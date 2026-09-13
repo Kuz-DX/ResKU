@@ -1,0 +1,88 @@
+# mission_winter_drive_params.yaml — mission_winter_drive.launch.py 전용
+# 파라미터(윤활제 도포된 철 트랙 경사 구간). autonomous_params.yaml(PlanA)과
+# 노드 구성이 동일한데, slope_traverse_node의 SLOPE_EXIT wz 안전 상한만
+# 저마찰 표면 기준으로 보수적으로 낮춘 게 유일한 차이다
+# (mission_winter_drive.launch.py 상단 docstring 참고 -- 500/0dps는
+# 일반 트랙 기준이라 저마찰에서 슬립 위험이 큼, 300/200dps는 사용자가
+# 실측으로 검증한 값이지만 일반 표면 기준이라 이것도 겨울 트랙 실측 후
+# 재검증 필요).
+#
+# 나머지 slope_traverse_node 파라미터(SLOPE_DRIVE 조향/블렌딩 등)는
+# autonomous_params.yaml과 완전히 동일 -- 이 파일에도 전부 다시 적어서
+# "이 미션의 모든 파라미터가 한눈에 보이게" 했다(값 자체는 code 기본값과
+# 같음, 오버라이드가 걸리는 건 slope_exit_wz_base_side_dps/other_dps뿐).
+#
+# 여기 없는 것: path_relay_node -> path_relay/config/path_relay_params.yaml,
+# controller_server(MPPI) -> robot_bringup/config/our_mppi_params.yaml (별도 관리)
+
+slope_traverse_node:
+  ros__parameters:
+    # --- 진입: 인지팀 signed left/right 경사 신호 ---
+    slope_side_topic: "/terrain/slope_side_signal"
+    slope_side_signal_timeout_sec: 1.0
+    side_enter_dwell_sec: 0.25
+    side_exit_dwell_sec: 0.25
+    track_width_m: 0.4904
+    wheel_radius_m: 0.1125
+
+    # --- SLOPE_DRIVE: 오르막 중 blend+P제어 조향 ---
+    climb_speed: 0.4
+    kp_steer: 0.4
+    wz_steer_max: 0.5
+    climb_timeout_sec: 600.0
+    climb_large_yaw_error_deg: 90.0
+
+    # --- SLOPE_DRIVE: target heading 연속 블렌딩(pitch 기반) ---
+    climb_pitch_low_threshold_deg: 8.0
+    climb_pitch_high_threshold_deg: 22.0
+    climb_pitch_rate_threshold_deg_s: 3.0
+    climb_pitch_rate_boost_gain: 0.5
+    climb_min_blend_factor: 0.0
+    climb_pitch_filter_alpha: 0.3
+    climb_straight_grace_sec: 0.0
+
+    # --- SLOPE_EXIT: pure pursuit 곡률 제어 ---
+    slope_exit_entry_pitch_deg: 0.0
+    slope_exit_speed: 0.4
+    # [겨울 미션 전용 오버라이드] 저마찰(윤활제 철판) 표면 기준 보수적 값.
+    # 일반 트랙 기본값은 500.0/0.0(autonomous_params.yaml 참고) -- 마찰력이
+    # 낮을수록 슬립 없이 버틸 안전 차동 한계도 낮아지므로(Coulomb 마찰
+    # F_max=μN), 사용자가 실측 검증한 300/200dps(일반 표면 기준)를
+    # 최선 추정치로 가져다 씀.
+    slope_exit_wz_base_side_dps: 300.0
+    slope_exit_wz_base_other_dps: 200.0
+    slope_exit_end_roll_deg: 3.0
+    path_straight_threshold_deg: 5.0
+    slope_exit_trigger_dwell_sec: 0.2
+    slope_exit_end_dwell_sec: 0.3
+    slope_exit_timeout_sec: 15.0
+    camera_imu_topic: "/drive/camera/imu"
+    base_frame: "base_link"
+    tf_lookup_timeout_sec: 0.1
+
+    # --- RECOVERY ---
+    recovery_motor_dps: 200.0
+    recovery_dwell_sec: 1.0
+
+    # --- /path 입력 ---
+    path_topic: "/path"
+    path_timeout_sec: 1.0
+    path_tangent_lookahead_m: 0.5
+
+    # --- 출력/토픽 ---
+    recovery_state_topic: "/drive/slope_traverse_state"
+    debug_topic: "/slope_traverse/debug"
+    cmd_vel_safety_topic: "/cmd_vel_safety"
+    control_rate_hz: 20.0
+
+current_ramp_node:
+  ros__parameters:
+    cmd_vel_input_topic: "/cmd_vel_auto"
+    soft_current_limit_a: 100.0
+    ramp_down_gain: 0.01
+    ramp_up_rate: 1.0
+    control_rate_hz: 20.0
+
+stability_monitor_node:
+  ros__parameters:
+    fault_clear_dwell_sec: 0.2

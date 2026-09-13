@@ -1,0 +1,306 @@
+# dolbotz_visualization.rviz
+#
+# "경로 주행" 스택 통합 디버그 뷰. 2026-08-20 작업, 실제 코드/launch 파일을
+# 먼저 확인해서 만들었다(오래된 문서 대신 코드가 기준이라는 이 프로젝트
+# 컨벤션 그대로 따름) — 아래 각 Display 옆 주석에 근거 소스를 남겨둔다.
+#
+# === Fixed Frame이 'map'이 아니라 'odom'인 이유 ===
+# 이 프로젝트는 GPS/SLAM이 없고 robot_localization EKF(odom<->base_link,
+# ekf_local.yaml: world_frame: odom, publish_tf: true)만 있음. map 프레임
+# 자체가 어디에도 존재하지 않는다.
+#
+# === 로봇 몸체를 URDF/RobotModel 대신 TF Axes로 표시하는 이유 ===
+# URDF는 이 프로젝트가 의도적으로 뺀 결정(reduced_odom_bringup.launch.py 상단 주석: "No
+# URDF/xacro/robot_state_publisher here"). 새 URDF를 만들지 말라는 요구사항
+# 그대로, robot_state_publisher 없이도 "base_link가 지금 어디 있는지"는
+# TF 트리(odom->base_link)만으로 이미 알 수 있어서, base_link에 좌표축을
+# 그리는 Axes 디스플레이 하나로 충분하다 — 별도 MarkerArray 발행 노드를
+# 새로 안 만들어도 되는 더 가벼운 방법이라 이쪽을 택함.
+#
+# === /terrain/elevation_map, /terrain/slope_deg, /terrain/gradient_magnitude를
+#     Image로 직접 안 넣고 _viz 접미사 토픽을 쓰는 이유 ===
+# 셋 다 32FC1(gradient_map.py/elevation_map.py 소스 확인 -- cv2_to_imgmsg
+# encoding='32FC1'). rviz_default_plugins Image가 float를 자동정규화로
+# 흑백 표시할 수는 있지만 이 데이터는 NaN 셀이 섞여있어(근접 이슈로 흔함,
+# 이번 세션에서 반복 확인) NaN이 min/max 계산을 깨뜨려 신뢰 불가 -- 그래서
+# utils/terrain_viz_relay.py(신규, NaN 마스킹 + 컬러맵)가 재발행하는
+# bgr8 결과(/terrain/*_viz)를 대신 넣는다. visualization.launch.py가
+# 이 릴레이 노드를 같이 띄운다.
+#
+# === /trajectories, transformed_global_plan이 처음엔 비어 보일 수 있음 ===
+# nav2_mppi_controller의 TrajectoryVisualizer(trajectory_visualizer.cpp:118)가
+# "실제 구독자가 있을 때만" 발행하는 최적화 코드라(연산 낭비 방지),
+# RViz에서 이 Display를 켜기 *전까지는* controller_server가 아예 발행을
+# 안 한다 -- 토픽이 비어 보여도 정상, RViz가 붙는 순간부터 나오기 시작함.
+# 둘 다 controller_server(nav2.launch.py) 자체가 떠 있어야 하고,
+# transformed_global_plan은 odom 프레임(local_costmap의 global_frame).
+#
+# === /path <-> odom TF 연결 미검증 항목 (요구사항 5) ===
+# path_relay_node.cpp(30-38행)에 "frame_id가 정말 'camera_link'인지, TF
+# 트리와 맞는지 실기 확인 필요"라는 주석이 이미 있음. 코드 추적으로는:
+#   /path.header.frame_id 기본값 'camera_link' (gradient_map.py/flat_drive.py
+#     의 path_frame_id 파라미터 기본값, slope_decision.py가 그대로 릴레이)
+#   path_relay_node가 lookupTransform(target_frame_="odom", "camera_link", ...)
+#     수행 (path_relay_node.cpp:202-203)
+#   TF 체인 odom->base_link(EKF)->camera_link(static, reduced_odom_bringup.launch.py)는
+#     구조적으로 존재함
+# 즉 코드상으로는 연결될 조건이 다 갖춰져 있지만, 실제 실행 중
+# `ros2 topic echo /path --field header.frame_id`로 문자열이 정말
+# 'camera_link'인지(오타/다른 값 아닌지)는 로봇 켜서 확인해야 한다 --
+# 이 파일 자체가 그 검증 결과는 아님. transformed_global_plan Display가
+# odom 프레임에서 로봇 근처에 말이 되는 위치로 뜨면 이 변환이 실제로도
+# 잘 되고 있다는 방증이 된다.
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Reference Frame: odom
+      Plane Cell Count: 20
+      Cell Size: 0.5
+      Enabled: true
+
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: true
+      Show Names: true
+      Show Axes: true
+      Show Arrows: false
+
+    # 로봇 몸체 표시 -- 위 "TF Axes" 설명 참고. Axes Length는 로봇
+    # 반폭(robot_radius 0.258m, our_mppi_params.yaml)보다 조금 크게.
+    - Class: rviz_default_plugins/Axes
+      Name: base_link Axes
+      Reference Frame: base_link
+      Length: 0.3
+      Radius: 0.02
+      Enabled: true
+
+    - Class: rviz_default_plugins/Odometry
+      Name: Odometry (EKF)
+      Topic:
+        Value: /odometry/filtered
+        Depth: 10
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+      Position Tolerance: 0.05
+      Angle Tolerance: 0.05
+      Keep: 30
+      Shape:
+        Value: Arrow
+        Alpha: 1
+        Color: 85; 170; 255
+        Shaft Length: 0.15
+        Shaft Radius: 0.02
+        Head Length: 0.08
+        Head Radius: 0.04
+      Enabled: true
+
+    # --- 경로 4종 --------------------------------------------------------
+    # /path: slope_decision.py가 평지/경사 후보 중 최종 선택해 릴레이하는
+    # "실제로 따라가는" 경로 (slope_decision.py:259,448) -- 굵고 눈에 띄게.
+    - Class: rviz_default_plugins/Path
+      Name: "/path (최종 추종 경로)"
+      Topic:
+        Value: /path
+        Depth: 10
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+      Color: 255; 0; 0
+      Line Style: Lines
+      Line Width: 0.05
+      Alpha: 1.0
+      Enabled: true
+
+    # [테스트용] synthetic_track_loop_path.py가 발행하는 전체 폐루프
+    # 참조 경로 -- MPPI가 실제로 추종하는 /path는 로봇 앞 몇 m만 매 cycle
+    # 잘려서 오므로(tmp_test_scripts/offline_mppi_bench 참고) 전체 모양을
+    # 한눈에 보려면 이 별도 topic이 필요. transient_local(latched)이라
+    # 한 번만 발행돼도 여기서 계속 보임.
+    - Class: rviz_default_plugins/Path
+      Name: "/synthetic_test_path_full (테스트용 전체 루프)"
+      Topic:
+        Value: /synthetic_test_path_full
+        Depth: 1
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+      Color: 255; 255; 0
+      Line Style: Lines
+      Line Width: 0.02
+      Alpha: 0.6
+      Enabled: true
+
+    # /flatdrive/planned_path: flat_drive.py의 평지 후보 (flat_drive.py:446).
+    - Class: rviz_default_plugins/Path
+      Name: "/flatdrive/planned_path (평지 후보)"
+      Topic:
+        Value: /flatdrive/planned_path
+        Depth: 10
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+      Color: 0; 255; 0
+      Line Style: Lines
+      Line Width: 0.02
+      Alpha: 0.4
+      Enabled: true
+
+    # /terrain/planned_path: gradient_map.py의 경사 후보 (gradient_map.py:515).
+    - Class: rviz_default_plugins/Path
+      Name: "/terrain/planned_path (경사 후보)"
+      Topic:
+        Value: /terrain/planned_path
+        Depth: 10
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+      Color: 255; 165; 0
+      Line Style: Lines
+      Line Width: 0.02
+      Alpha: 0.4
+      Enabled: true
+
+    # transformed_global_plan: nav2_mppi_controller가 /path를 받아 자기
+    # 내부적으로 odom 프레임으로 변환한 뒤 디버그로 재발행하는 사본
+    # (trajectory_visualizer.cpp:30, path_relay_node 자신이 만드는 토픽이
+    # 아님 -- controller_server 쪽 재발행). 구독자 있어야 발행되는 점
+    # 위쪽 주석 참고.
+    - Class: rviz_default_plugins/Path
+      Name: "transformed_global_plan (odom 변환 결과)"
+      Topic:
+        Value: /transformed_global_plan
+        Depth: 10
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+      Color: 255; 0; 255
+      Line Style: Lines
+      Line Width: 0.03
+      Alpha: 0.8
+      Enabled: true
+
+    # --- MarkerArray 2종 --------------------------------------------------
+    # MPPI 후보 궤적 + 최적 궤적 (trajectory_visualizer.cpp:125-126,
+    # our_mppi_params.yaml visualize:true). controller_server 필요.
+    - Class: rviz_default_plugins/MarkerArray
+      Name: "/trajectories (MPPI 후보/최적 궤적)"
+      Topic:
+        Value: /trajectories
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+      Enabled: true
+
+    # 급경사 셀 마커. 기존 노드 utils/slope_visualizer.py가 발행함(신규
+    # 아님) -- visualization.launch.py가 이 노드를 같이 띄운다.
+    - Class: rviz_default_plugins/MarkerArray
+      Name: "/debug/slope_markers (급경사 셀)"
+      Topic:
+        Value: /debug/slope_markers
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+      Enabled: true
+
+    # --- Map ---------------------------------------------------------------
+    # controller_server 내장 local_costmap (nav2.launch.py 주석: "controller_
+    # server(및 내부 local_costmap)"). global_frame: odom, rolling_window
+    # (our_mppi_params.yaml). 2026-08-22 커밋으로 planner_server/global_costmap/
+    # bt_navigator는 제거됐으므로 그쪽 costmap은 이제 없음 -- local_costmap만.
+    - Class: rviz_default_plugins/Map
+      Name: "/local_costmap/costmap"
+      Topic:
+        Value: /local_costmap/costmap
+        Depth: 1
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+      Color Scheme: costmap
+      Alpha: 0.6
+      Enabled: true
+
+    # --- Image 6종 (패널로 도킹됨) ------------------------------------------
+    # /path를 카메라 원근 시점에 덧씌운 것 (신규, utils/path_camera_overlay_relay.py).
+    # BEV(균일 축척)만 보면 짧은 거리도 끊긴 것처럼 보여 헷갈린다는 실기
+    # 피드백으로 추가 -- 사람이 실제로 보는 느낌과 비슷해서 더 직관적임
+    # (대신 원근 때문에 가까운 거리가 과장돼 보이는 착시는 감안할 것,
+    # path_camera_overlay_relay.py 상단 주석 참고). 맨 위에 둬서 제일 먼저 보이게.
+    - Class: rviz_default_plugins/Image
+      Name: "/debug/path_camera_overlay (경로, 카메라 시점)"
+      Topic:
+        Value: /debug/path_camera_overlay
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+      Enabled: true
+
+    # bgr8/mono8 그대로 되는 세 개 (segmentation.py/flat_drive.py 소스 확인).
+    - Class: rviz_default_plugins/Image
+      Name: "/perception/drivable_mask"
+      Topic:
+        Value: /perception/drivable_mask
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+      Enabled: true
+
+    - Class: rviz_default_plugins/Image
+      Name: "/bev/debug_overlay"
+      Topic:
+        Value: /bev/debug_overlay
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+      Enabled: true
+
+    - Class: rviz_default_plugins/Image
+      Name: "/bev/centerline_overlay"
+      Topic:
+        Value: /bev/centerline_overlay
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+      Enabled: true
+
+    # 32FC1 -> terrain_viz_relay.py가 컬러맵 입혀 재발행한 버전 (위 설명 참고).
+    - Class: rviz_default_plugins/Image
+      Name: "/terrain/slope_deg (컬러맵)"
+      Topic:
+        Value: /terrain/slope_deg_viz
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+      Enabled: true
+
+    - Class: rviz_default_plugins/Image
+      Name: "/terrain/gradient_magnitude (컬러맵)"
+      Topic:
+        Value: /terrain/gradient_magnitude_viz
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+      Enabled: true
+
+  Global Options:
+    Fixed Frame: odom
+    Background Color: 30; 30; 30
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/Select
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 8
+      Focal Point:
+        X: 0
+        Y: 0
+        Z: 0
+      Yaw: 3.14
+      Pitch: 0.6
+Window Geometry:
+  Height: 1000
+  Width: 1800
+  X: 40
+  Y: 40

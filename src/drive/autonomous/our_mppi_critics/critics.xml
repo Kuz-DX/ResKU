@@ -1,0 +1,13 @@
+<class_libraries>
+  <library path="our_mppi_critics">
+    <class type="mppi::critics::SkidCritic" base_class_type="mppi::critics::CriticFunction">
+      <description>Skid steering slip suppression critic for tracked vehicles</description>
+    </class>
+    <class type="mppi::critics::SlopeCritic" base_class_type="mppi::critics::CriticFunction">
+      <description>Slope penalty critic for tracked vehicles</description>
+    </class>
+    <class type="mppi::critics::AccelCritic" base_class_type="mppi::critics::CriticFunction">
+      <description>Penalizes candidate vx sequences that exceed ax_max between consecutive timesteps</description>
+    </class>
+  </library>
+</class_libraries>

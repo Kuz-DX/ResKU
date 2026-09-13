@@ -1,0 +1,29 @@
+reduced_odom_node:
+  ros__parameters:
+    wheel_topic: /wheel/odom
+    imu_topic: /imu
+    output_topic: /odometry/filtered
+    odom_frame: odom
+    base_frame: base_link
+    sensor_timeout: 0.3
+    max_dt: 0.25
+
+    # P is the 5x5 estimate covariance for [x,y,yaw,vx,wz]. Q below is
+    # continuous-time model uncertainty added during propagation. Position and
+    # yaw Q cover unmodelled skid/slip; vx/wz Q allow speed changes between
+    # measurements. These are starting values and must be tuned from bags.
+    q_x: 0.01
+    q_y: 0.02
+    q_yaw: 0.01
+    q_vx: 0.10
+    q_wz: 0.20
+
+    # R is measurement variance. Wheel yaw rate is intentionally less trusted
+    # than forward speed because skid-steer turning slips. AHRS yaw R starts
+    # from the driver's stationary covariance but is inflated for motor/magnetic
+    # disturbance. Record diagnostics/bags before reducing these values.
+    r_wheel_vx: 0.02
+    r_wheel_wz: 0.10
+    r_imu_yaw: 0.01
+    wheel_gate_sigma: 5.0
+    yaw_gate_sigma: 4.0

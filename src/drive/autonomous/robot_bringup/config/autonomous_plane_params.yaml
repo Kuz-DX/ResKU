@@ -1,0 +1,74 @@
+# autonomous_plane_params.yaml — autonomous_plane.launch.py(PlanE:
+# slope_traverse_plane_node) 전용 파라미터. planD(autonomous_pland_params.yaml)
+# 그대로 복사 + slope_exit_side_motor_dps만 400.0 -> 300.0(사용자 요청) --
+# 그 외 값/로직은 전부 동일(slope_traverse_plane_node.cpp 상단 docstring 참고).
+#
+# 여기 없는 것들:
+#   - path_relay_node       -> path_relay/config/path_relay_params.yaml (별도 관리)
+#   - controller_server(MPPI) -> robot_bringup/config/our_mppi_params.yaml (별도 관리)
+
+slope_traverse_plane_node:
+  ros__parameters:
+    # --- 진입: 인지팀 signed left/right 경사 신호 ---
+    slope_side_topic: "/terrain/slope_side_signal"   # +1=right_slope, -1=left_slope
+    slope_side_signal_timeout_sec: 1.0
+    side_enter_dwell_sec: 0.25
+    side_exit_dwell_sec: 0.25                 # [PlanD] SLOPE_DRIVE/SLOPE_EXIT 둘 다 side==0 조기출구 제거돼서 현재 미사용(파라미터 인터페이스만 유지)
+    track_width_m: 0.4904
+    wheel_radius_m: 0.1125
+
+    # --- SLOPE_DRIVE: 오르막 중 blend+P제어 조향 ---
+    climb_speed: 0.4                          # m/s
+    kp_steer: 0.4
+    wz_steer_max: 0.5                         # rad/s
+    climb_timeout_sec: 600.0                  # 이 시간 넘도록 SLOPE_DRIVE에 머물면 안전정지-래치
+    climb_large_yaw_error_deg: 90.0           # 이 오차 넘으면 안전정지-래치
+
+    # --- SLOPE_DRIVE: target heading 연속 블렌딩(pitch 기반) ---
+    climb_pitch_low_threshold_deg: 8.0        # 이하면 blend=1(=path 완전 신뢰)에 가까워짐
+    climb_pitch_high_threshold_deg: 22.0      # 이상이면 blend=0(=진입헤딩 유지)에 가까워짐
+    climb_pitch_rate_threshold_deg_s: 3.0     # pitch 하강 속도가 이 이상이면 blend 추가 부스트
+    climb_pitch_rate_boost_gain: 0.5
+    climb_min_blend_factor: 0.0
+    climb_pitch_filter_alpha: 0.3             # pitch EMA 필터 계수(클수록 반응 빠르고 노이즈도 더 실림)
+    climb_straight_grace_sec: 0.0             # SLOPE_DRIVE 진입 직후 강제 직진 구간(0=비활성)
+
+    # --- SLOPE_EXIT: 고정 게인 P제어(PlanA/B의 pure pursuit과 다른 방식) ---
+    slope_exit_entry_pitch_deg: -2.0          # [PlanD] 고정임계값(pitch<=이값), "처음 찍힌 시점"만 1회성 트리거(slope_exit_trigger_used_ 래치)
+    slope_exit_end_pitch_deg: -3.0            # 탈출조건: pitch가 이 이상(=더 완만)으로 돌아옴
+    slope_exit_end_roll_deg: 3.0              # 탈출조건: RealSense roll이 이내로 들어옴
+    path_straight_threshold_deg: 5.0          # 탈출조건: /path 직진 판정 임계값
+    slope_exit_trigger_dwell_sec: 0.2         # SLOPE_EXIT 진입 디바운스
+    slope_exit_end_dwell_sec: 0.3             # SLOPE_EXIT -> RECOVERY 디바운스
+    slope_exit_side_motor_dps: 300.0          # [PlanE] 400->300, wz 상한 역산용(바깥쪽 바퀴 기준, 매뉴얼 실측)
+    slope_exit_other_motor_dps: 150.0         # wz 상한 역산용(안쪽 바퀴 기준) + computeExitBaseSpeed()
+    slope_exit_timeout_sec: 15.0              # 탈출조건 안 갖춰지고 이 시간 넘으면 안전정지-래치
+    camera_imu_topic: "/drive/camera/imu"     # RealSense D455 자체 IMU(roll 전용)
+    kp_exit: 0.8                              # SLOPE_EXIT 조향 P게인(SLOPE_DRIVE의 kp_steer보다 큼)
+
+    # --- RECOVERY: 탈출 후 정착 구간 ---
+    recovery_motor_dps: 200.0
+    recovery_dwell_sec: 1.0
+
+    # --- /path 입력 (블렌딩 target용) ---
+    path_topic: "/path"
+    path_timeout_sec: 1.0
+    path_tangent_lookahead_m: 0.5
+
+    # --- 출력/토픽 ---
+    recovery_state_topic: "/drive/slope_traverse_state"
+    debug_topic: "/slope_traverse/debug"
+    cmd_vel_safety_topic: "/cmd_vel_safety"   # 최우선순위 override 토픽(rmd_x8_driver_node)
+    control_rate_hz: 20.0                     # 재시작해야 반영(타이머 생성 시점 고정)
+
+current_ramp_node:
+  ros__parameters:
+    cmd_vel_input_topic: "/cmd_vel_auto"      # controller_server(MPPI) 출력을 바로 받음
+    soft_current_limit_a: 100.0               # [임시완화] 정지가 거의 안 걸리게 넉넉히
+    ramp_down_gain: 0.01                      # 넘어도 아주 천천히만 깎임
+    ramp_up_rate: 1.0                         # 넘었다 내려오면 거의 즉시 회복
+    control_rate_hz: 20.0
+
+stability_monitor_node:
+  ros__parameters:
+    fault_clear_dwell_sec: 0.2                # [임시완화] 걸려도 거의 바로 풀리게

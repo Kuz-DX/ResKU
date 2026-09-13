@@ -1,0 +1,26 @@
+description: Ultralytics YOLO26n model trained on /home/s/trafficlightyolo/datasets/traffic-light-detection-hznds-v1-yolo26/data.local.yaml
+author: Ultralytics
+date: '2026-09-03T02:46:40.841983'
+version: 8.4.101
+license: AGPL-3.0 License (https://ultralytics.com/license)
+docs: https://docs.ultralytics.com
+stride: 32
+task: detect
+head: Detect
+batch: 1
+imgsz:
+- 320
+- 320
+names:
+  0: green
+  1: red
+  2: yellow
+args:
+  data: /home/j/vision_marker/trafficlight/Traffic-Light-Detection-1/data.yaml
+  batch: 1
+  fraction: 1.0
+  quantize: 8
+  dynamic: false
+  nms: false
+channels: 3
+end2end: true

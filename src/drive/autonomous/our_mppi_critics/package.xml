@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypesversion="2.0"?>
+<package format="3">
+  <name>our_mppi_critics</name>
+  <version>0.0.0</version>
+  <description>Custom MPPI critics for skid steering tracked vehicles</description>
+  <maintainer email="harim9340@gmail.com">rim</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>nav2_mppi_controller</depend>
+  <depend>pluginlib</depend>
+  <depend>rclcpp</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+    <nav2_mppi_controller plugin="${prefix}/critics.xml"/>
+  </export>
+</package>

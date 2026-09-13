@@ -1,0 +1,79 @@
+# autonomous_blend_params.yaml — autonomous_blend.launch.py(PlanB:
+# slope_traverse_blend_node, TF 미사용 pure pursuit) 전용 파라미터.
+# autonomous_params.yaml(PlanA)과 거의 동일하지만 slope_traverse_blend_node는
+# TF를 안 써서 base_frame/tf_lookup_timeout_sec 항목이 없다 -- 그 차이만
+# 빼면 값도 구조도 같다(slope_traverse_blend_node.cpp 상단 docstring 참고).
+#
+# 여기 없는 것들: path_relay_node -> path_relay/config/path_relay_params.yaml,
+# controller_server(MPPI) -> robot_bringup/config/our_mppi_params.yaml (둘 다 별도 관리)
+
+slope_traverse_blend_node:
+  ros__parameters:
+    # --- 진입: 인지팀 signed left/right 경사 신호 ---
+    slope_side_topic: "/terrain/slope_side_signal"
+    slope_side_signal_timeout_sec: 1.0
+    side_enter_dwell_sec: 0.25
+    side_exit_dwell_sec: 0.25
+    track_width_m: 0.4904
+    wheel_radius_m: 0.1125
+
+    # --- SLOPE_DRIVE: 오르막 중 blend+P제어 조향 ---
+    climb_speed: 0.4
+    kp_steer: 0.4
+    wz_steer_max: 0.5
+    climb_timeout_sec: 600.0
+    climb_large_yaw_error_deg: 90.0
+
+    # --- SLOPE_DRIVE: target heading 연속 블렌딩(pitch 기반) ---
+    climb_pitch_low_threshold_deg: 8.0
+    climb_pitch_high_threshold_deg: 22.0
+    climb_pitch_rate_threshold_deg_s: 3.0
+    climb_pitch_rate_boost_gain: 0.5
+    climb_min_blend_factor: 0.0
+    climb_pitch_filter_alpha: 0.3
+    climb_straight_grace_sec: 0.0
+
+    # --- SLOPE_EXIT: pure pursuit 곡률 제어 (TF 없이 /path의 raw x/y를
+    #     robot-relative로 간주 -- PlanA와의 유일한 알고리즘 차이) ---
+    slope_exit_entry_pitch_deg: 0.0
+    slope_exit_speed: 0.4
+    slope_exit_wz_base_side_dps: 500.0
+    slope_exit_wz_base_other_dps: 0.0
+    slope_exit_end_roll_deg: 3.0
+    path_straight_threshold_deg: 5.0
+    slope_exit_trigger_dwell_sec: 0.2
+    slope_exit_end_dwell_sec: 0.3
+    slope_exit_timeout_sec: 15.0
+    camera_imu_topic: "/drive/camera/imu"
+    # [PlanB, 3차] /path(카메라 파이프라인이 이미 레벨링해서 내보내는 값)를
+    # base_link 기준으로 옮기는 순수 평행이동량 -- base_link->camera_link
+    # static TF의 x translation과 동일(reduced_odom_bringup.launch.py의
+    # base_to_camera_tf 참고, 마운트 재측정 시 같이 갱신할 것)
+    camera_to_base_x_offset_m: 0.34815
+
+    # --- RECOVERY ---
+    recovery_motor_dps: 200.0
+    recovery_dwell_sec: 1.0
+
+    # --- /path 입력 ---
+    path_topic: "/path"
+    path_timeout_sec: 1.0
+    path_tangent_lookahead_m: 0.5
+
+    # --- 출력/토픽 ---
+    recovery_state_topic: "/drive/slope_traverse_state"
+    debug_topic: "/slope_traverse/debug"
+    cmd_vel_safety_topic: "/cmd_vel_safety"
+    control_rate_hz: 20.0
+
+current_ramp_node:
+  ros__parameters:
+    cmd_vel_input_topic: "/cmd_vel_auto"
+    soft_current_limit_a: 100.0
+    ramp_down_gain: 0.01
+    ramp_up_rate: 1.0
+    control_rate_hz: 20.0
+
+stability_monitor_node:
+  ros__parameters:
+    fault_clear_dwell_sec: 0.2

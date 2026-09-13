@@ -1,0 +1,451 @@
+controller_server:
+  ros__parameters:
+    use_sim_time: False
+
+    # [PDF 비교 반영 2026-08-22] 제어 루프 주기를 명시적으로 고정.
+    # 현재 FollowPath.model_dt=0.05s 이므로 20Hz와 정확히 일치한다.
+    # 기존에는 Humble 기본값 20Hz에 암묵적으로 의존했으므로, launch/배포판
+    # 변경으로 주기가 바뀌는 것을 막기 위해 명시한다.
+    controller_frequency: 20.0
+
+    # MPPI의 현재 vx/wz 입력. 기존 nav2.launch.py의
+    # ('odom' -> '/odometry/filtered') remap과 같은 대상을 명시적으로 지정한다.
+    # launch remap을 유지해도 결과는 동일하며, 둘 중 하나는 추후 정리 가능.
+    odom_topic: /odometry/filtered
+
+    # 일시적인 controller 계산 실패를 바로 FollowPath 실패로 만들지 않도록
+    # 짧은 유예를 둔다. PDF의 1.5s를 그대로 사용해도 현재 구조에 무리가 없다.
+    failure_tolerance: 1.5
+
+    # 정지 부근 odometry 노이즈를 0으로 취급하는 controller_server 문턱.
+    min_x_velocity_threshold: 0.001
+    min_y_velocity_threshold: 0.0       # DiffDrive라 lateral velocity는 사용하지 않음
+    min_theta_velocity_threshold: 0.001
+
+    progress_checker_plugin: "progress_checker"
+    goal_checker_plugins: ["goal_checker"]
+    controller_plugins: ["FollowPath"]
+
+    # 짧은 perception local path(대략 0.6~2m)용 progress checker.
+    # PDF의 0.5m는 현재 경로 길이에 비해 너무 커서 그대로 복사하지 않는다.
+    # 20초 동안 5cm도 못 움직이면 stuck 후보로 본다. 실기에서 action 교체가
+    # checker를 너무 자주 reset하는지 함께 확인할 것.
+    progress_checker:
+      plugin: "nav2_controller::SimpleProgressChecker"
+      required_movement_radius: 0.05
+      movement_time_allowance: 20.0
+
+    # perception path의 pose.orientation은 path tangent가 아니라 identity에서
+    # camera_link->odom TF가 적용된 값이라 최종 yaw 목표로 신뢰하기 어렵다.
+    # 따라서 위치 도달만 엄격히 보고 yaw는 사실상 무시한다.
+    goal_checker:
+      plugin: "nav2_controller::SimpleGoalChecker"
+      stateful: true
+      xy_goal_tolerance: 0.10
+      yaw_goal_tolerance: 3.14
+
+    FollowPath:
+      plugin: "nav2_mppi_controller::MPPIController"
+      reset_period: 1.0
+
+      # [PDF 비교 반영] PathHandler / TF 관련 파라미터를 명시한다.
+      transform_tolerance: 0.5
+
+      # perception이 보내는 경로는 짧은 local path(약 0.6~2m)이므로
+      # PDF의 3m/15m(Ackermann, 4s horizon, 3.4m/s)를 그대로 복사하지 않는다.
+      # 현재 horizon=20*0.05=1.0s, vx_max=0.45m/s -> 최대 rollout 이동은
+      # 약 0.45m. 2m면 현재 local path 전체를 유지/검색하기에 충분하다.
+      max_robot_pose_search_dist: 2.0
+      prune_distance: 2.0
+      
+      # 시간 설정
+      # [2026-08-20] 30 -> 20. controller_server가 "Control loop missed its
+      # desired rate of 20.0000Hz" WARN을 거의 매 사이클 내는 것 실기에서
+      # 확인 -- batch_size(1000)*time_steps 샘플링 + critic 8개 채점 +
+      # visualize(마커 발행)까지 겹쳐서 로봇 PC CPU가 20Hz(50ms) 예산을
+      # 못 맞추고 있었음. 예측 구간이 model_dt*time_steps=1.0s로 짧아짐
+      # (기존 1.5s) -- 짧아진 만큼 조향/경로이탈 대응이 둔해지면 다시 올릴 것.
+      time_steps: 20
+      model_dt: 0.05
+      model_delay_vx: 0.0
+      model_delay_wz: 0.0
+
+      # 샘플링 설정
+      # [2026-08-20] 1000 -> 500. 위 time_steps와 같은 이유(20Hz 데드라인
+      # 초과 완화) -- 후보 궤적 수가 절반으로 줄어드니 최적해 탐색 품질도
+      # 같이 낮아지는 트레이드오프가 있음. 여전히 WARN이 계속 뜨면 다음은
+      # visualize:false부터 끌 것(이건 안전/성능 트레이드오프가 없는 순수
+      # 디버그 비용이라 우선순위상 이 둘보다 먼저 껐어야 했을 수도 있음).
+      batch_size: 500
+      open_loop: false
+      iteration_count: 1
+      
+      # 가속도 제한
+      ax_max: 0.5
+      ax_min: -0.5
+      # [하림 수정] 2026-08-18: 0.8 -> 1.6. 경로를 지나쳐서 큰 각도 보정이
+      # 필요할 때 조향이 "엄청 느리게" 나온다는 실기 관찰 -> wz_max(0.9)까지
+      # 램프업하는 데 걸리는 시간이 vx_max(0.45, ax_max=0.5로 ~0.9초 도달)에
+      # 비해 지나치게 느렸음(0.8 rad/s^2면 0->wz_max까지 약 1.1초+, 게다가
+      # 실제 제어 주기 단위로 끊어서 누적되므로 체감은 더 느림). 2배로 올려서
+      # 직진 가속과 비슷한 정도의 반응성을 맞춤 -- 너무 튀는 조향이 되면
+      # 다시 낮출 것.
+      # [하림 수정] 2026-08-18 추가: 1.6 -> 3.0. 1.6에서도 여전히 느리다는
+      # 피드백 -> wz_max(0.9)까지 0->0.3초 안에 도달하도록 추가 상향. 다만
+      # 이건 local_costmap 확장(아래)으로 PathAlignCritic 스킵 문제를 먼저
+      # 없앤 뒤에 진짜 램프업 속도로 체감돼야 정상 -- 실기에서 조향이 너무
+      # 튀거나 트랙이 미끄러지면(SkidCritic이 못 따라잡는 수준) 낮출 것.
+      az_max: 3.0
+
+      # 지상 주행 샘플링 범위. 최초 저속 시험값에서 3배 상향.
+      # [2026-08-23 재상향] 0.15 -> 0.3 -- our_mppi_params.yaml의 동일 항목
+      # 주석 참고(곡률 구간에서 평균 vx가 0으로 수렴하면 못 빠져나오는
+      # 데드락 실측 -> vx_std 확장으로 해결, 라이브 검증 완료).
+      vx_std: 0.3
+      # [하림 수정] 2026-08-18: 0.3 -> 0.45. iteration_count=1이라 한 번의
+      # 최적화 내에서 이 std 범위 안 후보만 평가함 -- 직진 순항 중(wz~0
+      # 근처로 warm-start)에 갑자기 큰 보정이 필요해지면 좁은 std 탓에 큰 wz
+      # 후보 자체가 잘 안 뽑혀서 여러 replanning 사이클에 걸쳐 천천히
+      # 수렴하는 게 "조향이 느리다"는 체감의 또 다른 원인으로 추정. 넓혀서
+      # 큰 보정 후보가 한 사이클 안에도 뽑히도록 함.
+      # [하림 수정] 2026-08-18 추가: 0.45 -> 0.6. az_max와 함께 추가 상향.
+      wz_std: 0.6
+      
+      # 지상 주행 속도 제한. 최초 저속 시험값에서 3배 상향하고 후진은 계속 차단.
+      vx_max: 0.45
+      vx_min: 0.0
+      wz_max: 0.9
+      
+      # MPPI 파라미터
+      # [2026-08-17] 0.3 -> 0.15. 실기 테스트: 합성 좌회전 경로(90도, 반경 1m)를
+      # MPPI가 물리적으로 따라갈 수 있는 상태(offset_from_furthest=2, 속도
+      # vx_max 근접)에서도 angular.z가 -0.01~-0.1 수준으로만 나와서 육안으로는
+      # 거의 직진처럼 보였음. PathAlignCritic 비용 계산이 (짧은 경로 반경
+      # 안에서의) 절대거리 오차 기반이라 회전 궤적과 직진 궤적의 비용 차이 자체가
+      # 작은데, temperature가 높으면 그 작은 차이를 소프트맥스가 평균으로
+      # 더 뭉갬 -- 온도를 낮춰서 그나마 있는 비용 차이를 더 결정적으로 반영되게
+      # 함.
+      #
+      # [2026-08-17 추가] 0.15 -> 0.25. TwirlingCritic 추가(아래 critics 목록
+      # 참고) 이후 재조정. 완전 직진(곡률 0) 합성 경로로 실측: temperature만
+      # 낮춰둔 상태(0.15)에서는 편향은 줄었지만(-0.13 -> -0.06) wz=0 근처
+      # 평평한 비용 구간에서 사이클마다 부호가 자주 뒤집히는 진동이 생김
+      # (std 0.034 -> 0.052, 노이즈에 과민 반응). 0.25로 다시 올려서 진동을
+      # 줄임(std 0.043) -- 편향 자체(mean)는 TwirlingCritic.cost_weight가
+      # 잡아주므로 temperature를 다시 올려도 거의 안 흔들림.
+      temperature: 0.25
+      gamma: 0.015
+      visualize: true
+      regenerate_noises: true
+
+      # perception -> MPPI path pipeline 진단용 (/debug/mppi_setplan_path +
+      # setPlan()/PathHandler 통계 로그). 실주행에서는 반드시 false로 둘 것
+      # -- controller.cpp/path_handler.cpp의 debug_path_pipeline_ 참고.
+      debug_path_pipeline: true
+
+      # visualize:true를 유지할 때 marker 생성량을 제한한다. PDF의 설정을
+      # 현재 batch_size=500, time_steps=20에 적용하면 약 100개 trajectory의
+      # 5개 시점 정도만 시각화하므로 디버깅 비용을 줄일 수 있다.
+      TrajectoryVisualizer:
+        trajectory_step: 5
+        time_step: 4
+
+      # [하림 수정] motion_model=DiffDrive는 실수가 아니라 의도된 선택임 (2026-08-13
+      # 확인, navigation.ros.org 공식 문서 + 이 리포에 벤더링된
+      # nav2_mppi_controller/include/nav2_mppi_controller/motion_models.hpp 소스
+      # 둘 다로 검증): nav2_mppi_controller가 지원하는 motion_model은
+      # DiffDrive/Omni/Ackermann 세 개뿐이고, "SkidSteering"/"skid_steering"이라는
+      # 옵션 자체가 nav2_mppi_controller에 존재하지 않는다 (mppi::SkidSteeringMotionModel
+      # 클래스가 아예 없음). 이 로봇은 무한궤도(스키드 스티어)지만, 명령 레벨
+      # 기구학은 차동구동과 수학적으로 동일(좌/우 속도차로 회전)하므로 DiffDrive를
+      # 그대로 쓴다. 실제 슬립 차이는 motion_model이 아니라 다른 레이어에서 보정:
+      #   - SkidCritic으로 슬립을 비용에 반영 (아래 SkidCritic 참고)
+      #   - 유효 트랙 폭 실측 캘리브레이션 (effective_track_width_m, rmd_x8_driver
+      #     쪽 파라미터 -- 아직 실측 전이면 TODO로 남아있을 것)
+      #   - EKF에서 휠 오도메트리 wz는 신뢰 안 하고 vx만 신뢰
+      # 앞으로 "왜 DiffDrive지?" 하고 다시 헷갈리면 이 주석부터 볼 것.
+      motion_model: "DiffDrive"
+
+      # critics 목록 (우리 critic 추가)
+      # ASan 조사(2026-08-08): 진단용 Diag critic 대신 실제 stock critic으로
+      # 되돌림. nav2_mppi_controller 소스를 doldrive_ws/src에 가져와 ASan으로
+      # 로컬 빌드해서 이 "진짜" 조합으로 재현 중.
+      #
+      # [2026-08-17] TwirlingCritic 추가. 실기 디버깅: 완전 직진(곡률 0)
+      # 합성 경로를 30초간 줘도 angular.z가 -0.11~-0.15 사이에서 절대 0을
+      # 안 넘고 계속 한쪽으로만 나옴(경로 곡률과 무관한 순수 상수 편향).
+      # 원인 추정: 경로가 짧아서 위치 오차 기준으로는 wz를 얼마로 하든
+      # 비용 차이가 거의 없고(직진 상황에선 특히), 그 상태에서 MPPI가
+      # 초기에 무작위로 한쪽에 안착하면 reset_period 사이 warm-start
+      # 관성으로 계속 거기 눌러앉음 -- "이유 없이 도는 것"을 직접 눌러줄
+      # critic이 없었음. TwirlingCritic이 정확히 이 역할(|wz| 자체에
+      # 비용 부과)인데 critics 목록에서 빠져 있었음.
+      critics:
+        [
+          "ConstraintCritic",
+          "PathAlignCritic",
+          "PathFollowCritic",
+          "PathAngleCritic",
+          "PreferForwardCritic",
+          "SkidCritic",
+          "SlopeCritic",
+          "TwirlingCritic",
+          "AccelCritic",
+        ]
+
+      # 기존 critic 설정
+      ConstraintCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 4.0
+
+      TwirlingCritic:
+        enabled: true
+        cost_power: 1
+        # [2026-08-17] 10.0(코드 기본값) -> 18.0. 실측: 10.0에서는 직진 편향이
+        # -0.13 -> -0.06으로 절반만 줄었음. weight를 더 올릴수록 대칭적으로
+        # 더 눌러줄 거라는 가설대로, 18.0에서 -0.035~-0.037까지 더 줄어드는
+        # 것 확인(temperature 0.25와 같이 적용한 값 기준). 편향이 완전히
+        # 0은 아니지만(원인 미상 잔차), 대부분 상쇄됨.
+        #
+        # [하림 수정] 2026-08-18: 18.0 -> 10.0. 경로 이탈 후 조향이 매우
+        # 느리다는 실기 관찰 -> PathAlignCritic(19.0)과 거의 같은 크기라 큰
+        # 보정이 필요한 상황에서도 "wz는 무조건 억제"하는 힘이 거의 대등하게
+        # 맞서 싸우고 있었던 것으로 추정. az_max/wz_std 상향과 함께 우선
+        # 코드 기본값(10.0)으로 되돌려 보정 반응성을 우선 확보 -- 되돌린 뒤
+        # 직진 편향(-0.13 근처)이 다시 눈에 띄게 커지면, 이 값을 12~15 선에서
+        # 다시 올리며 보정 반응성과 직진 편향 억제 사이 균형점을 재탐색할 것.
+        #
+        # [2026-08-19] 10.0 -> 1.0. PathAlignCritic weight를 28로 올려도
+        # 여전히 곡선 추종 후보가 안 뽑히길래, 실제 critic 공식+소프트맥스
+        # 공식을 그대로 옮긴 오프라인 스크립트로 직접 검증함
+        # (/tmp/.../mppi_weight_check.py, 세션 스크래치패드) -- 45도/0.15m
+        # 급회전 기준 align=28만으로는 curve 후보 softmax 비중이 0%였고,
+        # twirl+skid 조합을 낮춰야 확실히 역전됨(twirl=1,skid=2 조합에서
+        # 급회전 80~86%, 완만한 회전 51~57%로 curve 승). 이유: SkidCritic도
+        # |wz|에 비례하는 벌점이라 TwirlingCritic이랑 사실상 같은 방향으로
+        # 겹쳐서, 둘 합쳐서 벌점이 PathAlignCritic이 만드는 이득보다 훨씬
+        # 컸음 -- PathAlignCritic weight만 올리는 걸로는(비현실적으로
+        # 190 근처까지 올려야 함) 해결 불가능했던 문제.
+        #
+        # [2026-08-20] 1.0 -> 5.0(이후 문서화 없이 7.0까지 추가 상향된 채로
+        # 방치돼 있었음 -- 아래 재발견 참고). 지면 실주행에서 반대 증상 관찰:
+        # 한번 돌기 시작하면 제자리 회전이 안 멈춤 -- twirl=1/skid=2로 낮춰둔
+        # 회전 억제 압력이 az_max=3.0/wz_std=0.6(2026-08-18 상향)과 겹쳐서
+        # 너무 약해진 것으로 추정(vx_min=0이라 후진으로 못 풀고 회전으로만
+        # 헤딩을 맞추려 하는 것도 한몫).
+        #
+        # [2026-08-23 재발견+수정] 7.0 -> 2.5. synthetic_track_loop_path.py
+        # (직선 흔들림+반원 폐루프)로 이 오프라인 벤치를 돌리다 로봇이 곡선
+        # 구간을 관통해버리는 걸 재관찰 -> ../../mppi_weight_check.py(2026-08-19에
+        # 만들어둔 오프라인 소프트맥스 검증 스크립트)를 지금 값(twirl=7.0)
+        # 그대로 다시 돌려보니, 그날 twirl=1.0으로 고쳤던 "곡선 후보가
+        # 소프트맥스에서 짐" 문제가 그대로 재발했음이 확인됨(급회전 curve
+        # 비중 0.1%, 완만한 회전 0.7~1.7% -- 2026-08-19 당시 twirl=1.0에서는
+        # 각각 99.7%/89~91%였음). 즉 2026-08-20 수정이 전날 고친 버그를 도로
+        # 만든 회귀였는데, 그 이후로 이 검증 스크립트를 한 번도 다시 안
+        # 돌려봐서 아무도 몰랐던 것. twirl을 0.5~5 사이 스윕해서 확인한 곡선
+        # 승리 임계점: 급회전(turn_length=0.15)은 3.0까지, 완만한 회전
+        # (turn_length=0.4)은 2.5까지만 curve가 이김 -- 더 낮은(까다로운) 쪽
+        # 기준에 맞춰 2.5로 낮춤. 단 "이유 없이 계속 도는" 증상이 2.5에서
+        # 재발하는지는 이 스크립트로 검증 불가, 실기 재확인 필요(같은 근거로
+        # our_mppi_params.yaml도 동일하게 낮춤).
+        cost_weight: 2.5
+
+      PathAlignCritic:
+        enabled: true
+        cost_power: 1
+        # [2026-08-17] 14.0 -> 19.0. temperature 0.3->0.15로 낮춰서 angular.z가
+        # 노이즈 수준(-0.01~-0.1)에서 ~0.15까지 개선된 뒤, 같은 방향으로 한 번
+        # 더 밀어보기 위해 정렬 비용 가중치 상향 -- 회전/직진 궤적 간 비용
+        # 격차를 더 벌려서 소프트맥스 선택이 더 확실하게 회전 쪽으로 쏠리게 함.
+        #
+        # [2026-08-19 추가] 19.0 -> 28.0. 사인파/일반 경로 둘 다에서 로봇이
+        # 곡선을 안 따라가고 직진으로 관통하는 증상 실기 관찰 -> TwirlingCritic
+        # (weight 10)이랑 힘 대결에서 아직 밀리는 것으로 추정, 경로 이탈 비용을
+        # 한 번 더 올려서 곡선 추종 쪽으로 무게중심을 옮김.
+        cost_weight: 28.0
+        max_path_occupancy_ratio: 0.05
+        # [2026-08-19] 4 -> 2. 30스텝 궤적에서 4칸씩(7~8점)만 뽑아 경로랑
+        # 비교하던 걸 2칸씩(14~15점)으로 촘촘하게 -- 저속 구간에서 성긴
+        # 샘플링이 사인파 같은 잔물결 굴곡을 건너뛰어 평균 이탈거리를
+        # 실제보다 작게 잡던 것을 완화.
+        trajectory_point_step: 2
+        # [2026-08-19] 0.5 -> 0.15. utils::withinPositionGoalTolerance()가
+        # "로봇 현재 위치 - 경로 마지막 점" 직선거리 기준으로 이 값보다
+        # 가까워지면 이 critic을 통째로 꺼버림(critic들 전부 이 조기리턴
+        # 패턴 공유, path_align_critic.cpp:49-53 참고). 곡선 경로는 직선거리가
+        # 실제 경로 길이보다 항상 짧은데, 지금 경로 자체가 0.6~2m로 짧아서
+        # 0.5m 문턱이면 출발 직후 혹은 몇 걸음 만에 꺼져버려 경로 모양을
+        # 볼 수 있는 구간이 사실상 거의 없었음 -- "직진만 함" 증상의 훨씬
+        # 근본적인 원인으로 추정. 0.15로 낮춰서 최종 접근 구간에서만 꺼지게 함.
+        threshold_to_consider: 0.15
+        # [하림 수정] 2026-08-15: 20(코드 기본값) -> 6. offset_from_furthest는
+        # "배치 내 가장 멀리 도달한 궤적의 경로 인덱스"가 이 값을 넘어야
+        # PathAlignCritic이 채점을 시작하는 문턱(초반엔 정렬을 과도하게
+        # 강요하지 않으려는 의도된 설계, nav2 메인테이너 확인).
+        # 지금 속도(vx_max=0.45, model_dt*time_steps=1.5s)로는 한 사이클에
+        # 인덱스 4~5개밖에 못 뻗어서 20을 거의 못 넘었고, 그 결과
+        # PathAlignCritic(weight 14,제일 무거운 경로정렬 critic)이 계속
+        # 비활성 상태로 돌면서 "직진만 함" 증상의 핵심 원인이 됐음(weight
+        # 19 vs 7 불균형, 자세한 분석은 대화 기록 참고). PathFollowCritic의
+        # 기본값(6)과 맞춰서 낮춤 -- 속도를 앞으로 올리면 이 문턱도 여유가
+        # 생기니 그때 다시 20 근처로 올리는 걸 재검토할 것.
+        #
+        # [2026-08-16 추가] 6 -> 2. /path 자체가 지금 0.6~0.8m로 짧고(depth/
+        # 마스크 데이터 부족), MPPI가 그 짧은 경로 밖으로 오버슈팅하는 걸
+        # 피하려고 스스로 저속(~0.09m/s, vx_max의 20%)을 택하면서 후보
+        # 궤적이 최대로 뻗어도 0.2m 안팎 -- 인덱스 6(약 0.18m)에 거의 못
+        # 미쳐서 PathAlignCritic이 여전히 거의 항상 비활성이었음(실측:
+        # 최적 궤적 헤딩이 로봇 현재 헤딩과 0.2°밖에 안 차이 나는데 경로는
+        # 15~17° 회전 요구). 정수 파라미터라 1.5는 못 받아서 2로 반올림.
+        # 근본 원인(경로가 짧은 것) 해결 전까지의 임시 대응 -- 경로 길이가
+        # 정상화되면 다시 올리는 걸 재검토할 것.
+        offset_from_furthest: 2
+
+        # 현재 perception path의 pose.orientation은 모두 의미 있는 path tangent
+        # yaw가 아니므로 PDF 설정(true)을 가져오면 오히려 잘못된 방향 오차가
+        # 조향 비용에 들어간다. 현재 시스템에서는 반드시 false로 명시한다.
+        use_path_orientations: false
+
+      PathFollowCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 5.0
+        # [2026-08-19 추가] 이전엔 이 파라미터가 아예 없어서 코드 기본값
+        # 1.4가 그대로 쓰이고 있었음. 지금 경로 길이가 0.6~2m라 로봇 시작
+        # 위치 기준 목표점까지 직선거리가 거의 항상 1.4m 밑이라, PathFollowCritic이
+        # 경로 전체 구간에서 사실상 한 번도 안 켜졌을 가능성이 높음
+        # (path_follow_critic.cpp:37-41의 조기리턴 조건 참고). PathAlignCritic
+        # 등 다른 critic들은 0.15로 맞췄는데, 이건 실기 확인 후 0.1로 한 번 더
+        # 낮춤(의도된 값).
+        threshold_to_consider: 0.1
+
+      PathAngleCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 2.0
+        # [2026-08-19] 0.5 -> 0.15. PathAlignCritic이랑 같은 이유(짧은 경로에서
+        # 조기리턴 문턱이 너무 커서 거의 항상 꺼져있었음) -- 자세한 설명은
+        # 위 PathAlignCritic.threshold_to_consider 주석 참고.
+        threshold_to_consider: 0.15
+
+      PreferForwardCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 5.0
+        # [2026-08-19] 0.5 -> 0.15. 위와 동일한 이유.
+        threshold_to_consider: 0.15
+
+      # 우리 커스텀 critic 설정
+      SkidCritic:
+        enabled: true
+        cost_power: 1
+        # [하림 수정] 2026-08-15: 지상 실주행 시작하며 10.0으로 복귀 (공중
+        # 부양 테스트 때만 6.0으로 완화했었음 -- 슬립 페널티를 원래대로 보수적으로).
+        #
+        # [2026-08-19] 10.0 -> 2.0. TwirlingCritic 주석 참고 -- |v_right-v_left|가
+        # |wz|에 비례해서 TwirlingCritic이랑 사실상 같은 방향(회전 억제)으로
+        # 겹치는 벌점이라, 둘 다 10이면 합쳐서 곡선 추종을 막는 힘이 너무 컸음.
+        # 오프라인 검증(twirl=1,skid=2 조합)으로 곡선 후보가 확실히 이기는 것
+        # 확인 후 반영. 슬립 안전장치 목적 자체를 없애는 게 아니라 2.0으로도
+        # 여전히 작동은 하니, 실기에서 슬립이 과도해지면 이 값부터 다시 올릴 것.
+        cost_weight: 2.0
+        track_width: 0.4904  # 실측 후 변경
+
+      # doldrive_ws 2026-08-10: 비활성화. 인지팀 side_slope_angle_deg 연동
+      # 논의 중 발견 -- 이 critic은 배치 내 모든 후보 궤적에 동일한 비용을
+      # 더해서, MPPI softmax 정규화 과정에서 수학적으로 상쇄돼 사실상
+      # 궤적 선택에 아무 영향을 못 주고 있었음(no-op). 코드/설정은 보존
+      # (나중에 궤적별로 실제 차별화되게 재설계할 가능성 대비). pitch(전후
+      # 경사) 대응은 slope_speed_limiter_node(속도 제한 방식)로 대체됨.
+      #
+      # [하림 수정] ⚠️ 경고: slope_critic.cpp가 궤적별(data.trajectories.x/y/yaw)
+      # 이 아니라 현재 로봇 pose(data.state.pose) 하나로만 비용을 계산하는 한
+      # (즉 no-op 버그가 실제로 고쳐지기 전까지) enabled: true로 절대 바꾸지
+      # 말 것. 지금 바꾸면 아무 효과 없이 계산 비용만 늘어나는 게 아니라,
+      # "경사 방어 중"이라는 잘못된 안전 인식을 줄 수 있어 더 위험함.
+      SlopeCritic:
+        enabled: false
+        cost_power: 1
+        cost_weight: 5.0
+        max_slope_deg: 30.0
+        critical_slope_deg: 25.0
+
+      # [2026-08-23 신규] 급발진 수정용 -- our_mppi_params.yaml의 동일 항목
+      # 주석 참고. 이 오프라인 벤치는 평지 시뮬레이션이라 SlopeCritic(v2)은
+      # 검증 불가지만, AccelCritic은 vx만 다루므로 여기서도 바로 테스트 가능.
+      AccelCritic:
+        enabled: true
+        cost_power: 1
+        # [2026-08-23] 5.0 -> 15.0 -- our_mppi_params.yaml 동일 항목 주석 참고.
+        cost_weight: 15.0
+        ax_max: 0.5
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      global_frame: odom
+      robot_base_frame: base_link
+      rolling_window: true
+      # [하림 수정] 2026-08-15: path_relay_node의 path_extension_m을 0.0으로
+      # 꺼서(원본 경로만 사용) 3x3(±1.5m)으로도 충분해 8x8 확장은 되돌림.
+      # 단, 실제 인지 경로 자체가 로봇 중심 ±1.5m를 넘는 급커브라면 이번과
+      # 같은 증상(worldToMap 실패 -> path_pts_valid=false -> PathAlignCritic의
+      # max_path_occupancy_ratio 초과로 critic 스킵 -> 직진만 함, utils.hpp/
+      # path_align_critic.cpp 참고)이 재발할 수 있음 -- 그때 다시 넓힐 것.
+      #
+      # [하림 수정] 2026-08-18: 3 -> 6 (±1.5m -> ±3m). 위에서 예고했던 증상이
+      # 실제로 재발함: 직진 경로를 지나치고 나서야(=경로 커브가 다시 ±1.5m
+      # 안으로 들어오고 나서야) 조향이 시작되는 걸 실기에서 확인. vx_max를
+      # 3배 올린 뒤로 인지 경로 커브가 ±1.5m 창을 쉽게 벗어나는 것으로 추정.
+      # ±3m로 넉넉하게 늘려서 PathAlignCritic이 스킵되는 구간을 없앰
+      # (resolution 0.05 기준 120x120 cell, inflation_layer 하나뿐이라 연산
+      # 부담은 여전히 미미함).
+      width: 6
+      height: 6
+      resolution: 0.05
+      # 2026-08-16: robot_radius 미지정 시 Nav2 기본값(0.1m)이 조용히 적용됨
+      # — 실제 로봇 폭 516mm(gradient_map.py LATERAL_CLEARANCE_M/slope_decision.py
+      # track_width_m 참고)의 5분의 1도 안 되는 값이라 잠재적으로 위험함.
+      # 지금은 obstacle_layer가 없어 충돌 판정엔 영향 없지만(inflation_layer만
+      # 있음), 나중에 obstacle_layer 붙을 때를 대비해 명시적으로 채워둔다.
+      # 원형 근사(반폭)이며, 로봇이 폭보다 긴 형상이면 나중에 footprint
+      # 폴리곤으로 교체할 것.
+      robot_radius: 0.258
+      update_frequency: 5.0
+      publish_frequency: 2.0
+      transform_tolerance: 0.5
+      plugins: ["inflation_layer"]
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        enabled: true
+        inflation_radius: 0.5
+
+# [PDF 비교 반영 - 의도적으로 추가하지 않은 항목]
+# - CostCritic: 현재 local_costmap은 inflation_layer만 있고 obstacle/static
+#   source가 없어서 실제 장애물 정보가 없다. 지금 켜면 충돌 회피가 되는 것처럼
+#   보이지만 실질적인 obstacle cost 원천이 없어 잘못된 안전 인식을 줄 수 있다.
+# - GoalCritic / GoalAngleCritic: perception이 15Hz로 짧은 local path endpoint를
+#   계속 갱신하고 pose.orientation도 path tangent가 아니므로, transient endpoint를
+#   강하게 끌어당기거나 잘못된 yaw를 맞추게 할 가능성이 있어 보류한다.
+# - AckermannConstraints: 이 로봇은 무한궤도이고 MPPI motion_model=DiffDrive라
+#   PDF의 Ackermann 전용 최소 회전반경 설정은 적용 대상이 아니다.
+# - PDF의 obstacle_layer(/scan), 40x40 costmap도 현재 센서/CPU/짧은 local path
+#   구조와 다르므로 그대로 복사하지 않는다.
+
+# [하림 수정] 2026-08-22: planner_server/global_costmap/bt_navigator 섹션을
+# 의도적으로 제거함 (이전에 편집 중 실수로 유실됐다가 한 번 복구했었으나,
+# 재검토 후 아예 안 쓰기로 결정). 실제 주행 경로(perception -> /path ->
+# path_relay_node -> FollowPath -> controller_server)는 이 셋을 전혀 안
+# 거치고, RViz "2D Nav Goal"(점 찍으면 Nav2가 전역경로를 계산해서 따라가는
+# 방식 -- NavigateToPose -> bt_navigator -> ComputePathToPose -> planner_
+# server -> FollowPath)도 실제로 써본 적이 없는 것으로 확인됨(지금까지
+# 검증에 쓴 건 synthetic_quarter_arc_path.py처럼 완성된 경로를 FollowPath에
+# 직접 넣는 방식이지, 점 하나로 전역경로를 계산시키는 방식이 아니었음).
+# 안 쓰는 세 노드가 nav2_lifecycle_manager의 "전부 configure 성공해야
+# activate로 넘어가는" 구조(lifecycle_manager.cpp:279-292) 때문에 실제로
+# 쓰는 controller_server(MPPI)의 activate까지 막을 수 있는 불필요한 결합
+# 리스크만 만들고 있었음 -- nav2.launch.py에서도 같이 제거함(해당 커밋
+# 참고). 나중에 map_server/SLAM이 붙어서 point-to-point 내비게이션이 실제로
+# 필요해지면, 이 커밋 이전 git 이력에서 원래 설정을 그대로 복원하면 됨.

@@ -1,0 +1,91 @@
+# purepursuit_node 파라미터 -- 자세한 설명/근거는 각 파라미터의
+# purepursuit.py 모듈 docstring 항목(파일 상단) 참고.
+#
+# [2026-09-01 신규] 이 파일은 문서/기본값 역할을 겸한다 -- 아래 값들은
+# purepursuit.launch.py가 지금 실제로 쓰는 값(각 DeclareLaunchArgument
+# default_value)과 mission_escort_drive.launch.py의 escort 전용 오버라이드를
+# 합친 "현재 실제 적용되는 escort 설정"의 스냅샷이다.
+#
+# [중요] purepursuit.launch.py의 Node(parameters=[...])는 이 파일을 먼저
+# 넣고 그 뒤에 기존 CLI(DeclareLaunchArgument) 값들을 dict로 이어붙인다 --
+# ROS2 parameters 리스트는 같은 키가 여러 번 나오면 "나중 항목이 이긴다".
+# 즉:
+#   - 이 파일에 있고 CLI 인자로도 노출된 키(대부분)는 커맨드라인이 항상
+#     이긴다 -- 여기 값을 고쳐도 실제로는 반영 안 됨, 혼동하지 말 것.
+#   - max_linear_accel_while_turning_mps2처럼 CLI 인자로 안 뺀 키만 이
+#     파일의 값이 실제로 적용된다 -- 이런 값을 실험별로 바꾸고 싶으면
+#     `ros2 launch dolbotz purepursuit.launch.py params_file:=<다른 yaml 경로>`
+#     로 파일째로 바꿔치기할 것(개별 값 하나만 오버라이드하는 CLI 문법은
+#     지원 안 함 -- ROS2 launch 자체의 제약).
+#
+# camera_pitch_rad/camera_roll_rad는 여기 없다 -- purepursuit_node의
+# ROS 파라미터가 아니라 static_transform_publisher(TF) 노드의 launch
+# 인자라서 별개다 -- purepursuit.launch.py의 DeclareLaunchArgument 참고.
+purepursuit_node:
+  ros__parameters:
+    # ---- 경로/프레임/타임아웃 ----
+    path_topic: /path
+    base_frame: base_link
+    tf_lookup_timeout_sec: 0.1
+    path_timeout_sec: 1.0
+
+    # ---- pure pursuit 기본 ----
+    lookahead_distance_m: 0.5
+    target_linear_speed_m_s: 0.3
+    goal_tolerance_m: 0.3
+
+    # ---- 차체/모터 보정 상수 (스윕 대상 아님, 실측값) ----
+    # track_width_m은 코드 기본값(0.50)이 아니라 reduced_odom_bringup.launch.py의
+    # 캘리브레이션 값(0.4904) -- purepursuit.launch.py의 Node parameters
+    # dict에 하드코딩돼 있어서 사실 이 yaml 값은 안 쓰이지만(dict가 항상
+    # 이김), 참고용으로 실제값을 적어둔다.
+    track_width_m: 0.4904
+    wheel_radius_m: 0.1125
+    left_motor_sign: 1.0
+    right_motor_sign: -1.0
+    control_rate_hz: 20.0
+    cmd_topic: /motor_speed_cmd
+
+    # ---- 속도 하드 클램프 ----
+    # escort_follow 기준(1.18m/s) -- 다른 미션은 360(0.707m/s)으로 오버라이드.
+    max_wheel_speed_dps: 600.0
+
+    # ---- 가감속 램프 ----
+    use_outer_wheel_boost: false
+    max_linear_accel_mps2: 3.0       # escort_follow 기준(정지/재포착 직후 빠르게 붙어야 함)
+    max_linear_decel_mps2: 1.0       # 전류 스파이크 방지 목적, 보수적으로 유지
+    # [2026-09-01 신규] 회전 중(제자리 회전이든 곡선 추종이든) 가속 상한 --
+    # 회전+가속 동시 발생 시 바퀴 슬립이 심해진다는 실차 피드백 대응.
+    # 0.0 = 회전 중엔 가속 완전 금지(감속/등속만 허용, 그 순간 속도를
+    # 넘어서지 않음), 직선 구간에서만 위 max_linear_accel_mps2로 가속.
+    # 이 파라미터만 CLI 인자로 안 뺐다 -- 실험 버전마다 이 값만 바꾼 yaml을
+    # 통째로 스왑하는 용도(위 파일 상단 주석 참고).
+    # [2026-09-04, 버그 수정] 완전 정지(v=0) 상태에서 목표가 정면 데드밴드
+    # 밖이면 이 0.0이 영구 데드락(가속 자체가 안 됨)으로 이어지던 문제를
+    # purepursuit.py의 _ramp_v()에서 고쳤다 -- "정지 상태에서 처음
+    # 출발할 때"만 이 값 대신 max_linear_accel_mps2를 쓰도록 예외 처리됨.
+    # 이미 움직이는 중에 회전이 걸리는 원래 의도한 케이스는 그대로 이 값이
+    # 적용된다.
+    max_linear_accel_while_turning_mps2: 0.0
+    # [2026-09-01 신규, 재도입] w(각속도) 변화율 상한 -- 각속도 "자체"의
+    # 최댓값이 아니라 각속도가 "변하는 속도"만 제한(정상상태 크기는
+    # bearing_steering_gain*각도와 max_wheel_speed_dps가 정함). CLI
+    # 인자로도 노출돼 있어서(purepursuit.launch.py) 이 값은 CLI를 안 줄
+    # 때만 적용됨.
+    max_angular_accel_rad_s2: 6.0
+
+    # ---- 거리 비례 속도 (escort_follow 전용) ----
+    use_distance_scaled_speed: true
+    distance_speed_gain: 2.0
+    distance_speed_min_m_s: 0.0
+    distance_speed_max_m_s: 1.8
+    distance_band_min_m: 1.5
+    distance_band_max_m: 2.0
+    distance_speed_reverse_max_m_s: 0.3
+
+    # ---- 각도 기반 조향 (escort_follow 전용) ----
+    use_bearing_steering: true
+    bearing_steering_gain: 3.0
+    bearing_deadband_lateral_m: 0.8
+    bearing_inplace_threshold_rad: 0.05
+    use_single_wheel_pivot: false

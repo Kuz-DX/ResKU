@@ -1,0 +1,3 @@
+[submodule "src/arm/pymoveit2"]
+	path = src/arm/pymoveit2
+	url = https://github.com/AndrejOrsula/pymoveit2.git

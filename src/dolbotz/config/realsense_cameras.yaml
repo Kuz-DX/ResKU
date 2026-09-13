@@ -1,0 +1,43 @@
+# 주행용/로봇팔용 RealSense 설정.
+# 두 카메라는 각각 drive_cam.launch.py, arm_cam.launch.py로 실행한다.
+drive_cam:
+  camera_namespace: drive
+  camera_name: camera
+  serial_no: "_117222251401"
+
+  enable_color: true
+  enable_depth: true
+  enable_infra1: false
+  enable_infra2: false
+  enable_gyro: true
+  enable_accel: true
+  unite_imu_method: 2
+
+  pointcloud.enable: false
+  align_depth.enable: true
+
+  rgb_camera.color_profile: 424x240x15
+  depth_module.depth_profile: 424x240x15
+
+# [주의, 2026-09-05] 실제 여름 미션에서는 arm_cam.launch.py 대신
+# army_manipulator_bringup/realsense_bringup.launch.py를 쓴다 - 그쪽은 TF 프레임을
+# arm_camera_*로 바꿔 구동부 D455(camera_*)와 충돌하지 않게 하고 cam_link TF도 낸다.
+# 이 arm_cam 항목으로 띄우면 프레임이 camera_*로 나와 구동부와 충돌한다.
+arm_cam:
+  camera_namespace: arm
+  camera_name: camera
+  # arm Intel RealSense D435I 시리얼. 카메라 교체 시 이 값만 갱신한다.
+  serial_no: "_243322074693"
+
+  enable_color: true
+  enable_depth: true
+  enable_infra1: false
+  enable_infra2: false
+  enable_gyro: false
+  enable_accel: false
+
+  pointcloud.enable: false
+  align_depth.enable: true
+
+  rgb_camera.color_profile: 640x480x15
+  depth_module.depth_profile: 640x480x15

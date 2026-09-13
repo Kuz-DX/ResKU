@@ -1,0 +1,45 @@
+# purepursuit_node(autonomous.planz_spring.py) 파라미터.
+#
+# [2026-09-05 신규] autonomous.planz_params.yaml을 그대로 복사한 뒤,
+# mission_spring_drive_params.yaml의 initial_straight_drive_sec/
+# initial_straight_speed_mps(STARTUP 무조건 직진 구간)만 추가했다 --
+# 그 외 값은 autonomous.planz_params.yaml과 완전히 동일. 전체 파라미터
+# 설명 근거는 각 항목의 autonomous.planz_spring.py 모듈 docstring 참고.
+purepursuit_node:
+  ros__parameters:
+    # ---- 경로/프레임/타임아웃 ----
+    path_topic: /path
+    base_frame: base_link
+    tf_lookup_timeout_sec: 0.1
+    path_timeout_sec: 1.0
+
+    # ---- pure pursuit 기본 ----
+    lookahead_distance_m: 0.5
+    target_linear_speed_m_s: 0.3
+    goal_tolerance_m: 0.3
+
+    # ---- 차체/모터 보정 상수 (실측값) ----
+    # reduced_odom_bringup.launch.py 캘리브레이션 값(0.4904) -- launch.py의
+    # Node parameters dict에서 이 값으로 덮어써지므로(항상 이김), 여기는
+    # 참고용 기록.
+    track_width_m: 0.4904
+    wheel_radius_m: 0.1125
+    left_motor_sign: 1.0
+    right_motor_sign: -1.0
+    control_rate_hz: 20.0
+    cmd_topic: /motor_speed_cmd
+
+    # ---- 속도 하드 클램프 ----
+    # 2026-08-27 시점 자율주행 공통값(0.707m/s) -- launch.py의 Node
+    # parameters dict에서 360.0으로 덮어써지므로 여기는 참고용 기록.
+    max_wheel_speed_dps: 360.0
+
+    # ---- 경사 주행용 (2026-08-27 신규) ----
+    use_outer_wheel_boost: false
+
+    # ---- STARTUP 무조건 직진 (2026-09-05 신규, 이 사본 전용) ----
+    # mission_spring_drive_params.yaml과 동일한 기본값 -- launch.py의 CLI
+    # 인자(initial_straight_drive_sec:=, initial_straight_speed_mps:=)로
+    # 재빌드 없이 오버라이드 가능.
+    initial_straight_drive_sec: 3.0    # 초
+    initial_straight_speed_mps: 0.4    # m/s

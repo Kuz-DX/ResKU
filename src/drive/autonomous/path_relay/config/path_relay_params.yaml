@@ -1,0 +1,40 @@
+# path_relay_node 파라미터 (doldrive_ws, 2026-08-10)
+#
+# 인지팀 트랙 경로(nav_msgs/Path, camera_link 기준, 15Hz)를 controller_server의
+# FollowPath 액션으로 중계. planner_server/bt_navigator는 이 경로에서 안 씀.
+#
+# input_path_topic: dolbotz(인지팀)의 slope_decision.py가 실제로 발행하는 토픽은
+#   '/path' (평지/경사 경로 중 임계각 기준으로 고른 최종 결과, dolbotz/drive_area/
+#   slope_decision.py 확인함). 기존 '/perception/track_path'는 확정 전 placeholder였음.
+#   [하림 수정] '/path'로 반영. 다만 frame_id/TF(odom까지 연결되는지)는 아직 미확인 -
+#   실제 카메라 노드 띄운 상태에서 검증 필요.
+# tf_failure_behavior: "stop"(기본, 권장) 또는 "hold_last". TF lookup이 실패할
+#   때(placeholder라 부정확한 것과는 별개 -- 그건 조용히 틀린 값을 쓰게 되므로
+#   이 파라미터로 감지 불가) 정지할지 마지막 경로를 유지할지. HANDOFF.md의
+#   경사로 설계 논의와 함께 재검토 대상.
+# path_timeout_sec: 인지팀과 아직 "트랙 놓침" 신호 방식이 확정 안 됐음 -- 지금은
+#   토픽이 이 시간 이상 안 오면 정지하는 기본 안전장치만 있음.
+#
+# [2026-08-27 임시 완화] 사용자 요청으로 정지가 거의 안 걸리게 완화 --
+# tf_failure_behavior stop->hold_last(TF 순간 실패해도 안 멈추고 마지막 경로
+# 유지), path_timeout_sec 1.0->60.0초(1분 넘게 /path가 안 와야 정지). 실제
+# 로봇에서 바로 실행하는 세션용 임시값 -- 인지 파이프라인이 죽었는데도 이만큼
+# 안 멈춘다는 뜻이므로, 이후 정식 운영 시엔 원복 검토할 것.
+
+path_relay_node:
+  ros__parameters:
+    input_path_topic: "/path"  # [하림 수정] dolbotz slope_decision.py의 실제 발행 토픽
+    target_frame: "odom"
+    follow_path_action_name: "follow_path"
+    controller_id: ""       # 빈 문자열 = controller_server가 단일 플러그인으로 자동 결정
+    goal_checker_id: ""     # 빈 문자열 = controller_server가 기본 goal_checker로 자동 결정
+    tf_lookup_timeout_sec: 0.1
+    tf_failure_behavior: "hold_last"
+    path_timeout_sec: 60.0
+    path_timeout_check_period_sec: 0.2
+    qos_depth: 1
+    # 인지팀이 발행한 원본 경로만 사용한다. 0.0이면 경로 끝 가상 연장 비활성화.
+    path_extension_m: 0.0
+    # perception -> MPPI path pipeline 진단용 (/debug/path_raw,
+    # /debug/path_relay_transformed). 실주행에서는 false로 둘 것.
+    debug_path_pipeline: false
