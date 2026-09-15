@@ -1,7 +1,6 @@
 """사이드캠(좌/우 웹캠) 공용 브링업 — usb_cam 패키지(ros-humble-usb-cam, 실행파일
-usb_cam_node_exe)로 웹캠 2대를 띄운다. perception_common.launch.py와 같은 스타일의
-공용 include 파일 — spring/summer/fall 미션 launch가 이걸 include해서 쓴다
-(mission_winter.launch.py는 사이드캠을 안 쓰므로 include 안 함).
+usb_cam_node_exe)로 웹캠 2대를 띄운다. spring/summer/fall 미션 launch가
+include해서 쓰는 공용 파일이다.
 
 [2026-09-01] pixel_format:="raw_mjpeg"(카메라가 뱉는 MJPEG 바이트를 재인코딩
 없이 그대로 CompressedImage로 통과시키는 모드)를 잠깐 썼었는데, 실기에서
@@ -25,7 +24,7 @@ usb_cam_node 혼자서 이미 <ns>/image_raw/compressed(그리고 덤으로
 확인), 구독 쪽에서 두 발행자의 프레임이 번갈아 들어와 "최신/과거 프레임이
 겹쳐서 왔다갔다 하는" 증상이 났다 — republish 노드를 다시 제거해서 해결.
 이 리포 컨벤션상 모든 카메라 입력이 CompressedImage인 것
-(segmentation.py/flat_drive.py docstring 참고)과 자동으로 호환되고,
+`sensor_msgs/CompressedImage` 구독 노드와 자동으로 호환되고,
 spring_ifof.py/summer_traffic.py/fall_marker.py 등 구독 쪽 코드는 토픽
 이름이 그대로라 전혀 안 건드려도 된다.
 

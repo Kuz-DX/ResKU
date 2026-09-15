@@ -321,9 +321,8 @@ private:
   // [PlanB, 3차] PlanA(slope_traverse_node.cpp)의
   // computeSlopeExitPursuitCurvature()와 동일한 알고리즘(purepursuit.py
   // 이식)이지만 TF 변환 없이 /path를 그대로 쓴다. 단, /path의 x/y를 곧바로
-  // "로봇 원점(0,0) 기준"으로 두지는 않는다 -- /path는 slope_decision.py
-  // 파이프라인(elevation_map.py류)이 카메라 자체 IMU로 매 프레임 roll/pitch를
-  // 추정해 이미 지면 기준으로 레벨링해서 내보내는 값이라(frame_id는
+  // "로봇 원점(0,0) 기준"으로 두지는 않는다 -- /path는 외부 인지 시스템이
+  // 지면 기준으로 레벨링해서 내보내는 값이라(frame_id는
   // "camera_link"라고 찍혀 나가지만 실제로는 회전이 이미 다 빠진 상태),
   // 여기서 base_link->camera_link static TF의 회전(47도 마운트 pitch 등)을
   // 다시 적용하면 이미 레벨링된 좌표에 회전을 이중으로 거는 꼴이 된다(TF를

@@ -23,7 +23,6 @@ manual_stability_node은 A안(IMU pitch/roll 임계값)만 구현 -- 전류 기�
   - ROS_DOMAIN_ID 동일해야 함
   - ROS_LOCALHOST_ONLY=0 (또는 미설정)이어야 함 -- 1이면 자기 PC 안에서만 통신됨
   - 가능하면 RMW_IMPLEMENTATION=rmw_cyclonedds_cpp로 양쪽 통일 권장
-  (path_visualizer.py 상단 주석에 있는 네트워크 체크리스트와 동일)
 
 사용:
     [원격 PC, 조이스틱이 물린 쪽]

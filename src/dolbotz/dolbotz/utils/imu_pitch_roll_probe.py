@@ -2,18 +2,16 @@
 """
 imu_pitch_roll_probe.py — /drive/camera/imu를 몇 초간 구독해서 body 프레임
 (x-전방, y-왼쪽, z-위) 기준 (roll, pitch)[rad/deg]를 계산해주는 1회성 실측
-스크립트. dolbotz 패키지 의존성 없음(path_ld_lp_visulizer.py와 동일 설계
-원칙) — rclpy + sensor_msgs + numpy만 필요. 빌드/설치 없이
+스크립트. dolbotz 패키지 의존성 없이 rclpy + sensor_msgs + numpy만
+사용하므로 빌드/설치 없이
 `python3 imu_pitch_roll_probe.py`로 바로 실행된다.
 
-계산 로직(attitude.py의 R_OPTICAL_TO_BODY/roll_pitch_from_accel_body와 동일,
-dolbotz 패키지 무의존 설계라 인라인으로 중복 정의)은 reduced_odom_bringup.
+계산 로직은 이 파일에 독립적으로 정의되어 있으며 reduced_odom_bringup.
 launch.py의 [2026-08-27 회전 실측]/[2026-08-30 회전 실측] 절에서 실제로 쓰인
 수동 절차(ros2 topic echo + 직접 계산)를 자동화한 것뿐이다.
 
 [중요] 측정 조건: 로봇 몸체가 완전히 정지 + 평평한 바닥 위에 있어야 한다.
-로봇 자체가 기울어져 있으면 이 값도 같이 오염된다(attitude.py 모듈
-docstring의 "총 기울기" 주의사항과 동일한 함정 -- 카메라 IMU는 카메라 자체
+로봇 자체가 기울어져 있으면 이 값도 같이 오염된다. 카메라 IMU는 카메라 자체
 내장 센서라 섀시 기울기와 마운트 기울기가 결합된 총 기울기를 측정함).
 
 [참고] 이전 실측(2026-08-27) 때 MIPI 스트림 에러로 12번 시도 중 4번만
@@ -36,7 +34,7 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPo
 from sensor_msgs.msg import Imu
 
 # Body 프레임(x=전방, y=왼쪽, z=위)에서 카메라 optical 프레임(x=오른쪽,
-# y=아래, z=전방)으로 -- attitude.py의 R_BODY_TO_OPTICAL과 동일 상수.
+# y=아래, z=전방)으로 변환하는 상수.
 R_BODY_TO_OPTICAL = np.array([
     [0., -1., 0.],
     [0., 0., -1.],
@@ -46,7 +44,7 @@ R_OPTICAL_TO_BODY = R_BODY_TO_OPTICAL.T
 
 
 def roll_pitch_from_accel_body(accel_body: np.ndarray) -> tuple[float, float]:
-    """attitude.py의 동일 함수와 100% 동일 -- 표준 2축 기울기 공식.
+    """표준 2축 기울기 공식.
     roll: 전방(x)축 중심 회전(양수=오른쪽이 아래로).
     pitch: 왼쪽(y)축 중심 회전(양수=기수가 아래로)."""
     ax, ay, az = accel_body

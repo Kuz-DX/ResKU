@@ -4,13 +4,12 @@ purepursuit_node
 Pure Pursuit 기반 경로추종 컨트롤러 -- Nav2 MPPI(controller_server)가 하던
 "/path -> 모터 명령" 역할을 대체한다. planner_server/bt_navigator/
 path_relay_node/controller_server(FollowPath 액션)를 전혀 거치지 않고,
-/path(인지팀 최종 경로, slope_decision.py가 15Hz로 발행, camera_link 프레임의
+/path(외부 인지 시스템이 발행하는 camera_link 프레임의
 body 좌표 x=전방/y=좌측)를 직접 구독해서 정적 TF(base_link<-camera_link,
 reduced_odom_bringup.launch.py가 CAD 실측값으로 쏨)로 base_link 좌표로 옮긴 뒤, 매 프레임
 그 자리에서 pure pursuit으로 조향을 계산한다. 로봇은 항상 base_link 원점이라
 EKF(/odometry/filtered)나 전역(odom) 위치추정이 필요 없다 -- 경로 자체가 매
-프레임 로봇 기준으로 새로 갱신되기 때문 (flat_drive.py/gradient_map.py도
-동일한 상대좌표 규약을 씀).
+프레임 로봇 기준으로 새로 갱신되기 때문이다.
 
 산출된 v(선속도)/w(각속도)는 rmd_x8_driver_node._skid_steer_inverse() +
 _send_speed_command()와 동일한 공식으로 좌우 바퀴 dps로 바꿔서, can_driver_node
@@ -20,10 +19,9 @@ _send_speed_command()와 동일한 공식으로 좌우 바퀴 dps로 바꿔서, 
 체인은 전혀 거치지 않는, can_driver_node만 재사용하는 독립된 새 경로다.
 
 구독:
-    /path (nav_msgs/Path) -- slope_decision.py가 발행하는 최종 경로.
+    /path (nav_msgs/Path) -- 외부에서 공급되는 최종 경로.
                               frame_id는 보통 'camera_link', 좌표는 body
                               규약(x=전방, y=좌측). force_mode가 무엇이든
-                              (flat_drive/gradient_map 어느 쪽이든) 최종
                               선택된 경로가 이 토픽 하나로 나온다.
 
 발행:
@@ -93,7 +91,7 @@ TF:
                                             escort_follow처럼 2점(로봇 원점+
                                             추종대상) 경로에서만 "선도 로봇까지의
                                             실제 거리"와 일치한다 -- 여러 점으로
-                                            이루어진 긴 경로(flat_drive 등)에
+                                            이루어진 일반적인 긴 경로에
                                             켜면 look_dist가 lookahead 반경 밖
                                             첫 경로점까지 거리일 뿐이라 의도한
                                             의미가 아니게 되므로 켜지 말 것.
@@ -361,7 +359,7 @@ TF:
                                             분리했다(_ramp_v() 참고) --
                                             escort_follow은 launch에서 이
                                             값만 올려 쓰고(예: 3.0), 다른
-                                            미션(flat_drive 등)은 기본값
+                                            미션은 기본값
                                             그대로라 영향 없음. 실측/현장
                                             튜닝 필요.
     max_linear_decel_mps2         float 1.0    [2026-08-31 신규] v(선속도)가

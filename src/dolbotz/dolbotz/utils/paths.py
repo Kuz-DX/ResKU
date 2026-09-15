@@ -1,6 +1,6 @@
 """
 리포/패키지 경로 해석 공용 유틸리티 — 실행 위치(cwd)나 사용자 홈 경로에
-관계없이 config/, config/models/, config/calibration/ 디렉토리를 안정적으로
+관계없이 config/와 config/models/ 디렉토리를 안정적으로
 찾는다.
 
 model_path를 절대경로로 하드코딩하면 사용자나 머신이 바뀔 때 깨지므로,
@@ -28,7 +28,6 @@ model_path를 절대경로로 하드코딩하면 사용자나 머신이 바뀔 �
 
 from __future__ import annotations
 
-import pickle
 from pathlib import Path
 
 
@@ -85,37 +84,3 @@ def get_config_dir() -> Path:
 def get_models_dir() -> Path:
     return get_config_dir() / 'models'
 
-
-def get_calibration_dir() -> Path:
-    return get_config_dir() / 'calibration'
-
-
-def load_calibration(serial_no: str) -> dict | None:
-    """config/calibration/{camera_model}_{serial_no}.pkl이 있으면 로드해서
-    dict로 반환한다. camera_model 접두사는 몰라도 되도록 serial_no만으로
-    글롭 탐색한다 (`config/calibration/README.md`의 네이밍 컨벤션 참고).
-
-    파일이 없으면 None을 반환한다 — 호출부(ROS 노드)는 이 경우 기존 ROS
-    파라미터 기본값으로 폴백해야 한다. 지금은 이 피클을 생성하는 캘리브레이션
-    스크립트가 아직 없으므로 항상 None이 반환되는 것이 정상이다.
-    """
-    if not serial_no:
-        return None
-
-    calibration_dir = get_calibration_dir()
-    if not calibration_dir.is_dir():
-        return None
-
-    matches = sorted(calibration_dir.glob(f'*_{serial_no}.pkl'))
-    if not matches:
-        return None
-
-    with open(matches[0], 'rb') as f:
-        data = pickle.load(f)
-
-    if data.get('serial_no') != serial_no:
-        raise ValueError(
-            f"{matches[0].name}의 내부 serial_no({data.get('serial_no')!r})가 파일명이 "
-            f'가리키는 serial_no({serial_no!r})와 일치하지 않습니다.'
-        )
-    return data

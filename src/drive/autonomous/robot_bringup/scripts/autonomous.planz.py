@@ -14,13 +14,12 @@ dolbotz/dolbotz/purepursuit.py와는 완전히 별개의 코드/노드이며 서
 Pure Pursuit 기반 경로추종 컨트롤러 -- Nav2 MPPI(controller_server)가 하던
 "/path -> 모터 명령" 역할을 대체한다. planner_server/bt_navigator/
 path_relay_node/controller_server(FollowPath 액션)를 전혀 거치지 않고,
-/path(인지팀 최종 경로, slope_decision.py가 15Hz로 발행, camera_link 프레임의
-body 좌표 x=전방/y=좌측)를 직접 구독해서 정적 TF(base_link<-camera_link,
+/path(외부 인지 시스템이 발행하는 camera_link 프레임의 body 좌표
+x=전방/y=좌측)를 직접 구독해서 정적 TF(base_link<-camera_link,
 reduced_odom_bringup.launch.py가 CAD 실측값으로 쏨)로 base_link 좌표로 옮긴 뒤, 매 프레임
 그 자리에서 pure pursuit으로 조향을 계산한다. 로봇은 항상 base_link 원점이라
-EKF(/odometry/filtered)나 전역(odom) 위치추정이 필요 없다 -- 경로 자체가 매
-프레임 로봇 기준으로 새로 갱신되기 때문 (flat_drive.py/gradient_map.py도
-동일한 상대좌표 규약을 씀).
+EKF(/odometry/filtered)나 전역(odom) 위치추정이 필요 없다 -- 경로 자체가 매 프레임
+로봇 기준으로 새로 갱신되기 때문이다.
 
 산출된 v(선속도)/w(각속도)는 rmd_x8_driver_node._skid_steer_inverse() +
 _send_speed_command()와 동일한 공식으로 좌우 바퀴 dps로 바꿔서, can_driver_node
@@ -30,10 +29,9 @@ _send_speed_command()와 동일한 공식으로 좌우 바퀴 dps로 바꿔서, 
 체인은 전혀 거치지 않는, can_driver_node만 재사용하는 독립된 새 경로다.
 
 구독:
-    /path (nav_msgs/Path) -- slope_decision.py가 발행하는 최종 경로.
+    /path (nav_msgs/Path) -- 외부에서 공급되는 최종 경로.
                               frame_id는 보통 'camera_link', 좌표는 body
                               규약(x=전방, y=좌측). force_mode가 무엇이든
-                              (flat_drive/gradient_map 어느 쪽이든) 최종
                               선택된 경로가 이 토픽 하나로 나온다.
 
 발행:

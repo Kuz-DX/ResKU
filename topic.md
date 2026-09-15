@@ -10,29 +10,10 @@
 - `src/dolbotz/howtorun.md`의 `/camera/camera/...` 표기는 오래된 값이므로, 주행/미션
   카메라는 루트 문서의 `/drive/camera/...`, `/arm/camera/...` 표기를 우선한다.
 
-## dolbotz (주행 영역 인식, 경로 생성, 계절 미션 및 시각화)
+## dolbotz (계절 미션 및 유틸리티)
 
 | 노드 | 발행 토픽 | 타입 | 용도 |
 |---|---|---|---|
-| `segmentation` | `/perception/drivable_mask` | `sensor_msgs/msg/Image` | 주행 가능 영역 마스크(`mono8`) |
-| `flat_drive` | `/flatdrive/planned_path` | `nav_msgs/msg/Path` | 평지 주행 경로 |
-| `flat_drive` | `/planning/target_point` | `geometry_msgs/msg/PointStamped` | 평지 경로의 목표점 |
-| `flat_drive` | `/bev/image` | `sensor_msgs/msg/Image` | BEV 변환 영상 |
-| `flat_drive` | `/bev/mask` | `sensor_msgs/msg/Image` | BEV 주행 가능 영역 마스크 |
-| `flat_drive` | `/bev/debug_overlay` | `sensor_msgs/msg/Image` | BEV 디버그 오버레이 |
-| `flat_drive` | `/bev/centerline_overlay` | `sensor_msgs/msg/Image` | 중심선 디버그 오버레이 |
-| `flat_drive` | `/bev/H` | `std_msgs/msg/Float64MultiArray` | 지면-영상 호모그래피 행렬 |
-| `elevation_map` | `/terrain/elevation_map` | `sensor_msgs/msg/Image` | 미터 단위 고도맵(`32FC1`, 미관측은 `NaN`) |
-| `gradient_map` | `/terrain/gradient_x` | `sensor_msgs/msg/Image` | x 방향 고도 변화량(`32FC1`) |
-| `gradient_map` | `/terrain/gradient_y` | `sensor_msgs/msg/Image` | y 방향 고도 변화량(`32FC1`) |
-| `gradient_map` | `/terrain/gradient_magnitude` | `sensor_msgs/msg/Image` | 경사 크기(`32FC1`) |
-| `gradient_map` | `/terrain/gradient_direction` | `sensor_msgs/msg/Image` | 경사 방향(`32FC1`) |
-| `gradient_map` | `/terrain/slope_deg` | `sensor_msgs/msg/Image` | 셀별 경사각(`32FC1`, degree) |
-| `gradient_map` | `/terrain/planned_path` | `nav_msgs/msg/Path` | 경사 제한을 반영한 경사 구간 경로 |
-| `slope_decision` | `/terrain/side_slope_angle_deg` | `std_msgs/msg/Float32` | 카메라 depth로 구한 좌우 경사각 |
-| `slope_decision` | `/terrain/slope_side_signal` | `std_msgs/msg/Int8` | 경사 방향 신호(`-1`=왼쪽 높음, `0`=없음, `+1`=오른쪽 높음) |
-| `slope_decision` | `/path` | `nav_msgs/msg/Path` | 평지/경사 경로 중 선택된 최종 제어 경로 |
-| `slope_decision` | `/drive/status` | `std_msgs/msg/String` | 현재 경로 모드(`flat` 또는 `slope`) |
 | `spring_ifof` | `/mission/spring_ifof/result` | `mission_manager_interfaces/msg/MissionResult` | 봄 피아식별 결과 |
 | `summer_traffic` | `/mission/summer_traffic/result` | `mission_manager_interfaces/msg/MissionResult` | 여름 신호등 인식 결과 |
 | `fall_marker` | `/mission/fall_marker/result` | `mission_manager_interfaces/msg/MissionResult` | 가을 비전 마커 인식 결과 |
@@ -42,15 +23,9 @@
 | `summer_supply` | `/arm/debug_image/compressed` | `sensor_msgs/msg/CompressedImage` | 보급품 검출 디버그 영상 |
 | `led_relay` | `/led_control` | `std_msgs/msg/String` | 피아식별 결과를 변환한 LED 명령 |
 | `purepursuit` | `/motor_speed_cmd` | `std_msgs/msg/Float32MultiArray` | Pure Pursuit가 계산한 좌/우 모터 속도 명령 |
-| `terrain_viz_relay` | `/terrain/elevation_map_viz` | `sensor_msgs/msg/Image` | 고도맵 컬러 시각화(`bgr8`) |
-| `terrain_viz_relay` | `/terrain/slope_deg_viz` | `sensor_msgs/msg/Image` | 경사각 컬러 시각화(`bgr8`) |
-| `terrain_viz_relay` | `/terrain/gradient_magnitude_viz` | `sensor_msgs/msg/Image` | 경사 크기 컬러 시각화(`bgr8`) |
-| `slope_visualizer` | `/debug/slope_markers` | `visualization_msgs/msg/MarkerArray` | RViz 경사 마커 |
-| `path_camera_overlay_relay` | `/debug/path_camera_overlay` | `sensor_msgs/msg/Image` | 카메라 영상 위 최종 경로 오버레이 |
 
 `arm_visualizer`와 `led_bridge_node`는 각각 화면 표시와 시리얼 전송만 담당하며 ROS
-토픽을 새로 발행하지 않는다. `path_visulizer.py --dummy` 계열의 테스트용 더미
-퍼블리셔도 운영 토픽 목록에서는 제외했다.
+토픽을 새로 발행하지 않는다.
 
 ## mission_manager_interfaces (미션 결과 메시지 정의)
 

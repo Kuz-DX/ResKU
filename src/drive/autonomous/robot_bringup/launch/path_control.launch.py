@@ -20,8 +20,7 @@ Run reduced_odom_bringup.launch.py + nav2.launch.py first/alongside this (odom, 
 `ros2 run`으로 수동 실행해야 했음 -- 이번에 처음 launch로 묶음.
 [2026-08-26] imu_slope_mode_node -> slope_traverse_node로 교체(완전 대체,
 imu_slope_mode_node는 삭제). 기능 1(IMU roll -> /drive/mode_command)도 함께
-삭제 -- slope_decision.py는 이제 force_mode/auto(depth 기반 자체 판단)만
-사용. 대신 인지팀이 새로 발행할 signed left/right 신호를 받아 진입 헤딩을
+삭제. 대신 외부에서 받는 signed left/right 신호로 진입 헤딩을
 직접 정하고, 탈출은 IMU 경사 크기 대신 /path 곡률(20도)로 판단.
 [2026-08-27] slope_speed_limiter_node 패키지 전체 삭제 -- roll/pitch 임계값
 테이블이 2026-08-18(EKF 발산 대응)부터 빈 배열이라 실질적으로 아무 동작도

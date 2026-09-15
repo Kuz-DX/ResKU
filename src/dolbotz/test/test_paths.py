@@ -6,18 +6,14 @@ Run (requires ROS env sourced, since ament_index_python is a ROS package):
     python3 -m pytest test/test_paths.py -v
 """
 
-import pickle
-
 import pytest
 
 from dolbotz.utils import paths as paths_module
 from dolbotz.utils.paths import (
-    get_calibration_dir,
     get_config_dir,
     get_models_dir,
     get_package_share_dir,
     get_repo_root,
-    load_calibration,
 )
 
 
@@ -92,80 +88,10 @@ class TestGetPackageShareDirHybrid:
 
 
 # ---------------------------------------------------------------------------
-# get_config_dir / get_models_dir / get_calibration_dir
+# get_config_dir / get_models_dir
 # ---------------------------------------------------------------------------
 
 class TestConfigSubdirs:
     def test_config_subdirs_are_nested_under_config_dir(self):
         config_dir = get_config_dir()
         assert get_models_dir() == config_dir / 'models'
-        assert get_calibration_dir() == config_dir / 'calibration'
-
-    def test_models_dir_contains_moved_model_files(self):
-        """Integration check that the config/models/ git mv actually landed
-        where get_models_dir() looks — supplybest.pt (arm_pickup_node) and
-        dolbotz_seg_v1/best_openvino_model/ (flat_drive_node)."""
-        models_dir = get_models_dir()
-        assert (models_dir / 'supplybest.pt').is_file()
-
-        seg_dir = models_dir / 'dolbotz_seg_v1'
-        assert (seg_dir / 'best.pt').is_file()
-        openvino_dir = seg_dir / 'best_openvino_model'
-        assert (openvino_dir / 'best.xml').is_file()
-        assert (openvino_dir / 'best.bin').is_file()
-        assert (openvino_dir / 'metadata.yaml').is_file()
-
-
-# ---------------------------------------------------------------------------
-# load_calibration
-# ---------------------------------------------------------------------------
-
-class TestLoadCalibration:
-    def test_missing_serial_returns_none(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(paths_module, 'get_calibration_dir', lambda: tmp_path)
-        assert load_calibration('0000000000000') is None
-
-    def test_empty_serial_returns_none_without_touching_filesystem(self, monkeypatch):
-        def _boom():
-            raise AssertionError('get_calibration_dir should not be called for empty serial_no')
-        monkeypatch.setattr(paths_module, 'get_calibration_dir', _boom)
-        assert load_calibration('') is None
-
-    def test_nonexistent_calibration_dir_returns_none(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(paths_module, 'get_calibration_dir', lambda: tmp_path / 'does_not_exist')
-        assert load_calibration('000000000000') is None
-
-    def test_matching_pickle_is_loaded_and_parsed(self, monkeypatch, tmp_path):
-        # Deliberately a dummy camera model/serial, not a real one on this
-        # robot — which physical camera is used for what has changed before
-        # (driving vs arm camera swap) and this test only exercises the
-        # generic pickle-loading mechanism, not any real camera assignment.
-        monkeypatch.setattr(paths_module, 'get_calibration_dir', lambda: tmp_path)
-        serial = '000000000000'
-        payload = {
-            'serial_no': serial,
-            'camera_model': 'TESTCAM',
-            'measured_at': '2026-07-08T00:00:00',
-            'camera_height_m': 0.52,
-            'camera_pitch_offset_deg': 9.4,
-            'camera_roll_offset_deg': 0.3,
-            'camera_matrix': None,
-            'dist_coeffs': None,
-            'accel_reference_body': None,
-        }
-        with open(tmp_path / f'TESTCAM_{serial}.pkl', 'wb') as f:
-            pickle.dump(payload, f)
-
-        result = load_calibration(serial)
-        assert result == payload
-
-    def test_serial_no_mismatch_inside_pickle_raises(self, monkeypatch, tmp_path):
-        """A pickle whose internal serial_no disagrees with its filename indicates
-        a misnamed/miscopied calibration file — this should fail loudly rather
-        than silently applying the wrong camera's calibration."""
-        monkeypatch.setattr(paths_module, 'get_calibration_dir', lambda: tmp_path)
-        with open(tmp_path / 'TESTCAM_000000000000.pkl', 'wb') as f:
-            pickle.dump({'serial_no': 'WRONG_SERIAL'}, f)
-
-        with pytest.raises(ValueError):
-            load_calibration('000000000000')

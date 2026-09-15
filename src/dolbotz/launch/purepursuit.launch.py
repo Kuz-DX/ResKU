@@ -2,8 +2,7 @@
 purepursuit.launch.py
 
 Pure Pursuit로 MPPI(controller_server) 역할을 대체하는 최소 구성. 아래
-세 가지만 띄운다 (경로 소스는 이 launch에 안 넣음 -- perception_common.launch.py
-+ mission_*.launch.py 등 /path를 내는 쪽을 별도로 같이 띄워야 함):
+세 가지만 띄우며, `/path`를 내는 경로 소스는 별도로 실행해야 한다:
 
     1) base_link -> imu_link / camera_link 정적 TF (reduced_odom_bringup.launch.py의 CAD 실측값과
        동일 -- purepursuit_node가 /path(camera_link)를 base_link로 변환하는 데 필요)
@@ -159,7 +158,7 @@ def generate_launch_description():
         ),
 
         # [2026-08-30 신규] escort_follow 전용, 기본 꺼짐 — 모듈 docstring
-        # 참고. 다른 미션(flat_drive/slope_decision 등 긴 경로)에서는 켜지
+        # 참고. 일반적인 긴 경로에서는 켜지
         # 말 것.
         DeclareLaunchArgument(
             'use_distance_scaled_speed',
@@ -242,7 +241,7 @@ def generate_launch_description():
         ),
 
         # [2026-08-30 신규] escort_follow 전용, 기본 꺼짐 -- 모듈 docstring
-        # 참고. 다른 미션(flat_drive/slope_decision 등 긴 경로)에서는 켜지
+        # 참고. 일반적인 긴 경로에서는 켜지
         # 말 것(표준 pure pursuit curvature를 쓰는 게 맞음).
         DeclareLaunchArgument(
             'use_bearing_steering',
@@ -405,8 +404,7 @@ def generate_launch_description():
         # base_link<-camera_link 정적 TF pitch/roll. imu_pitch_roll_probe.py가
         # 출력한 body-frame 부호를 그대로 static_transform_publisher에 쓴다.
         # 측정 조건: 로봇 몸체가 수평인 상태에서 IMU 가속도계로 쟀다(로봇
-        # 자체가 기울어져 있으면 이 값도 같이 오염됨 -- attitude.py 모듈
-        # docstring의 "총 기울기" 주의사항과 동일한 함정).
+        # 자체가 기울어져 있으면 이 값도 같이 오염됨).
         DeclareLaunchArgument(
             'camera_pitch_rad',
             default_value='0.2737',

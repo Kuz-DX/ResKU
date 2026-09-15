@@ -67,7 +67,7 @@ public:
     // --- Parameters -----------------------------------------------------
     // Topic name is UNCONFIRMED with perception -- parameterized so it can
     // be changed via launch/yaml without a code change or rebuild.
-    // [하림 수정] dolbotz(인지팀) slope_decision.py가 실제로 발행하는 토픽은 '/path'.
+    // 외부 인지 시스템의 기본 경로 토픽은 '/path'.
     input_path_topic_ = declare_parameter<std::string>(
       "input_path_topic", "/path");
     target_frame_ = declare_parameter<std::string>("target_frame", "odom");
@@ -190,7 +190,7 @@ private:
 
     // [하림 수정] 진단용 경고만 추가 -- 기존 TF 변환 동작(target_frame_/
     // tf_failure_behavior_)은 그대로 둔다. 이 frame_id는 경로 생성부
-    // (flat_drive.py/gradient_map.py)가 이미 body(=camera_link) 좌표계로
+    // 외부 인지 시스템이 body(=camera_link) 좌표계로
     // 명시하도록 고쳐졌어야 하므로, 정상이라면 여기 안 걸려야 한다. 그래도
     // *_optical_frame이 들어오면 좌표(x=전방/y=좌측 body 규약)와 frame_id
     // (optical: x=오른쪽/y=아래/z=전방)가 안 맞을 가능성이 높다는 신호라

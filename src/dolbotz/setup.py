@@ -43,15 +43,10 @@ setup(
     zip_safe=True,
     maintainer="j",
     maintainer_email="j@example.com",
-    description="ROS2 nodes for terrain side-slope detection and related robot utilities.",
+    description="ROS2 nodes for seasonal robot missions and related utilities.",
     license="MIT",
     entry_points={
         "console_scripts": [
-            "slope_decision = dolbotz.drive_area.slope_decision:main",
-            "flat_drive = dolbotz.drive_area.flat_drive:main",
-            "gradient_map = dolbotz.drive_area.gradient_map:main",
-            "elevation_map = dolbotz.drive_area.elevation_map:main",
-            "segmentation = dolbotz.drive_area.segmentation:main",
             "arm_visualizer = dolbotz.arm_visualizer:main",
             "purepursuit = dolbotz.purepursuit:main",
             "summer_supply = dolbotz.missions.summer_supply:main",
@@ -62,9 +57,6 @@ setup(
             "summer_traffic = dolbotz.missions.summer_traffic:main",
             "fall_marker = dolbotz.missions.fall_marker:main",
             "escort_follow = dolbotz.missions.escort_follow:main",
-            "slope_visualizer = dolbotz.utils.slope_visualizer:main",
-            "terrain_viz_relay = dolbotz.utils.terrain_viz_relay:main",
-            "path_camera_overlay_relay = dolbotz.utils.path_camera_overlay_relay:main",
         ],
     },
 )

@@ -111,12 +111,10 @@ except ImportError:
 # 조합해 model_path 파라미터 기본값으로 쓴다(summer_traffic.py의
 # TRAFFIC_MODEL_RELATIVE_PATH와 동일한 패턴). 모델이 비어있거나 로드
 # 실패하면 _load_model()이 None을 반환하고, 이후 모든 프레임에서 'unknown'만
-# 반환한다(valid=False 고정 — 모델 없이 아무 판정도 안 내는 게 안전하다는
-# 이 프로젝트 전반의 원칙과 동일, elevation_map.py의 min_points_per_cell
-# 등과 같은 취지).
+# 반환한다(valid=False 고정 — 모델 없이 아무 판정도 내리지 않는다).
 # [2026-09-02] ifofv1.pt(FP32, PyTorch)를 merged/data.yaml로 캘리브레이션한
-# OpenVINO INT8로 교체 — segmentation.py에 적용한 것과 동일 절차/근거
-# (config/models/README.md 참고). ONNX INT8도 시도했으나 OpenVINO INT8보다
+# OpenVINO INT8로 교체했다(config/models/README.md 참고). ONNX INT8도
+# 시도했으나 OpenVINO INT8보다
 # 5배 이상 느려서(이 CPU에서 실측 17.6ms vs 2.9ms) 버리고 OpenVINO로 감.
 # merged/data.yaml 전체(987장) 검증: mAP50 0.98735->0.98253,
 # mAP50-95 0.85763->0.83808, recall 0.96887->0.96804(거의 유지) —

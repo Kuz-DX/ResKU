@@ -27,8 +27,8 @@
 #
 # [2026-09-02, 사용자 요청] 이미지/뎁스 스트림(카메라 color/depth)도 이제
 # OPTIONAL_TOPICS에 포함해서 같이 담는다 -- bag 용량이 커지는 건 감수.
-# 토픽 이름은 실제 구독 코드 기준(압축 전송, slope_decision.py/flat_drive.py
-# 참고) -- 인지 파이프라인이 raw(비압축)로 바꾸면 여기도 맞춰서 바꿀 것.
+# 토픽 이름은 실제 구독 코드 기준(압축 전송) -- 인지 파이프라인이
+# raw(비압축)로 바꾸면 여기도 맞춰서 바꿀 것.
 #
 # 사용:
 #   ./record_autonomous_drive.sh [output_dir]
@@ -54,7 +54,7 @@ REQUIRED_TOPICS=(
   /wheel/odom           # rmd_x8_driver_node 원본 휠 오도메트리(reduced_odom_node 입력)
   /odometry/diagnostics
   /imu                  # myAHRS+
-  /path                 # 인지팀 slope_decision.py 최종 경로 -- perception 파이프라인 필요
+  /path                 # 외부 인지 시스템 최종 경로
 )
 
 # 있으면 같이 기록(자율주행 launch/perception 파이프라인 구성에 따라 없을
@@ -69,7 +69,7 @@ OPTIONAL_TOPICS=(
   /drive/camera/aligned_depth_to_color/camera_info
   /terrain/slope_side_signal     # 인지팀 signed left/right 경사 신호
   /terrain/side_slope_angle_deg  # 경사각 모니터링용(연속값)
-  /drive/status                  # slope_decision.py 상태 로그
+  /drive/status                  # 외부 인지 상태 로그
   /cmd_vel_auto                  # controller_server(MPPI) 출력
   /cmd_vel_safety                # slope_traverse_node/stability_monitor_node 최우선 override
   /cmd_vel                       # rmd_x8_driver_node가 실제로 받는 최종 구동 명령

@@ -176,24 +176,21 @@ def generate_launch_description():
         # [2026-08-27 마운트 재측정] base_link 기준 x=+90.461mm(전방),
         # y=0(정렬), z=805.188mm(base_link 원점 기준, 지면 기준 아님 --
         # 사용자 실측값 그대로 사용). purepursuit.launch.py에 동일 TF가
-        # 중복 선언돼 있어서 같이 갱신했고, path_ld_lp_visulizer.py의
-        # --base-to-camera-x-m 기본값도 이 x값에 맞춰 같이 갱신함.
+        # 중복 선언돼 있어서 같이 갱신함.
         # [2026-09-01 마운트 재변경] base_link 기준 x=+348.15mm, z=+257.95mm로
         # 다시 변경(사용자 지시). roll/pitch는 이번 변경 대상이 아니라
         # 기존 실측값(-0.0011/0.8063) 그대로 유지 -- 위치가 바뀌었으니 각도도
-        # 재측정이 필요할 수 있음. purepursuit.launch.py/path_ld_lp_visulizer.py
-        # 의 --base-to-camera-x-m도 같이 갱신.
+        # 재측정이 필요할 수 있음. purepursuit.launch.py도 같이 갱신.
         # child-frame-id를 'camera_link'로 잡은 이유: path_relay_node.cpp가 인지팀
         # Path의 frame_id를 'camera_link'로 가정하고 있고(코드 주석 참고), realsense2_camera
         # 노드도 이 이름을 자기 TF 트리의 루트로 쓰므로, 카메라 노드를 띄우면
         # camera_link 밑의 camera_color_optical_frame 등은 realsense 쪽이 알아서 채워줌.
         # [2026-08-27 회전 실측] 로봇을 평평한 바닥에 정지시킨 상태에서
         # /drive/camera/imu 원시 가속도(4개 유효 샘플, MIPI 에러로 스트림이
-        # 끊겨서 12번 중 4번만 성공했지만 std는 낮음)를 attitude.py의
-        # R_OPTICAL_TO_BODY/roll_pitch_from_accel_body()로 변환해 실측:
+        # 끊겨서 12번 중 4번만 성공했지만 std는 낮음)를 body 좌표로 변환해 실측:
         # roll=-0.001103rad(-0.063deg), pitch=0.806281rad(46.196deg, 기수 하향
         # 이 양수). yaw는 가속도만으로는 원리상 측정 불가(마그네토미터 없음)이라
-        # 기존대로 0 유지 -- attitude.py 모듈 docstring과 동일 원칙.
+        # 기존대로 0 유지.
         # [2026-09-04 재실측, 주행구간] imu_pitch_roll_probe.py로 재측정
         # (std roll=0.0009rad/pitch=0.0008rad로 매우 낮아 신뢰 가능):
         # roll=+0.0030rad(+0.17deg), pitch=+0.8106rad(+46.45deg). 같은 날

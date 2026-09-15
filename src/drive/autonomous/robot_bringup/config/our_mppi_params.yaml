@@ -570,8 +570,7 @@ local_costmap:
       height: 6
       resolution: 0.05
       # 2026-08-16: robot_radius 미지정 시 Nav2 기본값(0.1m)이 조용히 적용됨
-      # — 실제 로봇 폭 516mm(gradient_map.py LATERAL_CLEARANCE_M/slope_decision.py
-      # track_width_m 참고)의 5분의 1도 안 되는 값이라 잠재적으로 위험함.
+      # — 실제 로봇 폭 516mm의 5분의 1도 안 되는 값이라 잠재적으로 위험함.
       # 지금은 obstacle_layer가 없어 충돌 판정엔 영향 없지만(inflation_layer만
       # 있음), 나중에 obstacle_layer 붙을 때를 대비해 명시적으로 채워둔다.
       # 원형 근사(반폭)이며, 로봇이 폭보다 긴 형상이면 나중에 footprint

@@ -1,17 +1,4 @@
-"""봄 미션 — perception_common(segmentation) + side_cameras(좌/우 사이드캠) +
-flat_drive + elevation_map + gradient_map + slope_decision + spring_ifof
-+ led_bridge(시리얼->아두이노).
-
-elevation_map/gradient_map은 순서상 elevation_map -> gradient_map으로
-입력이 이어지지만, 둘 다 노드 시작 시점에 구독만 걸어두고 이후 메시지가
-들어오면 처리하는 구조라 launch에서 실행 순서를 강제할 필요는 없다.
-
-노드 이름(name=)은 mission_winter.launch.py와 동일하다(flat_drive_node,
-elevation_map_node, gradient_map_node, side_slope_trigger_node) — 같은
-executable을 여러 launch 파일이 공유하지만, 한 번에 하나의 mission_*.launch.py만
-실행하는 게 정상 운영 방식이라 이름 충돌은 없다. 다만 나중에 여러
-mission_*.launch.py를 한 프로세스/네임스페이스에서 동시에 include하는
-시나리오가 생기면 이 노드들이 이름 충돌로 죽을 수 있으니 주의할 것.
+"""봄 미션 — side_cameras + spring_ifof + led_bridge(시리얼->아두이노).
 
 [예외 케이스 안내] spring_ifof_node -> led_bridge_node 체인은 봄 미션
 (피아식별)만의 예외 — 이 미션에 한해 인식부터 LED 하드웨어 제어(아두이노)
@@ -36,9 +23,6 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
-    perception_common = os.path.join(
-        get_package_share_directory('dolbotz'),
-        'launch', 'perception_common.launch.py')
     side_cameras = os.path.join(
         get_package_share_directory('dolbotz'),
         'launch', 'side_cameras.launch.py')
@@ -50,21 +34,9 @@ def generate_launch_description():
     default_ifof_model_path = os.path.join(
         get_package_share_directory('dolbotz'),
         'config', 'models', 'ifofv1.pt')
-    enable_visualizer = LaunchConfiguration('enable_visualizer')
     led_port = LaunchConfiguration('led_port')
     ifof_model_path = LaunchConfiguration('ifof_model_path')
     return LaunchDescription([
-        DeclareLaunchArgument(
-            'enable_visualizer',
-            default_value='false',
-            description=(
-                "slope_decision의 OpenCV 디버그 창(ROI+슬로프 표시) 사용 여부. "
-                "헤드리스 환경(SSH, 무헤드 로봇 본체 등)을 위해 기본값은 false. "
-                "GUI 환경에서 "
-                "디버그 창 보고 싶으면 'true'로 넘길 것 — 꺼도 /path, "
-                "/terrain/side_slope_angle_deg, /drive/status 토픽 발행은 그대로다."
-            ),
-        ),
         DeclareLaunchArgument(
             'led_port',
             default_value='/dev/LED',
@@ -88,36 +60,7 @@ def generate_launch_description():
             ),
         ),
         IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(perception_common)),
-        IncludeLaunchDescription(
             PythonLaunchDescriptionSource(side_cameras)),
-        Node(
-            package='dolbotz',
-            executable='flat_drive',
-            name='flat_drive_node',
-            output='screen',
-        ),
-        Node(
-            package='dolbotz',
-            executable='elevation_map',
-            name='elevation_map_node',
-            output='screen',
-        ),
-        Node(
-            package='dolbotz',
-            executable='gradient_map',
-            name='gradient_map_node',
-            output='screen',
-        ),
-        Node(
-            package='dolbotz',
-            executable='slope_decision',
-            name='side_slope_trigger_node',
-            output='screen',
-            parameters=[{
-                'enable_visualizer': ParameterValue(enable_visualizer, value_type=bool),
-            }],
-        ),
         Node(
             package='dolbotz',
             executable='spring_ifof',

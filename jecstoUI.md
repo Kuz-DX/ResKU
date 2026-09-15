@@ -49,16 +49,6 @@ ros2 launch dolbotz side_cameras.launch.py
 다른 걸로 교체했을 때만 `ls -la /dev/v4l/by-id/`로 새 시리얼 확인 후
 `left_device:=...`/`right_device:=...`로 오버라이드할 것.
 
-## 터미널 5 — 경로·주행 상태
-
-```bash
-ssh jecs@192.168.0.100
-source /opt/ros/humble/setup.bash
-source ~/dolbotZ/install/setup.bash
-export ROS_DOMAIN_ID=0
-ros2 launch dolbotz mission_winter.launch.py enable_visualizer:=false
-```
-
 ## 터미널 6 — 오도메트리·IMU·진단
 
 ```bash

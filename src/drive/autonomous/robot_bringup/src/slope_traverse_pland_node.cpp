@@ -129,7 +129,7 @@ using namespace std::chrono_literals;
 // 확인 후 재시작하는 걸 전제로 한다.
 //
 // slope_side_topic_ 인터페이스: 부호 규약은 인지팀 확정 완료(2026-08-27) --
-// 오른쪽이 높은 경사=+, 왼쪽이 높은 경사=-. slope_decision.py의 기존
+// 오른쪽이 높은 경사=+, 왼쪽이 높은 경사=-. 입력 신호의
 // dh=hR-hL("+면 오른쪽이 더 높다") 규약과도 일치해서 +1=right_slope,
 // -1=left_slope로 그대로 구현. 단, 토픽명/정확한 메시지 타입(Int8 카테고리
 // 값인지, side_slope_angle_deg류 연속 Float32 각도인지)은 아직 PLACEHOLDER

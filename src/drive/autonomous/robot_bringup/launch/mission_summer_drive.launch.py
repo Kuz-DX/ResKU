@@ -17,9 +17,8 @@ traffic stop/go 상태머신을 직접 돌리고 /cmd_vel_auto의 유일한 publ
 [2026-09-05] 박스는 시작부터 팔 가동범위 안에 배치한다. 파지 완료 전에는
 정지하며 /arm/picking_command를 수신하면 주행한다. 차체 접근 동작은 없다.
 
-인지팀 쪽 mission_summer.launch.py(dolbotz 패키지 -- segmentation/
-side_cameras/flat_drive/elevation_map/gradient_map/slope_decision/
-summer_traffic/summer_supply)는 이 launch와 별개로
+인지팀 쪽 mission_summer.launch.py(dolbotz 패키지 -- side_cameras,
+summer_traffic, summer_supply)는 이 launch와 별개로
 같이 띄워야 한다 -- summer_traffic_node가 발행하는
 /mission/summer_traffic/result를 이 launch의 summer_supply_drive_node가
 구독하므로, 신호등 정지/진행 반응을 보려면 두 launch를 함께 실행해야 함.

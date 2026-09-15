@@ -3,9 +3,8 @@
 # 인지팀 트랙 경로(nav_msgs/Path, camera_link 기준, 15Hz)를 controller_server의
 # FollowPath 액션으로 중계. planner_server/bt_navigator는 이 경로에서 안 씀.
 #
-# input_path_topic: dolbotz(인지팀)의 slope_decision.py가 실제로 발행하는 토픽은
-#   '/path' (평지/경사 경로 중 임계각 기준으로 고른 최종 결과, dolbotz/drive_area/
-#   slope_decision.py 확인함). 기존 '/perception/track_path'는 확정 전 placeholder였음.
+# input_path_topic: 외부 인지 시스템이 공급하는 최종 경로 토픽.
+# 기존 '/perception/track_path'는 확정 전 placeholder였음.
 #   [하림 수정] '/path'로 반영. 다만 frame_id/TF(odom까지 연결되는지)는 아직 미확인 -
 #   실제 카메라 노드 띄운 상태에서 검증 필요.
 # tf_failure_behavior: "stop"(기본, 권장) 또는 "hold_last". TF lookup이 실패할
@@ -23,7 +22,7 @@
 
 path_relay_node:
   ros__parameters:
-    input_path_topic: "/path"  # [하림 수정] dolbotz slope_decision.py의 실제 발행 토픽
+    input_path_topic: "/path"
     target_frame: "odom"
     follow_path_action_name: "follow_path"
     controller_id: ""       # 빈 문자열 = controller_server가 단일 플러그인으로 자동 결정

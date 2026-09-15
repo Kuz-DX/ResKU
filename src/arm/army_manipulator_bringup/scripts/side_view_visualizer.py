@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""매니퓰레이터를 옆에서 본 것처럼 2D로 그려주는 완전 독립 실행 스크립트
-(path_visualizer.py와 동일 패턴 - army_manipulator_bringup 패키지 의존성 없음,
-rclpy + tf2_ros + sensor_msgs + opencv-python + numpy만 필요).
+"""매니퓰레이터를 옆에서 본 것처럼 2D로 그려주는 완전 독립 실행 스크립트.
+army_manipulator_bringup 패키지 의존성 없이 rclpy + tf2_ros + sensor_msgs +
+opencv-python + numpy만 사용한다.
 
 DH 트리거노메트리를 직접 손으로 다시 계산하지 않는다 - shoulder/elbow/wrist가
 지금 전부 axis=Z로 재구성되어 있어서(army_manipulator_macro.xacro 상단 주석)

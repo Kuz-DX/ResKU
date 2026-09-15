@@ -276,8 +276,8 @@ def generate_launch_description():
     # robot_state_publisher(frame_prefix=theoretical_)로 TF 생성 -> world와
     # theoretical_world를 identity로 이어서 같은 공간에 겹쳐 보이게 한다.
     # theoretical_state_relay.py 자체는 army_manipulator_bringup 패키지
-    # 의존성이 없는 완전 독립 스크립트로 바뀌어서(path_visualizer.py와 동일
-    # 패턴) 여기서 Node로 자동 실행하지 않는다 - show_theoretical_ghost:=true로
+    # 의존성이 없는 완전 독립 스크립트라 여기서 Node로 자동 실행하지 않는다.
+    # show_theoretical_ghost:=true로
     # 이 launch를 띄운 뒤, 필요할 때 별도 터미널에서
     # `python3 scripts/theoretical_state_relay.py`로 직접 실행할 것.
     theoretical_robot_state_publisher_node = Node(

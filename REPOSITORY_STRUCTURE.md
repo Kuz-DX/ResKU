@@ -11,7 +11,7 @@
 | `src/arm/` | ROS 2 패키지 묶음 | 로봇팔 URDF/MoveIt/ros2_control, RMD 및 Dynamixel 하드웨어 인터페이스, 수동/자동 팔 bringup |
 | `src/drive/manual/` | ROS 2 패키지 묶음 | 수동 구동: 조이스틱 입력을 좌우 모터 속도로 변환하고 CAN으로 송신 |
 | `src/drive/autonomous/` | ROS 2 패키지 묶음 | 자율 구동: 휠 모터 드라이버, IMU, 오도메트리, Nav2 MPPI, 경사 통과 상태 머신 |
-| `src/dolbotz/` | ROS 2 Python 패키지 | 비전/인지, 주행 가능 영역 추정, 계절별 미션 인식, Pure Pursuit, 시각화 유틸 |
+| `src/dolbotz/` | ROS 2 Python 패키지 | 계절별 미션 인식, Pure Pursuit, 카메라 및 시각화 유틸 |
 | `src/mission_manager_interfaces/` | ROS 2 인터페이스 패키지 | 계절 미션 결과 공통 메시지 `MissionResult` 정의 |
 | `src/usb_cam/` | gitlink 상태 | `usb_cam` 외부 패키지로 보이나 현재 `.gitmodules`에는 매핑이 없다. 워크트리에는 내용이 비어 있을 수 있다. |
 | `Arduino/LED_Control/` | Arduino 스케치 | 봄 피아식별 결과를 시리얼 명령으로 받아 빨강/초록 LED 제어 |
@@ -24,7 +24,7 @@
 
 | 패키지 | 위치 | 종류 | 한 줄 역할 |
 |---|---|---|---|
-| `dolbotz` | `src/dolbotz` | Python ROS package | 비전 기반 주행 영역/지형 판단과 계절 미션 인식의 중심 패키지 |
+| `dolbotz` | `src/dolbotz` | Python ROS package | 계절별 미션 인식과 관련 로봇 유틸리티 패키지 |
 | `mission_manager_interfaces` | `src/mission_manager_interfaces` | interface | `MissionResult` 공통 메시지 |
 | `manual_joy_control` | `src/drive/manual/manual_joy_control` | Python ROS package | 조이스틱을 `/motor_speed_cmd` 좌우 dps 명령으로 변환 |
 | `can_driver` | `src/drive/manual/can_driver` | Python ROS package | `/motor_speed_cmd`를 RMD 구동 CAN 명령으로 송신, 수동 안전 정지 |
@@ -68,29 +68,23 @@
 
 실기 운영 패키지라기보다 MPPI/경로추종/오도메트리 문제를 오프라인으로 재현하기 위한 스크립트 묶음이다. synthetic circle/half-circle/sharp-turn path, bag path 재스탬프, cross-track error logger, EKF divergence monitor 등이 있다.
 
-## 4. `dolbotz`: 비전, 지형 판단, 미션
+## 4. `dolbotz`: 비전 미션
 
 ### 주요 하위 폴더
 
 | 경로 | 역할 |
 |---|---|
-| `dolbotz/drive_area/` | 주행 가능 영역 세그멘테이션, BEV 경로, 고도맵, 경사맵, 평지/경사 경로 선택 |
 | `dolbotz/missions/` | 봄/여름/가을/호위 미션별 인식 및 결과 발행 |
-| `dolbotz/utils/` | QoS, 카메라 launch helper, 자세 추정, 경로/지형 시각화, 공통 상수 |
+| `dolbotz/utils/` | QoS, 카메라 launch helper 및 공통 유틸리티 |
 | `config/models/` | OpenVINO/YOLO 계열 모델 파일 |
 | `config/realsense_cameras.yaml` | 주행용 D455와 팔 D435i 카메라 설정 |
 | `config/purepursuit_params.yaml` | Pure Pursuit 주행 파라미터 |
-| `launch/` | 미션별 perception/drive/camera/visualization launch 묶음 |
+| `launch/` | 미션별 camera launch 묶음 |
 
 ### 실행 노드
 
 | 실행 이름 | 소스 | 역할 |
 |---|---|---|
-| `segmentation` | `drive_area/segmentation.py` | 주행 RGB 이미지에서 `area` 마스크를 추론해 `/perception/drivable_mask` 발행 |
-| `flat_drive` | `drive_area/flat_drive.py` | 마스크와 카메라 자세를 이용해 평지용 `/flatdrive/planned_path`와 BEV 디버그 영상 발행 |
-| `elevation_map` | `drive_area/elevation_map.py` | depth, IMU, 마스크를 이용해 `/terrain/elevation_map` 생성 |
-| `gradient_map` | `drive_area/gradient_map.py` | 고도맵에서 gradient/slope field와 경사용 `/terrain/planned_path` 계산 |
-| `slope_decision` | `drive_area/slope_decision.py` | 좌우 경사와 전방 slope를 보고 평지/경사 경로 중 하나를 `/path`로 릴레이 |
 | `purepursuit` | `purepursuit.py` | `/path`를 직접 추종해 `/motor_speed_cmd` 좌우 dps를 발행하는 Nav2 우회 경로 |
 | `summer_supply` | `missions/summer_supply.py` | 팔 카메라에서 보급품 3D 위치를 찾아 `/arm/target_point` 발행 |
 | `drive_supply_detector` | `missions/drive_supply_detector.py` | 주행 카메라에서 보급품 접근/검출 이벤트를 판단 |
@@ -101,23 +95,17 @@
 | `led_relay` | `missions/led_relay.py` | `MissionResult`를 `roka/enemy/none` LED 문자열로 매핑 |
 | `led_bridge_node` | `missions/led_bridge_node.py` | `/led_control` 문자열을 Arduino 시리얼 포트로 전달 |
 | `arm_visualizer` | `arm_visualizer.py` | `summer_supply` debug image와 target point를 OpenCV 창으로 표시 |
-| `slope_visualizer` | `utils/slope_visualizer.py` | slope/elevation을 RViz marker로 시각화 |
-| `terrain_viz_relay` | `utils/terrain_viz_relay.py` | `32FC1` 지형 이미지를 컬러 visualization image로 변환 |
-| `path_camera_overlay_relay` | `utils/path_camera_overlay_relay.py` | `/path`를 카메라 원본 영상 위에 오버레이 |
 
 ### 대표 launch
 
 | launch | 묶는 기능 |
 |---|---|
-| `perception_common.launch.py` | 주행 영역 `segmentation` 공통 실행 |
 | `drive_cam.launch.py`, `arm_cam.launch.py`, `side_cameras.launch.py` | RealSense/USB side camera 실행 |
-| `mission_spring.launch.py` | 공통 주행 인지 + side camera + 피아식별 + LED bridge |
-| `mission_summer.launch.py` | 주행 인지 + 여름 보급품/신호등 미션 |
-| `mission_fall.launch.py` | 주행 인지 + 가을 마커 인식 |
-| `mission_winter.launch.py` | 눈길 모델 옵션 포함 주행 인지 |
+| `mission_spring.launch.py` | side camera + 피아식별 + LED bridge |
+| `mission_summer.launch.py` | 여름 보급품/신호등 미션 |
+| `mission_fall.launch.py` | 가을 마커 인식 |
 | `mission_escort.launch.py`, `mission_escort_drive.launch.py` | 선도 로봇 추종 인지/주행 묶음 |
 | `purepursuit.launch.py` | static TF + `can_driver_node` + `purepursuit` 기반 직접 주행 |
-| `visualization.launch.py` | path/terrain/slope debug visualization |
 
 ## 5. 수동 구동 패키지
 

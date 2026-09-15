@@ -1,9 +1,7 @@
 """5구간(정찰·동행) 미션 — escort_follow 단독.
 
-base 주행 스택(segmentation/flat_drive/elevation_map/gradient_map/
-slope_decision)도, side_cameras.launch.py도 안 쓴다 — 다른 계절 미션들은
-"주행가능영역을 찾아 지형을 따라간다"는 문제라 그 스택이 필요하지만, 이
-미션은 지형 추종이 아니라 선도 로봇과의 상대위치(목표 간격 2m ± 0.5m)를
+공용 주행 인지나 side_cameras.launch.py를 쓰지 않는다. 이 미션은 지형
+추종이 아니라 선도 로봇과의 상대위치(목표 간격 2m ± 0.5m)를
 유지하는 것이 핵심이라 문제 성격 자체가 다르다 — escort_follow_node가
 드라이브캠(정면, 컬러+뎁스)을 직접 구독해서 선도 로봇을 추종하는 독립
 파이프라인이다.

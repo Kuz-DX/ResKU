@@ -7,74 +7,13 @@
 이제 모든 노드가 `dolbotz.utils.paths.get_models_dir()`로 이 디렉토리를
 실행 환경과 무관하게 찾는다.
 
-## 이동 내역
-
-| 파일/디렉토리 | 원래 위치 | 사용 노드 |
-|---|---|---|
-| `supplybest.pt` | 리포 루트 | `arm_pickup_node` |
-| `dolbotz_seg_v1/` | `runs/segment/dolbotz_seg_v1/weights/` | `flat_drive_node` (`best_openvino_model/` 사용, 지금은 `segmentation_node` 기본값에서는 안 씀 — 아래 참고) |
-| `dolbotz_seg_v2/` | `/home/j/vision_marker/drive_area/runs/segment/vision_marker_drive_area_v1/weights/drive_area_v2.pt` (별도 워크스페이스) | `segmentation_node` (`best_320_int8_openvino_model/`, 2026-09-02~ 기본값) |
-| `vision_marker.v3.pt`, `vision_marker.v3_int8_openvino_model/` | `/home/j/vision_marker/ifof/vision_makerv3.pt` | `fall_marker_node` (INT8, 2026-09-03~ 기본값) |
-
-`dolbotz_seg_v1/best.pt`는 GPU/일반 PyTorch용 원본 가중치, `best_openvino_model/`은
-CPU 추론용 OpenVINO IR 변환본(`best.bin`, `best.xml`, `metadata.yaml`)이다.
-`flat_drive_node`는 `best_openvino_model/`만 사용한다.
-
-이동 사유: 경로 일관성(모델 절대경로가 실행 환경에 따라 깨지는 문제 근절)과
-모델 파일 한곳 관리. `git mv`로 옮겨서 커밋 이력은 보존된다
-(`git log --follow -- config/models/...`로 원래 커밋까지 추적 가능).
-
-## 새로 학습한 모델을 반영하려면
-
-`train_drive_area.py`는 여전히 `runs/segment/{RUN_NAME}/weights/`에 결과를
-남긴다(학습 산출물을 검증 전에 곧바로 배포 위치에 덮어쓰지 않기 위한 의도적
-분리 — howtorun.md 참고). 검증 후 배포하려면 수동으로 이 디렉토리에
-복사한다:
-
-```bash
-cp runs/segment/{RUN_NAME}/weights/best.pt config/models/dolbotz_seg_v1/
-cp -r runs/segment/{RUN_NAME}/weights/best_openvino_model config/models/dolbotz_seg_v1/
-```
-
-## dolbotz_seg_v2 (2026-08-30~)
-
-`segmentation_node`의 `model_path` 기본값을 `dolbotz_seg_v1`에서 이걸로
-교체했다 — 원본은 이 리포가 아니라 별도 워크스페이스
-(`/home/j/vision_marker/drive_area/`)에서 학습된
-`drive_area_v2.pt`(YOLO26n-seg, 클래스는 `dolbotz_seg_v1`과 동일하게
-`{0: 'area'}` 단일 클래스)다. 그 리포의 `runs/segment/vision_marker_drive_area_v1/
-weights/drive_area_v2.pt`를 `config/models/dolbotz_seg_v2/best.pt`로 복사하고,
-`train_drive_area.py`/`export_drive_area_optimized.py`와 동일한 export
-파라미터(`format='openvino', half=False`)로 640 FP32
-(`best_openvino_model/`)와 320 FP32(`best_320_openvino_model/`) 변환본을
-만들었다. 이후 [2026-09-02] v2 학습에 사용한 Drive-area-5 데이터셋으로
-캘리브레이션해 320 INT8(`best_320_int8_openvino_model/`) 변환본도 만들었고,
-`segmentation_node`의 기본값을 이 INT8 모델로 교체했다. 세 모델은 롤백과
-비교 검증을 위해 모두 보존한다.
-
-INT8 변환본은 `quantize: 8`, 정적 입력 `1x3x320x320`이며 OpenVINO 그래프에
-INT8 상수 2,679,984개와 `FakeQuantize` 141개가 포함된 것을 확인했다. 가중치
-`.bin` 크기는 320 FP32 10.78MB에서 INT8 2.78MB로 줄었다. i7-13650HX에서
-OpenVINO latency 모드로 측정한 순수 추론 중앙값은 FP32 7.03ms, INT8 3.45ms였다
-(장비·OpenVINO 버전·스레드 설정에 따라 달라질 수 있음).
-
-Drive-area-5 전체 validation 285장으로 `imgsz=320`, `batch=1`, CPU 조건에서
-재검증한 결과, FP32 대비 INT8의 mask mAP50은 0.99034 -> 0.99056,
-mask mAP50-95는 0.98248 -> 0.98551로 유지됐다. 다만 mask recall은
-0.96985 -> 0.95357, box mAP50-95는 0.97030 -> 0.94219로 낮아졌고,
-실제 노드 기본값인 `conf=0.5`에서는 285장 중 18장의 검출 개수가 서로
-달랐다. 따라서 양자화로 인한 차이가 전혀 없다고 단정하지 않으며, 실기
-카메라에서 경계 사례와 오탐/미탐을 추가 확인해야 한다.
-
-320 FP32로 되돌리려면 `segmentation.py`의 `model_path` 기본값을 주석으로
-남겨둔 `dolbotz_seg_v2/best_320_openvino_model`로 바꾼다. 기존 v1 INT8로
-되돌리는 경로도 같은 위치에 함께 남겨뒀다.
+## 모델 최적화 기록
 
 ## ifofv1_int8_openvino_model / vision_makerv2_int8_openvino_model (2026-09-02)
 
 `spring_ifof_node`(`ifofv1.pt`)와 `fall_marker_node`(`vision_makerv2.pt`)의
 `model_path` 기본값을 각각 OpenVINO INT8 변환본으로 교체했다 —
-`dolbotz_seg_v2`에 적용한 것과 동일 절차. 둘 다 원본이 학습에 쓴
+두 모델 모두 원본이 학습에 쓴
 `/home/j/vision_marker/ifof/merged/data.yaml`(987장)로 캘리브레이션했다.
 
 2026-09-03부터 `fall_marker_node`는 후속 가중치
@@ -84,7 +23,7 @@ mask mAP50-95는 0.98248 -> 0.98551로 유지됐다. 다만 mask recall은
 
 **ONNX INT8도 시도했으나 폐기함** — 처음엔 (.onnx 형식으로) 전 모델
 양자화를 요청받아 `ultralytics`의 ONNX INT8 export(정적, 캘리브레이션
-포함)로 5개 모델(`dolbotz_seg_v2`, `ifofv1`, `vision_makerv2`,
+포함)로 4개 모델(`ifofv1`, `vision_makerv2`,
 `trafficlightv1`, `supplyboxv3`)을 다 만들어봤는데, 이 CPU(i7-13650HX)
 기준 ONNX Runtime의 기본 CPU 실행 공급자는 OpenVINO만큼 INT8 커널이
 최적화돼 있지 않아서 **OpenVINO INT8보다 5~8배 느렸다**(예:
@@ -102,7 +41,7 @@ merged/data.yaml 전체(987장) 검증 결과(`imgsz=320`, `batch=1`, CPU):
 | vision_makerv2 | mAP50 / mAP50-95 / recall | 0.98638 / 0.83968 / 0.96898 | 0.98282 / 0.80252 / 0.97140 |
 | vision_makerv2 | 추론시간(i7-13650HX) | 25.31ms | 3.01ms(약 8.4배) |
 
-`dolbotz_seg_v2`와 같은 경향 — mAP50/recall은 거의 유지되고 mAP50-95가
+양자화 모델에서 공통으로 관찰되는 경향처럼 mAP50/recall은 거의 유지되고 mAP50-95가
 좀 더 뚜렷하게 떨어진다(IoU 임계값이 빡빡할수록 양자화 영향을 더 받음).
 `spring_ifof.py`/`fall_marker.py` 둘 다 좌/우 카메라를 `ThreadPoolExecutor`로
 병렬 처리하는 구조라, 프레임당 추론시간이 줄면 좌/우 지연도 같이 준다.
@@ -164,8 +103,7 @@ valid 158장 검증(`imgsz=320`, `batch=1`, CPU) 결과:
 
 [ONNX 관련 참고, 2026-09-03] 이 모델도 ONNX(순정 `onnxruntime` CPU EP)로
 바꿔보자는 요청이 있었으나, jecs가 GPU 없는 Intel i7 온보드 PC라는 게
-확인되면서(`train_drive_area.py`/`train_supplybox.py`/`test_gradient_field.py`
-등 여러 학습 스크립트 docstring에 이미 명시돼 있었음) 순정 ONNX Runtime
+확인되면서 순정 ONNX Runtime
 대신 Intel 자체 최적화 엔진인 OpenVINO를 계속 쓰기로 했다 — 위 "ONNX
 INT8도 시도했으나 폐기함" 절의 실측과 같은 결론. `onnxruntime-openvino`
 (ONNX 포맷 + 내부적으로 OpenVINO 엔진 사용) 하이브리드도 검토했으나,
@@ -212,8 +150,8 @@ valid 200장 검증(`imgsz=320`, `batch=1`, CPU) 결과:
 | recall | 0.95432 | 0.88255 |
 | 추론시간(i7-13650HX) | 22.69ms | 2.85ms(약 8배) |
 
-**다른 5개보다 mAP/recall 하락 폭이 뚜렷하다**(mAP50-95 약 12pt, recall
-약 7pt) — 그래서 세그멘테이션/spring_ifof 때처럼 실제 판정 로직
+**다른 모델보다 mAP/recall 하락 폭이 뚜렷하다**(mAP50-95 약 12pt, recall
+약 7pt) — 그래서 다른 모델 검토 때처럼 실제 판정 로직
 (`pick_best_state`, `conf_threshold=0.8`, red→stop/green→go, yellow는
 애초에 무시)을 그대로 재현해서 valid 200장 전부 FP32 vs INT8로 프레임
 단위 직접 대조했다: **stop↔go가 실제로 뒤바뀐 케이스는 0건**. 차이 나는
@@ -227,46 +165,6 @@ valid 200장 검증(`imgsz=320`, `batch=1`, CPU) 결과:
 전까지 이 모델을 아예 로드하지 않는 지연 로드 설계다
 (`summer-traffic-deferred-model-load` 메모 참고) — 노드 생성 직후
 `self._model is None`인 건 정상이며 버그가 아니다.
-
-## snow_v1_int8_openvino_model (2026-09-03~, 겨울 미션 전용)
-
-`segmentation_node`가 겨울 미션에서만 area 모델과 함께 돌리는 두 번째
-세그멘테이션 모델 — `{0: 'snow'}` 단일 클래스. 겨울 트랙(빙판길/제설
-구간)에서 area 모델 단독으로는 놓칠 수 있는 영역을 보강하려고
-`snow_model_path` 파라미터(기본값 빈 문자열=비활성)로 켜며, 켜지면 매
-프레임 `area 마스크 OR snow 마스크`로 합쳐서 기존과 동일한
-`/perception/drivable_mask` 토픽 하나로 발행한다(재현율 우선 — [2026-09-03,
-사용자 결정]). `flat_drive.py`/`elevation_map.py`/`slope_decision.py`는
-전혀 안 건드림. `mission_winter.launch.py`만 이 인자를 채우고
-spring/summer/fall은 항상 비활성 — `segmentation.py` 모듈 docstring 참고.
-
-**imgsz 주의**: area 모델(320)과 달리 **snow_v1은 640으로 학습/export됐다**
-(`/home/j/vision_marker/snow/train_snow.py` `IMGSZ = 640`) — `segmentation.py`의
-`snow_imgsz` 파라미터가 이 값을 따로 관리한다(`imgsz`와 공유하면 안 됨).
-
-캘리브레이션/검증 데이터는 `/home/j/vision_marker/snow/snow-1`
-(`train_snow.py`가 실제로 학습에 쓴 원본 그 자체, Roboflow `snow-t6eor`
-project v1, 1140 train / 65 valid / 33 test).
-
-valid 65장 검증(`imgsz=640`, `batch=1`, CPU) 결과:
-
-| 지표 | FP32(.pt) | INT8(OpenVINO) |
-|---|---|---|
-| mask mAP50 | 0.99415 | 0.98163 |
-| mask mAP50-95 | 0.97782 | 0.93203 |
-| box mAP50 | 0.99415 | 0.96981 |
-| recall | 0.98462 | 0.92271 |
-| 추론시간(i7-13650HX) | 68.74ms | 13.31ms(약 5.2배) |
-
-다른 모델들보다 recall 하락 폭이 좀 더 크지만(-6.2pt), OR 결합 구조라
-area 모델이 놓친 부분을 snow가, snow가 놓친 부분을 area가 서로 보완하는
-관계라 시스템 전체로는 위험도가 완화된다. 이전 FP32로 되돌리려면
-`mission_winter.launch.py`의 `default_snow_model_path` 정의에서 주석
-처리해둔 `.pt` 줄로 바꾸면 된다.
-
-ONNX(FP32/동적 INT8)도 이 모델로 먼저 시도됐었으나(`snow_v1.onnx`/
-`snow_v1_int8.onnx`, 이후 삭제) 위 "ONNX INT8도 시도했으나 폐기함" 절과
-같은 이유로 OpenVINO로 교체함.
 
 ## supplyboxv3.pt (2026-08-30~)
 

@@ -2,10 +2,8 @@
 """
 robodog_visualizer.py — escort_follow_node(5구간, 선도 정찰로봇 추종)의 검출
 결과를 RGB 카메라 화면에 덧씌우는 노트북 전용 로컬 디버그 뷰어 (독립 실행
-스크립트). path_visualizer.py의 자매 스크립트 — 형식(독립 실행, argparse,
---dummy, HUD 창, 's' 스냅샷)은 그대로 따르되, escort_follow_node는
-flat_drive_node의 BEV 호모그래피(/bev/H)를 전혀 안 쓰는 별개 파이프라인이라
-투영 방식은 다르다(아래 "좌표 변환" 절 참고).
+스크립트). 독립 실행, argparse, --dummy, HUD 창과 's' 스냅샷 기능을
+제공한다(아래 "좌표 변환" 절 참고).
 
 dolbotz 패키지 의존성 없음 — rclpy + sensor_msgs/nav_msgs/geometry_msgs +
 mission_manager_interfaces + opencv-python + numpy만 필요(cv_bridge도 안 씀,
@@ -37,16 +35,14 @@ vision_msgs/Detection2DArray류의 원시 bbox 토픽을 발행하지 않는다(
      (아래 "HUD" 절 참고).
 
 === 좌표 변환: 단순 핀홀 재투영(호모그래피 없음) ===
-flat_drive.py 기반 미션들(/bev/H 쓰는 path_visualizer.py 등)은 지면
-평탄(flat-ground) 가정 호모그래피로 x_forward/y_left를 화면에 투영하지만,
-escort_follow.py는 완전히 다른 방식으로 3D 좌표를 만든다(escort_follow.py
+escort_follow.py는 핀홀 카메라 모델로 3D 좌표를 만든다(escort_follow.py
 ._detect_best_candidate() 직접 확인):
     u, v = bbox 중심 픽셀
     z = 그 지점의 depth(m)
     X = (u - cx) * z / fx
     Y = (v - cy) * z / fy
 즉 target_point(X,Y,Z)는 카메라 "광학" 프레임의 표준 핀홀 좌표(X=오른쪽,
-Y=아래, Z=전방)다 — flat_drive의 "x=전방,y=좌측" body 규약이 아니다. 그래서
+Y=아래, Z=전방)다 — 일반적인 body 좌표의 "x=전방,y=좌측" 규약이 아니다. 그래서
 이 뷰어가 할 일은 저 식을 그대로 뒤집는 것뿐이다:
     u = cx + X * fx / z
     v = cy + Y * fy / z          (z<=0이면 카메라 뒤쪽 -> 투영 불가, 버림)
@@ -54,9 +50,7 @@ Y=아래, Z=전방)다 — flat_drive의 "x=전방,y=좌측" body 규약이 아�
 하나면 충분하다.
 
 === 왜곡보정(undistort) 안 함 ===
-path_visualizer.py는 flat_drive.py가 왜곡보정된 이미지 좌표계 기준으로
-호모그래피를 만들기 때문에 undistort를 거쳤지만, escort_follow.py는
-_on_frames()에서 cv2.undistort()를 전혀 호출하지 않고 raw 이미지 그대로
+escort_follow.py는 _on_frames()에서 cv2.undistort()를 호출하지 않고 raw 이미지 그대로
 bbox를 검출하고 depth를 샘플링한다(직접 소스 확인 — CameraInfo는 fx/fy/cx/cy
 값만 꺼내 쓰고 D(왜곡계수)는 아예 안 읽음). 그래서 이 뷰어도 raw 이미지에
 그대로 그린다 — undistort를 넣으면 오히려 escort_follow.py의 실제 좌표
@@ -69,7 +63,7 @@ color_topic, camera_info_topic : BEST_EFFORT/depth=1 —
 debug_image_topic, result_topic, path_topic : RELIABLE, depth 10 —
     escort_follow.py가 create_publisher()에 QoS를 안 넘겨 ROS2 기본값
     (RELIABLE/KEEP_LAST/depth10)을 그대로 쓰므로 그것과 맞춘다
-    (path_visualizer.py의 _reliable_qos()와 동일 근거/구현).
+    (publisher의 기본 QoS와 일치).
 QoS가 안 맞으면 에러 없이 그 토픽만 조용히 콜백이 안 불리므로(원인 파악
 어려움) 이 파일에서도 하드코딩해 실수를 방지한다.
 
@@ -130,9 +124,8 @@ HUD_HEIGHT = 320
 
 def _sensor_data_qos_depth1() -> QoSProfile:
     """카메라 이미지/CameraInfo 구독용 — rclpy 기본 qos_profile_sensor_data
-    (BEST_EFFORT/VOLATILE/depth=5)와 동일하되 depth만 1로 낮춘 프로필
-    (path_visualizer.py의 _sensor_data_qos_depth1()와 동일 근거/구현 —
-    dolbotz.utils.qos.SENSOR_DATA_QOS_DEPTH1과 스펙 동일, 이 파일은 dolbotz
+    (BEST_EFFORT/VOLATILE/depth=5)와 동일하되 depth만 1로 낮춘 프로필.
+    dolbotz.utils.qos.SENSOR_DATA_QOS_DEPTH1과 스펙이 같지만, 이 파일은 dolbotz
     패키지 무의존 설계라 인라인으로 중복 정의)."""
     return QoSProfile(
         reliability=ReliabilityPolicy.BEST_EFFORT,
@@ -144,8 +137,7 @@ def _sensor_data_qos_depth1() -> QoSProfile:
 
 def _reliable_qos() -> QoSProfile:
     """/mission/escort_follow/{result,debug_image/compressed}, /path
-    발행자 쪽 기본 QoS(RELIABLE, depth 10)와 맞춘 프로필 —
-    path_visualizer.py의 _reliable_qos()와 동일 근거."""
+    발행자 쪽 기본 QoS(RELIABLE, depth 10)와 맞춘 프로필."""
     return QoSProfile(
         reliability=ReliabilityPolicy.RELIABLE,
         history=HistoryPolicy.KEEP_LAST,

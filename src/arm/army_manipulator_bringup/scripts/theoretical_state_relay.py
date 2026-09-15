@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """제어 사이클마다 "이론상 명령값(reference)"을 별도 JointState로 중계하는
-완전 독립 실행 스크립트 (path_visualizer.py와 동일한 패턴).
+완전 독립 실행 스크립트.
 
 army_manipulator_bringup 패키지 의존성 없음 - rclpy + control_msgs +
 sensor_msgs만 필요(전부 표준 ROS2 메시지 패키지). 그래서 colcon build로

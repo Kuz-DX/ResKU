@@ -6,8 +6,7 @@
 dolbotz 패키지 의존성 없음 — rclpy + sensor_msgs + vision_msgs +
 mission_manager_interfaces + opencv-python + numpy만 필요(cv_bridge도 안 씀,
 CompressedImage 바이트를 cv2.imdecode로 직접 디코드). utils/ 아래 있지만
-빌드/설치 없이 `python3 traffic_light_visualizer.py`로 바로 실행된다
-(path_visualizer.py 등과 동일한 설계).
+빌드/설치 없이 `python3 traffic_light_visualizer.py`로 바로 실행된다.
 
 전제: 로컬 PC와 젝슨이 같은 네트워크에서 서로의 토픽을 봐야 한다 —
 ROS_DOMAIN_ID를 젝슨과 동일하게 맞추고, ROS_LOCALHOST_ONLY=0이어야 하며,
@@ -77,7 +76,7 @@ def _sensor_data_qos_depth1() -> QoSProfile:
 def _reliable_qos() -> QoSProfile:
     """result/detections 발행자 쪽 기본 QoS(RELIABLE, depth 10)와 맞춘 프로필
     (summer_traffic.py가 create_publisher()에 QoS를 안 넘겨 이 기본값을
-    그대로 쓰기 때문 — path_visualizer.py의 _reliable_qos()와 동일 근거)."""
+    그대로 쓰기 때문)."""
     return QoSProfile(
         reliability=ReliabilityPolicy.RELIABLE,
         history=HistoryPolicy.KEEP_LAST,

@@ -197,7 +197,7 @@ class EscortFollowNode(Node):
         self.declare_parameter(
             'camera_info_topic', '/drive/camera/color/camera_info')
         # purepursuit_node(dolbotz/purepursuit.py)의 path_topic 기본값과
-        # 동일 — slope_decision.py 등 다른 미션의 최종 경로도 같은 '/path'
+        # 다른 미션의 최종 경로와 같은 '/path'
         # 토픽 하나를 공유하는 이 리포 관례(mission_*.launch.py는 한 번에
         # 하나만 실행되므로 충돌 없음)를 그대로 따른다.
         self.declare_parameter('path_topic', '/path')
@@ -354,8 +354,8 @@ class EscortFollowNode(Node):
         if not _YOLO_OK:
             self.get_logger().error('ultralytics 미설치 — pip install ultralytics')
             return None
-        # [2026-09-04] task='detect' 명시 — segmentation.py에서 확인된 것과
-        # 같은 이유(경로 문자열만으로 task를 오판하는 ultralytics 회귀 방지).
+        # 경로 문자열만으로 task를 오판하는 ultralytics 회귀를 막기 위해
+        # task='detect'를 명시한다.
         model = YOLO(path, task='detect')
         self.get_logger().info(f'모델 로드 완료: {path}')
         return model
