@@ -2,7 +2,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Joy
-from std_msgs.msg import Float32MultiArray, String
+from std_msgs.msg import Bool, Float32MultiArray, String
 
 
 class ManualJoyControlNode(Node):
@@ -50,10 +50,17 @@ class ManualJoyControlNode(Node):
         self.declare_parameter('max_speed_dps', 800.0)
         self.declare_parameter('stick_deadzone', 0.05)
 
-        self.declare_parameter('left_motor_sign', 1.0)
-        self.declare_parameter('right_motor_sign', -1.0)
+        # [manual+return 통합] left_motor_sign/right_motor_sign 파라미터는
+        # 제거했다 -- 모터 마운팅 방향 보정은 이제 딱 한 곳,
+        # rmd_x8_driver_node의 left_direction_sign/right_direction_sign에서만
+        # 적용한다 (여기서 한 번 더 곱하면 이중 반전이 된다). 이 노드는 이제
+        # "물리적으로 양수 = 그 바퀴가 전진"인 부호 없는 바퀴 명령만 만든다.
 
-        self.declare_parameter('cmd_topic', '/motor_speed_cmd')
+        # [manual+return 통합, 2026 사용자 결정] 출력은 dps로 유지한다 (Twist
+        # 변환은 drive_cmd_mux_node로 옮김) -- dps 값이 디버깅에 더 직관적이라는
+        # 사용자 판단. 이 노드는 wheel_radius_m/effective_track_width_m을 몰라도
+        # 된다.
+        self.declare_parameter('cmd_topic', '/motor_speed_cmd_manual')
         self.declare_parameter('cmd_publish_rate_hz', 50.0)
         self.declare_parameter('joy_topic', 'joy')
         # [하림 수정] 조이스틱 연결이 끊겨도 publish_cmd 타이머는 계속 마지막 값을
@@ -61,6 +68,12 @@ class ManualJoyControlNode(Node):
         # /joy 수신 자체가 오래됐으면 여기서 직접 0으로 강제한다. arm의
         # manual_total_position_node.py와 동일한 joy_timeout 패턴.
         self.declare_parameter('joy_timeout', 0.5)
+
+        # [manual+return 통합] RETURN 미션 트리거용 버튼. 기존 버튼 매핑
+        # (0/1/2/3/4/5/6/7=조향, 9=arm 포커스 토글, 10=drive e-stop 예약,
+        # 11/12=diff 테스트) 중 미사용으로 확인된 버튼 8(PS4 Share/Options 계열)
+        # 기본값 사용.
+        self.declare_parameter('button_return', 8)
 
         p = self.get_parameter
         self.axis_left_motor = p('axis_left_motor').value
@@ -85,9 +98,8 @@ class ManualJoyControlNode(Node):
         self.max_speed = p('max_speed_dps').value
         self.deadzone = p('stick_deadzone').value
 
-        self.left_sign = p('left_motor_sign').value
-        self.right_sign = p('right_motor_sign').value
         self.joy_timeout = p('joy_timeout').value
+        self.btn_return = p('button_return').value
 
         self._prev_l1 = 0
         self._prev_l2 = 0
@@ -95,6 +107,7 @@ class ManualJoyControlNode(Node):
         self._prev_r2 = 0
         self._prev_diff_left_fast = 0
         self._prev_diff_right_fast = 0
+        self._prev_return = 0
 
         self._latest_left_cmd = 0.0
         self._latest_right_cmd = 0.0
@@ -116,10 +129,17 @@ class ManualJoyControlNode(Node):
         self.sub = self.create_subscription(Joy, joy_topic, self.joy_callback, 10)
 
         cmd_topic = p('cmd_topic').value
+        # [manual+return 통합] Float32MultiArray([left_dps, right_dps]) 그대로
+        # 유지 (기존 /motor_speed_cmd와 동일한 형식, 토픽명만 구분). dps->Twist
+        # 변환은 drive_cmd_mux_node가 담당한다.
         self.cmd_pub = self.create_publisher(Float32MultiArray, cmd_topic, 10)
         # [하림 수정] 좌우 속도 프리셋이 분리되면서 단일 Float32로는 둘 다 못 담아
         # Float32MultiArray([left, right])로 변경.
         self.max_speed_pub = self.create_publisher(Float32MultiArray, 'max_speed_dps', 10)
+        # [manual+return 통합] RETURN 미션 트리거 -- return_state_machine_node가
+        # WAIT_RETURN_COMMAND 상태에서 이 rising edge를 감지해 복귀 시퀀스를
+        # 시작한다.
+        self.return_trigger_pub = self.create_publisher(Bool, '/mission/return/trigger', 10)
 
         rate = p('cmd_publish_rate_hz').value
         self.timer = self.create_timer(1.0 / rate, self.publish_cmd)
@@ -179,7 +199,12 @@ class ManualJoyControlNode(Node):
             msg.buttons[self.btn_diff_left_fast] if len(msg.buttons) > self.btn_diff_left_fast else 0)
         diff_right_fast_held = (
             msg.buttons[self.btn_diff_right_fast] if len(msg.buttons) > self.btn_diff_right_fast else 0)
+        return_held = msg.buttons[self.btn_return] if len(msg.buttons) > self.btn_return else 0
 
+        # [manual+return 통합] left_motor_sign/right_motor_sign을 더 이상 곱하지
+        # 않는다 -- 아래에서 만드는 _latest_left_cmd/_latest_right_cmd는 "그
+        # 바퀴가 물리적으로 전진하면 양수"인 부호 없는 값이며, 마운팅 방향
+        # 보정은 rmd_x8_driver_node에서 한 번만 적용된다.
         # [하림 수정] command priority: mode gating(위에서 처리) -> 차동주행 버튼
         # -> 직진/후진/회전 버튼 -> 아날로그 스틱 -> 정지. 차동주행은 fixed dps를
         # 직접 쓰므로 left_speed_dps/right_speed_dps 설정과 별개로 동작.
@@ -187,28 +212,28 @@ class ManualJoyControlNode(Node):
             if self._prev_diff_left_fast == 0:
                 self.get_logger().info(
                     f'[JOY] DIFF_LEFT_FAST: L={self.diff_fast_speed} R={self.diff_base_speed}')
-            self._latest_left_cmd = self.left_sign * self.diff_fast_speed
-            self._latest_right_cmd = self.right_sign * self.diff_base_speed
+            self._latest_left_cmd = self.diff_fast_speed
+            self._latest_right_cmd = self.diff_base_speed
         elif diff_right_fast_held and not diff_left_fast_held:
             if self._prev_diff_right_fast == 0:
                 self.get_logger().info(
                     f'[JOY] DIFF_RIGHT_FAST: L={self.diff_base_speed} R={self.diff_fast_speed}')
-            self._latest_left_cmd = self.left_sign * self.diff_base_speed
-            self._latest_right_cmd = self.right_sign * self.diff_fast_speed
+            self._latest_left_cmd = self.diff_base_speed
+            self._latest_right_cmd = self.diff_fast_speed
         elif forward_held and not backward_held:
             # 직진/후진 버튼이 스틱보다 우선 - 정확한 직진이 필요할 때 사용
-            self._latest_left_cmd = self.left_sign * self.left_speed_dps
-            self._latest_right_cmd = self.right_sign * self.right_speed_dps
+            self._latest_left_cmd = self.left_speed_dps
+            self._latest_right_cmd = self.right_speed_dps
         elif backward_held and not forward_held:
-            self._latest_left_cmd = self.left_sign * -self.left_speed_dps
-            self._latest_right_cmd = self.right_sign * -self.right_speed_dps
+            self._latest_left_cmd = -self.left_speed_dps
+            self._latest_right_cmd = -self.right_speed_dps
         elif rotate_left_held and not rotate_right_held:
-            # 좌우 모터를 반대 부호로 구동 -> 제자리 좌회전
-            self._latest_left_cmd = self.left_sign * -self.left_speed_dps
-            self._latest_right_cmd = self.right_sign * self.right_speed_dps
+            # 좌우 바퀴를 반대 부호로 구동 -> 제자리 좌회전
+            self._latest_left_cmd = -self.left_speed_dps
+            self._latest_right_cmd = self.right_speed_dps
         elif rotate_right_held and not rotate_left_held:
-            self._latest_left_cmd = self.left_sign * self.left_speed_dps
-            self._latest_right_cmd = self.right_sign * -self.right_speed_dps
+            self._latest_left_cmd = self.left_speed_dps
+            self._latest_right_cmd = -self.right_speed_dps
         else:
             left_val = msg.axes[self.axis_left_motor] if len(msg.axes) > self.axis_left_motor else 0.0
             right_val = msg.axes[self.axis_right_motor] if len(msg.axes) > self.axis_right_motor else 0.0
@@ -218,11 +243,19 @@ class ManualJoyControlNode(Node):
             if abs(right_val) < self.deadzone:
                 right_val = 0.0
 
-            self._latest_left_cmd = self.left_sign * left_val * self.left_speed_dps
-            self._latest_right_cmd = self.right_sign * right_val * self.right_speed_dps
+            self._latest_left_cmd = left_val * self.left_speed_dps
+            self._latest_right_cmd = right_val * self.right_speed_dps
 
         self._prev_diff_left_fast = diff_left_fast_held
         self._prev_diff_right_fast = diff_right_fast_held
+
+        # [manual+return 통합] RETURN 버튼 rising edge -> 1회성 트리거 발행.
+        # 실제로 이 트리거를 받아들일지(예: 최소 1개 이상의 경로 포인트가
+        # 기록됐는지)는 return_state_machine_node가 판단한다.
+        if return_held and not self._prev_return:
+            self.get_logger().info('[JOY] RETURN trigger pressed.')
+            self.return_trigger_pub.publish(Bool(data=True))
+        self._prev_return = return_held
 
     def publish_cmd(self):
         elapsed = (self.get_clock().now() - self.last_joy_time).nanoseconds / 1e9
@@ -237,6 +270,8 @@ class ManualJoyControlNode(Node):
             self._joy_stale_reported = False
             self.get_logger().info('/joy reception recovered.')
 
+        # [manual+return 통합] 부호 없는 바퀴 dps(물리적으로 양수=전진) 그대로
+        # 발행 -- drive_cmd_mux_node가 Twist로 변환한다.
         msg = Float32MultiArray()
         msg.data = [self._latest_left_cmd, self._latest_right_cmd]
         self.cmd_pub.publish(msg)

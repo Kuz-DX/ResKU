@@ -43,39 +43,73 @@ ros2 launch dolbotz mission_summer.launch.py  # side camera + summer_traffic + s
 ros2 launch dolbotz mission_fall.launch.py    # side camera + fall_marker
 ```
 
-### 자율 제어
+### 자율 제어 (MPPI, 2단계 평가용 보존 — 지금 당장 쓰지 않음)
 
-**[하림 수정] drive 쪽은 더 이상 스텁이 아님** — `drive_auto` 패키지는 삭제됐고,
-doldrive_ws에서 이관한 실제 파이프라인(`src/drive/autonomous/`)으로 완전히
-대체됨. 조이스틱 없이 터미널만으로 실행 가능:
+[2026 사용자 결정, 계절 미션 정리] 계절 미션 전용 노드(`slope_traverse_*`,
+`dog_follow_node`, `summer_supply_drive_node`)와 `current_ramp_node`,
+`stability_monitor_node`는 소스 자체가 삭제됐다 — 지금은 manual+return
+미션(바로 아래 절)만 운용한다. MPPI(`nav2_mppi_controller`/`our_mppi_critics`)와
+`path_relay`는 나중에 recorded return path와 비교하는 2단계 평가용으로
+소스만 보존했다:
 
 ```bash
 ros2 launch robot_bringup autonomous.launch.py
 ```
 
-외부에서 공급되는 `/path`와 경사 신호를 받아 `path_relay`와
-`slope_traverse_node`, MPPI(`nav2_mppi_controller`)를 거쳐 실제 CAN 모터
-명령까지 이어진다. 세부 흐름은 `src/drive/autonomous/robot_bringup/launch/`
-안 각 launch 파일의 설명을 참고한다.
+reduced_odom + Nav2 MPPI controller_server + path_relay_node만 남은
+경량 구성이다. **manual_return_bringup.launch.py(아래)와 절대 동시에
+띄우지 말 것** — 같은 CAN 버스/`/cmd_vel`을 두고 충돌한다.
 
-# 메뉴얼 주행
+# 메뉴얼 주행 + 자동 복귀 (manual+return 통합 아키텍처)
+
+[manual+return 통합] 예전엔 manual 조종(can_driver_node)과 자율주행
+(rmd_x8_driver_node)이 CAN을 각자 따로 소유해서 manual 주행 중엔 wheel
+odometry가 아예 안 나왔다. 이제 rmd_x8_driver_node가 manual+return 공용
+CAN 드라이버라 manual 주행 중에도 `/wheel/odom`/`/odometry/filtered`가
+정상 발행되고, 사용자가 RETURN 트리거를 누르면 기록된 경로를 뒤집어
+자동으로 출발지까지 복귀한다. 상세 아키텍처/토픽 그래프는
+`src/drive/autonomous/robot_bringup/launch/manual_return_bringup.launch.py`
+docstring과 `topic.md` 참고.
+
+can_driver_node 기반 구 manual.launch.py는 더 이상 쓰지 않는다 (소스는
+참고용으로 남아있지만, manual_stability_node의 안전 배선이 깨져 있어
+그대로 실행하면 IMU 긴급정지가 동작하지 않는다).
 
 ### CAN_drive 인터페이스 활성화
 sudo ip link set can_drive type can bitrate 1000000
 sudo ip link set up can_drive
 ip -details link show can_drive
 
-### [하림 수정] 실행 — 한 줄로 끝남 (joy_node+manual_joy_control_node+can_driver_node+
-### myahrs_driver_node+manual_stability_node 전부 포함, IMU pitch/roll 25°/20° 넘으면
-### 자동 긴급정지)
-source install/setup.bash
-ros2 launch can_driver manual.launch.py
+### 실행 (로봇 PC + 원격 PC 각 1줄)
 
-### 예전 방식(터미널 2개로 따로 띄우기, 참고용 — 위 한 줄로 대체됨, IMU 안전장치 없음)
-# source install/setup.bash
-# ros2 run can_driver can_driver_node --ros-args -p can_channel:=can_drive
-# source install/setup.bash
-# ros2 launch manual_joy_control manual_control.launch.py
+[로봇 PC] rmd_x8_driver_node(CAN 유일 소유, /wheel/odom) + myahrs_driver_node
+(/imu) + reduced_odom_node(/odometry/filtered) + drive_cmd_mux_node +
+manual_path_recorder_node + return_state_machine_node +
+return_path_follower_node 전부 포함:
+
+[2026 경량화 결정] manual_stability_node(IMU pitch/roll 긴급정지)는 이
+launch에 포함되지 않는다 -- 전복 위험이 없는 운용 환경으로 판단해 의도적으로
+뺐다(제거 이유/재추가 방법은 manual_return_bringup.launch.py 상단 주석 참고).
+```bash
+source install/setup.bash
+ros2 launch robot_bringup manual_return_bringup.launch.py
+```
+
+[원격 PC, 조이스틱이 물린 쪽] joy_node + manual_joy_control_node
+(출력: `/motor_speed_cmd_manual`, dps, Twist 변환은 drive_cmd_mux_node가 담당.
+RETURN 트리거: `/mission/return/trigger`):
+```bash
+source install/setup.bash
+ros2 launch manual_joy_control manual_control.launch.py
+```
+
+두 PC 모두 같은 ROS_DOMAIN_ID, ROS_LOCALHOST_ONLY=0 이어야 한다.
+
+### rosbag 기록
+
+```bash
+bash src/drive/autonomous/robot_bringup/scripts/record_manual_drive.sh
+```
 
 ## 확인용 (선택)
 
@@ -84,9 +118,16 @@ source ~/dolbotZ/install/setup.bash
 ros2 topic echo /joy
  
 
-### 터미널 4 - 최종 모터 속도 명령 확인
+### 터미널 4 - manual/최종 모터 명령 확인
 source ~/dolbotZ/install/setup.bash
-ros2 topic echo /motor_speed_cmd
+ros2 topic echo /motor_speed_cmd_manual   # manual_joy_control_node 출력 (dps)
+ros2 topic echo /cmd_vel                  # drive_cmd_mux_node 최종 출력(Twist) -> rmd_x8_driver_node
+
+### 터미널 4-1 - 복귀 미션 상태/경로 확인
+source ~/dolbotZ/install/setup.bash
+ros2 topic echo /mission/return/state    # IDLE/MANUAL_RECORDING/.../FINISHED
+ros2 topic echo /recorded_path           # manual 주행 중 계속 쌓이는 기록 경로
+ros2 topic echo /return_path             # RETURN 트리거 후 1회 발행되는 복귀 경로
 
 ### 터미널 5 - drive/arm 중 조이스틱이 지금 어디에 반응 중인지 확인
 source ~/dolbotZ/install/setup.bash

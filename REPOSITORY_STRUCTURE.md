@@ -26,17 +26,19 @@
 |---|---|---|---|
 | `dolbotz` | `src/dolbotz` | Python ROS package | 계절별 미션 인식과 관련 로봇 유틸리티 패키지 |
 | `mission_manager_interfaces` | `src/mission_manager_interfaces` | interface | `MissionResult` 공통 메시지 |
-| `manual_joy_control` | `src/drive/manual/manual_joy_control` | Python ROS package | 조이스틱을 `/motor_speed_cmd` 좌우 dps 명령으로 변환 |
-| `can_driver` | `src/drive/manual/can_driver` | Python ROS package | `/motor_speed_cmd`를 RMD 구동 CAN 명령으로 송신, 수동 안전 정지 |
-| `rmd_x8_driver` | `src/drive/autonomous/rmd_x8_driver` | Python/CMake ROS package | 자율 주행용 RMD-X8 좌우 구동모터 CAN 드라이버 |
+| `manual_joy_control` | `src/drive/manual/manual_joy_control` | Python ROS package | 조이스틱을 `/motor_speed_cmd_manual` 좌우 dps 명령으로 변환 |
+| `can_driver` | `src/drive/manual/can_driver` | Python ROS package | [deprecated, 미사용] 구 수동 주행 CAN 드라이버. `manual_stability_node`만 소스로 남아있음(어느 launch에서도 안 쓰임) |
+| `rmd_x8_driver` | `src/drive/autonomous/rmd_x8_driver` | Python/CMake ROS package | manual+return 공용 RMD-X8 좌우 구동모터 CAN 드라이버(CAN 유일 소유자) |
 | `myahrs_driver` | `src/drive/autonomous/myahrs_driver` | C++ ROS package | WithRobot myAHRS+ 시리얼 IMU 드라이버 |
 | `reduced_odom` | `src/drive/autonomous/reduced_odom` | C++ ROS package | 휠 오도메트리와 IMU yaw를 융합한 5상태 오도메트리 |
 | `direct_odom` | `src/drive/autonomous/direct_odom` | Python/CMake ROS package | 휠/IMU 기반 직접 오도메트리 대안 노드 |
-| `path_relay` | `src/drive/autonomous/path_relay` | C++ ROS package | 인지팀 `/path`를 Nav2 `FollowPath` 액션으로 중계 |
-| `robot_bringup` | `src/drive/autonomous/robot_bringup` | C++/Python ROS package | 자율 주행 launch, 경사 통과, 전류 램프, 안정성 감시 |
-| `nav2_mppi_controller` | `src/drive/autonomous/nav2_mppi_controller` | C++ plugin package | Nav2 MPPI controller fork/로컬 복사본 |
-| `our_mppi_critics` | `src/drive/autonomous/our_mppi_critics` | C++ plugin package | tracked/skid 차량용 MPPI critic 플러그인 |
+| `path_relay` | `src/drive/autonomous/path_relay` | C++ ROS package | 인지팀 `/path`를 Nav2 `FollowPath` 액션으로 중계 (MPPI 2단계 평가용 보존) |
+| `robot_bringup` | `src/drive/autonomous/robot_bringup` | CMake ROS package (C++ 실행 파일 없음) | manual+return/MPPI launch 및 config 모음 |
+| `nav2_mppi_controller` | `src/drive/autonomous/nav2_mppi_controller` | C++ plugin package | Nav2 MPPI controller fork/로컬 복사본 (MPPI 2단계 평가용 보존) |
+| `our_mppi_critics` | `src/drive/autonomous/our_mppi_critics` | C++ plugin package | tracked/skid 차량용 MPPI critic 플러그인 (MPPI 2단계 평가용 보존) |
 | `mppi_repro_harness` | `src/drive/autonomous/mppi_repro_harness` | C++ utility package | MPPI 재현용 하네스와 synthetic path 도구 |
+| `drive_cmd_mux` | `src/drive/return/drive_cmd_mux` | Python ROS package | manual(dps→Twist 변환)/return 명령 중재, 최종 `/cmd_vel` 발행 |
+| `return_navigation` | `src/drive/return/return_navigation` | Python ROS package | manual 경로 기록 + RETURN 상태 머신(폐루프 180도 회전 포함) + 고정 경로 pure pursuit |
 | `rmd_sdk` | `src/arm/rmd_sdk` | C++ library + Python binding | MyActuator RMD-X CAN 저수준 SDK |
 | `rmd_hardware_interface` | `src/arm/rmd_hardware_interface` | ros2_control plugin | RMD 관절을 ros2_control actuator interface로 연결 |
 | `dynamixel_sdk` | `src/arm/dynamixelSDK/ros/dynamixel_sdk` | SDK library | ROBOTIS Dynamixel SDK ROS 패키지 |
@@ -107,23 +109,35 @@
 | `mission_escort.launch.py`, `mission_escort_drive.launch.py` | 선도 로봇 추종 인지/주행 묶음 |
 | `purepursuit.launch.py` | static TF + `can_driver_node` + `purepursuit` 기반 직접 주행 |
 
-## 5. 수동 구동 패키지
+## 5. 수동 구동 + manual+return 미션 패키지
+
+[manual+return 통합 이후] manual 조종은 더 이상 `can_driver_node`가 아니라
+`rmd_x8_driver_node`(CAN 유일 소유)로 흘러간다: `manual_joy_control_node`
+(dps) → `drive_cmd_mux_node`(Twist 변환+중재) → `rmd_x8_driver_node`.
+`can_driver` 패키지는 `manual_stability_node`만 소스로 남아있고 실제로는
+어느 launch에서도 쓰이지 않는다(2026 사용자 결정, 경량화로 제외).
 
 ### `manual_joy_control`
 
 | 노드 | 역할 |
 |---|---|
-| `manual_joy_control_node` | `/joy`를 받아 좌우 모터 속도 배열 `/motor_speed_cmd`를 발행한다. `/control/active_target`이 있으면 주행/팔 제어 대상 분리를 따른다. |
+| `manual_joy_control_node` | `/joy`를 받아 좌우 모터 속도 배열 `/motor_speed_cmd_manual`(dps)을 발행한다. `/control/active_target`이 있으면 주행/팔 제어 대상 분리를 따르고, RETURN 버튼 rising edge를 `/mission/return/trigger`로 발행한다. |
 
-`manual_control.launch.py`는 `joy_node`와 `manual_joy_control_node`를 함께 실행한다.
+`manual_control.launch.py`는 `joy_node`와 `manual_joy_control_node`를 함께 실행한다(원격 PC).
 
-### `can_driver`
+### `can_driver` (deprecated, 미사용)
 
 | 노드 | 역할 |
 |---|---|
-| `can_driver_node` | `/motor_speed_cmd`와 `/motor_speed_cmd_safety`를 받아 RMD 구동모터 CAN speed command로 송신한다. 명령 timeout과 재연결 로직을 가진다. |
-| `manual_stability_node` | `/imu`의 pitch/roll 위험 자세를 감지해 수동 주행용 정지 명령 `/motor_speed_cmd_safety`를 발행한다. |
+| `manual_stability_node` | `/imu`의 pitch/roll 위험 자세를 감지해 정지 명령을 `/cmd_vel_safety`(Twist)로 발행한다. 소스는 남아있지만 현재 어느 launch에도 포함되지 않음(2026 경량화 결정). |
+| `can_driver_node` | 구 수동 주행 CAN 드라이버. CAN feedback을 안 읽어 wheel odometry가 구조적으로 불가능했던 문제로 더 이상 launch되지 않는다(참고용 소스만 남음). |
 | `motor_status_monitor` | RMD motor status를 폴링/디코딩하는 CLI 성격의 상태 확인 도구다. |
+
+### `drive_cmd_mux` + `return_navigation`
+
+manual+return 미션의 실제 실행 노드는 `robot_bringup/launch/manual_return_bringup.launch.py`가
+`rmd_x8_driver`/`reduced_odom`과 함께 묶어 띄운다 — 자세한 노드/토픽은
+`topic.md`의 `drive_cmd_mux`, `return_navigation` 절 참고.
 
 `manual.launch.py`는 `can_driver_node`, 선택적 `myahrs_driver_node`, `manual_stability_node`를 묶는다.
 
@@ -149,33 +163,28 @@
 
 ### `robot_bringup` 실행 노드
 
-| 노드 | 역할 |
-|---|---|
-| `stability_monitor_node` | IMU pitch/roll, 카메라 roll, 모터 진단을 감시해 위험 시 `/cmd_vel_safety`로 정지 명령을 낸다. |
-| `current_ramp_node` | `/cmd_vel_auto`를 받아 전류/가속 관점의 ramp를 적용한 `/cmd_vel`을 발행한다. |
-| `slope_traverse_node` | 인지 경사 신호와 `/path`를 이용해 경사 진입/등반/탈출을 `/cmd_vel_safety`로 직접 제어하는 기본 Plan A 노드다. |
-| `slope_traverse_blend_node` | TF 기반 pure pursuit 전환 대신 blend/P 제어를 유지하는 Plan B 경사 통과 노드다. |
-| `slope_traverse_planc_node` | 이전 고정 gain 방식의 Plan C 경사 통과 노드다. |
-| `slope_traverse_planc_spring_node` | Plan C에 봄 미션용 startup 직진 상태를 추가한 변형이다. |
-| `slope_traverse_pland_node` | side 신호가 0이 되어도 `SLOPE_EXIT -> RECOVERY`를 반드시 거치도록 한 Plan D 변형이다. |
-| `slope_traverse_spring_node` | Plan D에 봄 미션용 startup 직진 상태를 추가한 변형이다. |
-| `slope_traverse_plane_node` | Plan D 기반이지만 탈출 구간 side motor 속도를 낮춘 Plan E 변형이다. |
-| `summer_supply_drive_node` | 여름 보급 미션의 정지 상태머신과 `/path` pure pursuit 기반 `/cmd_vel_auto` 발행을 담당한다. |
-| `dog_follow_node` | 선도 로봇 상대 위치를 받아 거리/방향 유지용 `/cmd_vel_auto`를 발행한다. |
-| `autonomous.planz.py` | `dolbotz/purepursuit.py`의 특정 시점 코드를 `robot_bringup` 전용 독립 노드로 복원한 경로추종 노드다. |
-| `autonomous.planz_spring.py` | Plan Z의 봄 미션 변형이다. |
-| `autonomous.planz_winter.py` | Plan Z의 겨울 미션 변형이다. |
+[2026 사용자 결정, 경량화 + 계절 미션 정리] 계절 미션 전용 노드(slope_traverse_*,
+dog_follow_node, summer_supply_drive_node, autonomous.planz*.py)와
+전류 램프/자세 긴급정지 노드(current_ramp_node, stability_monitor_node)는
+소스 자체가 삭제됐다 — manual+return 미션에서 쓰지 않고, 실기 검증 결과
+전복 위험이 없는 운용 환경으로 판단해 안전 여유보다 구성 단순화를 우선한
+명시적 선택(자세한 배경은 git 이력 및 `howtorun.md`/`topic.md` 참고).
+지금 이 패키지는 C++ 실행 파일이 없는 순수 launch/config 패키지다 —
+실제 동작 노드(`rmd_x8_driver`, `reduced_odom`, `drive_cmd_mux`,
+`return_navigation` 등)는 전부 다른 패키지에 있다. MPPI
+(`nav2_mppi_controller`/`our_mppi_critics`)와 `path_relay_node`는 나중에
+recorded return path와 비교하는 2단계 평가용으로 소스를 보존한다.
 
 ### 대표 launch
 
 | launch | 묶는 기능 |
 |---|---|
 | `reduced_odom_bringup.launch.py` | RMD-X8, myAHRS, static TF, reduced odom bringup |
-| `nav2.launch.py` | Nav2 controller server와 MPPI 설정 |
-| `path_control*.launch.py` | 경사 통과 Plan A/B/C/D/E 변형을 path control 체인으로 실행 |
-| `autonomous*.launch.py` | odom, Nav2, path control, safety/current ramp를 묶은 자율 주행 변형 |
-| `mission_*_drive.launch.py` | 계절 미션별 주행 하드웨어/제어 체인 |
-| `manual_drive_sensors.launch.py` | 수동 주행 중에도 센서/TF/camera를 띄우기 위한 보조 launch |
+| `nav2.launch.py` | Nav2 controller server와 MPPI 설정 (보존, 2단계 평가용) |
+| `path_control.launch.py` | `path_relay_node`만 남김 (경사 통과 Plan 노드는 전부 삭제) |
+| `autonomous.launch.py` | odom + Nav2 + path_control을 묶은 MPPI 자율 주행 진입점 (2단계 평가용, manual+return 미션과 동시 실행 금지) |
+| `manual_return_bringup.launch.py` | manual 주행 + 자동 복귀(RETURN) 통합 미션의 실제 진입점 |
+| `manual_drive_sensors.launch.py` | manual 주행 rosbag 기록용 카메라 보조 launch (TF/odom은 이제 manual_return_bringup.launch.py가 직접 발행) |
 
 ## 7. 로봇팔 패키지
 
@@ -277,8 +286,8 @@
 
 | 목적 | 우선 이식 후보 |
 |---|---|
-| 구동 모터 직접 제어 | `src/drive/autonomous/rmd_x8_driver`, 또는 수동 CAN만 필요하면 `src/drive/manual/can_driver` |
-| 조이스틱 수동 구동 | `src/drive/manual/manual_joy_control` + `src/drive/manual/can_driver` |
+| 구동 모터 직접 제어 | `src/drive/autonomous/rmd_x8_driver` (manual+return 공용 CAN 유일 소유자) |
+| 조이스틱 수동 구동 | `src/drive/manual/manual_joy_control` + `src/drive/return/drive_cmd_mux` + `src/drive/autonomous/rmd_x8_driver` |
 | 차체 IMU | `src/drive/autonomous/myahrs_driver` |
 | 휠+IMU 오도메트리 | `src/drive/autonomous/reduced_odom` 또는 대안 `direct_odom` |
 | 팔 RMD/Dynamixel 제어 | `rmd_sdk`, `rmd_hardware_interface`, `dynamixelSDK/ros/dynamixel_sdk`, `dynamixel_interfaces`, `dynamixel_hardware_interface` |

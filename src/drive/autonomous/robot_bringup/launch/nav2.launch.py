@@ -46,6 +46,12 @@ critics: SkidCritic/SlopeCritic come from our_mppi_critics, plugged into
 the stock (apt-installed) nav2_mppi_controller - NOT the full fork in
 mppi_ws/our_mppi_controller (deliberately not migrated, see project
 decision).
+
+[2026 사용자 결정, 경량화] current_ramp_node(소프트 전류 램프 -- /cmd_vel_auto
+-> /cmd_vel 중계도 겸했음)를 삭제하면서 그 우회 리맵도 같이 뗐다.
+controller_server는 이제 곧장 /cmd_vel로 발행한다. manual+return 미션의
+drive_cmd_mux_node/rmd_x8_driver_node와 이 launch를 절대 동시에 띄우지
+말 것(같은 /cmd_vel·CAN 버스를 두고 충돌).
 """
 
 import os
@@ -62,7 +68,7 @@ def generate_launch_description():
 
     return LaunchDescription([
 
-        # Nav2 MPPI 컨트롤러 서버 (출력 토픽을 MUX 노드로 들어가도록 리맵핑)
+        # Nav2 MPPI 컨트롤러 서버
         Node(
             package='nav2_controller',
             executable='controller_server',
@@ -73,7 +79,6 @@ def generate_launch_description():
             ],
             remappings=[
                 ('odom', '/odometry/filtered'),
-                ('/cmd_vel', '/cmd_vel_auto'),  # 자율주행 명령을 MUX 노드로 우회
             ],
             output='screen',
         ),

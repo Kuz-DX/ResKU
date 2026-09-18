@@ -9,12 +9,14 @@ ROS2 DDS 네트워크로 /cmd_vel이 여기까지 넘어온다.
     [LOCAL PC]  joy_node -> teleop_twist_joy_node -> /cmd_vel ---(DDS)---+
                                                                           v
     [ROBOT PC]  reduced_odom_bringup.launch.py(rmd_x8_driver+myahrs+static TF+reduced_odom)
-                + stability_monitor_node(모터 통신두절/에러 안전장치)
 
 reduced_odom_bringup.launch.py는 원래부터 조이스틱/네트워크 토폴로지와 무관해서(수정 없이)
-그대로 include만 한다. stability_monitor_node만 추가 -- autonomous.launch.py가
-reduced_odom_bringup.launch.py와 별도로 띄우는 것과 동일한 이유(기존 하드웨어 안전장치
-재사용, 파라미터 없음).
+그대로 include만 한다.
+
+[2026 사용자 결정, 경량화] robot_bringup의 stability_monitor_node(모터
+통신두절/에러 안전장치)는 계절 미션 정리와 함께 소스 자체가 삭제됐다 --
+이 launch에서도 더 이상 띄우지 않는다. /cmd_vel_safety로 향하는 안전
+개입이 이제 이 검증 launch엔 전혀 없다는 뜻이니, 참고할 것.
 
 manual can_driver_node/manual_joy_control_node는 여기서도 절대 같이 띄우지
 않는다(CAN/motor ID 충돌, VALIDATION.md §-1 참고).
@@ -37,7 +39,6 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
 
 
@@ -67,14 +68,5 @@ def generate_launch_description():
                 'can_interface': can_interface,
                 'imu_port': imu_port,
             }.items(),
-        ),
-
-        # 기존 하드웨어 안전장치 재사용 (모터 통신두절/에러 시 /cmd_vel_safety로
-        # 정지 -- 파라미터 없음, autonomous.launch.py와 동일하게 그대로 씀).
-        Node(
-            package='robot_bringup',
-            executable='stability_monitor_node',
-            name='stability_monitor_node',
-            output='screen',
         ),
     ])

@@ -9,36 +9,25 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
+  <!-- [2026 사용자 결정, 경량화 + 계절 미션 정리] 계절 미션/전류 램프/자세
+       긴급정지 C++ 노드를 전부 삭제하면서 이 패키지엔 빌드할 C++ 실행 파일이
+       없다 (rclcpp/std_msgs/geometry_msgs/sensor_msgs/tf2/tf2_ros/
+       tf2_geometry_msgs/diagnostic_msgs/nav_msgs/mission_manager_interfaces
+       depend는 전부 그 노드들 전용이었음, 같이 제거). 아래는 launch 파일이
+       런타임에 참조하는 패키지만 남김. -->
   <exec_depend>rmd_x8_driver</exec_depend>
   <exec_depend>myahrs_driver</exec_depend>
   <exec_depend>reduced_odom</exec_depend>
   <exec_depend>nav2_controller</exec_depend>
-  <!-- [하림 수정] 2026-08-22: nav2_planner/nav2_bt_navigator 제거함.
-       실제 주행에서 안 쓰고(nav2.launch.py 참고), controller_server
-       하나만 nav2_lifecycle_manager로 관리하면 되므로 그건 유지함. -->
   <exec_depend>nav2_lifecycle_manager</exec_depend>
   <exec_depend>our_mppi_critics</exec_depend>
+  <exec_depend>path_relay</exec_depend>
   <!-- [2026-09-04] manual_drive_sensors.launch.py가 drive_cam.launch.py를
        include(메뉴얼 주행 중 rosbag 기록용 카메라, record_manual_drive.sh 참고) -->
   <exec_depend>dolbotz</exec_depend>
-
-  <depend>rclcpp</depend>
-  <!-- [2026-09-02] autonomous.planz.py(복원된 python pure pursuit 노드)용 -->
-  <exec_depend>rclpy</exec_depend>
-  <depend>std_msgs</depend>
-  <depend>geometry_msgs</depend>
-  <depend>sensor_msgs</depend>
-  <depend>tf2</depend>
-  <!-- [2026-08-28] slope_traverse_node의 SLOPE_EXIT pure pursuit이 /path를
-       camera_link -> base_link로 변환하는 데 필요 (path_relay_node와 동일 패턴).
-       기존엔 exec_depend만 있었는데 이제 빌드 시점에도 필요해서 depend로 승격. -->
-  <depend>tf2_ros</depend>
-  <depend>tf2_geometry_msgs</depend>
-  <depend>diagnostic_msgs</depend>
-  <depend>nav_msgs</depend>
-  <!-- [하림 수정] 2026-08-27: summer_supply_drive_node의 traffic 신호 구독용
-       (/mission/summer_traffic/result, summer_traffic_node.py가 이미 발행) -->
-  <depend>mission_manager_interfaces</depend>
+  <!-- [manual+return 통합] manual_return_bringup.launch.py용 -->
+  <exec_depend>drive_cmd_mux</exec_depend>
+  <exec_depend>return_navigation</exec_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

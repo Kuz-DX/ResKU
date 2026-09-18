@@ -2,8 +2,8 @@ import math
 
 import rclpy
 from rclpy.node import Node
+from geometry_msgs.msg import Twist
 from sensor_msgs.msg import Imu
-from std_msgs.msg import Float32MultiArray
 
 
 class ManualStabilityNode(Node):
@@ -13,8 +13,11 @@ class ManualStabilityNode(Node):
     맞췄지만, 완전히 독립된 별도 구현이다 (미션이 원격 1회/자율 1회로 나뉘어서
     공유할 필요가 없음 -- 코드가 겹치더라도 서로 안 건드리는 쪽을 택함).
 
-    can_driver_node의 /motor_speed_cmd_safety로 발행하며, can_driver_node가
-    이미 그 토픽을 최우선으로 처리하도록 되어 있어 여기서는 판단만 하면 된다.
+    [manual+return 통합] can_driver_node(더 이상 launch되지 않음)의
+    /motor_speed_cmd_safety 대신, rmd_x8_driver_node가 이미 최우선으로 처리하는
+    /cmd_vel_safety(geometry_msgs/Twist, stability_monitor_node와 동일 토픽)로
+    직접 발행한다. rmd_x8_driver_node 쪽은 변경 없음 -- 원래도 여러 publisher가
+    같은 안전 토픽에 발행할 수 있는 구조였다.
     """
 
     def __init__(self):
@@ -23,7 +26,7 @@ class ManualStabilityNode(Node):
         self.declare_parameter('critical_pitch_deg', 25.0)
         self.declare_parameter('critical_roll_deg', 20.0)
         self.declare_parameter('imu_topic', '/imu')
-        self.declare_parameter('cmd_safety_topic', '/motor_speed_cmd_safety')
+        self.declare_parameter('cmd_safety_topic', '/cmd_vel_safety')
         self.declare_parameter('check_rate_hz', 100.0)
 
         p = self.get_parameter
@@ -37,7 +40,7 @@ class ManualStabilityNode(Node):
         cmd_safety_topic = p('cmd_safety_topic').value
 
         self.imu_sub = self.create_subscription(Imu, imu_topic, self.imu_callback, 10)
-        self.safety_pub = self.create_publisher(Float32MultiArray, cmd_safety_topic, 10)
+        self.safety_pub = self.create_publisher(Twist, cmd_safety_topic, 10)
 
         rate_hz = p('check_rate_hz').value
         self.timer = self.create_timer(1.0 / rate_hz, self.check_loop)
@@ -67,14 +70,13 @@ class ManualStabilityNode(Node):
         abs_r = abs(self.current_roll_deg)
 
         if abs_p >= self.critical_pitch or abs_r >= self.critical_roll:
-            # [하림 수정] 완전 정지(0,0)로 발행. autonomous 쪽은 사람이 옆에
+            # [하림 수정] 완전 정지(v=0, w=0)로 발행. autonomous 쪽은 사람이 옆에
             # 없을 수 있어 초저속 탈출(0.05m/s)을 택했지만, manual은 조종자가
             # 바로 옆에서 조이스틱을 잡고 있으므로 완전 정지가 더 안전하다고
             # 판단함 (재개는 자세가 임계값 아래로 내려오는 순간 자동으로 됨 --
-            # can_driver_node의 cmd_safety_timeout_sec가 지나면 조이스틱
+            # rmd_x8_driver_node의 cmd_vel_safety_timeout_s가 지나면 조이스틱
             # 명령으로 자동 복귀).
-            msg = Float32MultiArray()
-            msg.data = [0.0, 0.0]
+            msg = Twist()
             self.safety_pub.publish(msg)
             self.get_logger().warn(
                 f'Emergency stop: pitch={self.current_pitch_deg:.1f}deg '

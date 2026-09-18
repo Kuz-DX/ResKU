@@ -6,8 +6,16 @@ Drives two RMD-X8-120 actuators (left/right) of a skid-steer /
 tracked vehicle over CAN, using MYACTUATOR's RMD-X protocol
 (Speed Closed-loop Control Command, 0xA2).
 
+[manual+return 통합] 이 노드가 CAN 버스(can_drive)/motor ID를 소유하는
+유일한 저수준 드라이버다 -- manual 조종(drive_cmd_mux_node를 거쳐
+/cmd_vel_manual -> /cmd_vel)과 return 자동복귀(/cmd_vel_return -> /cmd_vel)
+모두 이 노드를 공용으로 사용한다. 예전 can_driver_node(manual 전용, CAN
+feedback을 안 읽어 wheel odometry가 없었음)는 더 이상 launch되지 않는다 --
+같은 CAN 버스/motor ID를 두 노드가 동시에 제어해서는 안 된다.
+
 Subscribes:
     /cmd_vel               (geometry_msgs/Twist)   -- desired body v, w
+                                                        (from drive_cmd_mux_node)
 
 Publishes:
     /wheel/odom             (nav_msgs/Odometry)      -- vx only is meaningful;
@@ -208,6 +216,12 @@ class RmdX8DriverNode(Node):
         # 로봇이 계속 움직인 사고의 유력한 원인. 0으로 주면 이 기능 자체가
         # 꺼지니 절대 0으로 두지 말 것.
         self.declare_parameter("comm_timeout_protection_ms", 500)
+        # [manual+return 통합] can_driver_node에서 이관 -- USB-CAN 어댑터(gs_usb)가
+        # 물리적으로 잠깐 빠졌다 붙는 사고가 manual 조종 중 실기에서 확인된 적이
+        # 있다(can_driver_node._attempt_reconnect() 주석 참고). 이 노드가 이제
+        # manual+return 공용 CAN 소유 노드가 되므로 동일한 재연결 로직이 필요하다.
+        self.declare_parameter("reconnect_after_failures", 10)
+        self.declare_parameter("reconnect_cooldown_sec", 2.0)
 
         can_interface = self.get_parameter("can_interface").value
         left_id = int(self.get_parameter("left_motor_can_id").value)
@@ -228,33 +242,39 @@ class RmdX8DriverNode(Node):
         self.base_frame_id = self.get_parameter("base_frame_id").value
         self.publish_odom_tf = bool(self.get_parameter("publish_odom_tf").value)
         self.comm_timeout_protection_ms = int(self.get_parameter("comm_timeout_protection_ms").value)
+        self.reconnect_after_failures = int(self.get_parameter("reconnect_after_failures").value)
+        self.reconnect_cooldown_sec = float(self.get_parameter("reconnect_cooldown_sec").value)
 
         self.left = MotorChannel("left", left_id, left_dir, wheel_radius, gear_ratio)
         self.right = MotorChannel("right", right_id, right_dir, wheel_radius, gear_ratio)
         self.channels = [self.left, self.right]
 
-        # ---- CAN bus ------------------------------------------------------
-        try:
-            self.bus = can.interface.Bus(channel=can_interface, bustype="socketcan")
-        except Exception as exc:  # noqa: BLE001
-            self.get_logger().fatal(
-                f"Failed to open CAN interface '{can_interface}': {exc}. "
-                f"Check `ip link show {can_interface}` and that the bus is up "
-                f"(e.g. `sudo ip link set {can_interface} up type can bitrate 1000000`)."
-            )
-            raise
-
+        self._can_interface = can_interface
         self._reply_id_map = {
             proto.motor_reply_id(left_id): self.left,
             proto.motor_reply_id(right_id): self.right,
         }
+        self._consecutive_send_failures = 0
+        self._last_reconnect_attempt = None
+        self.bus = None
+        self._notifier = None
 
-        self._notifier = can.Notifier(self.bus, [self._on_can_message])
+        # ---- CAN bus ------------------------------------------------------
+        # [manual+return 통합] can_driver_node._open_bus()와 동일하게, 최초
+        # 연결 실패에도 노드를 살려둔다 -- 이 노드는 이제 manual 조종의 유일한
+        # 저수준 드라이버이기도 하므로, 어댑터가 아직 안 붙은 채로 launch돼도
+        # 프로세스 자체는 죽지 않고 재연결을 계속 시도해야 한다.
+        if not self._open_bus():
+            self.get_logger().error(
+                f"CAN interface '{can_interface}' not available at startup -- "
+                f"node stays alive and will keep retrying (see _attempt_reconnect())."
+            )
 
         # [수정] 모터 하드웨어 통신두절 보호(0xB3)를 시작 시 실제로 걸어준다
         # (지금까지 아무도 이걸 호출한 적이 없었음). Notifier가 이미 떠 있으니
         # 여기서 보낸 명령의 reply도 _on_can_message가 정상적으로 받아 처리한다.
-        self._configure_comm_timeout_protection()
+        if self.bus is not None:
+            self._configure_comm_timeout_protection()
 
         # ---- ROS interfaces -------------------------------------------------
         best_effort_qos = QoSProfile(depth=10,
@@ -267,9 +287,13 @@ class RmdX8DriverNode(Node):
         # [하림 수정] stability_monitor_node의 CRITICAL 비상 명령을
         # current_ramp_node를 거치지 않고 여기서 직접 받아
         # 최우선 처리한다 (그 체인이 죽어도 안전 개입은 살아있도록, 실제 모터
-        # 명령 생성 지점에 가장 가깝게 배치). 이 노드는 이제 autonomous 전용이라
-        # 조이스틱/joy_mux_node는 애초에 이 경로에 없음 (manual 조종은
-        # can_driver_node로 완전히 분리됨).
+        # 명령 생성 지점에 가장 가깝게 배치).
+        # [manual+return 통합] 이 노드는 이제 manual 조종(경유: drive_cmd_mux_node)과
+        # return 자동복귀 모두의 공용 저수준 CAN 드라이버다 -- can_driver_node는
+        # CAN feedback을 못 읽어 manual 주행 중 wheel odometry가 아예 안 나오는
+        # 구조적 한계 때문에 이 경로에서 제외됐다(더 이상 launch되지 않음, 소스는
+        # 보존). manual_stability_node(IMU pitch/roll)도 이제 여기 /cmd_vel_safety로
+        # 직접 발행한다.
         self.cmd_vel_safety_sub = self.create_subscription(
             Twist, "/cmd_vel_safety", self._on_cmd_vel_safety, 10)
 
@@ -306,6 +330,70 @@ class RmdX8DriverNode(Node):
             f"track_width={self.track_width} m (VERIFY VIA CALIBRATION), "
             f"wheel_radius={wheel_radius} m"
         )
+
+    # ------------------------------------------------------------------ #
+    # CAN bus (re)connection -- ported from can_driver_node._open_bus() /
+    # _attempt_reconnect(), extended to also (re)bind the CAN RX Notifier
+    # and re-arm the comm_timeout_protection watchdog, since this node
+    # (unlike can_driver_node) reads feedback and configures the motors'
+    # own hardware watchdog on top of just sending commands.
+    # ------------------------------------------------------------------ #
+    def _open_bus(self) -> bool:
+        try:
+            self.bus = can.interface.Bus(channel=self._can_interface, bustype="socketcan")
+        except Exception as exc:  # noqa: BLE001
+            self.bus = None
+            self.get_logger().error(
+                f"Failed to open CAN interface '{self._can_interface}': {exc} -- "
+                f"node stays alive, will keep retrying "
+                f"(`ip link show {self._can_interface}` to check interface state)."
+            )
+            return False
+
+        if self._notifier is not None:
+            try:
+                self._notifier.stop()
+            except Exception:  # noqa: BLE001
+                pass
+        self._notifier = can.Notifier(self.bus, [self._on_can_message])
+        return True
+
+    def _attempt_reconnect(self):
+        """CAN 소켓을 다시 연다 -- self.bus가 없는 경우(_send_speed_command의
+        가드)와 연속 전송 실패가 임계치를 넘은 경우 둘 다 여기로 온다. USB-CAN
+        어댑터 재열거로 인터페이스 자체가 바뀌는 상황을 노린 재시도이며, 재시도
+        폭주를 막기 위해 reconnect_cooldown_sec 간격을 둔다 (can_driver_node와
+        동일 패턴)."""
+        now = self.get_clock().now()
+        if self._last_reconnect_attempt is not None:
+            age_s = (now - self._last_reconnect_attempt).nanoseconds * 1e-9
+            if age_s < self.reconnect_cooldown_sec:
+                return
+        self._last_reconnect_attempt = now
+
+        self.get_logger().warn(
+            f"CAN bus unusable ({self._consecutive_send_failures} consecutive send "
+            f"failures) -- attempting to (re)open {self._can_interface}"
+        )
+        if self.bus is not None:
+            try:
+                self._notifier.stop()
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                self.bus.shutdown()
+            except Exception:  # noqa: BLE001
+                pass
+            self.bus = None
+            self._notifier = None
+
+        # 재연결 성공 시, 재부팅된 모터 쪽 통신두절 보호(0xB3)도 다시 걸어준다 --
+        # 이 설정은 모터 자체 상태라 소켓만 다시 여는 것과 무관하게 유지되지만,
+        # 그 사이 모터 전원이 같이 나갔다 들어온 경우까지 커버하기 위해 매
+        # 재연결마다 재적용한다.
+        if self._open_bus():
+            self._consecutive_send_failures = 0
+            self._configure_comm_timeout_protection()
 
     # ------------------------------------------------------------------ #
     # CAN RX
@@ -478,14 +566,32 @@ class RmdX8DriverNode(Node):
             data=data,
             is_extended_id=False,
         )
+        self._send_can_message(channel.name, message)
+
+    def _send_can_message(self, channel_name: str, message: can.Message):
+        # [manual+return 통합] can_driver_node._send_frame()과 동일 패턴: bus가
+        # 없으면 매 호출마다 재연결을 시도(쿨다운 내부에 있음)하고, 있으면
+        # 보내되 연속 실패가 임계치를 넘으면 재연결을 트리거한다.
+        if self.bus is None:
+            self._attempt_reconnect()
+            if self.bus is None:
+                self.get_logger().warn(
+                    f"[{channel_name}] CAN bus not open on {self._can_interface} -- "
+                    f"command not sent.", throttle_duration_sec=1.0)
+            return
+
         try:
             self.bus.send(message)
+            self._consecutive_send_failures = 0
         except can.CanError as exc:
             # [2026-08-19] throttle 추가. 이 메서드가 control_rate_hz(기본 50)로
             # 계속 불리는데, 모터 전원이 꺼진 채로 방치되면(배터리 OFF 등)
             # 매 사이클 실패해서 로그가 스팸으로 쏟아짐 -- 2초에 한 번으로 줄임.
+            self._consecutive_send_failures += 1
             self.get_logger().warn(
-                f"[{channel.name}] CAN send failed: {exc}", throttle_duration_sec=2.0)
+                f"[{channel_name}] CAN send failed: {exc}", throttle_duration_sec=2.0)
+            if self._consecutive_send_failures >= self.reconnect_after_failures:
+                self._attempt_reconnect()
 
     def _poll_status1(self, channel: MotorChannel):
         data = proto.build_read_status1_command()
@@ -494,11 +600,7 @@ class RmdX8DriverNode(Node):
             data=data,
             is_extended_id=False,
         )
-        try:
-            self.bus.send(message)
-        except can.CanError as exc:
-            self.get_logger().warn(
-                f"[{channel.name}] status1 poll send failed: {exc}", throttle_duration_sec=2.0)
+        self._send_can_message(channel.name, message)
 
     # ------------------------------------------------------------------ #
     # publishing
@@ -638,17 +740,20 @@ class RmdX8DriverNode(Node):
 
     def destroy_node(self):
         # best-effort: stop motors before shutting down the node
+        if self.bus is not None:
+            try:
+                for ch in self.channels:
+                    data = proto.build_stop_command()
+                    msg = can.Message(arbitration_id=proto.motor_send_id(ch.can_id),
+                                       data=data, is_extended_id=False)
+                    self.bus.send(msg)
+            except Exception:  # noqa: BLE001
+                pass
         try:
-            for ch in self.channels:
-                data = proto.build_stop_command()
-                msg = can.Message(arbitration_id=proto.motor_send_id(ch.can_id),
-                                   data=data, is_extended_id=False)
-                self.bus.send(msg)
-        except Exception:  # noqa: BLE001
-            pass
-        try:
-            self._notifier.stop()
-            self.bus.shutdown()
+            if self._notifier is not None:
+                self._notifier.stop()
+            if self.bus is not None:
+                self.bus.shutdown()
         except Exception:  # noqa: BLE001
             pass
         super().destroy_node()

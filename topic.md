@@ -34,19 +34,37 @@
 
 ## manual_joy_control (수동 주행 조이스틱 명령 생성)
 
+[manual+return 통합 이후] 토픽명만 `/motor_speed_cmd` → `/motor_speed_cmd_manual`로
+바뀌었고 타입(dps)은 그대로다 — 2026 사용자 결정으로 dps 유지, Twist 변환은
+`drive_cmd_mux_node`로 옮김(디버깅 시 dps 숫자가 더 직관적). 모터 마운팅
+방향 보정(`left_motor_sign`/`right_motor_sign`)은 이 노드에서 제거됐고
+`rmd_x8_driver`에서 한 번만 적용된다 — 이 노드가 만드는 값은 부호 없는
+물리 좌표 기준(양수 = 그 바퀴가 전진) dps다.
+
 | 발행 토픽 | 타입 | 용도 |
 |---|---|---|
-| `/motor_speed_cmd` | `std_msgs/msg/Float32MultiArray` | 좌/우 구동 모터 속도 명령 |
+| `/motor_speed_cmd_manual` | `std_msgs/msg/Float32MultiArray` | 좌/우 구동 모터 속도 명령(dps, 부호 없음) |
 | `/max_speed_dps` | `std_msgs/msg/Float32MultiArray` | 조이스틱으로 조절한 좌/우 최대 속도 표시 |
+| `/mission/return/trigger` | `std_msgs/msg/Bool` | RETURN 버튼 rising edge — return_state_machine_node가 구독 |
 
-## can_driver (수동 주행 CAN 출력 및 자세 안전 정지)
+## can_driver (구 수동 주행 CAN 드라이버 — deprecated, 미사용)
 
-| 노드 | 발행 토픽 | 타입 | 용도 |
-|---|---|---|---|
-| `manual_stability_node` | `/motor_speed_cmd_safety` | `std_msgs/msg/Float32MultiArray` | IMU 위험 자세 감지 시 좌/우 정지 명령 |
+[manual+return 통합 이후] `can_driver_node`는 CAN feedback을 안 읽어서
+manual 주행 중 wheel odometry가 구조적으로 불가능했던 문제 때문에 더 이상
+launch하지 않는다. CAN 소유는 이제 `rmd_x8_driver` 하나뿐이다.
 
-`can_driver_node`는 `/motor_speed_cmd`와 `/motor_speed_cmd_safety`를 받아 CAN 프레임을
-전송하며 ROS 토픽을 새로 발행하지 않는다.
+[2026 사용자 결정, 경량화] `manual_stability_node`(IMU pitch/roll 긴급정지)도
+`manual_return_bringup.launch.py`에서 제외됐다 — 실기 검증 결과 전복 위험
+자세가 나타나지 않는 운용 환경으로 판단, 안전 여유보다 구성 단순화를
+우선한 명시적 선택. 소스는 남아있고 `/cmd_vel_safety`(Twist)로 발행하도록
+재배선까지 끝나있으므로, 필요해지면 launch에 다시 추가하면 된다. 이
+패키지 전체가 현재 실제로는 어떤 launch에서도 안 쓰인다(구
+`can_driver/launch/manual.launch.py`만 참고용으로 남아있음).
+
+> **주의**: 혹시 구 `can_driver/launch/manual.launch.py`를 그대로 실행하면
+> `can_driver_node`가 여전히 옛 `/motor_speed_cmd_safety`(Float32MultiArray)를
+> 기다리는데 `manual_stability_node`는 이제 다른 타입/토픽으로 발행하므로
+> **IMU 긴급정지가 조용히 동작하지 않는다.** 이 launch는 쓰지 말 것.
 
 ## myahrs_driver (차체 IMU 드라이버)
 
@@ -57,11 +75,18 @@
 수동 주행과 자율 주행 launch가 같은 토픽명을 사용한다. 두 launch를 동시에 실행해
 드라이버를 중복 기동하지 않는다.
 
-## rmd_x8_driver (자율 주행 구동 모터 CAN 드라이버)
+## rmd_x8_driver (manual+return 공용 구동 모터 CAN 드라이버)
+
+[manual+return 통합 이후] 이 노드가 CAN(`can_drive`)/motor ID를 소유하는
+**유일한** 저수준 드라이버다. manual 조종(`drive_cmd_mux_node`를 거쳐
+`/cmd_vel_manual` → `/cmd_vel`)과 return 자동복귀(`/cmd_vel_return` →
+`/cmd_vel`) 모두 이 노드를 공용으로 쓰므로, manual 주행 중에도
+`/wheel/odom`이 정상 발행된다. CAN 재연결(consecutive-failure 감지 +
+쿨다운 재오픈) 로직도 구 `can_driver_node`에서 이관해 추가됨.
 
 | 발행 토픽 | 타입 | 용도 |
 |---|---|---|
-| `/wheel/odom` | `nav_msgs/msg/Odometry` | 좌/우 모터 피드백 기반 휠 오도메트리 |
+| `/wheel/odom` | `nav_msgs/msg/Odometry` | 좌/우 모터 피드백 기반 휠 오도메트리 (manual 주행 중에도 발행) |
 | `/wheel/joint_states` | `sensor_msgs/msg/JointState` | 휠 속도와 전류 상태 |
 | `/wheel/motor_status` | `diagnostic_msgs/msg/DiagnosticArray` | 모터 통신 및 오류 진단 |
 | `/tf` | `tf2_msgs/msg/TFMessage` | **조건부** `publish_odom_tf:=true`일 때 odom TF 발행. 운영 기본값은 `false` |
@@ -74,6 +99,40 @@
 | `/odometry/diagnostics` | `diagnostic_msgs/msg/DiagnosticArray` | 센서 timeout과 추정기 상태 진단 |
 | `/tf` | `tf2_msgs/msg/TFMessage` | `odom` -> `base_link` 동적 TF |
 
+## drive_cmd_mux (manual/return 명령 중재 + dps→Twist 변환)
+
+[신규, manual+return 통합] `/motor_speed_cmd_manual`(dps)을 Twist로 변환한
+뒤 `/mission/return/state`에 따라 그 값과 `/cmd_vel_return` 중 하나만 골라
+`/cmd_vel`로 통과시킨다(`STOP_BEFORE_TURN` 상태에서는 둘 다 막고 0).
+`/cmd_vel_safety`는 이 mux를 거치지 않고 `rmd_x8_driver`에 직결되어 항상
+최우선. dps→Twist 변환에 쓰는 `wheel_radius_m`/`effective_track_width_m`
+파라미터는 `rmd_x8_driver`의 실제 운영값과 반드시 같이 맞출 것.
+
+| 발행 토픽 | 타입 | 용도 |
+|---|---|---|
+| `/cmd_vel` | `geometry_msgs/msg/Twist` | 최종 주행 명령 (`rmd_x8_driver` 구독) |
+
+## return_navigation (manual 경로 기록 + 자동 복귀)
+
+[신규, manual+return 통합] 3개 노드로 구성. `manual_path_recorder_node`가
+`/odometry/filtered`를 mission 기준 좌표(기록 시작 시점 pose = (0,0,0))로
+변환해 경로를 쌓고, `return_state_machine_node`가 RETURN 트리거 이후
+정지 확인 → 폐루프 180도 회전 → 복귀 경로 발행 → 완료 판정까지 상태
+머신을 총괄하며 `/cmd_vel_return`을 단독 발행하고,
+`return_path_follower_node`가 고정된 `/return_path`와 실시간 오도메트리를
+비교하는 pure pursuit로 조향값을 계산한다.
+
+| 노드 | 발행 토픽 | 타입 | 용도 |
+|---|---|---|---|
+| `manual_path_recorder_node` | `/mission/origin_pose` | `geometry_msgs/msg/Pose` | mission 좌표계 원점 T0 (recording 시작 시 1회, TRANSIENT_LOCAL) |
+| `manual_path_recorder_node` | `/recorded_path_raw` | `nav_msgs/msg/Path` | 임계값(거리/회전각/시간) 게이팅된 원본 기록 경로, mission frame |
+| `manual_path_recorder_node` | `/recorded_path` | `nav_msgs/msg/Path` | 중복점 제거 등 가공된 기록 경로, mission frame |
+| `return_state_machine_node` | `/mission/return/state` | `std_msgs/msg/String` | `IDLE`/`MANUAL_RECORDING`/`WAIT_RETURN_COMMAND`/`STOP_BEFORE_TURN`/`TURN_180`/`FOLLOW_RETURN_PATH`/`FINISHED` |
+| `return_state_machine_node` | `/cmd_vel_return` | `geometry_msgs/msg/Twist` | 복귀 주행 명령 (정지 대기/180도 회전/경로 추종 중계, 단독 발행자) |
+| `return_state_machine_node` | `/manual_path_recorder/command` | `std_msgs/msg/String` | 레코더 제어: `START`/`STOP`/`CLEAR` |
+| `return_state_machine_node` | `/return_path` | `nav_msgs/msg/Path` | `/recorded_path`를 역순+재계산 yaw로 뒤집은 고정 복귀 경로, TURN_180 완료 시 1회(TRANSIENT_LOCAL) |
+| `return_path_follower_node` | `/cmd_vel_return_path` | `geometry_msgs/msg/Twist` | `/return_path` 기준 pure pursuit 조향 명령 |
+
 ## path_relay (인지 경로를 Nav2 FollowPath 액션으로 중계)
 
 운영 기본 설정에서는 토픽을 직접 발행하지 않고 `/path`를 FollowPath 액션 goal로
@@ -84,25 +143,28 @@
 | `/debug/path_raw` | `nav_msgs/msg/Path` | **조건부** `debug_path_pipeline:=true`일 때 수신 원본 경로 |
 | `/debug/path_relay_transformed` | `nav_msgs/msg/Path` | **조건부** `debug_path_pipeline:=true`일 때 `odom` 변환 경로 |
 
-## robot_bringup (자율 주행 명령 연결 및 안전 상태 머신)
+## robot_bringup (2026 사용자 결정, 계절 미션 정리 이후)
 
-| 노드 | 발행 토픽 | 타입 | 용도 |
-|---|---|---|---|
-| `current_ramp_node` | `/cmd_vel` | `geometry_msgs/msg/Twist` | 전류 제한 램프를 적용한 최종 일반 주행 명령 |
-| `stability_monitor_node` | `/cmd_vel_safety` | `geometry_msgs/msg/Twist` | 모터 통신/하드웨어 오류 시 안전 정지 명령 |
-| `slope_traverse_node` | `/cmd_vel_safety` | `geometry_msgs/msg/Twist` | 경사 진입, 등반, 탈출 중 최우선 주행 명령 |
-| `slope_traverse_node` | `/drive/slope_traverse_state` | `std_msgs/msg/String` | 경사 통과 상태 머신 상태 |
-| `slope_traverse_node` | `/slope_traverse/debug` | `std_msgs/msg/Float64MultiArray` | 경사 통과 제어 디버그 값 |
-| `summer_supply_drive_node` | `/cmd_vel_auto` | `geometry_msgs/msg/Twist` | 여름 보급 미션용 직진/정지 명령 |
+계절 미션 전용 노드(`slope_traverse_*`, `dog_follow_node`,
+`summer_supply_drive_node`)와 전류 램프/자세·통신 긴급정지 노드
+(`current_ramp_node`, `stability_monitor_node`)는 소스 자체가 삭제됐다 —
+manual+return 미션에서 쓰지 않고, 전복 위험이 없는 운용 환경으로 판단해
+안전 여유보다 구성 단순화를 우선한 명시적 선택. 이 패키지는 이제 C++
+실행 파일이 없는 순수 launch/config 패키지다. `manual_return_bringup.launch.py`
+(manual+return 미션의 실제 진입점)에는 원래도 포함된 적이 없다.
 
-`stability_monitor_node`와 `slope_traverse_node`가 같은 `/cmd_vel_safety`를 발행할 수
-있으며, `rmd_x8_driver`가 이 안전 토픽을 일반 `/cmd_vel`보다 우선 처리한다.
+## nav2_controller / nav2_mppi_controller (MPPI 경로 추종 — 2단계 평가용 보존)
 
-## nav2_controller / nav2_mppi_controller (MPPI 경로 추종)
+[2026 사용자 결정] MPPI 자체는 나중에 recorded return path와 비교하는
+2단계 평가용으로 소스를 보존한다(`autonomous.launch.py`로 계속 실행
+가능). `current_ramp_node` 삭제로 더 이상 `/cmd_vel_auto`로 우회하지 않고
+`controller_server`가 곧장 `/cmd_vel`을 발행한다 — manual+return 미션의
+`drive_cmd_mux_node`/`rmd_x8_driver_node`와 이 launch를 절대 동시에
+띄우지 말 것(같은 `/cmd_vel`·CAN 버스 충돌).
 
 | 발행 토픽 | 타입 | 용도 |
 |---|---|---|
-| `/cmd_vel_auto` | `geometry_msgs/msg/Twist` | MPPI 속도 명령. launch에서 기본 `/cmd_vel`을 remap한 결과 |
+| `/cmd_vel` | `geometry_msgs/msg/Twist` | MPPI 속도 명령 (더 이상 `/cmd_vel_auto`로 우회하지 않음) |
 | `/local_costmap/costmap` | `nav_msgs/msg/OccupancyGrid` | controller_server 내부 local costmap |
 | `/trajectories` | `visualization_msgs/msg/MarkerArray` | **조건부** MPPI 후보 궤적. 현재 `visualize:false`이므로 기본 미발행 |
 | `/transformed_global_plan` | `nav_msgs/msg/Path` | **조건부** MPPI가 변환한 입력 경로. 시각화가 켜지고 구독자가 있을 때 발행 |

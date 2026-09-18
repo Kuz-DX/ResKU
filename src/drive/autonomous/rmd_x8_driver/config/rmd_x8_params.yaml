@@ -40,3 +40,9 @@ rmd_x8_driver:
     base_frame_id: "base_link"
     publish_odom_tf: false        # robot_localization publishes odom->base_link;
                                    # keep this false to avoid a duplicate TF broadcaster
+
+    # [manual+return 통합] can_driver_node에서 이관된 CAN 재연결 파라미터.
+    # USB-CAN 어댑터(gs_usb)가 물리적으로 잠깐 빠졌다 붙는 상황에서 소켓을
+    # 스스로 닫고 다시 여는 데 쓰인다 (can_driver 패키지와 동일 기본값).
+    reconnect_after_failures: 10
+    reconnect_cooldown_sec: 2.0

@@ -1,19 +1,12 @@
-**봄가을 MPPI 제거 코드**
-```bash
-# 봄 구간
-ros2 launch robot_bringup mission_spring_drive.launch.py
-ros2 launch robot_bringup mission_spring_drive.launch.py initial_straight_drive_sec:=3.0
-ros2 launch robot_bringup mission_spring_drive.launch.py initial_straight_drive_sec:=3.0 initial_straight_speed_mps:=0.3
+**[2026 사용자 결정, 계절 미션 정리로 삭제됨]**
 
-# 가을/ 겨울 구간
-ros2 launch robot_bringup autonomous_pland.launch.py
--> 너무 빠르게 돌면
-ros2 launch robot_bringup autonomous_plane.launch.py
-
-# 여름 구간
-ros2 launch robot_bringup mission_summer_drive.launch.py
-
-```
+계절별 미션 주행 launch(`mission_spring_drive.launch.py`,
+`autonomous_pland.launch.py`, `autonomous_plane.launch.py`,
+`mission_summer_drive.launch.py` 등)와 그 아래 "경사 주행 plan A/B/C/D/E,
+Z" 명령어들은 소스 자체가 삭제됐다 — 지금은 manual+return 미션만
+운용한다(`robot_bringup/launch/manual_return_bringup.launch.py`,
+`howtorun.md` 참고). MPPI(`autonomous.launch.py`)는 나중에 recorded return
+path와 비교하는 2단계 평가용으로만 소스가 남아있다.
 
 -------------------------------------------------------------------
 
@@ -41,25 +34,3 @@ distance_speed_reverse_max_m_s:=0.3
 ```
 
 --------------------------------------------------------------------
-
-** 경사 주행 plan A, B, Z **
-
-```bash
-# planA
-ros2 launch robot_bringup autonomous.launch.py
-# planB
-ros2 launch robot_bringup autonomous_blend.launch.py
-# planC(planD, E가 안되면 기존 autonomous로 회귀)
-ros2 launch robot_bringup autonomous_planc.launch.py
-# planD
-ros2 launch robot_bringup autonomous_pland.launch.py
-# planE
-ros2 launch robot_bringup autonomous_plane.launch.py
-
-# planZ(planD, E가 안되면 기존 purepursuit으로 회귀)
-#가을겨울
-ros2 launch robot_bringup autonomous.planz.launch.py use_outer_wheel_boost:=true target_linear_speed_m_s:=0.4
-#봄
-ros2 launch robot_bringup mission_spring_purepursuit_drive.launch.py initial_straight_drive_sec:=5.0 initial_straight_speed_mps:=0.3
-
-```

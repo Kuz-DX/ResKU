@@ -1,6 +1,22 @@
 """
 manual.launch.py (can_driver) -- 로봇(온보드 PC) 쪽 전용
 
+[DEPRECATED -- manual+return 통합, 더 이상 사용하지 마라]
+이 launch 파일은 can_driver_node를 CAN 소유 노드로 쓴다. manual+return
+통합 이후에는 rmd_x8_driver_node가 CAN(motor feedback 포함)을 소유하는
+유일한 노드이며, 이 launch가 없어도 되는 대체 경로는
+robot_bringup/launch/manual_return_bringup.launch.py다. 소스는 참고용으로
+남겨뒀을 뿐 더 이상 유지보수하지 않는다.
+
+[중요][깨진 안전 배선] manual_stability_node의 기본 출력이 이제
+Twist(/cmd_vel_safety, rmd_x8_driver_node용)로 바뀌었다. 반면 이 launch가
+띄우는 can_driver_node는 여전히 Float32MultiArray(/motor_speed_cmd_safety)를
+기다린다 -- 토픽 이름을 다시 맞춰도 메시지 타입 자체가 다르므로 연결되지
+않는다. 즉 이 launch를 그대로 실행하면 IMU pitch/roll 긴급정지가 겉보기엔
+떠 있지만 실제로는 can_driver_node에 전혀 전달되지 않는다(조용히
+무력화됨). 정말 이 legacy 경로를 써야 한다면 can_driver_node를 직접
+고치거나, 권장하는 대로 manual_return_bringup.launch.py로 옮겨갈 것.
+
 [하림 수정] 2026-08-14: 조이스틱이 로봇 온보드 PC가 아니라 별도 원격 PC에
 물려있는 구조로 확인되어, joy_node/manual_joy_control_node를 이 launch에서
 분리했다. 이제 두 PC에서 각각 띄워야 한다:
