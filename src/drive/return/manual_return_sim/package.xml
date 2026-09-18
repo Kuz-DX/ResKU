@@ -1,0 +1,42 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>manual_return_sim</name>
+  <version>0.0.0</version>
+  <description>
+    Pre-flight virtual test rig for the manual+return mission. Simulates
+    the RMD-X8 CAN motors + IMU on a vcan0 bus so the real
+    rmd_x8_driver_node/reduced_odom_node/drive_cmd_mux/return_navigation
+    stack can be exercised end-to-end (record a path, trigger RETURN,
+    watch the 180-degree turn + path-following return) without real
+    hardware. Not launched in production (manual_return_bringup.launch.py
+    does not depend on this package).
+  </description>
+  <maintainer email="harim9340@gmail.com">rim</maintainer>
+  <license>TODO: License declaration</license>
+
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>visualization_msgs</depend>
+  <depend>tf2_ros</depend>
+  <depend>python3-can</depend>
+
+  <!-- runs the real production stack against the simulated hardware -->
+  <exec_depend>rmd_x8_driver</exec_depend>
+  <exec_depend>reduced_odom</exec_depend>
+  <exec_depend>drive_cmd_mux</exec_depend>
+  <exec_depend>return_navigation</exec_depend>
+  <exec_depend>rviz2</exec_depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

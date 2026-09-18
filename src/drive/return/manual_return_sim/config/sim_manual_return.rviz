@@ -1,0 +1,97 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Reference Frame: odom
+      Plane Cell Count: 40
+      Cell Size: 0.5
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: true
+      Show Names: true
+      Show Axes: true
+      Marker Scale: 0.5
+    - Class: rviz_default_plugins/Odometry
+      Name: /odometry/filtered
+      Enabled: true
+      Topic:
+        Value: /odometry/filtered
+      Position Tolerance: 0.01
+      Angle Tolerance: 0.01
+      Keep: 300
+      Covariance:
+        Position:
+          Value: false
+        Orientation:
+          Value: false
+      Shape:
+        Value: Arrow
+        Alpha: 1
+        Axes Length: 0.3
+        Axes Radius: 0.03
+        Head Length: 0.15
+        Head Radius: 0.1
+        Shaft Length: 0.2
+        Shaft Radius: 0.05
+        Color: 85; 170; 255
+    - Class: rviz_default_plugins/Path
+      Name: /recorded_path (raw, growing)
+      Enabled: true
+      Topic:
+        Value: /recorded_path_raw
+      Color: 25; 255; 0
+      Line Style: Lines
+      Line Width: 0.03
+    - Class: rviz_default_plugins/Path
+      Name: /recorded_path (processed)
+      Enabled: true
+      Topic:
+        Value: /recorded_path
+      Color: 0; 200; 0
+      Line Style: Billboards
+      Line Width: 0.05
+    - Class: rviz_default_plugins/Path
+      Name: /return_path
+      Enabled: true
+      Topic:
+        Value: /return_path
+      Color: 255; 85; 0
+      Line Style: Billboards
+      Line Width: 0.06
+    - Class: rviz_default_plugins/MarkerArray
+      Name: recorded path history (all cycles)
+      Enabled: true
+      Topic:
+        Value: /debug/recorded_path_history
+    - Class: rviz_default_plugins/MarkerArray
+      Name: return path history (all cycles)
+      Enabled: true
+      Topic:
+        Value: /debug/return_path_history
+    - Class: rviz_default_plugins/MarkerArray
+      Name: actual driven return trace (all cycles)
+      Enabled: true
+      Topic:
+        Value: /debug/actual_return_trace_history
+  Global Options:
+    Fixed Frame: odom
+    Background Color: 48; 48; 48
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+  Views:
+    Current:
+      Class: rviz_default_plugins/TopDownOrtho
+      Name: TopDownOrtho
+      Scale: 60
+      Target Frame: odom
+      X: 0
+      Y: 0
+Window Geometry:
+  Height: 900
+  Width: 1400
