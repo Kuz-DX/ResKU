@@ -35,6 +35,7 @@ setup(
         'console_scripts': [
             'sim_rmd_x8_hardware = manual_return_sim.sim_rmd_x8_hardware:main',
             'sim_debug_viz = manual_return_sim.sim_debug_viz:main',
+            'keyboard_teleop = manual_return_sim.keyboard_teleop:main',
         ],
     },
 )

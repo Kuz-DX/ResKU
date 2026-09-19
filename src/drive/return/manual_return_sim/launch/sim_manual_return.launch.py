@@ -16,14 +16,17 @@ One-time setup (needs root, run yourself -- this launch does not do it):
 Usage:
     ros2 launch manual_return_sim sim_manual_return.launch.py
 
-There is no real joystick in this rig -- drive it by hand with
-`ros2 topic pub` on /motor_speed_cmd_manual (std_msgs/Float32MultiArray,
-[left_dps, right_dps]), e.g.:
+There is no real joystick in this rig -- drive it from the keyboard in a
+SEPARATE terminal (needs a real TTY, so it can't run inside this launch):
+    ros2 run manual_return_sim keyboard_teleop
+    (w/s forward/back, a/d turn, q/e/z/c curves, space stop, +/- speed,
+     r = RETURN, x = quit)
+
+Or by hand with `ros2 topic pub` on /motor_speed_cmd_manual
+(std_msgs/Float32MultiArray, [left_dps, right_dps]):
     ros2 topic pub -r 20 /motor_speed_cmd_manual std_msgs/msg/Float32MultiArray \\
         "{data: [150.0, 150.0]}"   # drive forward
-    ros2 topic pub -r 20 /motor_speed_cmd_manual std_msgs/msg/Float32MultiArray \\
-        "{data: [-100.0, 100.0]}"  # turn in place
-Ctrl+C the pub to stop, then trigger RETURN:
+and trigger RETURN with:
     ros2 topic pub -1 /mission/return/trigger std_msgs/msg/Bool "{data: true}"
 
 Watch /recorded_path grow (green) then /return_path (orange) get followed
