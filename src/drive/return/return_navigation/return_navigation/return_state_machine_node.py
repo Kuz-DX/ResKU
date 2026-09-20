@@ -75,9 +75,16 @@ class ReturnStateMachineNode(Node):
         self.declare_parameter('stop_wz_threshold_radps', 0.03)
         self.declare_parameter('stop_settle_duration_s', 0.5)
 
-        self.declare_parameter('turn_kp', 1.0)
-        self.declare_parameter('turn_w_max_radps', 0.6)
-        self.declare_parameter('turn_yaw_tolerance_rad', 0.035)  # ~2 deg
+        # Measured on the real robot (skid steer): in-place rotation only
+        # achieves ~30-40% of the commanded angular speed, so kp/w_max are
+        # raised well above the values that suffice in simulation.
+        self.declare_parameter('turn_kp', 2.0)
+        self.declare_parameter('turn_w_max_radps', 1.2)
+        self.declare_parameter('turn_yaw_tolerance_rad', 0.087)  # ~5 deg
+        # 'left' = counter-clockwise (+angular.z), 'right' = clockwise.
+        # Fixed on purpose: a 180 deg error has no natural shortest
+        # direction, so leaving it to sensor noise picks a random side.
+        self.declare_parameter('turn_direction', 'left')
         self.declare_parameter('turn_settle_duration_s', 0.3)
 
         self.declare_parameter('follow_relay_timeout_s', 0.5)
@@ -91,6 +98,10 @@ class ReturnStateMachineNode(Node):
         self.stop_wz_threshold = float(p('stop_wz_threshold_radps').value)
         self.stop_settle_duration = float(p('stop_settle_duration_s').value)
         self.turn_kp = float(p('turn_kp').value)
+        direction = str(p('turn_direction').value).strip().lower()
+        if direction not in ('left', 'right'):
+            raise ValueError(f"turn_direction must be 'left' or 'right', got '{direction}'")
+        self.turn_sign = 1.0 if direction == 'left' else -1.0
         self.turn_w_max = float(p('turn_w_max_radps').value)
         self.turn_yaw_tolerance = float(p('turn_yaw_tolerance_rad').value)
         self.turn_settle_duration = float(p('turn_settle_duration_s').value)
@@ -112,8 +123,8 @@ class ReturnStateMachineNode(Node):
         self._prev_trigger = False
 
         self._stop_settle_since = None
-        self._turn_yaw_start = None
-        self._turn_yaw_target = None
+        self._turn_prev_yaw = None
+        self._turn_accum = 0.0  # signed rotation done since TURN_180 began
         self._turn_settle_since = None
 
         self._return_path = []       # list[Pose2D], mission frame, PN..P0 order
@@ -221,8 +232,8 @@ class ReturnStateMachineNode(Node):
             return
         settled_s = (now - self._stop_settle_since).nanoseconds * 1e-9
         if settled_s >= self.stop_settle_duration:
-            self._turn_yaw_start = self._odom_pose.yaw if self._odom_pose else 0.0
-            self._turn_yaw_target = normalize_angle(self._turn_yaw_start + math.pi)
+            self._turn_prev_yaw = self._odom_pose.yaw if self._odom_pose else 0.0
+            self._turn_accum = 0.0
             self._turn_settle_since = None
             self._go_to(TURN_180)
 
@@ -231,7 +242,10 @@ class ReturnStateMachineNode(Node):
             self.cmd_vel_return_pub.publish(Twist())
             return
 
-        yaw_error = normalize_angle(self._turn_yaw_target - self._odom_pose.yaw)
+        yaw = self._odom_pose.yaw
+        self._turn_accum += normalize_angle(yaw - self._turn_prev_yaw)
+        self._turn_prev_yaw = yaw
+        yaw_error = self.turn_sign * math.pi - self._turn_accum
         cmd = Twist()
         cmd.angular.z = max(-self.turn_w_max, min(self.turn_w_max, self.turn_kp * yaw_error))
         self.cmd_vel_return_pub.publish(cmd)

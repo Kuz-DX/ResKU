@@ -56,6 +56,7 @@ import os
 def generate_launch_description():
     can_interface = LaunchConfiguration('can_interface')
     imu_port = LaunchConfiguration('imu_port')
+    turn_direction = LaunchConfiguration('turn_direction')
 
     reduced_odom_bringup_launch = os.path.join(
         get_package_share_directory('robot_bringup'),
@@ -64,6 +65,8 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('can_interface', default_value='can_drive'),
         DeclareLaunchArgument('imu_port', default_value='/dev/ttyACM0'),
+        # RETURN 직전 180도 정렬 회전 방향 ('left'=반시계, 'right'=시계).
+        DeclareLaunchArgument('turn_direction', default_value='left'),
 
         # [단계 1] rmd_x8_driver_node(CAN, 유일한 소유자) + myahrs_driver_node
         # + static TF(base_link->imu_link/camera_link) + reduced_odom_node.
@@ -99,6 +102,7 @@ def generate_launch_description():
             package='return_navigation',
             executable='return_state_machine_node',
             name='return_state_machine_node',
+            parameters=[{'turn_direction': turn_direction}],
             output='screen',
         ),
 

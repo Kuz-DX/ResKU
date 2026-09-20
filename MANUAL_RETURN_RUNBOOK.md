@@ -16,6 +16,19 @@ manual 주행 중 경로를 기록하고, RETURN 트리거 후 자동으로 출�
 recorder는 제자리 회전 중 같은 위치에 겹쳐 찍힌 점(`min_point_spacing_m`
 기본 0.1m 이내)을 하나로 합쳐서 경로 방향이 튀지 않게 한다.
 
+**[실차 튜닝]** 실차 로그에서 스키드 조향 제자리 회전이 명령의 약 25~40%만
+나오는 것이 확인되어(예: `TURN_180`이 35초), 회전 게인/속도 한도를 올렸다:
+`turn_kp` 2.0, `turn_w_max_radps` 1.2, `turn_yaw_tolerance_rad` 0.087(5°),
+`rotate_kp` 2.0, `rotate_max_angular_speed_radps` 1.2,
+`rotate_min_angular_speed_radps` 0.15. 또한 RETURN 직전 180° 정렬 회전은
+방향이 우연에 맡겨져 있던 것을 **고정**했다(기본 `left`=반시계):
+
+```bash
+ros2 launch robot_bringup manual_return_bringup.launch.py turn_direction:=right   # 시계 방향
+```
+
+벽이 있는 쪽으로 돌지 않게 상황에 맞춰 고른다.
+
 ## 1. 로봇 PC — CAN 인터페이스 켜기
 
 ```bash
