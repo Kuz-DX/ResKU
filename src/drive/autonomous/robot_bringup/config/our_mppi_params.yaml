@@ -133,7 +133,7 @@ controller_server:
       # 반복 abort) -> 0.3 적용 즉시 vx_max까지 나오기 시작, 60초 만에 폐루프
       # (~17.5m) 거의 한 바퀴 완주(평균 약 0.3~0.4m/s), 그동안 WARN/abort 0건.
       # 곡선 관통 재발 여부도 같이 확인: 반원 구간 포함 정상 통과 확인됨.
-      vx_std: 0.3
+      vx_std: 0.1
       # [하림 수정] 2026-08-18: 0.3 -> 0.45. iteration_count=1이라 한 번의
       # 최적화 내에서 이 std 범위 안 후보만 평가함 -- 직진 순항 중(wz~0
       # 근처로 warm-start)에 갑자기 큰 보정이 필요해지면 좁은 std 탓에 큰 wz
@@ -395,7 +395,7 @@ controller_server:
       PathFollowCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 5.0
+        cost_weight: 3.0
         # [2026-08-19 추가] 이전엔 이 파라미터가 아예 없어서 코드 기본값
         # 1.4가 그대로 쓰이고 있었음. 지금 경로 길이가 0.6~2m라 로봇 시작
         # 위치 기준 목표점까지 직선거리가 거의 항상 1.4m 밑이라, PathFollowCritic이
