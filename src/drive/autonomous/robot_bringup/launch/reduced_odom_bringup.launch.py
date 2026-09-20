@@ -24,6 +24,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from ament_index_python.packages import get_package_share_directory
 import os
 
@@ -31,6 +32,9 @@ import os
 def generate_launch_description():
     can_interface = LaunchConfiguration('can_interface')
     imu_port = LaunchConfiguration('imu_port')
+    track_width = LaunchConfiguration('effective_track_width_m')
+    slip_factor = LaunchConfiguration('angular_slip_compensation_factor')
+    use_imu_yaw = LaunchConfiguration('use_imu_yaw')
 
     odom_params = os.path.join(
         get_package_share_directory('reduced_odom'),
@@ -59,6 +63,12 @@ def generate_launch_description():
                 "socat-fed virtual serial pair."
             ),
         ),
+
+        # 아래 세 인자의 기본값은 기존 자율주행(MPPI)용 값 그대로다. manual+return
+        # 미션(manual_return_bringup.launch.py)만 다른 값을 넘긴다.
+        DeclareLaunchArgument('effective_track_width_m', default_value='0.4904'),
+        DeclareLaunchArgument('angular_slip_compensation_factor', default_value='1.05'),
+        DeclareLaunchArgument('use_imu_yaw', default_value='true'),
 
         # [단계 1] RMD-X8 CAN 구동 드라이버 노드 -> /wheel/odom
         # 지상 주행용 hard wheel-speed clamp. 최초 저속 시험값에서 3배 상향.
@@ -91,7 +101,7 @@ def generate_launch_description():
                 # 추가 보정이 필요하면 명령 생성에만 영향을 주는(오도메트리는
                 # 안 건드리는) angular_slip_compensation_factor 쪽에서 작은
                 # 폭으로 스윕할 것.
-                'effective_track_width_m': 0.4904,
+                'effective_track_width_m': ParameterValue(track_width, value_type=float),
                 # [2026-08-27 스윕 잠정 중단, 1.05로 복귀] track_width=0.4904
                 # (원래 값, CTE 실측 최저)로 고정. 지금까지: 1.0->0.722m,
                 # 1.05->0.445m(최저), 1.10->0.507m. 1.07 세밀화 테스트 도중
@@ -100,7 +110,7 @@ def generate_launch_description():
                 # 발생해서 CTE 비교가 무의미해짐 -- 그 원인 규명 전까지 세밀화
                 # 스윕은 보류하고, 지금까지 나온 값 중 가장 좋았던 1.05로
                 # 되돌려둠.
-                'angular_slip_compensation_factor': 1.05,
+                'angular_slip_compensation_factor': ParameterValue(slip_factor, value_type=float),
                 'wheel_radius_m': 0.1125,
                 'external_gear_ratio': 1.0,
                 'max_wheel_speed_dps': 360.0,
@@ -219,7 +229,7 @@ def generate_launch_description():
             package='reduced_odom',
             executable='reduced_odom_node',
             name='reduced_odom_node',
-            parameters=[odom_params],
+            parameters=[odom_params, {'use_imu_yaw': ParameterValue(use_imu_yaw, value_type=bool)}],
             output='screen',
         ),
     ])

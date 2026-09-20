@@ -49,6 +49,7 @@ from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from ament_index_python.packages import get_package_share_directory
 import os
 
@@ -57,6 +58,9 @@ def generate_launch_description():
     can_interface = LaunchConfiguration('can_interface')
     imu_port = LaunchConfiguration('imu_port')
     turn_direction = LaunchConfiguration('turn_direction')
+    track_width = LaunchConfiguration('effective_track_width_m')
+    slip_factor = LaunchConfiguration('angular_slip_compensation_factor')
+    use_imu_yaw = LaunchConfiguration('use_imu_yaw')
 
     reduced_odom_bringup_launch = os.path.join(
         get_package_share_directory('robot_bringup'),
@@ -67,6 +71,17 @@ def generate_launch_description():
         DeclareLaunchArgument('imu_port', default_value='/dev/ttyACM0'),
         # RETURN 직전 180도 정렬 회전 방향 ('left'=반시계, 'right'=시계).
         DeclareLaunchArgument('turn_direction', default_value='left'),
+        # [실차 실측 2026-09] 스키드 조향 제자리 회전이 바퀴 기준 명령/오도메트리의
+        # 약 0.31배만 실제로 회전함(왼쪽 90도 vs 바퀴 267.5도, 오른쪽 82도 vs 289.1도
+        # -> 평균 0.31). 유효 트랙 폭을 0.4904/0.31=1.58m로 잡으면 명령(w)과 바퀴
+        # 오도메트리 yaw가 모두 실제 회전과 맞는다. drive_cmd_mux의 값도 반드시
+        # 같이 바꿔야 수동 dps 명령이 그대로 통과한다(mux->driver 왕복이 항등).
+        # myAHRS+ yaw는 모터 구동 후 분 단위로 초당 2도씩 흘러서 이 미션에서는
+        # 쓰지 않는다(use_imu_yaw=false). 옛 동작으로 되돌리려면:
+        #   effective_track_width_m:=0.4904 angular_slip_compensation_factor:=1.05 use_imu_yaw:=true
+        DeclareLaunchArgument('effective_track_width_m', default_value='1.58'),
+        DeclareLaunchArgument('angular_slip_compensation_factor', default_value='1.0'),
+        DeclareLaunchArgument('use_imu_yaw', default_value='false'),
 
         # [단계 1] rmd_x8_driver_node(CAN, 유일한 소유자) + myahrs_driver_node
         # + static TF(base_link->imu_link/camera_link) + reduced_odom_node.
@@ -77,6 +92,9 @@ def generate_launch_description():
             launch_arguments={
                 'can_interface': can_interface,
                 'imu_port': imu_port,
+                'effective_track_width_m': track_width,
+                'angular_slip_compensation_factor': slip_factor,
+                'use_imu_yaw': use_imu_yaw,
             }.items(),
         ),
 
@@ -85,6 +103,7 @@ def generate_launch_description():
             package='drive_cmd_mux',
             executable='drive_cmd_mux_node',
             name='drive_cmd_mux_node',
+            parameters=[{'effective_track_width_m': ParameterValue(track_width, value_type=float)}],
             output='screen',
         ),
 

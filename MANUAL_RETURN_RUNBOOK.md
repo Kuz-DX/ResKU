@@ -16,12 +16,37 @@ manual 주행 중 경로를 기록하고, RETURN 트리거 후 자동으로 출�
 recorder는 제자리 회전 중 같은 위치에 겹쳐 찍힌 점(`min_point_spacing_m`
 기본 0.1m 이내)을 하나로 합쳐서 경로 방향이 튀지 않게 한다.
 
-**[실차 튜닝]** 실차 로그에서 스키드 조향 제자리 회전이 명령의 약 25~40%만
-나오는 것이 확인되어(예: `TURN_180`이 35초), 회전 게인/속도 한도를 올렸다:
-`turn_kp` 2.0, `turn_w_max_radps` 0.9, `turn_yaw_tolerance_rad` 0.087(5°),
-`rotate_kp` 2.0, `rotate_max_angular_speed_radps` 0.9,
-`rotate_min_angular_speed_radps` 0.15, 복귀 직진 속도 `linear_speed_mps` 0.2. 또한 RETURN 직전 180° 정렬 회전은
-방향이 우연에 맡겨져 있던 것을 **고정**했다(기본 `left`=반시계):
+**[실차 튜닝 / 오도메트리 보정]** 실차 시험에서 두 가지가 확인됐다.
+
+1. 스키드 조향 제자리 회전은 바퀴 기준 값의 약 0.31배만 실제로 회전한다
+   (왼쪽 실제 90° vs 바퀴 267.5°, 오른쪽 82° vs 289.1°).
+2. myAHRS+ yaw는 모터를 구동한 뒤 분 단위로 초당 약 2°씩 계속 흐른다(정지 중엔
+   안정적). 회전 직후 몇 초는 실제와 맞음(오른쪽 -85° vs 실제 -82°).
+
+그래서 `manual_return_bringup`은 아래 값을 기본으로 넘긴다(MPPI용
+`autonomous.launch.py`의 기본값은 그대로 — 인자 기본값이 옛 값):
+
+| 인자 | manual+return 기본 | MPPI/기존 기본 |
+|---|---|---|
+| `effective_track_width_m` | 1.58 (= 0.4904/0.31) | 0.4904 |
+| `angular_slip_compensation_factor` | 1.0 | 1.05 |
+| `use_imu_yaw` | false (바퀴만으로 yaw 적분) | true |
+
+`effective_track_width_m`은 드라이버와 `drive_cmd_mux`에 **같은 값**이 들어가서
+수동 dps 명령은 그대로 통과하고, 복귀 회전 명령(w)은 실제 회전량과 맞는다.
+옛 동작으로 되돌리려면:
+
+```bash
+ros2 launch robot_bringup manual_return_bringup.launch.py \
+  effective_track_width_m:=0.4904 angular_slip_compensation_factor:=1.05 use_imu_yaw:=true
+```
+
+회전 관련 값은 이제 "실제 회전 속도"다: `turn_kp` 1.5, `turn_w_max_radps` 0.5,
+`turn_yaw_tolerance_rad` 0.087(5°), `rotate_kp` 1.5,
+`rotate_max_angular_speed_radps` 0.5, `rotate_min_angular_speed_radps` 0.25
+(정지마찰을 넘는 최소값), 복귀 직진 `linear_speed_mps` 0.2.
+보정치 0.31은 0.8 rad/s 명령·약 6초 시험 2회 평균이라 속도별 확인이 더 필요하다.
+또한 RETURN 직전 180° 정렬 회전은 방향을 **고정**했다(기본 `left`=반시계):
 
 ```bash
 ros2 launch robot_bringup manual_return_bringup.launch.py turn_direction:=right   # 시계 방향

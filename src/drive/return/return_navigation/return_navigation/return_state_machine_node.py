@@ -75,11 +75,11 @@ class ReturnStateMachineNode(Node):
         self.declare_parameter('stop_wz_threshold_radps', 0.03)
         self.declare_parameter('stop_settle_duration_s', 0.5)
 
-        # Measured on the real robot (skid steer): in-place rotation only
-        # achieves ~30-40% of the commanded angular speed, so kp/w_max are
-        # raised well above the values that suffice in simulation.
-        self.declare_parameter('turn_kp', 2.0)
-        self.declare_parameter('turn_w_max_radps', 0.9)
+        # manual_return_bringup sets effective_track_width_m=1.58 so that a
+        # commanded w is (roughly) the real rotation rate on the robot; these
+        # are therefore real rates: 0.5 rad/s ~ 29 deg/s.
+        self.declare_parameter('turn_kp', 1.5)
+        self.declare_parameter('turn_w_max_radps', 0.5)
         self.declare_parameter('turn_yaw_tolerance_rad', 0.087)  # ~5 deg
         # 'left' = counter-clockwise (+angular.z), 'right' = clockwise.
         # Fixed on purpose: a 180 deg error has no natural shortest

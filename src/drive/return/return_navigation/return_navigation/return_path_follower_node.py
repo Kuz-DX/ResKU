@@ -82,13 +82,14 @@ class ReturnPathFollowerNode(Node):
         # error hovering near one boundary doesn't chatter between modes.
         self.declare_parameter('rotate_enter_angle_deg', 42.0)
         self.declare_parameter('rotate_exit_angle_deg', 9.0)
-        # Real robot only turns ~30-40% of the commanded in-place rate
-        # (skid slip), hence the higher gain/limits than sim needs.
-        self.declare_parameter('rotate_kp', 2.0)
-        self.declare_parameter('rotate_max_angular_speed_radps', 0.9)
+        # Real rates (manual_return_bringup calibrates the effective track
+        # width so commanded w ~ real rotation). rotate_min is the lowest
+        # rate that still overcomes wheel stiction (~100 dps per wheel).
+        self.declare_parameter('rotate_kp', 1.5)
+        self.declare_parameter('rotate_max_angular_speed_radps', 0.5)
         # floor so the commanded angular speed doesn't decay into the
         # motor's dead-band while still actively correcting a small error
-        self.declare_parameter('rotate_min_angular_speed_radps', 0.15)
+        self.declare_parameter('rotate_min_angular_speed_radps', 0.25)
         self.declare_parameter('rotate_settle_time_s', 0.3)
         # A path vertex whose heading change is >= corner_detection_angle_deg
         # is a temporary goal: drive to it, stop, rotate, continue.

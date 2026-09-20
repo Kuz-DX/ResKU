@@ -44,6 +44,12 @@ public:
     r_yaw_ = declare_parameter("r_imu_yaw", 0.01);
     wheel_gate_ = declare_parameter("wheel_gate_sigma", 5.0);
     yaw_gate_ = declare_parameter("yaw_gate_sigma", 4.0);
+    // false: ignore the IMU's absolute yaw entirely and integrate yaw from
+    // the wheel yaw rate only (roll/pitch still come from the IMU when it is
+    // present). Used by the manual+return mission, where the AHRS yaw was
+    // measured to keep sliding at ~2 deg/s for minutes after the motors ran.
+    // Default true keeps the original wheel+IMU behaviour for every other user.
+    use_imu_yaw_ = declare_parameter("use_imu_yaw", true);
 
     auto sensor_qos = rclcpp::SensorDataQoS().keep_last(20);
     wheel_sub_ = create_subscription<nav_msgs::msg::Odometry>(
@@ -54,6 +60,13 @@ public:
     diag_pub_ = create_publisher<DiagnosticArray>("/odometry/diagnostics", 10);
     tf_pub_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
     diag_timer_ = create_wall_timer(std::chrono::seconds(1), std::bind(&ReducedOdomNode::diagnostics, this));
+    if (!use_imu_yaw_) {
+      // No IMU is needed to start publishing in this mode; yaw starts at 0
+      // (callers work in a mission frame anchored at their own T0).
+      ekf_.initializeYaw(0.0, r_yaw_);
+      have_attitude_ = true;
+      RCLCPP_WARN(get_logger(), "use_imu_yaw=false: yaw is integrated from wheel odometry only");
+    }
     RCLCPP_INFO(get_logger(), "5-state estimator: %s + %s -> %s and %s->%s TF",
       wheel_topic_.c_str(), imu_topic_.c_str(), output_topic_.c_str(),
       odom_frame_.c_str(), base_frame_.c_str());
@@ -91,6 +104,10 @@ private:
     double roll, pitch, yaw;
     if (!imuToBase(*msg, roll, pitch, yaw)) {++imu_rejects_; return;}
     last_imu_stamp_ = t;
+    if (!use_imu_yaw_) {
+      roll_ = roll; pitch_ = pitch;
+      return;
+    }
     if (!have_attitude_) {
       // AHRS heading has an arbitrary valid initial angle. It is not an
       // innovation relative to zero, so initialize rather than gate it.
@@ -152,8 +169,9 @@ private:
     const double now_s = get_clock()->now().seconds();
     const bool wheel_stale = last_wheel_stamp_ <= 0.0 || now_s - last_wheel_stamp_ > timeout_;
     const bool imu_stale = last_imu_stamp_ <= 0.0 || now_s - last_imu_stamp_ > timeout_;
-    s.level = (wheel_stale || imu_stale) ? DiagnosticStatus::ERROR : DiagnosticStatus::OK;
-    s.message = wheel_stale ? "wheel stale" : (imu_stale ? "IMU stale" : "OK");
+    const bool imu_missing = use_imu_yaw_ && imu_stale;
+    s.level = (wheel_stale || imu_missing) ? DiagnosticStatus::ERROR : DiagnosticStatus::OK;
+    s.message = wheel_stale ? "wheel stale" : (imu_missing ? "IMU stale" : "OK");
     const auto add = [&s](const std::string & k, auto v) {
         KeyValue item; item.key = k; item.value = std::to_string(v); s.values.push_back(item);
       };
@@ -180,6 +198,7 @@ private:
   double timeout_, max_dt_, r_vx_, r_wz_, r_yaw_, wheel_gate_, yaw_gate_;
   double last_wheel_stamp_{-1.0}, last_imu_stamp_{-1.0}, roll_{0.0}, pitch_{0.0};
   bool have_attitude_{false};
+  bool use_imu_yaw_{true};
   uint64_t wheel_count_{0}, imu_count_{0}, wheel_rejects_{0}, imu_rejects_{0};
   uint64_t yaw_gate_rejects_{0}, timestamp_rejects_{0};
   uint64_t wheel_vx_rejects_{0}, wheel_wz_rejects_{0};
