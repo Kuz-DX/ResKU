@@ -213,6 +213,36 @@ ros2 run manual_return_sim keyboard_teleop
 ros2 topic echo /cmd_vel_return_path      # 회전 중 linear.x 가 0 인지 확인
 ```
 
+## 7-5. 실차 모니터링 (로컬 PC에서 RViz + 초 단위 yaw)
+
+로봇 PC에서는 `manual_return_bringup`만 켜고, **로컬 PC**에서 아래 두 개를 띄우면
+로봇 토픽(`/odometry/filtered`, `/mission/*`, `/return_path`)을 그대로 받아 그린다
+(두 PC의 `ROS_DOMAIN_ID`가 같아야 함). 코드 수정 후에는 로컬 PC에서
+`colcon build --packages-select manual_return_sim` 먼저.
+
+```bash
+# 터미널 A: 경로/궤적/yaw 마커 발행 + odom->mission TF (debug 전용)
+source /opt/ros/humble/setup.bash && source install/setup.bash
+ros2 run manual_return_sim sim_debug_viz
+
+# 터미널 B: RViz
+rviz2 -d install/manual_return_sim/share/manual_return_sim/config/sim_manual_return.rviz
+```
+
+TURN_180 / FOLLOW_RETURN_PATH 동안 **1초마다** 실제 궤적 위에 노란 점과
+글자가 찍히고, 같은 내용이 터미널 A에 표로 출력된다:
+
+```
+  t(s)  state                 yaw(deg) path(deg)  err(deg)   xte(m)     v(m/s)  w(rad/s)
+     3  FOLLOW_RETURN_PATH         30.4      11.0     -19.4     +0.05       0.20     +0.10
+```
+
+- `yaw`: 로봇 현재 yaw (mission 프레임), `path`: 가장 가까운 계획 구간의 진행방향
+- `err` = `path - yaw` (양수면 경로 방향이 로봇 기준 왼쪽), `xte`: 경로까지의 거리
+  (양수 = 로봇이 경로 왼쪽), `v`/`w`: follower가 낸 명령
+- 로봇 옆의 하늘색 글자는 실시간 상태/yaw/명령(0.2초 갱신)
+- 라벨은 사이클마다 누적된다(최대 600개). 지우려면 터미널 A를 재시작.
+
 ## 8. 동시 실행 금지
 
 `autonomous.launch.py`(MPPI, 2단계 평가용 보존)와

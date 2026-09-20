@@ -78,6 +78,16 @@ Visualization Manager:
       Enabled: true
       Topic:
         Value: /debug/actual_return_trace_history
+    - Class: rviz_default_plugins/MarkerArray
+      Name: yaw labels (per second)
+      Enabled: true
+      Topic:
+        Value: /debug/yaw_labels
+    - Class: rviz_default_plugins/Marker
+      Name: live yaw
+      Enabled: true
+      Topic:
+        Value: /debug/live_yaw
   Global Options:
     Fixed Frame: odom
     Background Color: 48; 48; 48
