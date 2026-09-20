@@ -178,6 +178,12 @@ class ReturnStateMachineNode(Node):
             self.get_logger().info(f'[return_state_machine] {self._state} -> {new_state}')
             self._state = new_state
             self._state_entered_time = self.get_clock().now()
+            if new_state == WAIT_RETURN_COMMAND:
+                # Publishers that only ever send True (keyboard, `topic pub -1`)
+                # never produce a False->True edge after their first press, so a
+                # stale True from an earlier (too-early, absorbed) press would
+                # otherwise block every later trigger.
+                self._prev_trigger = False
 
     def _elapsed_in_state(self) -> float:
         return (self.get_clock().now() - self._state_entered_time).nanoseconds * 1e-9

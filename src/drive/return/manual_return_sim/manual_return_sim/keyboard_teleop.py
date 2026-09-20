@@ -61,6 +61,7 @@ class KeyboardTeleop(Node):
 
         self.left = 0.0
         self.right = 0.0
+        self._trigger_off_at = None
         self.label = 'stop'
         self.state = '?'
 
@@ -68,6 +69,10 @@ class KeyboardTeleop(Node):
         self.state = msg.data
 
     def _publish(self):
+        if self._trigger_off_at is not None and time.monotonic() >= self._trigger_off_at:
+            # release the trigger so the next press is a fresh False->True edge
+            self.trigger_pub.publish(Bool(data=False))
+            self._trigger_off_at = None
         msg = Float32MultiArray()
         msg.data = [float(self.left), float(self.right)]
         self.cmd_pub.publish(msg)
@@ -105,6 +110,7 @@ class KeyboardTeleop(Node):
             self._set(0, 0, 'stop')
             self._publish()
             self.trigger_pub.publish(Bool(data=True))
+            self._trigger_off_at = time.monotonic() + 0.3
             self.label = 'RETURN sent'
         elif key == 'x' or key == '\x03':
             return False

@@ -113,11 +113,15 @@ ros2 topic echo /return_path              # RETURN 트리거 후 1회 발행되�
 ## 6. RETURN 트리거
 
 조이스틱 버튼 8번(기본값, 미검증 — 실기에서 확인 필요). 수동으로
-트리거하려면:
+트리거하려면 **False를 먼저 보내고 True를 보낸다** (상태 머신은 False->True 변화만
+트리거로 인식해서, True만 여러 번 보내면 두 번째부터 무시된다):
 
 ```bash
+ros2 topic pub -1 /mission/return/trigger std_msgs/msg/Bool "{data: false}"
 ros2 topic pub -1 /mission/return/trigger std_msgs/msg/Bool "{data: true}"
 ```
+
+키보드 조종(`keyboard_teleop`)의 `r`은 True를 보낸 뒤 자동으로 False를 이어서 보낸다.
 
 ## 7. 실차 전 가상환경 테스트 (RViz + 키보드 조종)
 
