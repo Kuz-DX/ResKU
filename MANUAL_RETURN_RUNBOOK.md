@@ -18,9 +18,9 @@ recorder는 제자리 회전 중 같은 위치에 겹쳐 찍힌 점(`min_point_s
 
 **[실차 튜닝]** 실차 로그에서 스키드 조향 제자리 회전이 명령의 약 25~40%만
 나오는 것이 확인되어(예: `TURN_180`이 35초), 회전 게인/속도 한도를 올렸다:
-`turn_kp` 2.0, `turn_w_max_radps` 1.2, `turn_yaw_tolerance_rad` 0.087(5°),
-`rotate_kp` 2.0, `rotate_max_angular_speed_radps` 1.2,
-`rotate_min_angular_speed_radps` 0.15. 또한 RETURN 직전 180° 정렬 회전은
+`turn_kp` 2.0, `turn_w_max_radps` 0.9, `turn_yaw_tolerance_rad` 0.087(5°),
+`rotate_kp` 2.0, `rotate_max_angular_speed_radps` 0.9,
+`rotate_min_angular_speed_radps` 0.15, 복귀 직진 속도 `linear_speed_mps` 0.2. 또한 RETURN 직전 180° 정렬 회전은
 방향이 우연에 맡겨져 있던 것을 **고정**했다(기본 `left`=반시계):
 
 ```bash

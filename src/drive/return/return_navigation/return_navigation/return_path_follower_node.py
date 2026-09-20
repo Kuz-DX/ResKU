@@ -69,7 +69,7 @@ class ReturnPathFollowerNode(Node):
 
         self.declare_parameter('control_rate_hz', 20.0)
         self.declare_parameter('lookahead_distance_m', 0.6)
-        self.declare_parameter('linear_speed_mps', 0.3)
+        self.declare_parameter('linear_speed_mps', 0.2)
         self.declare_parameter('min_linear_speed_mps', 0.05)
         self.declare_parameter('max_angular_speed_radps', 0.6)
         self.declare_parameter('goal_slowdown_radius_m', 0.8)
@@ -85,7 +85,7 @@ class ReturnPathFollowerNode(Node):
         # Real robot only turns ~30-40% of the commanded in-place rate
         # (skid slip), hence the higher gain/limits than sim needs.
         self.declare_parameter('rotate_kp', 2.0)
-        self.declare_parameter('rotate_max_angular_speed_radps', 1.2)
+        self.declare_parameter('rotate_max_angular_speed_radps', 0.9)
         # floor so the commanded angular speed doesn't decay into the
         # motor's dead-band while still actively correcting a small error
         self.declare_parameter('rotate_min_angular_speed_radps', 0.15)
