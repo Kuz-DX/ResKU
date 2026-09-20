@@ -46,12 +46,14 @@ class ManualPathRecorderNode(Node):
         self.declare_parameter('distance_threshold_m', 0.3)
         self.declare_parameter('yaw_threshold_rad', 0.26)   # ~15 deg
         self.declare_parameter('max_time_interval_s', 2.0)
+        self.declare_parameter('min_point_spacing_m', 0.1)
 
         p = self.get_parameter
         self.mission_frame_id = p('mission_frame_id').value
         self.distance_threshold_m = float(p('distance_threshold_m').value)
         self.yaw_threshold_rad = float(p('yaw_threshold_rad').value)
         self.max_time_interval_s = float(p('max_time_interval_s').value)
+        self.min_point_spacing_m = float(p('min_point_spacing_m').value)
 
         self._recording = False
         self._origin = None            # Pose2D, odom frame, set on START
@@ -133,12 +135,27 @@ class ManualPathRecorderNode(Node):
 
     # ------------------------------------------------------------------ #
     def _process_path(self, raw_poses):
-        """P0: duplicate-point removal only. Kept as its own method so
-        resampling/smoothing can be added later without touching capture
-        logic (_on_odom above)."""
+        """Merge points closer than min_point_spacing_m to the last KEPT
+        point (first point of each cluster wins).
+
+        Turning in place fires the yaw gate repeatedly at (almost) the same
+        spot, stacking points a few mm apart. The return path derives each
+        point's heading from atan2(next - this), so such stacked points get
+        random headings (measured: -134, -170, -152, -85, -74 deg across
+        one physical corner) and the follower spins back and forth. The
+        cluster's position IS the corner vertex, so keeping its first
+        point preserves the corner geometry.
+
+        INVARIANT for any future resampling/smoothing added here: a point
+        whose heading changes sharply from its neighbor (a recorded sharp
+        corner) must never be dropped -- return_path_follower_node relies
+        on /recorded_path (via /return_path's per-point yaw) to detect and
+        rotate-in-place at those corners. Thinning by distance/count alone
+        would silently erase that geometry and corner-cutting would come
+        back regardless of follower-side fixes."""
         processed = []
         for pose in raw_poses:
-            if processed and pose.distance_to(processed[-1]) < 1e-6:
+            if processed and pose.distance_to(processed[-1]) < self.min_point_spacing_m:
                 continue
             processed.append(pose)
         return processed
