@@ -45,7 +45,8 @@
 |---|---|---|
 | `/motor_speed_cmd_manual` | `std_msgs/msg/Float32MultiArray` | 좌/우 구동 모터 속도 명령(dps, 부호 없음) |
 | `/max_speed_dps` | `std_msgs/msg/Float32MultiArray` | 조이스틱으로 조절한 좌/우 최대 속도 표시 |
-| `/mission/return/trigger` | `std_msgs/msg/Bool` | RETURN 버튼 rising edge — return_state_machine_node가 구독 |
+| `/path/record` | `std_msgs/msg/Bool` | [UI 인터페이스] 녹화 시작(현재 위치를 (0,0) 원점으로) rising edge — return_state_machine_node가 구독. 더 이상 자동 시작 안 함 |
+| `/path/return` | `std_msgs/msg/Bool` | [UI 인터페이스, 구 `/mission/return/trigger`] RETURN rising edge — return_state_machine_node가 구독. UI 쪽 값은 True 발행 후 False로 되돌리는 게 스펙이지만, 이 노드는 그 값과 무관하게 False→True 변화(edge)만 인식하므로 UI가 리셋을 빼먹어도 두 번째 트리거는 정상 동작한다 |
 
 ## can_driver (구 수동 주행 CAN 드라이버 — deprecated, 미사용)
 

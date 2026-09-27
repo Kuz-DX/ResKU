@@ -97,7 +97,7 @@ ros2 launch robot_bringup manual_return_bringup.launch.py
 
 [원격 PC, 조이스틱이 물린 쪽] joy_node + manual_joy_control_node
 (출력: `/motor_speed_cmd_manual`, dps, Twist 변환은 drive_cmd_mux_node가 담당.
-RETURN 트리거: `/mission/return/trigger`):
+RETURN 트리거: `/path/return`, 구 `/mission/return/trigger`):
 ```bash
 source install/setup.bash
 ros2 launch manual_joy_control manual_control.launch.py

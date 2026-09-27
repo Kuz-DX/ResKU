@@ -139,7 +139,7 @@ class ManualJoyControlNode(Node):
         # [manual+return 통합] RETURN 미션 트리거 -- return_state_machine_node가
         # WAIT_RETURN_COMMAND 상태에서 이 rising edge를 감지해 복귀 시퀀스를
         # 시작한다.
-        self.return_trigger_pub = self.create_publisher(Bool, '/mission/return/trigger', 10)
+        self.return_trigger_pub = self.create_publisher(Bool, '/path/return', 10)
 
         rate = p('cmd_publish_rate_hz').value
         self.timer = self.create_timer(1.0 / rate, self.publish_cmd)

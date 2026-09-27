@@ -7,9 +7,21 @@ RETURN and watch the robot retrace them in RViz.
 
 Publishes:
     /motor_speed_cmd_manual  (std_msgs/Float32MultiArray, [left_dps, right_dps])
-    /mission/return/trigger  (std_msgs/Bool)  -- on 'r'
+    /path/record              (std_msgs/Bool)  -- on 'g'
+    /path/return               (std_msgs/Bool)  -- on 'r'
 Subscribes:
     /mission/return/state    (std_msgs/String) -- shown in the status line
+
+[UI boolean interface, 2026-09] /path/record and /path/return replace the
+old /mission/return/trigger. return_state_machine_node no longer starts
+recording automatically the instant odometry appears -- 'g' marks the
+current position as the (0,0) origin and starts recording explicitly,
+matching what the UI team's spec does. Both keys pulse True then False
+0.3s later (see _fire_trigger/_publish below), mirroring the "resets to
+default after the action runs" behaviour the UI is expected to have --
+but return_state_machine_node's own correctness never depends on that
+pulse actually arriving (it only acts on a False->True edge, see that
+node's docstring).
 
 Latching keys (the command keeps running until you press another key):
     w / s   forward / backward
@@ -18,6 +30,7 @@ Latching keys (the command keeps running until you press another key):
     z / c   curve backward-left / backward-right
     space   stop
     + / -   speed up / down (10 dps steps)
+    g       start recording (marks current position as origin)
     r       RETURN (stops first, then triggers the return sequence)
     x       stop and quit
 
@@ -39,7 +52,7 @@ HELP = """
   w/s  forward/back      a/d  turn in place (left/right)
   q/e  curve fwd L/R     z/c  curve back L/R
   space stop             +/-  speed up/down
-  r    RETURN            x    quit
+  g    start recording   r    RETURN            x    quit
 """
 
 CURVE_RATIO = 0.55
@@ -56,23 +69,49 @@ class KeyboardTeleop(Node):
         self.period = 1.0 / float(self.get_parameter('publish_rate_hz').value)
 
         self.cmd_pub = self.create_publisher(Float32MultiArray, '/motor_speed_cmd_manual', 10)
-        self.trigger_pub = self.create_publisher(Bool, '/mission/return/trigger', 10)
+        self.record_pub = self.create_publisher(Bool, '/path/record', 10)
+        self.return_pub = self.create_publisher(Bool, '/path/return', 10)
         self.create_subscription(String, '/mission/return/state', self._on_state, 10)
 
         self.left = 0.0
         self.right = 0.0
-        self._trigger_off_at = None
+        # each entry: [publisher, monotonic time to send the False release]
+        self._pending_releases = []
         self.label = 'stop'
         self.state = '?'
 
     def _on_state(self, msg: String):
         self.state = msg.data
 
+    def _fire_trigger(self, pub, label: str):
+        """False right before True, then True, then False again 0.3s later.
+
+        The leading False is defensive, not load-bearing here (nothing
+        else on this process writes to these topics, so the value is
+        already False from this node's own previous release) -- but it's
+        the pattern documented for the UI team, since a UI CAN'T assume
+        that: another client might have left a stray True on the topic,
+        or this might be the very first press this session. Sending False
+        immediately before True makes the resulting edge unconditional
+        regardless of prior state. The trailing False afterward is
+        separate: it's what makes the topic's resting value satisfy the
+        UI spec's "resets to default after the action runs", for anyone
+        else reading the topic -- return_state_machine_node itself never
+        needs it (it only acts on the edge, see that node's docstring)."""
+        pub.publish(Bool(data=False))
+        pub.publish(Bool(data=True))
+        self._pending_releases.append([pub, time.monotonic() + 0.3])
+        self.label = label
+
     def _publish(self):
-        if self._trigger_off_at is not None and time.monotonic() >= self._trigger_off_at:
-            # release the trigger so the next press is a fresh False->True edge
-            self.trigger_pub.publish(Bool(data=False))
-            self._trigger_off_at = None
+        now = time.monotonic()
+        still_pending = []
+        for pub, off_at in self._pending_releases:
+            if now >= off_at:
+                pub.publish(Bool(data=False))
+            else:
+                still_pending.append([pub, off_at])
+        self._pending_releases = still_pending
         msg = Float32MultiArray()
         msg.data = [float(self.left), float(self.right)]
         self.cmd_pub.publish(msg)
@@ -106,12 +145,12 @@ class KeyboardTeleop(Node):
             self._rescale(self.speed + self.step)
         elif key in ('-', '_'):
             self._rescale(max(self.step, self.speed - self.step))
+        elif key == 'g':
+            self._fire_trigger(self.record_pub, 'RECORD sent')
         elif key == 'r':
             self._set(0, 0, 'stop')
             self._publish()
-            self.trigger_pub.publish(Bool(data=True))
-            self._trigger_off_at = time.monotonic() + 0.3
-            self.label = 'RETURN sent'
+            self._fire_trigger(self.return_pub, 'RETURN sent')
         elif key == 'x' or key == '\x03':
             return False
         return True

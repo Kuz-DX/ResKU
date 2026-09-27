@@ -110,18 +110,50 @@ ros2 topic echo /return_path              # RETURN 트리거 후 1회 발행되�
 #   "ROTATE_TO_PATH -> TRACK_PATH (yaw_error=...)"
 ```
 
-## 6. RETURN 트리거
+## 6. 녹화 시작 / RETURN 트리거 (UI 불리언 인터페이스)
 
-조이스틱 버튼 8번(기본값, 미검증 — 실기에서 확인 필요). 수동으로
-트리거하려면 **False를 먼저 보내고 True를 보낸다** (상태 머신은 False->True 변화만
-트리거로 인식해서, True만 여러 번 보내면 두 번째부터 무시된다):
+**[업데이트] UI 팀 요구사항 반영** — 녹화가 더 이상 오도메트리가 뜨는 즉시
+자동으로 시작하지 않는다. `/path/record`를 True로 보내야 그 순간의 위치를
+(0,0) 원점으로 녹화가 시작된다. 복귀 트리거는 기존 `/mission/return/trigger`
+에서 이름만 `/path/return`으로 바뀌었다(동작은 동일).
+
+| 토픽 | 타입 | 동작 |
+|---|---|---|
+| `/path/record` | `std_msgs/msg/Bool` | True가 되는 순간 현재 위치를 (0,0)으로 녹화 시작 |
+| `/path/return` | `std_msgs/msg/Bool` | True가 되는 순간 정지→180도 회전→복귀 경로 추종 시작 |
+
+**[UI 팀 주의사항] 반드시 False→True로 "바뀌는 순간"만 트리거로 인식한다.**
+True를 계속 유지하거나, False로 되돌리지 않고 다시 True를 보내도 두 번째
+트리거는 인식되지 않는다(이전에 이 문제로 실차에서 복귀 명령이 무시되는
+버그가 있었다). 그래서:
+- 매 요청마다 **False를 먼저 보낸 뒤 True를 보내는 두 번의 publish**로
+  구현해야 한다(토글 버튼이라도 내부적으로 이렇게 pulse를 만들어야 함).
+- "수행 이후 다시 기본값(false)으로 세팅"은 **UI 쪽에서 직접 해야 한다** —
+  로봇 쪽 코드가 자동으로 리셋해주지 않는다. 다만 로봇 쪽은 UI가 리셋을
+  깜빡하고 True를 계속 보내고 있어도(즉 매번 새 메시지 자체는 발행하되 값이
+  항상 True인 경우) 다음 트리거가 막히지 않도록 대기 상태에 들어갈 때마다
+  내부적으로 이전 값을 리셋해 둔다 — 그래도 스펙대로 False→True pulse를
+  보내는 쪽이 가장 안전하다.
+- `/path/record`는 `WAIT_RETURN_COMMAND`/그 이후 상태에서는 무시된다(오직
+  `IDLE` 상태에서만 받는다). `/path/return`도 마찬가지로 `WAIT_RETURN_COMMAND`
+  상태에서만 받는다(그 전엔 최소 2개 이상 경로점이 쌓여야 함).
+
+명령줄로 수동 시험하려면:
 
 ```bash
-ros2 topic pub -1 /mission/return/trigger std_msgs/msg/Bool "{data: false}"
-ros2 topic pub -1 /mission/return/trigger std_msgs/msg/Bool "{data: true}"
+ros2 topic pub -1 /path/record std_msgs/msg/Bool "{data: false}"
+ros2 topic pub -1 /path/record std_msgs/msg/Bool "{data: true}"
+# 주행 후
+ros2 topic pub -1 /path/return std_msgs/msg/Bool "{data: false}"
+ros2 topic pub -1 /path/return std_msgs/msg/Bool "{data: true}"
 ```
 
-키보드 조종(`keyboard_teleop`)의 `r`은 True를 보낸 뒤 자동으로 False를 이어서 보낸다.
+조이스틱은 버튼 8번(기본값, 미검증 — 실기에서 확인 필요)이 `/path/return`만
+발행한다. `/path/record`에 대응하는 조이스틱 버튼은 아직 없음(필요하면 버튼
+번호를 정해서 `manual_joy_control_node`에 추가해야 함).
+
+키보드 조종(`keyboard_teleop`)은 `g`가 `/path/record`, `r`이 `/path/return`
+이고 둘 다 True를 보낸 뒤 0.3초 후 자동으로 False를 이어서 보낸다.
 
 ## 7. 실차 전 가상환경 테스트 (RViz + 키보드 조종)
 
@@ -224,13 +256,15 @@ ros2 run manual_return_sim keyboard_teleop
 | `z` / `c` | 후진 좌/우 커브 |
 | `space` | 정지 |
 | `+` / `-` | 속도 ±10 dps |
-| `r` | 정지 후 RETURN 트리거 |
+| `g` | 현재 위치를 원점으로 녹화 시작 (`/path/record`) |
+| `r` | 정지 후 RETURN 트리거 (`/path/return`) |
 | `x` | 종료 |
 
 키를 누르면 다른 키를 누르거나 `space`를 누를 때까지 유지된다. 화면
 아래 상태줄에 현재 미션 상태와 좌/우 dps가 실시간으로 표시된다.
-직각/지그재그 경로를 그려본 뒤 `r`로 복귀시켜 코너에서 정지 후
-제자리 회전하는지 RViz로 확인한다.
+**녹화는 `g`를 눌러야 시작된다** (더 이상 자동 시작 안 함 — 6장 참고).
+`g`로 녹화를 시작하고 직각/지그재그 경로를 그려본 뒤 `r`로 복귀시켜
+코너에서 정지 후 제자리 회전하는지 RViz로 확인한다.
 
 ### 7-4. 코너 회전 동작 확인 (선택)
 

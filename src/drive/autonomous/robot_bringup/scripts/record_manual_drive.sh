@@ -104,7 +104,8 @@ CORE_TOPICS=(
   /wheel/motor_status
   /odometry/filtered       # reduced_odom_node -- 이제 manual 주행 중에도 나옴
   /mission/return/state
-  /mission/return/trigger
+  /path/record             # [UI 인터페이스, 구 /mission/return/trigger] 녹화 시작
+  /path/return              # [UI 인터페이스, 구 /mission/return/trigger] RETURN
   /mission/origin_pose
   /recorded_path_raw
   /recorded_path

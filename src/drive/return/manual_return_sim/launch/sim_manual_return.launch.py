@@ -26,8 +26,15 @@ Or by hand with `ros2 topic pub` on /motor_speed_cmd_manual
 (std_msgs/Float32MultiArray, [left_dps, right_dps]):
     ros2 topic pub -r 20 /motor_speed_cmd_manual std_msgs/msg/Float32MultiArray \\
         "{data: [150.0, 150.0]}"   # drive forward
+
+[UI boolean interface] recording no longer starts automatically -- mark the
+origin and start it with (False then True, since only the edge counts --
+see return_state_machine_node.py's docstring):
+    ros2 topic pub -1 /path/record std_msgs/msg/Bool "{data: false}"
+    ros2 topic pub -1 /path/record std_msgs/msg/Bool "{data: true}"
 and trigger RETURN with:
-    ros2 topic pub -1 /mission/return/trigger std_msgs/msg/Bool "{data: true}"
+    ros2 topic pub -1 /path/return std_msgs/msg/Bool "{data: false}"
+    ros2 topic pub -1 /path/return std_msgs/msg/Bool "{data: true}"
 
 Watch /recorded_path grow (green) then /return_path (orange) get followed
 back toward the origin in RViz.

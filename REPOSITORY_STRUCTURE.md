@@ -121,7 +121,7 @@
 
 | 노드 | 역할 |
 |---|---|
-| `manual_joy_control_node` | `/joy`를 받아 좌우 모터 속도 배열 `/motor_speed_cmd_manual`(dps)을 발행한다. `/control/active_target`이 있으면 주행/팔 제어 대상 분리를 따르고, RETURN 버튼 rising edge를 `/mission/return/trigger`로 발행한다. |
+| `manual_joy_control_node` | `/joy`를 받아 좌우 모터 속도 배열 `/motor_speed_cmd_manual`(dps)을 발행한다. `/control/active_target`이 있으면 주행/팔 제어 대상 분리를 따르고, RETURN 버튼 rising edge를 `/path/return`(구 `/mission/return/trigger`)으로 발행한다. |
 
 `manual_control.launch.py`는 `joy_node`와 `manual_joy_control_node`를 함께 실행한다(원격 PC).
 

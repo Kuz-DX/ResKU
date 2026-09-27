@@ -10,12 +10,19 @@ States (published continuously as std_msgs/String on /mission/return/state):
     IDLE -> MANUAL_RECORDING -> WAIT_RETURN_COMMAND -> STOP_BEFORE_TURN
          -> TURN_180 -> FOLLOW_RETURN_PATH -> FINISHED -> IDLE (loops)
 
-    IDLE->MANUAL_RECORDING:            once /odometry/filtered is available
+    IDLE->MANUAL_RECORDING:
+        on /path/record rising edge, once /odometry/filtered is available.
+        [UI interface, 2026-09] recording is no longer auto-started the
+        instant odometry appears -- the operator/UI marks the origin
+        explicitly by publishing /path/record=true. A stale True already
+        latched in from an earlier (too-early) press cannot re-trigger this
+        on its own: _go_to() clears _prev_record_trigger on every entry to
+        IDLE, so only an actual False->True edge counts (see _on_record_trigger).
     MANUAL_RECORDING->WAIT_RETURN_COMMAND:
         once the recorder has captured >=2 waypoints (i.e. the robot has
         actually moved) -- an early RETURN trigger before that is ignored.
     WAIT_RETURN_COMMAND->STOP_BEFORE_TURN:
-        on /mission/return/trigger rising edge
+        on /path/return rising edge
     STOP_BEFORE_TURN->TURN_180:
         |vx| and |wz| (from /odometry/filtered) below threshold, sustained
     TURN_180->FOLLOW_RETURN_PATH:
@@ -38,10 +45,24 @@ Publishes:
 
 Subscribes:
     /odometry/filtered      (nav_msgs/Odometry)
-    /mission/return/trigger  (std_msgs/Bool)
+    /path/record             (std_msgs/Bool)  -- UI trigger, start recording at (0,0)
+    /path/return             (std_msgs/Bool)  -- UI trigger, start Return to Base
     /mission/origin_pose     (geometry_msgs/Pose, TRANSIENT_LOCAL)
     /recorded_path           (nav_msgs/Path)
     /cmd_vel_return_path      (geometry_msgs/Twist) -- from return_path_follower_node
+
+[UI boolean interface, 2026-09] /path/record and /path/return are level
+signals from the UI team's spec ("default false, reset to false again after
+the action runs") -- but THIS NODE only ever acts on a False->True EDGE
+(_on_record_trigger/_on_return_trigger below), never on a sustained True.
+This is deliberate and load-bearing: whether or not the UI actually resets
+its own value back to False afterward, a stale True sitting on the topic
+can never fire twice in a row here, and a fresh press is never missed
+because _prev_record_trigger/_prev_trigger are cleared every time the node
+re-enters the state that is waiting for that trigger (IDLE / 
+WAIT_RETURN_COMMAND) -- see _go_to(). The UI must still publish False after
+True for its own "boolean resets to default" semantics to be true on ITS
+side, but this node's correctness does not depend on it doing so.
 """
 
 import math
@@ -121,6 +142,8 @@ class ReturnStateMachineNode(Node):
 
         self._trigger_pending = False
         self._prev_trigger = False
+        self._record_trigger_pending = False
+        self._prev_record_trigger = False
 
         self._stop_settle_since = None
         self._turn_prev_yaw = None
@@ -140,7 +163,8 @@ class ReturnStateMachineNode(Node):
         self.return_path_pub = self.create_publisher(Path, '/return_path', transient_qos)
 
         self.create_subscription(Odometry, '/odometry/filtered', self._on_odom, 10)
-        self.create_subscription(Bool, '/mission/return/trigger', self._on_trigger, 10)
+        self.create_subscription(Bool, '/path/record', self._on_record_trigger, 10)
+        self.create_subscription(Bool, '/path/return', self._on_return_trigger, 10)
         self.create_subscription(Pose, '/mission/origin_pose', self._on_origin, transient_qos)
         self.create_subscription(Path, '/recorded_path', self._on_recorded_path, 10)
         self.create_subscription(Twist, '/cmd_vel_return_path', self._on_follow_cmd, 10)
@@ -157,7 +181,12 @@ class ReturnStateMachineNode(Node):
         self._odom_vx = msg.twist.twist.linear.x
         self._odom_wz = msg.twist.twist.angular.z
 
-    def _on_trigger(self, msg: Bool):
+    def _on_record_trigger(self, msg: Bool):
+        if msg.data and not self._prev_record_trigger:
+            self._record_trigger_pending = True
+        self._prev_record_trigger = msg.data
+
+    def _on_return_trigger(self, msg: Bool):
         if msg.data and not self._prev_trigger:
             self._trigger_pending = True
         self._prev_trigger = msg.data
@@ -184,6 +213,9 @@ class ReturnStateMachineNode(Node):
                 # stale True from an earlier (too-early, absorbed) press would
                 # otherwise block every later trigger.
                 self._prev_trigger = False
+            if new_state == IDLE:
+                # Same reasoning as above, for /path/record.
+                self._prev_record_trigger = False
 
     def _elapsed_in_state(self) -> float:
         return (self.get_clock().now() - self._state_entered_time).nanoseconds * 1e-9
@@ -208,7 +240,8 @@ class ReturnStateMachineNode(Node):
             self._tick_finished()
 
     def _tick_idle(self):
-        if self._odom_pose is not None:
+        if self._record_trigger_pending and self._odom_pose is not None:
+            self._record_trigger_pending = False
             self.recorder_cmd_pub.publish(String(data='START'))
             self._go_to(MANUAL_RECORDING)
 
