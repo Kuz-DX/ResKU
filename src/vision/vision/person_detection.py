@@ -26,7 +26,7 @@ class PersonDetectionNode(Node):
             / 'mando-dummy-v1.xml'
         )
         self.declare_parameter('model_path', default_model)
-        self.declare_parameter('input_topic', '/camera/camera/color/image_raw/compressed')
+        self.declare_parameter('input_topic', '/drive/camera/color/image_raw/compressed')
         self.declare_parameter('detections_topic', '/person_detection/detections')
         self.declare_parameter('output_topic', '/person_detection/image/compressed')
         self.declare_parameter('confidence_threshold', 0.5)
@@ -42,7 +42,7 @@ class PersonDetectionNode(Node):
 
         self.detector = RFDETROpenVINO(
             model_path=str(get('model_path')),
-            class_names=('pedestrian',),
+            class_names=('person',),
             device=str(get('device')),
             confidence_threshold=float(get('confidence_threshold')),
             background_class_id=-1,
