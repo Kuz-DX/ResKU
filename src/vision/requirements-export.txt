@@ -1,0 +1,7 @@
+# Only needed once when converting a .pth checkpoint to OpenVINO IR.
+# RF-DETR 1.9.3 matches the training checkpoint. Its ONNX exporter is used as
+# an intermediate step because native OpenVINO export was added in a later
+# RF-DETR release.
+rfdetr[onnx]==1.9.3
+openvino>=2025.0
+

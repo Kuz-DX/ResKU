@@ -1,1 +1,2 @@
 pupil-apriltags
+openvino>=2025.0

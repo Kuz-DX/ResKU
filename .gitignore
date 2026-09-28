@@ -31,7 +31,7 @@ rosbag2_*/
 # git으로 추적하지 않는다.
 runs/
 
-# [2026-08-30, 사용자 요청] 학습된 가중치(.pt) 전체를 git 추적에서 제외 —
+# [2026-08-30, 사용자 요청] 학습된 가중치(.pt/.pth) 전체를 git 추적에서 제외 —
 # 기존엔 크기가 작은(<50MB) 가중치는 커밋하고, 큰 것(supplybox_v2.pt,
 # 116MB — GitHub 파일당 100MB 하드 리밋 초과로 push 자체가 거부됨, 실측
 # 확인됨)이나 개별 요청이 있는 것만 파일명으로 하나씩 여기 추가했는데,
@@ -42,11 +42,12 @@ runs/
 # 베이스 가중치(yolo26n-seg.pt, YOLO() 최초 실행 시 자동 다운로드,
 # 사전학습 베이스 가중치도 이 패턴에 자동으로 걸린다.
 #
-# git으로 안 딸려가므로, .pt를 model_path로 직접 참조하는 노드를 실행할
+# git으로 안 딸려가므로, .pt/.pth를 model_path로 직접 참조하는 노드를 실행할
 # 머신(jecs 등)에는 수동으로 복사해둬야 한다 — summer_supply.py
 # (supplybest.pt/supplybox_v2.pt), summer_traffic.py(trafficlightv1.pt).
+*.pth
 *.pt
-
+*.bin
 # API 키/시크릿은 환경변수로만 전달한다. 나중에 로컬 파일로 관리하게 될
 # 경우를 대비한 방어적 규칙.
 .env
