@@ -22,10 +22,15 @@ SEPARATE terminal (needs a real TTY, so it can't run inside this launch):
     (w/s forward/back, a/d turn, q/e/z/c curves, space stop, +/- speed,
      r = RETURN, x = quit)
 
-Or by hand with `ros2 topic pub` on /motor_speed_cmd_manual
+Or by hand with `ros2 topic pub` on /motor_speed_cmd_keyboard
 (std_msgs/Float32MultiArray, [left_dps, right_dps]):
-    ros2 topic pub -r 20 /motor_speed_cmd_manual std_msgs/msg/Float32MultiArray \\
+    ros2 topic pub -r 20 /motor_speed_cmd_keyboard std_msgs/msg/Float32MultiArray \\
         "{data: [150.0, 150.0]}"   # drive forward
+
+[Joystick-only driving on the real robot] In THIS launch the mux is pointed at
+/motor_speed_cmd_keyboard (below) because the sim has no joystick. The real
+manual_return_bringup.launch.py leaves the mux on /motor_speed_cmd_manual
+(the joystick), so the same keyboard tool cannot drive the real robot.
 
 [UI boolean interface] recording no longer starts automatically -- mark the
 origin and start it with (False then True, since only the edge counts --
@@ -115,6 +120,7 @@ def generate_launch_description():
             package='drive_cmd_mux',
             executable='drive_cmd_mux_node',
             name='drive_cmd_mux_node',
+            parameters=[{'manual_topic': '/motor_speed_cmd_keyboard'}],
             output='screen',
         ),
         Node(

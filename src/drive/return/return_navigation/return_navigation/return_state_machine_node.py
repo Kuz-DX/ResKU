@@ -216,6 +216,12 @@ class ReturnStateMachineNode(Node):
             if new_state == IDLE:
                 # Same reasoning as above, for /path/record.
                 self._prev_record_trigger = False
+                # A /path/record edge that arrived in any OTHER state (e.g. an
+                # accidental second press while recording) sets the pending
+                # flag but nothing there consumes it; without this clear it
+                # would silently auto-start the next recording the instant
+                # the cycle returns to IDLE, with no new press.
+                self._record_trigger_pending = False
 
     def _elapsed_in_state(self) -> float:
         return (self.get_clock().now() - self._state_entered_time).nanoseconds * 1e-9

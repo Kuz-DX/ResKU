@@ -73,6 +73,21 @@ ros2 launch robot_bringup manual_return_bringup.launch.py
 `manual_path_recorder` + `return_state_machine` + `return_path_follower`가
 한 번에 뜬다.
 
+**다시 실행할 때는 정리 스크립트로 시작한다.** 이전 launch가 완전히 안 끝나서
+`rmd_x8_driver_node` 같은 노드가 남아 있으면 같은 CAN 버스와 IMU 시리얼 포트를
+나눠 쓰게 되어, 로봇이 안 움직이거나 모터 통신두절 보호 설정 확인이 실패할 수 있다.
+이 스크립트는 남은 미션 프로세스를 정상 종료(SIGINT)하고 5초 안에 안 끝난 것만
+강제 종료한 뒤 같은 launch를 실행한다(launch 인자는 뒤에 그대로 붙임):
+
+```bash
+bash ~/ResKU/src/drive/autonomous/robot_bringup/scripts/start_manual_return.sh
+bash ~/ResKU/src/drive/autonomous/robot_bringup/scripts/start_manual_return.sh turn_direction:=right
+bash ~/ResKU/src/drive/autonomous/robot_bringup/scripts/start_manual_return.sh --cleanup-only   # 정리만
+```
+
+같은 이름의 노드를 쓰는 자율주행(`autonomous.launch.py`)과 가상 테스트(`manual_return_sim`)도
+같이 종료된다 — 이 미션과 CAN을 같이 쓸 수 없으므로 의도한 동작이다.
+
 
 ## 3. 원격 PC — 조이스틱
 
@@ -148,12 +163,25 @@ ros2 topic pub -1 /path/return std_msgs/msg/Bool "{data: false}"
 ros2 topic pub -1 /path/return std_msgs/msg/Bool "{data: true}"
 ```
 
-조이스틱은 버튼 8번(기본값, 미검증 — 실기에서 확인 필요)이 `/path/return`만
-발행한다. `/path/record`에 대응하는 조이스틱 버튼은 아직 없음(필요하면 버튼
-번호를 정해서 `manual_joy_control_node`에 추가해야 함).
+조이스틱 버튼 (실기 미검증 — 번호는 코드 기준이라 로봇에서 `/joy`로 확인 필요):
+
+| 버튼 | 동작 |
+|---|---|
+| 10번 (PS) | 녹화 시작 (`/path/record`) — `button_record` 파라미터 |
+| 8번 (Share) | 복귀 시작 (`/path/return`) — `button_return` 파라미터 |
+
+둘 다 조이스틱이 **주행 포커스**일 때만 전달된다(팔이 포커스를 가지면 드라이브
+노드가 입력을 통째로 무시). 팔 쪽에서 8번(MANUAL_100 토글)과 10번(EE 일시정지)도
+쓰지만 팔이 켜진 상태에서만 동작하므로 주행 포커스에서는 겹치지 않는다.
 
 키보드 조종(`keyboard_teleop`)은 `g`가 `/path/record`, `r`이 `/path/return`
 이고 둘 다 True를 보낸 뒤 0.3초 후 자동으로 False를 이어서 보낸다.
+
+**실차는 조이스틱으로만 움직인다.** 키보드의 주행 키(`w` `a` `s` `d` 등)는
+`/motor_speed_cmd_keyboard`로만 나가고, 실차의 `drive_cmd_mux`는 조이스틱
+토픽 `/motor_speed_cmd_manual`만 듣는다. 그래서 실차에 대고 키보드를 실행해도
+`g`/`r`(녹화/복귀 트리거)만 전달되고 로봇은 움직이지 않는다. 가상 테스트
+(`sim_manual_return.launch.py`)만 mux가 키보드 토픽을 듣도록 설정돼 있다.
 
 ## 7. 실차 전 가상환경 테스트 (RViz + 키보드 조종)
 
@@ -238,6 +266,9 @@ ros2 launch manual_return_sim sim_manual_return.launch.py
 7-1부터). 코드를 고쳤다면 실행 전에 7-2의 `colcon build`를 먼저 한다.
 
 ### 7-3. [터미널 2] 키보드로 조종
+
+가상 테스트에서만 키보드로 주행한다(이 launch의 mux가 `/motor_speed_cmd_keyboard`를
+듣도록 설정돼 있음. 실차는 조이스틱 전용 — 6장 참고).
 
 **별도 터미널**(실제 TTY 필요)에서:
 

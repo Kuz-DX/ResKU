@@ -74,6 +74,11 @@ class ManualJoyControlNode(Node):
         # 11/12=diff 테스트) 중 미사용으로 확인된 버튼 8(PS4 Share/Options 계열)
         # 기본값 사용.
         self.declare_parameter('button_return', 8)
+        # [UI 불리언 인터페이스] 녹화 시작(/path/record)용 버튼 = 10번(PS).
+        # 드라이브 포커스에서는 아무도 안 쓰는 버튼이다: 팔의 10번(EE 일시정지)은 팔이
+        # 켜진 MANUAL_EE에서만 동작하고, 그 동안 이 노드는 입력을 통째로 무시한다.
+        # RETURN(8번)과 마찬가지로 드라이브 포커스에서만 눌림이 전달된다.
+        self.declare_parameter('button_record', 10)
 
         p = self.get_parameter
         self.axis_left_motor = p('axis_left_motor').value
@@ -100,6 +105,7 @@ class ManualJoyControlNode(Node):
 
         self.joy_timeout = p('joy_timeout').value
         self.btn_return = p('button_return').value
+        self.btn_record = p('button_record').value
 
         self._prev_l1 = 0
         self._prev_l2 = 0
@@ -108,6 +114,7 @@ class ManualJoyControlNode(Node):
         self._prev_diff_left_fast = 0
         self._prev_diff_right_fast = 0
         self._prev_return = 0
+        self._prev_record = 0
 
         self._latest_left_cmd = 0.0
         self._latest_right_cmd = 0.0
@@ -140,6 +147,7 @@ class ManualJoyControlNode(Node):
         # WAIT_RETURN_COMMAND 상태에서 이 rising edge를 감지해 복귀 시퀀스를
         # 시작한다.
         self.return_trigger_pub = self.create_publisher(Bool, '/path/return', 10)
+        self.record_trigger_pub = self.create_publisher(Bool, '/path/record', 10)
 
         rate = p('cmd_publish_rate_hz').value
         self.timer = self.create_timer(1.0 / rate, self.publish_cmd)
@@ -200,6 +208,7 @@ class ManualJoyControlNode(Node):
         diff_right_fast_held = (
             msg.buttons[self.btn_diff_right_fast] if len(msg.buttons) > self.btn_diff_right_fast else 0)
         return_held = msg.buttons[self.btn_return] if len(msg.buttons) > self.btn_return else 0
+        record_held = msg.buttons[self.btn_record] if len(msg.buttons) > self.btn_record else 0
 
         # [manual+return 통합] left_motor_sign/right_motor_sign을 더 이상 곱하지
         # 않는다 -- 아래에서 만드는 _latest_left_cmd/_latest_right_cmd는 "그
@@ -256,6 +265,13 @@ class ManualJoyControlNode(Node):
             self.get_logger().info('[JOY] RETURN trigger pressed.')
             self.return_trigger_pub.publish(Bool(data=True))
         self._prev_return = return_held
+
+        # [UI 불리언 인터페이스] 녹화 시작 버튼 rising edge -> 1회성 트리거 발행.
+        # 받아들일지는 return_state_machine_node가 판단한다(IDLE일 때만).
+        if record_held and not self._prev_record:
+            self.get_logger().info('[JOY] RECORD trigger pressed.')
+            self.record_trigger_pub.publish(Bool(data=True))
+        self._prev_record = record_held
 
     def publish_cmd(self):
         elapsed = (self.get_clock().now() - self.last_joy_time).nanoseconds / 1e9

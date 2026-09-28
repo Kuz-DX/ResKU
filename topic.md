@@ -46,7 +46,21 @@
 | `/motor_speed_cmd_manual` | `std_msgs/msg/Float32MultiArray` | 좌/우 구동 모터 속도 명령(dps, 부호 없음) |
 | `/max_speed_dps` | `std_msgs/msg/Float32MultiArray` | 조이스틱으로 조절한 좌/우 최대 속도 표시 |
 | `/path/record` | `std_msgs/msg/Bool` | [UI 인터페이스] 녹화 시작(현재 위치를 (0,0) 원점으로) rising edge — return_state_machine_node가 구독. 더 이상 자동 시작 안 함 |
+| `/path/record` (조이스틱 10번 PS) | `std_msgs/msg/Bool` | 녹화 시작 버튼 rising edge, 드라이브 포커스일 때만 발행 |
 | `/path/return` | `std_msgs/msg/Bool` | [UI 인터페이스, 구 `/mission/return/trigger`] RETURN rising edge — return_state_machine_node가 구독. UI 쪽 값은 True 발행 후 False로 되돌리는 게 스펙이지만, 이 노드는 그 값과 무관하게 False→True 변화(edge)만 인식하므로 UI가 리셋을 빼먹어도 두 번째 트리거는 정상 동작한다 |
+
+## manual_return_sim (가상 테스트 전용 키보드 조종)
+
+시뮬레이션과 녹화/복귀 트리거 시험용 도구다. **실차는 조이스틱으로만 움직인다** —
+키보드의 주행 명령은 조이스틱과 다른 토픽으로 나가고, 실차 `drive_cmd_mux_node`는
+기본값(`manual_topic=/motor_speed_cmd_manual`, 조이스틱)만 듣는다. 시뮬레이션 launch만
+`manual_topic`을 `/motor_speed_cmd_keyboard`로 바꿔서 키보드로 주행한다.
+
+| 발행 토픽 | 타입 | 용도 |
+|---|---|---|
+| `/motor_speed_cmd_keyboard` | `std_msgs/msg/Float32MultiArray` | 키보드 좌/우 속도 명령(dps). 시뮬레이션의 mux만 구독하고, 실차에서는 아무도 안 듣는다 |
+| `/path/record` | `std_msgs/msg/Bool` | `g` 키. False→True→(0.3초 뒤)False 발행 |
+| `/path/return` | `std_msgs/msg/Bool` | `r` 키. False→True→(0.3초 뒤)False 발행 |
 
 ## can_driver (구 수동 주행 CAN 드라이버 — deprecated, 미사용)
 
