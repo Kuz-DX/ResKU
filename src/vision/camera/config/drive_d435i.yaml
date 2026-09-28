@@ -1,7 +1,7 @@
 /**:
   ros__parameters:
     # 주행용 D435i (기존 장비 시리얼). 숫자 타입으로 해석되지 않도록 '_'를 붙인다.
-    serial_no: "_117222251401"
+    serial_no: "_339222071362"
     camera_name: "drive_camera"
     initial_reset: false
 
