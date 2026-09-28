@@ -45,7 +45,15 @@ Verify with:
 """
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import (
+    DeclareLaunchArgument,
+    EmitEvent,
+    IncludeLaunchDescription,
+    LogInfo,
+    RegisterEventHandler,
+)
+from launch.event_handlers import OnProcessExit
+from launch.events import Shutdown
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -65,6 +73,29 @@ def generate_launch_description():
     reduced_odom_bringup_launch = os.path.join(
         get_package_share_directory('robot_bringup'),
         'launch', 'reduced_odom_bringup.launch.py')
+
+    return_state_machine = Node(
+        package='return_navigation',
+        executable='return_state_machine_node',
+        name='return_state_machine_node',
+        parameters=[{'turn_direction': turn_direction}],
+        output='screen',
+    )
+
+    # return_state_machine_node는 /emergency_stop=true를 받으면 safety zero를
+    # 잠시 반복 발행한 뒤 정상 종료한다. 이 종료를 launch 전체 shutdown으로
+    # 승격해 mux와 CAN-owning rmd_x8_driver_node까지 함께 정리한다. 예기치 않은
+    # state-machine 종료도 구동 스택을 fail-safe 방향으로 내리는 효과가 있다.
+    shutdown_on_return_state_machine_exit = RegisterEventHandler(
+        OnProcessExit(
+            target_action=return_state_machine,
+            on_exit=[
+                LogInfo(msg='return_state_machine_node exited; shutting down manual_return_bringup.'),
+                EmitEvent(event=Shutdown(
+                    reason='return_state_machine_node exit / emergency stop')),
+            ],
+        )
+    )
 
     return LaunchDescription([
         DeclareLaunchArgument('can_interface', default_value='can_drive'),
@@ -117,13 +148,8 @@ def generate_launch_description():
 
         # [단계 4] RETURN 상태 머신 (STOP_BEFORE_TURN/TURN_180/FOLLOW_RETURN_PATH
         # 상태 및 /cmd_vel_return 발행)
-        Node(
-            package='return_navigation',
-            executable='return_state_machine_node',
-            name='return_state_machine_node',
-            parameters=[{'turn_direction': turn_direction}],
-            output='screen',
-        ),
+        shutdown_on_return_state_machine_exit,
+        return_state_machine,
 
         # [단계 5] 고정 mission-frame Path를 추종하는 복귀 컨트롤러
         Node(

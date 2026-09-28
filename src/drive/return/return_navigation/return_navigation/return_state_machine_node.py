@@ -47,6 +47,7 @@ Subscribes:
     /odometry/filtered      (nav_msgs/Odometry)
     /path/record             (std_msgs/Bool)  -- UI trigger, start recording at (0,0)
     /path/return             (std_msgs/Bool)  -- UI trigger, start Return to Base
+    /emergency_stop          (std_msgs/Bool)  -- UI emergency shutdown trigger
     /mission/origin_pose     (geometry_msgs/Pose, TRANSIENT_LOCAL)
     /recorded_path           (nav_msgs/Path)
     /cmd_vel_return_path      (geometry_msgs/Twist) -- from return_path_follower_node
@@ -111,6 +112,9 @@ class ReturnStateMachineNode(Node):
         self.declare_parameter('follow_relay_timeout_s', 0.5)
         self.declare_parameter('goal_tolerance_m', 0.3)
         self.declare_parameter('finished_hold_s', 2.0)
+        # Emergency 수신 직후 launch를 내리기 전에 safety zero가 드라이버까지
+        # 전달될 시간을 확보한다. 20 Hz 기본 주기에서 5회 발행된다.
+        self.declare_parameter('emergency_stop_hold_s', 0.25)
 
         p = self.get_parameter
         self.control_period = 1.0 / float(p('control_rate_hz').value)
@@ -129,6 +133,7 @@ class ReturnStateMachineNode(Node):
         self.follow_relay_timeout = float(p('follow_relay_timeout_s').value)
         self.goal_tolerance_m = float(p('goal_tolerance_m').value)
         self.finished_hold_s = float(p('finished_hold_s').value)
+        self.emergency_stop_hold_s = float(p('emergency_stop_hold_s').value)
 
         # ---- runtime state ----
         self._state = IDLE
@@ -153,18 +158,23 @@ class ReturnStateMachineNode(Node):
         self._return_path = []       # list[Pose2D], mission frame, PN..P0 order
         self._follow_cmd = Twist()
         self._follow_cmd_time = None
+        self._emergency_stop_active = False
+        self._emergency_stop_started = None
 
         transient_qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
                                     durability=DurabilityPolicy.TRANSIENT_LOCAL)
 
         self.state_pub = self.create_publisher(String, '/mission/return/state', 10)
         self.cmd_vel_return_pub = self.create_publisher(Twist, '/cmd_vel_return', 10)
+        # rmd_x8_driver_node가 일반 /cmd_vel보다 우선 처리하는 안전 입력이다.
+        self.cmd_vel_safety_pub = self.create_publisher(Twist, '/cmd_vel_safety', 10)
         self.recorder_cmd_pub = self.create_publisher(String, '/manual_path_recorder/command', 10)
         self.return_path_pub = self.create_publisher(Path, '/return_path', transient_qos)
 
         self.create_subscription(Odometry, '/odometry/filtered', self._on_odom, 10)
         self.create_subscription(Bool, '/path/record', self._on_record_trigger, 10)
         self.create_subscription(Bool, '/path/return', self._on_return_trigger, 10)
+        self.create_subscription(Bool, '/emergency_stop', self._on_emergency_stop, 10)
         self.create_subscription(Pose, '/mission/origin_pose', self._on_origin, transient_qos)
         self.create_subscription(Path, '/recorded_path', self._on_recorded_path, 10)
         self.create_subscription(Twist, '/cmd_vel_return_path', self._on_follow_cmd, 10)
@@ -190,6 +200,17 @@ class ReturnStateMachineNode(Node):
         if msg.data and not self._prev_trigger:
             self._trigger_pending = True
         self._prev_trigger = msg.data
+
+    def _on_emergency_stop(self, msg: Bool):
+        if not msg.data or self._emergency_stop_active:
+            return
+        self._emergency_stop_active = True
+        self._emergency_stop_started = self.get_clock().now()
+        # 콜백 시점에도 즉시 한 번 발행하고, _tick()에서 종료 전까지 반복한다.
+        self.cmd_vel_return_pub.publish(Twist())
+        self.cmd_vel_safety_pub.publish(Twist())
+        self.get_logger().fatal(
+            '/emergency_stop=true 수신: 모터 0 명령 후 manual_return launch를 종료합니다.')
 
     def _on_origin(self, msg: Pose):
         self._origin = Pose2D.from_ros_pose(msg)
@@ -228,6 +249,10 @@ class ReturnStateMachineNode(Node):
 
     # ------------------------------------------------------------------ #
     def _tick(self):
+        if self._emergency_stop_active:
+            self._tick_emergency_stop()
+            return
+
         self.state_pub.publish(String(data=self._state))
 
         if self._state == IDLE:
@@ -244,6 +269,22 @@ class ReturnStateMachineNode(Node):
             self._tick_follow_return_path()
         elif self._state == FINISHED:
             self._tick_finished()
+
+    def _tick_emergency_stop(self):
+        # mux의 현재 상태/입력과 무관하게 드라이버 최우선 safety 채널을 0으로
+        # 유지한다. return 채널도 동시에 0으로 내려 정상 종료 중 재가속을 막는다.
+        self.cmd_vel_return_pub.publish(Twist())
+        self.cmd_vel_safety_pub.publish(Twist())
+
+        elapsed = (
+            (self.get_clock().now() - self._emergency_stop_started).nanoseconds * 1e-9
+            if self._emergency_stop_started is not None else 0.0
+        )
+        if elapsed >= self.emergency_stop_hold_s:
+            self.get_logger().fatal('긴급정지 0 명령 전달 완료: 노드를 종료합니다.')
+            # manual_return_bringup.launch.py의 OnProcessExit가 이 정상 종료를
+            # 감지해 launch 전체(rmd_x8_driver 포함)를 shutdown한다.
+            rclpy.shutdown()
 
     def _tick_idle(self):
         if self._record_trigger_pending and self._odom_pose is not None:
