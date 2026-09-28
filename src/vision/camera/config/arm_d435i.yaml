@@ -1,0 +1,18 @@
+/**:
+  ros__parameters:
+    # 로봇팔용 D435i (기존 장비 시리얼). 숫자 타입으로 해석되지 않도록 '_'를 붙인다.
+    serial_no: "_243322074693"
+    camera_name: "arm_camera"
+    initial_reset: false
+
+    enable_color: true
+    enable_depth: true
+    enable_infra1: false
+    enable_infra2: false
+    enable_gyro: false
+    enable_accel: false
+    pointcloud.enable: false
+    align_depth.enable: true
+
+    rgb_camera.color_profile: "640x480x15"
+    depth_module.depth_profile: "640x480x15"

@@ -1,0 +1,12 @@
+/**:
+  ros__parameters:
+    # 실제 장비의 /dev/v4l/by-id/... 경로는 launch의 right_device로 지정할 수 있다.
+    video_device: "/dev/video2"
+    pixel_format: "mjpeg2rgb"
+    image_width: 640
+    image_height: 480
+    framerate: 30.0
+    io_method: "mmap"
+    frame_id: "right_camera_optical_frame"
+    camera_name: "right_camera"
+    brightness: -1
