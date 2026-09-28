@@ -45,7 +45,7 @@ class PersonDetectionNode(Node):
 
         self.detector = RFDETROpenVINO(
             model_path=str(get('model_path')),
-            class_names=('pedestrian',),
+            class_names=('person',),
             device=str(get('device')),
             confidence_threshold=float(get('confidence_threshold')),
             background_class_id=-1,

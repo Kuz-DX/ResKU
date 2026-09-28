@@ -1,3 +1,23 @@
+## Person Detection 비전 모델
+
+주행 카메라의 압축 컬러 영상(`/drive/camera/color/image_raw/compressed`)을
+입력받아 사람 bbox를 `/person_detection/detections`로 발행한다. bbox 발행
+주기를 우선할 때는 시각화 이미지 생성과 JPEG 재인코딩을 끈 상태로 실행한다.
+
+```bash
+source install/setup.bash
+ros2 run vision person_detection --ros-args \
+  -p publish_visualization:=false
+```
+
+이 모드에서는 `/person_detection/image/compressed`가 발행되지 않으며,
+탐지 결과(`/person_detection/detections`)만 발행된다. 동작 주기는 다음 명령으로
+확인한다.
+
+```bash
+ros2 topic hz /person_detection/detections --wall-time
+```
+
 ## 3. 계절별 미션
 
 ### mission_manager_interfaces (신규 패키지, 임시)
