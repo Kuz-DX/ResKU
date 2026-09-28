@@ -73,6 +73,21 @@ ros2 launch robot_bringup manual_return_bringup.launch.py
 `manual_path_recorder` + `return_state_machine` + `return_path_follower`가
 한 번에 뜬다.
 
+**다시 실행할 때는 정리 스크립트로 시작한다.** 이전 launch가 완전히 안 끝나서
+`rmd_x8_driver_node` 같은 노드가 남아 있으면 같은 CAN 버스와 IMU 시리얼 포트를
+나눠 쓰게 되어, 로봇이 안 움직이거나 모터 통신두절 보호 설정 확인이 실패할 수 있다.
+이 스크립트는 남은 미션 프로세스를 정상 종료(SIGINT)하고 5초 안에 안 끝난 것만
+강제 종료한 뒤 같은 launch를 실행한다(launch 인자는 뒤에 그대로 붙임):
+
+```bash
+bash ~/ResKU/src/drive/autonomous/robot_bringup/scripts/start_manual_return.sh
+bash ~/ResKU/src/drive/autonomous/robot_bringup/scripts/start_manual_return.sh turn_direction:=right
+bash ~/ResKU/src/drive/autonomous/robot_bringup/scripts/start_manual_return.sh --cleanup-only   # 정리만
+```
+
+같은 이름의 노드를 쓰는 자율주행(`autonomous.launch.py`)과 가상 테스트(`manual_return_sim`)도
+같이 종료된다 — 이 미션과 CAN을 같이 쓸 수 없으므로 의도한 동작이다.
+
 
 ## 3. 원격 PC — 조이스틱
 

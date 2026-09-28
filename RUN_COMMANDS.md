@@ -17,13 +17,16 @@ sudo ip link set can_drive type can bitrate 1000000
 sudo ip link set up can_drive
 ```
 
-## 2. 미션 실행
+## 2. 미션 실행 (이전 실행에서 남은 프로세스를 먼저 정리하고 실행한다)
 
 ```bash
-cd ~/ResKU
-source /opt/ros/humble/setup.bash
-source install/setup.bash
-ros2 launch robot_bringup manual_return_bringup.launch.py
+bash ~/ResKU/src/drive/autonomous/robot_bringup/scripts/start_manual_return.sh
+```
+
+정리만 하고 싶을 때:
+
+```bash
+bash ~/ResKU/src/drive/autonomous/robot_bringup/scripts/start_manual_return.sh --cleanup-only
 ```
 
 
