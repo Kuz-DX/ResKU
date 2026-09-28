@@ -6,11 +6,19 @@ by hand from the keyboard so you can draw arbitrary paths, then trigger
 RETURN and watch the robot retrace them in RViz.
 
 Publishes:
-    /motor_speed_cmd_manual  (std_msgs/Float32MultiArray, [left_dps, right_dps])
+    /motor_speed_cmd_keyboard (std_msgs/Float32MultiArray, [left_dps, right_dps])
     /path/record              (std_msgs/Bool)  -- on 'g'
     /path/return               (std_msgs/Bool)  -- on 'r'
 Subscribes:
     /mission/return/state    (std_msgs/String) -- shown in the status line
+
+[JOYSTICK-ONLY DRIVING ON THE REAL ROBOT, 2026-09] The drive keys publish to
+/motor_speed_cmd_keyboard, NOT /motor_speed_cmd_manual. The real mission's
+drive_cmd_mux_node only listens to /motor_speed_cmd_manual (the joystick),
+so running this tool against the real robot cannot move it -- only g/r (the
+mission triggers below) still reach the robot. The simulation launch
+(sim_manual_return.launch.py) points its mux at the keyboard topic instead,
+because there is no joystick there.
 
 [UI boolean interface, 2026-09] /path/record and /path/return replace the
 old /mission/return/trigger. return_state_machine_node no longer starts
@@ -68,7 +76,7 @@ class KeyboardTeleop(Node):
         self.step = float(self.get_parameter('speed_step_dps').value)
         self.period = 1.0 / float(self.get_parameter('publish_rate_hz').value)
 
-        self.cmd_pub = self.create_publisher(Float32MultiArray, '/motor_speed_cmd_manual', 10)
+        self.cmd_pub = self.create_publisher(Float32MultiArray, '/motor_speed_cmd_keyboard', 10)
         self.record_pub = self.create_publisher(Bool, '/path/record', 10)
         self.return_pub = self.create_publisher(Bool, '/path/return', 10)
         self.create_subscription(String, '/mission/return/state', self._on_state, 10)
