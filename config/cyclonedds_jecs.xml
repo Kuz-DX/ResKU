@@ -7,5 +7,10 @@
       </Interfaces>
       <AllowMulticast>true</AllowMulticast>
     </General>
+
+    <Discovery>
+      <ParticipantIndex>auto</ParticipantIndex>
+      <MaxAutoParticipantIndex>50</MaxAutoParticipantIndex>
+    </Discovery>
   </Domain>
 </CycloneDDS>
