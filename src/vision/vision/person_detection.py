@@ -26,7 +26,7 @@ class PersonDetectionNode(Node):
             / 'mando-dummy-v1.xml'
         )
         self.declare_parameter('model_path', default_model)
-        self.declare_parameter('input_topic', '/camera/camera/color/image_raw/compressed')
+        self.declare_parameter('input_topic', '/drive/camera/color/image_raw/compressed')
         self.declare_parameter('detections_topic', '/person_detection/detections')
         self.declare_parameter('output_topic', '/person_detection/image/compressed')
         self.declare_parameter('confidence_threshold', 0.5)
@@ -36,6 +36,9 @@ class PersonDetectionNode(Node):
         self.declare_parameter('cache_dir', '')
 
         get = lambda name: self.get_parameter(name).value
+        self.input_topic = str(get('input_topic'))
+        self.detections_topic = str(get('detections_topic'))
+        self.output_topic = str(get('output_topic'))
         self.jpeg_quality = int(get('jpeg_quality'))
         self.publish_visualization = bool(get('publish_visualization'))
         cache_dir = str(get('cache_dir')).strip() or None
@@ -48,20 +51,21 @@ class PersonDetectionNode(Node):
             background_class_id=-1,
             cache_dir=cache_dir,
         )
-        self.detections_pub = self.create_publisher(String, str(get('detections_topic')), 10)
+        self.detections_pub = self.create_publisher(String, self.detections_topic, 10)
         self.image_pub = self.create_publisher(
             CompressedImage,
-            str(get('output_topic')),
+            self.output_topic,
             qos_profile_sensor_data,
         )
         self.subscription = self.create_subscription(
             CompressedImage,
-            str(get('input_topic')),
+            self.input_topic,
             self.image_callback,
             qos_profile_sensor_data,
         )
         self.get_logger().info(
-            f'RF-DETR OpenVINO ready: {get("model_path")} on {get("device")}'
+            f'RF-DETR OpenVINO ready: {get("model_path")} on {get("device")}; '
+            f'input={self.input_topic}, bbox_image={self.output_topic}'
         )
 
     def image_callback(self, msg: CompressedImage) -> None:
@@ -112,12 +116,15 @@ class PersonDetectionNode(Node):
             success, encoded = cv2.imencode(
                 '.jpg', image, [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality]
             )
-            if success:
-                image_msg = CompressedImage()
-                image_msg.header = msg.header
-                image_msg.format = 'jpeg'
-                image_msg.data = encoded.tobytes()
-                self.image_pub.publish(image_msg)
+            if not success:
+                self.get_logger().warning('Could not encode bbox visualization as JPEG.')
+                return
+
+            image_msg = CompressedImage()
+            image_msg.header = msg.header
+            image_msg.format = 'jpeg'
+            image_msg.data = encoded.tobytes()
+            self.image_pub.publish(image_msg)
 
 
 def main(args=None):
@@ -137,4 +144,3 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
-
