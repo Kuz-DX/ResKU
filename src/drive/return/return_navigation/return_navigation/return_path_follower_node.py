@@ -35,6 +35,25 @@ changes by >= corner_detection_angle_deg is treated as a TEMPORARY GOAL:
 A separate reactive check (heading vs. the current segment > 42 deg) also
 enters ROTATE_TO_PATH, e.g. if the path starts facing the wrong way.
 
+[reverse_drive, 2026-09] When true, the robot backs up along /return_path
+instead of turning to face it (return_state_machine_node skips TURN_180 in
+this mode -- see that node). Two things change here, and only these two:
+  - v_target in TRACK_PATH is negated. The curvature/steering formula
+    (curvature = 2*local.y/look_dist**2, w = v*curvature) is UNCHANGED --
+    pure pursuit's arc-fitting is direction-of-travel agnostic, it only
+    describes the circle through the robot tangent to its heading and
+    through the target; only the sign of v needs to flip to traverse that
+    same arc backward instead of forward (see _target_heading below for the
+    one-line proof sketch of why the local.y computed against the
+    UNCHANGED current heading is already correct, no extra rotation
+    needed).
+  - every "heading the robot should face" target (_target_heading) becomes
+    path_yaw + 180 deg instead of path_yaw, since backing along a segment
+    means the body points opposite to the direction of travel along it.
+All position-based logic (nearest-index search, lookahead point selection,
+corner-reach distance, deceleration) is untouched -- it never depended on
+the robot's body heading to begin with.
+
 Subscribes:
     /return_path         (nav_msgs/Path, TRANSIENT_LOCAL, mission frame) -- once
     /odometry/filtered    (nav_msgs/Odometry, odom frame)
@@ -97,6 +116,9 @@ class ReturnPathFollowerNode(Node):
         self.declare_parameter('corner_reach_distance_m', 0.08)
         self.declare_parameter('corner_slowdown_radius_m', 0.4)
         self.declare_parameter('odom_timeout_s', 0.5)
+        # See module docstring [reverse_drive]. Default false = existing
+        # forward-after-180-turn behaviour, unchanged.
+        self.declare_parameter('reverse_drive', False)
 
         p = self.get_parameter
         self.control_period = 1.0 / float(p('control_rate_hz').value)
@@ -118,6 +140,7 @@ class ReturnPathFollowerNode(Node):
         self.corner_reach_distance_m = float(p('corner_reach_distance_m').value)
         self.corner_slowdown_radius_m = float(p('corner_slowdown_radius_m').value)
         self.odom_timeout_s = float(p('odom_timeout_s').value)
+        self.reverse_drive = bool(p('reverse_drive').value)
 
         self._path = []       # list[Pose2D], mission frame, fixed once received
         self._corner_angle = []  # list[float], parallel to _path; turn AT each vertex
@@ -211,20 +234,28 @@ class ReturnPathFollowerNode(Node):
             if corner_idx is not None:
                 ref_idx = min(nearest_idx, corner_idx - 1)
             ref_idx = max(self._floor, min(ref_idx, len(self._path) - 1))
-            heading_error = normalize_angle(self._path[ref_idx].yaw - current.yaw)
+            heading_error = normalize_angle(self._target_heading(ref_idx) - current.yaw)
 
             if corner_idx is not None and self._reached_corner(current, corner_idx):
-                self._enter_rotate(self._path[corner_idx].yaw, corner_idx,
+                self._enter_rotate(self._target_heading(corner_idx), corner_idx,
                                    f'reached corner {corner_idx} '
                                    f'({math.degrees(self._corner_angle[corner_idx]):.0f} deg turn)')
             elif abs(heading_error) > self.rotate_enter_angle:
-                self._enter_rotate(self._path[ref_idx].yaw, None,
+                self._enter_rotate(self._target_heading(ref_idx), None,
                                    f'heading_error={math.degrees(heading_error):.1f} deg')
 
         if self._mode == ROTATE_TO_PATH:
             self._tick_rotate_to_path(current)
         else:
             self._tick_track_path(current, nearest_idx, corner_idx)
+
+    def _target_heading(self, idx: int) -> float:
+        """Heading the robot's BODY should face at path[idx]. Forward mode:
+        the segment's own direction of travel (path[idx].yaw). Reverse mode:
+        the opposite, since the body points away from the direction the
+        robot is actually moving in."""
+        yaw = self._path[idx].yaw
+        return normalize_angle(yaw + math.pi) if self.reverse_drive else yaw
 
     def _next_corner(self):
         if self._corner_ptr < len(self._corners):
@@ -283,6 +314,8 @@ class ReturnPathFollowerNode(Node):
             v_target = max(self.min_linear_speed_mps, self.linear_speed_mps * scale)
         else:
             v_target = self.linear_speed_mps
+        if self.reverse_drive:
+            v_target = -v_target
 
         w_target = max(-self.max_angular_speed_radps,
                         min(self.max_angular_speed_radps, v_target * curvature))

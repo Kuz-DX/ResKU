@@ -29,6 +29,16 @@ bash ~/ResKU/src/drive/autonomous/robot_bringup/scripts/start_manual_return.sh
 bash ~/ResKU/src/drive/autonomous/robot_bringup/scripts/start_manual_return.sh --cleanup-only
 ```
 
+**복귀 방식 선택** (기본은 정지→180도 회전→전진 복귀):
+
+```bash
+bash ~/ResKU/src/drive/autonomous/robot_bringup/scripts/start_manual_return.sh reverse_return:=true
+```
+
+회전 없이 왔던 길 그대로 후진으로 복귀한다. `/path/record`, `/path/return`은
+그대로다 — UI 쪽은 이 옵션과 무관하다. **실차에서 후진 복귀는 아직 안 해봤으니
+사람이 뒤쪽을 보면서 처음 몇 번은 시험할 것.**
+
 
 # 💻 로컬 PC
 

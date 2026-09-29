@@ -54,6 +54,29 @@ ros2 launch robot_bringup manual_return_bringup.launch.py turn_direction:=right 
 
 벽이 있는 쪽으로 돌지 않게 상황에 맞춰 고른다.
 
+**[업데이트] 복귀 방식 선택 — 회전 후 전진 / 무회전 후진** — 기본은 여전히
+정지 → 180° 회전 → 전진으로 복귀다. `reverse_return:=true`를 주면
+**회전 없이 왔던 길을 그대로 후진으로** 복귀한다:
+
+```bash
+ros2 launch robot_bringup manual_return_bringup.launch.py reverse_return:=true
+```
+
+내부적으로 `return_state_machine_node`가 `STOP_BEFORE_TURN`에서 `TURN_180`을
+건너뛰고 바로 `FOLLOW_RETURN_PATH`로 가고, `return_path_follower_node`는
+같은 코너 인식 pure-pursuit을 선속도만 음수로 써서 후진 추종한다(곡률 계산식
+자체는 전진과 동일 — pure pursuit은 진행 방향과 무관하게 같은 공식이 성립함,
+다만 코너에서 "바라봐야 할 방향"은 진행 방향의 반대라 180° 뒤집어서 계산함).
+헤드리스 시뮬레이션으로 직선/90도 코너/지그재그/시작 자세 어긋남 각각
+전진 모드와 동일한 오차로 수렴하는 것과, 회전 중 선속도가 동시에 나가지
+않는 것까지 확인했다. **다만 실차에서 후진 복귀는 아직 시험한 적이 없다** —
+후방 장애물 감지가 없는 로봇이라 사람이 뒤쪽을 직접 보면서 처음 몇 번은
+시험할 것.
+
+`/path/record`, `/path/return` 토픽과 그 의미는 이 옵션과 완전히 무관하다 —
+UI 쪽 연동 코드는 이 값에 상관없이 그대로 쓰면 된다(로봇 PC의 launch 인자로만
+선택하는 것이라, "어떻게 복귀할지"는 UI가 알 필요도 없다).
+
 ## 1. 로봇 PC — CAN 인터페이스 켜기
 
 ```bash

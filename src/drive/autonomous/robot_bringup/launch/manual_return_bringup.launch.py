@@ -69,6 +69,7 @@ def generate_launch_description():
     track_width = LaunchConfiguration('effective_track_width_m')
     slip_factor = LaunchConfiguration('angular_slip_compensation_factor')
     use_imu_yaw = LaunchConfiguration('use_imu_yaw')
+    reverse_return = LaunchConfiguration('reverse_return')
 
     reduced_odom_bringup_launch = os.path.join(
         get_package_share_directory('robot_bringup'),
@@ -78,7 +79,10 @@ def generate_launch_description():
         package='return_navigation',
         executable='return_state_machine_node',
         name='return_state_machine_node',
-        parameters=[{'turn_direction': turn_direction}],
+        parameters=[{
+            'turn_direction': turn_direction,
+            'reverse_return': ParameterValue(reverse_return, value_type=bool),
+        }],
         output='screen',
     )
 
@@ -115,6 +119,13 @@ def generate_launch_description():
         DeclareLaunchArgument('effective_track_width_m', default_value='1.244'),
         DeclareLaunchArgument('angular_slip_compensation_factor', default_value='1.0'),
         DeclareLaunchArgument('use_imu_yaw', default_value='false'),
+        # [복귀 방식 선택] false(기본) = 정지 후 180도 회전 -> 전진으로 복귀.
+        # true = 회전 없이 왔던 길을 그대로 후진으로 복귀 (return_state_machine_node가
+        # TURN_180을 건너뛰고, return_path_follower_node가 음수 선속도로 추종 --
+        # 두 노드 모두 각자 docstring의 [reverse_return]/[reverse_drive] 참고).
+        # /path/record, /path/return 토픽/의미는 이 옵션과 무관하게 그대로다 --
+        # UI 쪽 연동 코드는 이 값에 상관없이 손댈 필요 없다.
+        DeclareLaunchArgument('reverse_return', default_value='false'),
 
         # [단계 1] rmd_x8_driver_node(CAN, 유일한 소유자) + myahrs_driver_node
         # + static TF(base_link->imu_link/camera_link) + reduced_odom_node.
@@ -158,6 +169,7 @@ def generate_launch_description():
             package='return_navigation',
             executable='return_path_follower_node',
             name='return_path_follower_node',
+            parameters=[{'reverse_drive': ParameterValue(reverse_return, value_type=bool)}],
             output='screen',
         ),
     ])
