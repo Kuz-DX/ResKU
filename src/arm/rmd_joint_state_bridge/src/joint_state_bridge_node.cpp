@@ -87,6 +87,9 @@ public:
     declare_parameter<std::string>("dxl_port_name", "/dev/ttyUSB0");
     declare_parameter<int>("dxl_baud_rate", 1000000);
     declare_parameter<int>("base_dxl_id", 0);
+    // -1 disables an optional actuator without making RMD feedback unusable.
+    // Set this to the physical tool-lock yaw Dynamixel ID for real hardware.
+    declare_parameter<int>("wrist_yaw_dxl_id", -1);
     declare_parameter<int>("gripper_dxl_id", 4);
     // army_manipulator_ros2_control.xacro의 position_zero_offset/position_direction과
     // 동일한 이름/기본값(실측 JECS 캘리브레이션 값 그대로).
@@ -97,6 +100,9 @@ public:
     declare_parameter<double>("base_zero_offset", -9.314331344042);
     declare_parameter<double>("base_direction", 1.0);
     declare_parameter<bool>("base_wraparound", true);
+    declare_parameter<double>("wrist_yaw_zero_offset", 0.0);
+    declare_parameter<double>("wrist_yaw_direction", 1.0);
+    declare_parameter<bool>("wrist_yaw_wraparound", true);
     declare_parameter<double>("gripper_zero_offset", -1.375980766733627);
     declare_parameter<double>("gripper_direction", 1.0);
     declare_parameter<bool>("gripper_wraparound", true);
@@ -111,10 +117,14 @@ public:
     wrist_q_offset_ = get_parameter("wrist_q_offset").as_double();
 
     base_dxl_id_ = get_parameter("base_dxl_id").as_int();
+    wrist_yaw_dxl_id_ = get_parameter("wrist_yaw_dxl_id").as_int();
     gripper_dxl_id_ = get_parameter("gripper_dxl_id").as_int();
     base_zero_offset_ = get_parameter("base_zero_offset").as_double();
     base_direction_ = get_parameter("base_direction").as_double();
     base_wraparound_ = get_parameter("base_wraparound").as_bool();
+    wrist_yaw_zero_offset_ = get_parameter("wrist_yaw_zero_offset").as_double();
+    wrist_yaw_direction_ = get_parameter("wrist_yaw_direction").as_double();
+    wrist_yaw_wraparound_ = get_parameter("wrist_yaw_wraparound").as_bool();
     gripper_zero_offset_ = get_parameter("gripper_zero_offset").as_double();
     gripper_direction_ = get_parameter("gripper_direction").as_double();
     gripper_wraparound_ = get_parameter("gripper_wraparound").as_bool();
@@ -133,11 +143,16 @@ public:
     RCLCPP_INFO(get_logger(), "Opening Dynamixel port '%s'...", dxl_port_name.c_str());
     dxl_port_ = dynamixel::PortHandler::getPortHandler(dxl_port_name.c_str());
     dxl_packet_ = dynamixel::PacketHandler::getPacketHandler(2.0);
-    if (!dxl_port_->openPort()) {
-      throw std::runtime_error("Failed to open Dynamixel port '" + dxl_port_name + "'");
-    }
-    if (!dxl_port_->setBaudRate(get_parameter("dxl_baud_rate").as_int())) {
-      throw std::runtime_error("Failed to set Dynamixel baud rate");
+    if (!dxl_port_->openPort() ||
+      !dxl_port_->setBaudRate(get_parameter("dxl_baud_rate").as_int()))
+    {
+      // A disconnected TTL USB adapter must not stop the RMD-only capture
+      // workflow.  Per-joint DXL failures are likewise omitted below.
+      RCLCPP_ERROR(
+        get_logger(), "Dynamixel port '%s' unavailable; base/wrist_yaw/gripper will be absent",
+        dxl_port_name.c_str());
+      dxl_port_->closePort();
+      dxl_port_ = nullptr;
     }
 
     joint_states_pub_ = create_publisher<sensor_msgs::msg::JointState>("/joint_states", 10);
@@ -260,25 +275,35 @@ private:
       double direction;
       bool wraparound;
     };
-    std::vector<DxlJoint> const dxl_joints{
+    std::vector<DxlJoint> dxl_joints{
       {"base_joint", static_cast<std::uint8_t>(base_dxl_id_), base_zero_offset_, base_direction_,
         base_wraparound_},
-      {"gripper_joint", static_cast<std::uint8_t>(gripper_dxl_id_), gripper_zero_offset_,
-        gripper_direction_, gripper_wraparound_},
     };
+    if (wrist_yaw_dxl_id_ >= 0) {
+      dxl_joints.push_back(
+        {"wrist_yaw_joint", static_cast<std::uint8_t>(wrist_yaw_dxl_id_),
+          wrist_yaw_zero_offset_, wrist_yaw_direction_, wrist_yaw_wraparound_});
+    }
+    if (gripper_dxl_id_ >= 0) {
+      dxl_joints.push_back(
+        {"gripper_joint", static_cast<std::uint8_t>(gripper_dxl_id_), gripper_zero_offset_,
+          gripper_direction_, gripper_wraparound_});
+    }
     std_msgs::msg::Float64MultiArray dxl_angle_deg_msg;
     std_msgs::msg::Float64MultiArray dxl_encoder_msg;
-    for (auto const & joint : dxl_joints) {
-      std::int32_t raw_pulse{0};
-      if (!readDynamixelPulse(joint.id, raw_pulse)) {
-        continue;
+    if (dxl_port_ != nullptr) {
+      for (auto const & joint : dxl_joints) {
+        std::int32_t raw_pulse{0};
+        if (!readDynamixelPulse(joint.id, raw_pulse)) {
+          continue;
+        }
+        double const calibrated_rad = calibrateDxl(
+          raw_pulse, joint.zero_offset, joint.direction, joint.wraparound);
+        joint_states.name.push_back(joint.name);
+        joint_states.position.push_back(calibrated_rad);
+        dxl_angle_deg_msg.data.push_back(calibrated_rad * 180.0 / M_PI);
+        dxl_encoder_msg.data.push_back(static_cast<double>(raw_pulse));
       }
-      double const calibrated_rad = calibrateDxl(
-        raw_pulse, joint.zero_offset, joint.direction, joint.wraparound);
-      joint_states.name.push_back(joint.name);
-      joint_states.position.push_back(calibrated_rad);
-      dxl_angle_deg_msg.data.push_back(calibrated_rad * 180.0 / M_PI);
-      dxl_encoder_msg.data.push_back(static_cast<double>(raw_pulse));
     }
     dxl_angle_pub_->publish(dxl_angle_deg_msg);
     dxl_encoder_pub_->publish(dxl_encoder_msg);
@@ -298,9 +323,11 @@ private:
   // delete하면 안 됨) - 그래서 스마트 포인터로 감싸지 않고 raw pointer로 둔다.
   dynamixel::PortHandler * dxl_port_{nullptr};
   dynamixel::PacketHandler * dxl_packet_{nullptr};
-  int base_dxl_id_{0}, gripper_dxl_id_{4};
+  int base_dxl_id_{0}, wrist_yaw_dxl_id_{-1}, gripper_dxl_id_{4};
   double base_zero_offset_{0.0}, base_direction_{1.0};
   bool base_wraparound_{true};
+  double wrist_yaw_zero_offset_{0.0}, wrist_yaw_direction_{1.0};
+  bool wrist_yaw_wraparound_{true};
   double gripper_zero_offset_{0.0}, gripper_direction_{1.0};
   bool gripper_wraparound_{true};
 

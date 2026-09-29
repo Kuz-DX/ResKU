@@ -1,0 +1,513 @@
+<?xml version="1.0"?>
+
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro"
+       name="tool_manipulator_6dof">
+
+  <!-- ========================================================= -->
+  <!-- PARAMETERS -->
+  <!-- ========================================================= -->
+
+  <xacro:arg name="use_mesh" default="true"/>
+
+  <xacro:property
+      name="mesh_path"
+      value="package://tool_manipulator_description/meshes/visual/cad_6dof"/>
+
+
+  <!-- ========================================================= -->
+  <!-- MATERIALS -->
+  <!-- ========================================================= -->
+
+  <!-- PETG : charcoal -->
+  <material name="petg_charcoal">
+    <color rgba="0.20 0.20 0.22 1.0"/>
+  </material>
+
+  <!-- MOTOR -->
+  <material name="motor_grey">
+    <color rgba="0.58 0.58 0.60 1.0"/>
+  </material>
+
+
+  <!-- ========================================================= -->
+  <!-- VISUAL MACRO -->
+  <!-- STL 자체 좌표계를 그대로 사용 -->
+  <!-- STL 단위 mm -> URDF m -->
+  <!-- ========================================================= -->
+
+  <xacro:macro name="mesh_visual" params="mesh material">
+
+    <xacro:if value="$(arg use_mesh)">
+      <visual>
+
+      <!--
+        중요:
+        STL export origin = 해당 hinge
+        STL export axes   = 해당 local frame
+
+        따라서 여기서 추가 회전/이동 금지.
+      -->
+      <origin xyz="0 0 0"
+              rpy="0 0 0"/>
+
+      <geometry>
+        <mesh
+          filename="${mesh_path}/${mesh}.stl"
+          scale="0.001 0.001 0.001"/>
+      </geometry>
+
+      <material name="${material}"/>
+
+    </visual>
+    </xacro:if>
+
+  </xacro:macro>
+
+
+  <!-- ========================================================= -->
+  <!-- WORLD -->
+  <!-- ========================================================= -->
+
+  <link name="world"/>
+
+
+  <!-- ========================================================= -->
+  <!-- BASE ACTUATOR -->
+  <!-- ========================================================= -->
+
+  <link name="base_actuator">
+
+    <xacro:mesh_visual
+        mesh="base_actuator"
+        material="motor_grey"/>
+
+  </link>
+
+
+  <joint name="world_to_base_actuator"
+         type="fixed">
+
+    <parent link="world"/>
+    <child link="base_actuator"/>
+
+    <origin xyz="0 0 0"
+            rpy="0 0 0"/>
+
+  </joint>
+
+
+  <!-- ========================================================= -->
+  <!-- Q1 : BASE YAW -->
+  <!-- local Z = world +Z -->
+  <!-- ========================================================= -->
+
+  <link name="base_link">
+
+    <xacro:mesh_visual
+        mesh="base_link"
+        material="petg_charcoal"/>
+
+  </link>
+
+
+  <joint name="base_joint"
+         type="revolute">
+
+    <parent link="base_actuator"/>
+    <child link="base_link"/>
+
+    <origin xyz="0 0 0"
+            rpy="0 0 0"/>
+
+    <axis xyz="0 0 1"/>
+
+    <!-- 임시 limit -->
+    <limit
+        lower="${-pi}"
+        upper="${pi}"
+        effort="1.0"
+        velocity="1.0"/>
+
+  </joint>
+
+
+  <!-- ========================================================= -->
+  <!-- SHOULDER ACTUATOR -->
+  <!-- P1 world = (0, -37.7, 103.9) mm -->
+  <!-- shoulder frame -->
+  <!-- Xs = +Xw -->
+  <!-- Ys = -Zw -->
+  <!-- Zs = +Yw -->
+  <!-- ========================================================= -->
+
+  <link name="shoulder_actuator">
+
+    <xacro:mesh_visual
+        mesh="shoulder_actuator"
+        material="motor_grey"/>
+
+  </link>
+
+
+  <joint name="shoulder_actuator_mount"
+         type="fixed">
+
+    <parent link="base_link"/>
+    <child link="shoulder_actuator"/>
+
+    <origin
+        xyz="0 -0.037700 0.103900"
+        rpy="${pi/2} 0 0"/>
+
+  </joint>
+
+
+  <!-- ========================================================= -->
+  <!-- Q2 : SHOULDER PITCH -->
+  <!-- ========================================================= -->
+
+  <link name="shoulder_link">
+
+    <xacro:mesh_visual
+        mesh="shoulder_link"
+        material="petg_charcoal"/>
+
+  </link>
+
+
+  <joint name="shoulder_joint"
+         type="revolute">
+
+    <parent link="base_link"/>
+    <child link="shoulder_link"/>
+
+    <origin
+        xyz="0 -0.037700 0.103900"
+        rpy="${pi/2} 0 0"/>
+
+    <axis xyz="0 0 -1"/>
+
+    <limit
+        lower="${-pi}"
+        upper="${pi}"
+        effort="1.0"
+        velocity="1.0"/>
+
+  </joint>
+
+
+  <!-- ========================================================= -->
+  <!-- ELBOW ACTUATOR -->
+  <!-- world displacement -->
+  <!-- shoulder -> elbow -->
+  <!-- (0, +52.578, +180) mm -->
+  <!-- expressed in SHOULDER frame -->
+  <!-- (0, -180, +52.578) mm -->
+  <!-- ========================================================= -->
+
+  <link name="elbow_actuator">
+
+    <xacro:mesh_visual
+        mesh="elbow_actuator"
+        material="motor_grey"/>
+
+  </link>
+
+
+  <joint name="elbow_actuator_mount"
+         type="fixed">
+
+    <parent link="shoulder_link"/>
+    <child link="elbow_actuator"/>
+
+    <origin
+        xyz="0 0.180000 -0.052578"
+        rpy="${pi} 0 0"/>
+
+  </joint>
+
+
+  <!-- ========================================================= -->
+  <!-- Q3 : ELBOW PITCH -->
+  <!-- ========================================================= -->
+
+  <link name="elbow_link">
+
+    <xacro:mesh_visual
+        mesh="elbow_link"
+        material="petg_charcoal"/>
+
+  </link>
+
+
+  <joint name="elbow_joint"
+         type="revolute">
+
+    <parent link="shoulder_link"/>
+    <child link="elbow_link"/>
+
+    <origin
+        xyz="0 0.180000 -0.052578"
+        rpy="${pi} 0 0"/>
+
+    <axis xyz="0 0 -1"/>
+
+    <limit
+        lower="${-pi}"
+        upper="${pi}"
+        effort="1.0"
+        velocity="1.0"/>
+
+  </joint>
+
+
+  <!-- ========================================================= -->
+  <!-- WRIST PITCH ACTUATOR -->
+  <!-- world displacement -->
+  <!-- elbow -> wrist pitch -->
+  <!-- (0, -48.397, +200) mm -->
+  <!-- expressed in ELBOW frame -->
+  <!-- (0, +200, +48.397) mm -->
+  <!-- ========================================================= -->
+
+  <link name="wrist_actuator_pitch">
+
+    <xacro:mesh_visual
+        mesh="wrist_actuator_pitch"
+        material="motor_grey"/>
+
+  </link>
+
+
+  <joint name="wrist_pitch_actuator_mount"
+         type="fixed">
+
+    <parent link="elbow_link"/>
+    <child link="wrist_actuator_pitch"/>
+
+    <origin
+        xyz="0 -0.200000 -0.048397"
+        rpy="${pi} 0 0"/>
+
+  </joint>
+
+
+  <!-- ========================================================= -->
+  <!-- Q4 : WRIST PITCH -->
+  <!-- ========================================================= -->
+
+  <link name="wrist_link_pitch">
+
+    <xacro:mesh_visual
+        mesh="wrist_link_pitch"
+        material="petg_charcoal"/>
+
+  </link>
+
+
+  <joint name="wrist_pitch_joint"
+         type="revolute">
+
+    <parent link="elbow_link"/>
+    <child link="wrist_link_pitch"/>
+
+    <origin
+        xyz="0 -0.200000 -0.048397"
+        rpy="${pi} 0 0"/>
+
+    <axis xyz="0 0 -1"/>
+
+    <limit
+        lower="${-pi}"
+        upper="${pi}"
+        effort="1.0"
+        velocity="1.0"/>
+
+  </joint>
+
+
+  <!-- ========================================================= -->
+  <!-- WRIST ROLL ACTUATOR -->
+  <!-- world displacement -->
+  <!-- wrist pitch -> wrist roll -->
+  <!-- (0, +33.519, +80) mm -->
+  <!-- expressed in WRIST-PITCH frame -->
+  <!-- (0, -80, +33.519) mm -->
+  <!-- ========================================================= -->
+
+  <link name="wrist_actuator_roll">
+
+    <xacro:mesh_visual
+        mesh="wrist_actuator_roll"
+        material="motor_grey"/>
+
+  </link>
+
+
+  <joint name="wrist_roll_actuator_mount"
+         type="fixed">
+
+    <parent link="wrist_link_pitch"/>
+    <child link="wrist_actuator_roll"/>
+
+    <origin
+        xyz="0 0.080000 -0.033519"
+        rpy="${pi/2} 0 ${-pi/2}"/>
+
+  </joint>
+
+
+  <!-- ========================================================= -->
+  <!-- Q5 : WRIST ROLL -->
+  <!-- ========================================================= -->
+
+  <link name="wrist_link_roll">
+
+    <xacro:mesh_visual
+        mesh="wrist_link_roll"
+        material="petg_charcoal"/>
+
+  </link>
+
+
+  <joint name="wrist_roll_joint"
+         type="revolute">
+
+    <parent link="wrist_link_pitch"/>
+    <child link="wrist_link_roll"/>
+
+    <origin
+        xyz="0 0.080000 -0.033519"
+        rpy="${pi/2} 0 ${-pi/2}"/>
+
+    <axis xyz="0 0 1"/>
+
+    <limit
+        lower="${-pi}"
+        upper="${pi}"
+        effort="1.0"
+        velocity="1.0"/>
+
+  </joint>
+
+
+  <!-- ========================================================= -->
+  <!-- WRIST YAW ACTUATOR -->
+  <!-- world displacement -->
+  <!-- wrist roll -> wrist yaw -->
+  <!-- (0,0,+75) mm -->
+  <!-- expressed in WRIST-ROLL frame -->
+  <!-- (-75,0,0) mm -->
+  <!-- ========================================================= -->
+
+  <link name="wrist_actuator_yaw">
+
+    <xacro:mesh_visual
+        mesh="wrist_actuator_yaw"
+        material="motor_grey"/>
+
+  </link>
+
+
+  <joint name="wrist_yaw_actuator_mount"
+         type="fixed">
+
+    <parent link="wrist_link_roll"/>
+    <child link="wrist_actuator_yaw"/>
+
+    <origin
+        xyz="-0.075000 0 0"
+        rpy="${pi/2} 0 ${-pi/2}"/>
+
+  </joint>
+
+
+  <!-- ========================================================= -->
+  <!-- Q6 : WRIST YAW -->
+  <!-- ========================================================= -->
+
+  <link name="wrist_link_yaw">
+
+    <xacro:mesh_visual
+        mesh="wrist_link_yaw"
+        material="petg_charcoal"/>
+
+  </link>
+
+
+  <joint name="wrist_yaw_joint"
+         type="revolute">
+
+    <parent link="wrist_link_roll"/>
+    <child link="wrist_link_yaw"/>
+
+    <origin
+        xyz="-0.075000 0 0"
+        rpy="${pi/2} 0 ${-pi/2}"/>
+
+    <axis xyz="0 0 1"/>
+
+    <limit
+        lower="${-pi}"
+        upper="${pi}"
+        effort="1.0"
+        velocity="1.0"/>
+
+  </joint>
+
+
+  <!-- ========================================================= -->
+  <!-- EE ACTUATOR -->
+  <!-- wrist yaw -> EE hinge/TCP = +62 mm world Z -->
+  <!-- wrist_yaw frame -->
+  <!-- Xe = -Yworld -->
+  <!-- Ye = +Xworld -->
+  <!-- Ze = +Zworld -->
+  <!-- 따라서 local displacement = (0,0,+62 mm) -->
+  <!-- ========================================================= -->
+
+  <link name="ee_actuator">
+
+    <xacro:mesh_visual
+        mesh="ee_actuator"
+        material="motor_grey"/>
+
+  </link>
+
+
+  <joint name="ee_actuator_mount"
+         type="fixed">
+
+    <parent link="wrist_link_yaw"/>
+    <child link="ee_actuator"/>
+
+    <origin
+        xyz="0 0 0.062000"
+        rpy="0 0 0"/>
+
+  </joint>
+
+
+  <!-- ========================================================= -->
+  <!-- TCP -->
+  <!-- EE actuator hinge center 자체가 TCP -->
+  <!-- 따라서 추가 62 mm를 절대 넣지 않음 -->
+  <!-- ========================================================= -->
+
+  <link name="tcp_link"/>
+
+
+  <joint name="tcp_joint"
+         type="fixed">
+
+    <parent link="ee_actuator"/>
+    <child link="tcp_link"/>
+
+    <origin
+        xyz="0 0 0"
+        rpy="0 0 0"/>
+
+  </joint>
+
+
+</robot>
