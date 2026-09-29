@@ -118,6 +118,33 @@ export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 
 ---
 
+# 🧭 gyro odom 실차 모니터링
+
+`manual_return_bringup`은 기본으로 myAHRS+ gyro를 EKF yaw rate로 쓴다
+(`use_imu_gyro:=true`). **시작 직후 약 2.5초 로봇을 정지**시켜야 gyro bias를
+잡고 odom이 나온다. 로봇 PC는 위와 같이 `start_manual_return.sh`로 띄우고,
+**로컬 PC**에서:
+
+```bash
+cd ~/ResKU
+export ROS_DOMAIN_ID=99
+export ROS_LOCALHOST_ONLY=0
+export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+source /opt/ros/humble/setup.bash && source install/setup.bash
+cd src/drive/autonomous/robot_bringup/scripts
+python3 gyro_odom_monitor.py        # 로그: 현재 폴더 gyro_odom_monitor.csv
+```
+
+- 1초마다: `ekf`(odom yaw) / `gyro`(gyro 적분) / `wheel`(휠만 적분) / `slip`(=wheel-ekf,
+  휠만 썼다면 생겼을 오차) / `ahrs`(참고) / 각속도 / `/cmd_vel` / `src`(GYRO·WHEEL) / 수신 Hz
+- `>>` 이벤트: 보정 완료(bias), 복귀 상태 변화, **회전 정지 후 미끄러짐 N deg**,
+  **IMU 끊김 → WHEEL 전환 / GYRO 복귀**
+- `src`가 WHEEL로 바뀌면 gyro가 끊긴 것 -- IMU 케이블/포트부터 확인
+- 방향을 새로 0으로 잡기: `ros2 service call /reset_yaw_zero std_srvs/srv/Trigger`
+- 그래프로 보기: `ros2 run rqt_plot rqt_plot /imu/yaw_gyro_integrated/data /imu/yaw_relative/data` (rad)
+- 복귀 회전 속도 상한: `return_max_angular_radps` (기본 0.25 rad/s, 직진 속도 불변).
+  회전이 멈춰서 안 돌면 로봇 PC에서 `... manual_return_bringup.launch.py return_max_angular_radps:=0.3`
+
 # 📐 회전 보정치(effective_track_width_m) 재측정
 
 바닥이 바뀌면 슬립이 달라져서 다시 재야 한다. **로봇 PC(JECS, SSH)**와
