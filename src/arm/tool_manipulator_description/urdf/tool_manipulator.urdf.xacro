@@ -513,8 +513,7 @@
 
   <!-- RealSense D435 bracket: TCP is the mechanical parent frame. -->
 
-  </link>
-    <link name="cam_link">
+  <link name="cam_link">
 
     <xacro:mesh_visual
         mesh="cam_d435"
