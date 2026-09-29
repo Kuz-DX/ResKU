@@ -1,0 +1,95 @@
+{
+  "assumptions": "RMD motor masses and rated torque from user table, hardware revision/thermal conditions unverified. Link/tool/payload masses remain assumptions unless measured by user. Any other segments are preserved. Horizontal pitch-chain screening only.",
+  "safety_factor": 2.0,
+  "payload_kg": 0.5,
+  "tool_mass_kg": 0.4,
+  "tool_offset_m": 0.09,
+  "tool_changer": {
+    "minimum_length_m": 0.11,
+    "motor": "MX-106T",
+    "motor_mass_kg": 0.153,
+    "note": "Tool-change locking motor. The 0.300 kg ee actuator_mass_kg below is the retained motor-plus-bracket assembly mass, not motor mass alone. MX-106T continuous torque is unverified; 8.4 Nm is stall torque."
+  },
+  "segments": [
+    {
+      "name": "shoulder",
+      "motor": "RMD-X8-120",
+      "length_m": 0.18,
+      "link_mass_kg": 0.15,
+      "com_fraction": 0.5,
+      "actuator_mass_kg": 1.4,
+      "continuous_output_nm": 43,
+      "motor_spec_note": "User supplied motor-only mass and rated output torque; revision and continuous operating conditions unverified. Add bracket mass separately.",
+      "motor_spec_reference": {
+        "user_reported_stall_nm": 64.5,
+        "voltage_v": 48,
+        "communication": "CAN",
+        "url": "https://www.myactuator.com/x8-120details"
+      }
+    },
+    {
+      "name": "elbow",
+      "motor": "RMD-X6-60",
+      "length_m": 0.22,
+      "link_mass_kg": 0.15,
+      "com_fraction": 0.5,
+      "actuator_mass_kg": 0.82,
+      "continuous_output_nm": 20,
+      "motor_spec_note": "User supplied motor-only mass and rated output torque; revision and continuous operating conditions unverified. Add bracket mass separately.",
+      "motor_spec_reference": {
+        "user_reported_stall_nm": 30,
+        "voltage_v": 48,
+        "communication": "CAN",
+        "url": "https://www.myactuator.com/x6-60details"
+      }
+    },
+    {
+      "name": "wrist",
+      "motor": "RMD-X4-36",
+      "length_m": 0.15,
+      "link_mass_kg": 0.1,
+      "com_fraction": 0.5,
+      "actuator_mass_kg": 0.36,
+      "continuous_output_nm": 10.5,
+      "motor_spec_note": "User supplied motor-only mass and rated output torque; revision and continuous operating conditions unverified. Add bracket mass separately.",
+      "motor_spec_reference": {
+        "user_reported_stall_nm": 17.25,
+        "voltage_v": 24,
+        "communication": "CAN",
+        "url": "https://www.myactuator.com/x4-36details"
+      }
+    },
+    {
+      "name": "wrist_yaw",
+      "motor": "MX-106T",
+      "joint_type": "fixed",
+      "length_m": 0.055,
+      "link_mass_kg": 0.05,
+      "com_fraction": 0.5,
+      "actuator_mass_kg": 0.153,
+      "continuous_output_nm": null,
+      "role": "distal_yaw",
+      "motor_spec_note": "Independent wrist-yaw MX-106T #1. It is a yaw axis, so this planar horizontal pitch-chain screen includes only its mass/length as downstream load; yaw inertial torque, external docking moment, backlash, and bracket mass require a separate 3D calculation."
+    },
+    {
+      "name": "ee",
+      "motor": "MX-106T",
+      "length_m": 0.16,
+      "link_mass_kg": 0.1,
+      "com_fraction": 0.5,
+      "actuator_mass_kg": 0.3,
+      "continuous_output_nm": null,
+      "joint_type": "fixed",
+      "role": "gripper_pinion_lock",
+      "motor_spec_note": "Independent end-effector gripper-pinion MX-106T #2. Its pinion axis drives the gripper and ballpoint-style lock/unlock mechanism; it is not an arm pose joint. Fixed design point: 0.160 m, 0.400 kg total (0.300 kg motor-plus-bracket assembly plus 0.100 kg structure). Motor alone is 0.153 kg. Assembly mass needs measurement."
+    }
+  ],
+  "base_motor_reference": {
+    "motor": "XH540-W270-T",
+    "stall_nm": 9.9,
+    "stall_derating_factor": 0.5,
+    "assumed_design_limit_nm": 4.95,
+    "continuous_output_nm": null,
+    "note": "User assumption: stall times 0.5, NOT manufacturer rated torque. Metadata only; base yaw sizing is not implemented."
+  }
+}

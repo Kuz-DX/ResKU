@@ -1,0 +1,63 @@
+<?xml version="1.0"?>
+<!-- Tool 1: existing MX-106T gripper, pinion and racks.  This file owns every
+     link downstream of the common tcp_link; it is never part of no-tool URDF. -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:macro name="tool_1_gripper" params="prefix parent use_mesh:=false">
+    <xacro:property name="tool_1_tcp_offset" value="0.090"/>
+    <xacro:property name="tool_1_rack_offset" value="0.018"/>
+    <xacro:property name="tool_1_pitch_radius" value="0.017"/>
+
+    <joint name="${prefix}tool_1_mount_joint" type="fixed">
+      <parent link="${parent}"/><child link="${prefix}tool_1_link"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </joint>
+    <link name="${prefix}tool_1_link">
+      <inertial><mass value="0.001"/><inertia ixx="1e-7" ixy="0" ixz="0" iyy="1e-7" iyz="0" izz="1e-7"/></inertial>
+    </link>
+
+    <joint name="${prefix}gripper_actuator_joint" type="fixed">
+      <parent link="${prefix}tool_1_link"/><child link="${prefix}gripper_actuator"/>
+      <origin xyz="0 0 0" rpy="0 -${pi/2} 0"/>
+    </joint>
+    <link name="${prefix}gripper_actuator">
+      <xacro:if value="${use_mesh}">
+        <visual><origin rpy="0 0 ${pi/2}"/><geometry><mesh filename="package://tool_manipulator_description/meshes/visual/gripper_actuator.stl" scale="0.001 0.001 0.001"/></geometry><material name="motor_dark"/></visual>
+        <collision><origin rpy="0 0 ${pi/2}"/><geometry><mesh filename="package://tool_manipulator_description/meshes/collision/gripper_actuator.stl" scale="0.001 0.001 0.001"/></geometry></collision>
+      </xacro:if>
+      <xacro:unless value="${use_mesh}"><visual><geometry><cylinder radius="0.030" length="0.050"/></geometry><material name="motor_dark"/></visual><collision><geometry><cylinder radius="0.030" length="0.050"/></geometry></collision></xacro:unless>
+      <inertial><mass value="0.001"/><inertia ixx="1e-7" ixy="0" ixz="0" iyy="1e-7" iyz="0" izz="1e-7"/></inertial>
+    </link>
+    <joint name="${prefix}gripper_joint" type="revolute">
+      <parent link="${prefix}gripper_actuator"/><child link="${prefix}pinion_gear"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/><axis xyz="0 0 1"/>
+      <limit lower="0.0" upper="2.59396" effort="8.4" velocity="3.665"/>
+      <dynamics damping="0.05" friction="0.01"/>
+    </joint>
+    <link name="${prefix}pinion_gear">
+      <xacro:if value="${use_mesh}"><visual><geometry><mesh filename="package://tool_manipulator_description/meshes/visual/pinion_gear.stl" scale="0.001 0.001 0.001"/></geometry><material name="motor_dark"/></visual><collision><geometry><mesh filename="package://tool_manipulator_description/meshes/collision/pinion_gear.stl" scale="0.001 0.001 0.001"/></geometry></collision></xacro:if>
+      <xacro:unless value="${use_mesh}"><visual><geometry><cylinder radius="0.016" length="0.012"/></geometry><material name="motor_dark"/></visual><collision><geometry><cylinder radius="0.016" length="0.012"/></geometry></collision></xacro:unless>
+      <inertial><mass value="0.01"/><inertia ixx="1e-6" ixy="0" ixz="0" iyy="1e-6" iyz="0" izz="1.5e-6"/></inertial>
+    </link>
+
+    <joint name="${prefix}rack_left_joint" type="prismatic">
+      <parent link="${prefix}tool_1_link"/><child link="${prefix}rack_left"/>
+      <origin xyz="0 ${tool_1_rack_offset} 0.062" rpy="${pi} 0 ${pi}"/><axis xyz="0 0 1"/>
+      <limit lower="0" upper="0.030" effort="8.4" velocity="0.1"/>
+      <mimic joint="${prefix}gripper_joint" multiplier="${tool_1_pitch_radius}" offset="0"/>
+    </joint>
+    <joint name="${prefix}rack_right_joint" type="prismatic">
+      <parent link="${prefix}tool_1_link"/><child link="${prefix}rack_right"/>
+      <origin xyz="0 -${tool_1_rack_offset} -0.062" rpy="0 0 0"/><axis xyz="0 0 1"/>
+      <limit lower="0" upper="0.030" effort="8.4" velocity="0.1"/>
+      <mimic joint="${prefix}gripper_joint" multiplier="${tool_1_pitch_radius}" offset="0"/>
+    </joint>
+    <link name="${prefix}rack_left"><visual><geometry><box size="0.020 0.020 0.120"/></geometry><material name="petg_grey"/></visual><collision><geometry><box size="0.020 0.020 0.120"/></geometry></collision><inertial><mass value="0.03"/><inertia ixx="4e-5" ixy="0" ixz="0" iyy="4e-5" iyz="0" izz="1e-6"/></inertial></link>
+    <link name="${prefix}rack_right"><visual><geometry><box size="0.020 0.020 0.120"/></geometry><material name="petg_grey"/></visual><collision><geometry><box size="0.020 0.020 0.120"/></geometry></collision><inertial><mass value="0.03"/><inertia ixx="4e-5" ixy="0" ixz="0" iyy="4e-5" iyz="0" izz="1e-6"/></inertial></link>
+
+    <joint name="${prefix}tool_1_tcp_joint" type="fixed">
+      <parent link="${prefix}pinion_gear"/><child link="${prefix}tool_1_tcp"/>
+      <origin xyz="0 0 ${tool_1_tcp_offset}" rpy="0 0 0"/>
+    </joint>
+    <link name="${prefix}tool_1_tcp"><visual><geometry><sphere radius="0.005"/></geometry><material name="tcp_red"/></visual><inertial><mass value="0.001"/><inertia ixx="1e-7" ixy="0" ixz="0" iyy="1e-7" iyz="0" izz="1e-7"/></inertial></link>
+  </xacro:macro>
+</robot>

@@ -1,0 +1,23 @@
+{
+  "description": "Design constraint, not consumed by design_sizing.py yet. Position-only target; orientation and collision clearance unspecified.",
+  "frame": "world: chassis bottom centre, +x forward, +z up",
+  "chassis_size_xyz_m": [
+    0.78,
+    0.5,
+    0.35
+  ],
+  "base_origin_world_xyz_m": [
+    0.278,
+    0,
+    0.35
+  ],
+  "target_tcp_world_xyz_m": [
+    0.39,
+    0,
+    0
+  ],
+  "target_note": "Front bottom centre assumed. The base is 28 mm farther forward than the prior 0.250 m candidate: chassis_mount_x=0.278 m. Finite tool geometry requires approach clearance and ground-contact handling.",
+  "required_orientation": null,
+  "approach_clearance_m": null,
+  "validation_status": "NOT_IK_OR_COLLISION_VALIDATED"
+}

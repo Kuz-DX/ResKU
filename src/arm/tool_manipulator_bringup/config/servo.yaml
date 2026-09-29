@@ -1,0 +1,19 @@
+/**:
+  ros__parameters:
+    move_group_name: arm
+    planning_frame: base_actuator
+    ee_frame_name: tcp_link
+    # TCP commands from tcp_joy_teleop are expressed in this fixed robot link.
+    robot_link_command_frame: base_actuator
+    command_in_type: speed_units
+    command_out_type: trajectory_msgs/JointTrajectory
+    command_out_topic: /arm_controller/joint_trajectory
+    publish_period: 0.02
+    incoming_command_timeout: 0.1
+    num_outgoing_halt_msgs_to_publish: 4
+    lower_singularity_threshold: 17.0
+    hard_stop_singularity_threshold: 30.0
+    joint_limit_margin: 0.10
+    check_collisions: true
+    collision_check_rate: 20.0
+    is_primary_planning_scene_monitor: true

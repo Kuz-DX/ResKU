@@ -1,0 +1,44 @@
+# Tool registry.  The arm itself ends at tcp_link; values below describe
+# only what becomes valid after that tool is mechanically locked.
+tools:
+  1:
+    enabled: false
+    name: gripper_pinion_tool
+    # Existing gripper/pinion URDF values, expressed at gripper_joint = 0.
+    # ee_mount -> gripper_actuator is Ry(-90 deg), then pinion -> old TCP was
+    # +90 mm in local Z, yielding the offset below in ee_mount coordinates.
+    tcp:
+      frame: tool_1_tcp
+      parent: tcp_link
+      xyz: [-0.090, 0.0, 0.0]
+      quat_xyzw: [0.0, -0.70710678, 0.0, 0.70710678]
+    collision:
+      # Conservative fallback until the assembled gripper mesh is measured.
+      primitives:
+        - {type: cylinder, radius: 0.030, length: 0.050, xyz: [-0.025, 0.0, 0.0]}
+        - {type: box, size: [0.040, 0.120, 0.040], xyz: [-0.090, 0.0, 0.0]}
+    actuator:
+      type: dynamixel
+      joint: gripper_joint
+      id: 4
+      position_limits_rad: [0.0, 2.59396]
+    # Disabled: re-teach all six joints against the new CAD URDF before enabling.
+    lock:
+      joint: wrist_yaw_joint
+      locked_angle_rad: 0.0  # replace after real lock calibration
+
+  2:
+    enabled: false
+    name: tool_2_case
+    dock_fixture: tool_2_case
+    # Supplied square-bore upper-centre in arm_world_frame.
+    target_entry:
+      frame: arm_world_frame
+      position: [-0.268, -0.10245, 0.187]
+    # Disabled: re-teach all six joints against the new CAD URDF before enabling.
+
+  3:
+    enabled: false
+    name: tool_3_unconfigured
+    # Fill fixture, TCP, collision, actuator, and teaching values after
+    # mechanical dimensions are available.

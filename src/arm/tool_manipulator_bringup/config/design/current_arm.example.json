@@ -1,0 +1,15 @@
+{
+  "assumptions": "Static horizontal pitch-chain screening only. Motor torque and mass values are design inputs; bracket, cable, thermal, dynamic, stiffness, collision, and IK effects require separate verification.",
+  "safety_factor": 1.8,
+  "payload_kg": 0.5,
+  "tool_mass_kg": 0.4,
+  "tool_offset_m": 0.0,
+  "segments": [
+    {"name": "shoulder", "motor": "RMD-X8-120", "joint_type": "pitch", "length_m": 0.18, "link_mass_kg": 0.15, "com_fraction": 0.5, "actuator_mass_kg": 1.4, "continuous_output_nm": 43},
+    {"name": "elbow", "motor": "RMD-X6-60", "joint_type": "pitch", "length_m": 0.22, "link_mass_kg": 0.15, "com_fraction": 0.5, "actuator_mass_kg": 0.82, "continuous_output_nm": 20},
+    {"name": "wrist", "motor": "RMD-X4-36", "joint_type": "pitch", "length_m": 0.15, "link_mass_kg": 0.05, "com_fraction": 0.5, "actuator_mass_kg": 0.36, "continuous_output_nm": 10.5},
+    {"name": "extra", "motor": "MX-106T", "joint_type": "pitch", "length_m": 0.11, "link_mass_kg": 0.10, "com_fraction": 0.5, "actuator_mass_kg": 0.153, "continuous_output_nm": 4.2, "role": "distal_pose", "motor_spec_note": "4.2 Nm is a provisional static design limit (50% of 8.4 Nm stall), not a manufacturer continuous rating."},
+    {"name": "ee_power", "motor": "MX-106T", "joint_type": "fixed", "length_m": 0.06, "link_mass_kg": 0.0, "com_fraction": 0.5, "actuator_mass_kg": 0.153, "continuous_output_nm": null, "role": "end_effector_power", "motor_spec_note": "Fixed end-effector power-transmission actuator. Its mass is included in upstream joint loads; gripping/transmission torque is outside this arm-pose calculation."}
+  ],
+  "base_motor_reference": {"motor": "XH540-W270-T", "stall_nm": 9.9, "stall_derating_factor": 0.5, "assumed_design_limit_nm": 4.95, "continuous_output_nm": null, "note": "Base yaw sizing is not included in this planar gravity calculation."}
+}

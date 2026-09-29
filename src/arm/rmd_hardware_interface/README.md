@@ -1,12 +1,12 @@
 # rmd_hardware_interface
 
-`rmd_sdk`를 ROS 2 `ros2_control` actuator interface로 연결합니다. `robot_arm_description`의 각 RMD 관절은 아래 pluginlib 식별자를 사용합니다.
+`rmd_sdk`를 ROS 2 `ros2_control` actuator interface로 연결합니다. 현재 로봇 URDF의 RMD 관절은 아래 pluginlib 식별자를 사용합니다.
 
 ```xml
 <plugin>rmd_hardware_interface/MyActuatorRmdHardwareInterface</plugin>
 ```
 
-관절별 CAN interface, actuator ID, 속도 제한과 timeout은 URDF/Xacro의 hardware parameter로 전달됩니다. 일반적인 관절 추가는 이 패키지가 아니라 `robot_arm_description`과 `robot_arm_bringup`에서 수행합니다.
+관절별 CAN interface, actuator ID, 속도 제한과 timeout은 URDF/Xacro의 hardware parameter로 전달됩니다. 일반적인 관절 추가는 이 패키지가 아니라 현재 로봇의 description/bringup 패키지에서 수행합니다.
 
 실기 position interface는 상위 명령원이 수동인지 AUTO인지와 무관하게 마지막
 하드웨어 안전계층을 통과합니다. 유효한 최초 feedback 전에는 제어를 시작하지 않고,

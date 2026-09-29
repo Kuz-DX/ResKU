@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:macro name="tool_2" params="prefix parent use_mesh:=false">
+    <joint name="${prefix}tool_2_mount_joint" type="fixed"><parent link="${parent}"/><child link="${prefix}tool_2_link"/><origin xyz="0 0 0"/></joint>
+    <link name="${prefix}tool_2_link"><inertial><mass value="0.001"/><inertia ixx="1e-7" ixy="0" ixz="0" iyy="1e-7" iyz="0" izz="1e-7"/></inertial></link>
+    <joint name="${prefix}tool_2_tcp_joint" type="fixed"><parent link="${prefix}tool_2_link"/><child link="${prefix}tool_2_tcp"/><origin xyz="0 0 0"/></joint>
+    <link name="${prefix}tool_2_tcp"/>
+  </xacro:macro>
+</robot>

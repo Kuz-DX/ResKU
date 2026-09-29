@@ -1,0 +1,46 @@
+apriltag_tool_docking:
+  ros__parameters:
+    # UI contract: publish std_msgs/Int32(tag_id) to /selected_tool_id.
+    tool_id_topic: /selected_tool_id
+    tool_id_message_type: int32
+    detection_topic: /tag_detections
+    # Humble apriltag_msgs default. Change only for a bridge with different fields.
+    tag_id_field: id
+    tag_pose_field: pose.pose.pose
+    servo_twist_topic: /servo_node/delta_twist_cmds
+    # Detector poses and TwistStamped commands must use this same frame.
+    servo_command_frame: camera_color_optical_frame
+    planning_group: arm
+    base_link: base_actuator
+    end_effector_link: tcp_link
+    joint_state_topic: /joint_states
+    joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
+    # Named common pose: docking_wait. It faces the docking rack before the
+    # tag-specific taught approach is planned. base=pi requires a matching
+    # base_joint hard/soft limit before real-hardware use.
+    docking_wait_joint_goal: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    # Replace only after collision-checked teaching on the real robot (radians).
+    tool_joint_goals_yaml: '{}'
+    # Desired tag centre in servo_command_frame. Only x/y are closed-loop.
+    desired_tag_position: [0.0, 0.0, 0.20]
+    kp_position: 0.8
+    max_linear_velocity: 0.03
+    servo_rate_hz: 50.0
+    xy_position_tolerance: 0.003
+    stable_frame_count: 8
+    coarse_timeout_sec: 30.0
+    xy_align_timeout_sec: 20.0
+    detection_timeout_sec: 0.5
+    divergence_ratio: 1.5
+    divergence_frames: 10
+    # Fixture-calibrated descent in the base-axis reference whose axes follow
+    # world: +X front, +Y left, +Z up.  This does not change the arm FK.
+    descent_distance_m: 0.015
+    descent_speed_mps: 0.008
+    descent_command_frame: arm_world_frame
+    descent_direction: [0.0, 0.0, -1.0]
+    descent_timeout_sec: 5.0
+    # A collision-checked joint-space lock move, relative to current joint state.
+    lock_joint_name: wrist_yaw_joint
+    lock_rotation_rad: 1.5708
+    lock_timeout_sec: 15.0
