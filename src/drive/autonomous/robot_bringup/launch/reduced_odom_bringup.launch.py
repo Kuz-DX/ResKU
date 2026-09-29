@@ -22,6 +22,7 @@ Verify with:
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition, UnlessCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -35,10 +36,35 @@ def generate_launch_description():
     track_width = LaunchConfiguration('effective_track_width_m')
     slip_factor = LaunchConfiguration('angular_slip_compensation_factor')
     use_imu_yaw = LaunchConfiguration('use_imu_yaw')
+    use_imu_gyro = LaunchConfiguration('use_imu_gyro')
+    heading_sign = LaunchConfiguration('imu_heading_sign')
 
     odom_params = os.path.join(
         get_package_share_directory('reduced_odom'),
         'config', 'reduced_odom.yaml')
+
+    myahrs_params = {
+        'port': imu_port,
+        'baudrate': 460800,
+        'frame_id': 'imu_link',
+        # [2026-08-23] 기존 10Hz(divider=10 상당) -> 50Hz(divider=2).
+        # EKF sensor_timeout(0.3s로 같이 상향, ekf_local.yaml 참고)
+        # 대비 마진을 넉넉히 확보 -- EKF 발산 진단 세션 근거.
+        # myahrs_driver_node.cpp 상단 docstring 참고: 지원값은
+        # 1/2/4/5/10(divider) -> 100/50/25/20/10(Hz)뿐, 다른 값은
+        # 노드가 시작 자체를 거부함.
+        # [2026-08-27] 50Hz(divider=2) -> 20Hz(divider=5) -- MPPI/
+        # rmd_x8_driver(위)와 동일하게 20Hz로 통일하려는 사용자 요청.
+        # 20Hz는 지원 목록에 있는 값이라 정확히 맞출 수 있음(30Hz는
+        # 지원 안 돼서 불가능했음, 그래서 20Hz로 합의).
+        # [2026-09-29 실측] use_imu_gyro=false 경로의 @divider는 CRC가 없어
+        # 센서가 거부("~error,ERROR,no crc field") -> 실제로는 기본 10Hz였다.
+        # use_imu_gyro=true 경로는 CRC 포함으로 보내서 실제 20Hz가 된다.
+        'output_divider': 5,
+        'orientation_covariance_roll': 0.00000594,
+        'orientation_covariance_pitch': 0.00003487,
+        'orientation_covariance_yaw': 0.00051956,
+    }
 
     return LaunchDescription([
 
@@ -69,6 +95,14 @@ def generate_launch_description():
         DeclareLaunchArgument('effective_track_width_m', default_value='0.4904'),
         DeclareLaunchArgument('angular_slip_compensation_factor', default_value='1.05'),
         DeclareLaunchArgument('use_imu_yaw', default_value='true'),
+        # [2026-09-29] true: myahrs_driver를 RPYIMU(gyro 포함)로 띄우고
+        # reduced_odom이 gyro wz + (use_imu_yaw면) yaw_relative를 융합,
+        # 시작 방향을 odom yaw=0으로. false면 이전(휠 wz / AHRS 절대 yaw)과 동일.
+        # [2026-09-30] 기본 true -- 실측: 휠 슬립에 무관, 정지 드리프트 ~0.55deg/min.
+        # 시작 직후 ~2.5s 정지 필요, IMU가 없으면 odom이 publish되지 않음.
+        DeclareLaunchArgument('use_imu_gyro', default_value='true'),
+        # yaw와 gyro z에 함께 적용되는 센서->ROS 부호 (TEST A/B로 확정).
+        DeclareLaunchArgument('imu_heading_sign', default_value='-1.0'),
 
         # [단계 1] RMD-X8 CAN 구동 드라이버 노드 -> /wheel/odom
         # 지상 주행용 hard wheel-speed clamp. 최초 저속 시험값에서 3배 상향.
@@ -122,30 +156,26 @@ def generate_launch_description():
         ),
 
         # [단계 2] myAHRS+ IMU 드라이버 노드 -> /imu
+        # use_imu_gyro에 따라 둘 중 하나만 뜬다. 기존 경로는 파라미터가 이전과 동일.
+        Node(
+            package='myahrs_driver',
+            executable='myahrs_driver_node',
+            name='myahrs_driver',
+            parameters=[myahrs_params],
+            output='screen',
+            condition=UnlessCondition(use_imu_gyro),
+        ),
         Node(
             package='myahrs_driver',
             executable='myahrs_driver_node',
             name='myahrs_driver',
             parameters=[{
-                'port': imu_port,
-                'baudrate': 460800,
-                'frame_id': 'imu_link',
-                # [2026-08-23] 기존 10Hz(divider=10 상당) -> 50Hz(divider=2).
-                # EKF sensor_timeout(0.3s로 같이 상향, ekf_local.yaml 참고)
-                # 대비 마진을 넉넉히 확보 -- EKF 발산 진단 세션 근거.
-                # myahrs_driver_node.cpp 상단 docstring 참고: 지원값은
-                # 1/2/4/5/10(divider) -> 100/50/25/20/10(Hz)뿐, 다른 값은
-                # 노드가 시작 자체를 거부함.
-                # [2026-08-27] 50Hz(divider=2) -> 20Hz(divider=5) -- MPPI/
-                # rmd_x8_driver(위)와 동일하게 20Hz로 통일하려는 사용자 요청.
-                # 20Hz는 지원 목록에 있는 값이라 정확히 맞출 수 있음(30Hz는
-                # 지원 안 돼서 불가능했음, 그래서 20Hz로 합의).
-                'output_divider': 5,
-                'orientation_covariance_roll': 0.00000594,
-                'orientation_covariance_pitch': 0.00003487,
-                'orientation_covariance_yaw': 0.00051956,
+                **myahrs_params,
+                'ascii_format': 'RPYIMU',
+                'heading_sign': ParameterValue(heading_sign, value_type=float),
             }],
             output='screen',
+            condition=IfCondition(use_imu_gyro),
         ),
 
         # [단계 3] base_link -> imu_link static TF
@@ -229,7 +259,10 @@ def generate_launch_description():
             package='reduced_odom',
             executable='reduced_odom_node',
             name='reduced_odom_node',
-            parameters=[odom_params, {'use_imu_yaw': ParameterValue(use_imu_yaw, value_type=bool)}],
+            parameters=[odom_params, {
+                'use_imu_yaw': ParameterValue(use_imu_yaw, value_type=bool),
+                'use_imu_gyro': ParameterValue(use_imu_gyro, value_type=bool),
+            }],
             output='screen',
         ),
     ])

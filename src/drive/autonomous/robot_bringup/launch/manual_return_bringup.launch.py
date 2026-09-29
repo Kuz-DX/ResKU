@@ -69,7 +69,11 @@ def generate_launch_description():
     track_width = LaunchConfiguration('effective_track_width_m')
     slip_factor = LaunchConfiguration('angular_slip_compensation_factor')
     use_imu_yaw = LaunchConfiguration('use_imu_yaw')
+    use_imu_gyro = LaunchConfiguration('use_imu_gyro')
+    imu_heading_sign = LaunchConfiguration('imu_heading_sign')
     reverse_return = LaunchConfiguration('reverse_return')
+    return_max_w = LaunchConfiguration('return_max_angular_radps')
+    return_max_w_param = ParameterValue(return_max_w, value_type=float)
 
     reduced_odom_bringup_launch = os.path.join(
         get_package_share_directory('robot_bringup'),
@@ -82,6 +86,7 @@ def generate_launch_description():
         parameters=[{
             'turn_direction': turn_direction,
             'reverse_return': ParameterValue(reverse_return, value_type=bool),
+            'turn_w_max_radps': return_max_w_param,
         }],
         output='screen',
     )
@@ -119,6 +124,20 @@ def generate_launch_description():
         DeclareLaunchArgument('effective_track_width_m', default_value='1.244'),
         DeclareLaunchArgument('angular_slip_compensation_factor', default_value='1.0'),
         DeclareLaunchArgument('use_imu_yaw', default_value='false'),
+        # [2026-09-29] myAHRS+ gyro wz 융합 + 시작 방향 yaw=0 (reduced_odom_bringup 참고).
+        # 시작 직후 로봇이 약 2.5초 정지해 있어야 odom이 나온다. [2026-09-30] 기본 true.
+        # AHRS yaw는 use_imu_yaw=false(위)라 쓰지 않음 -> EKF yaw는 gyro wz 기반.
+        DeclareLaunchArgument('use_imu_gyro', default_value='true'),
+        DeclareLaunchArgument('imu_heading_sign', default_value='-1.0'),
+        # [2026-09-30] 복귀 주행의 모든 회전 속도 상한 (rad/s, 직진 속도는 불변).
+        # 궤도형 스키드 조향은 목표 yaw에서 명령을 끊어도 관성/슬립으로 더 미끄러지므로
+        # 천천히 돌려서 멈춤 오차를 줄인다. 적용: TURN_180(turn_w_max_radps),
+        # 코너 제자리 회전(rotate_max_angular_speed_radps), 경로 추종 조향
+        # (max_angular_speed_radps). 기존 0.5/0.5/0.6.
+        # ⚠️ 0.25 rad/s는 track_width 1.244에서 바퀴당 약 79 dps -- 노드 주석의
+        # 정지마찰 한계(~100 dps/바퀴, 옛 바닥 기준)보다 이미 낮다. 더 낮추기 전에
+        # 제자리 회전이 멈추지 않고 도는지 실차로 먼저 확인할 것.
+        DeclareLaunchArgument('return_max_angular_radps', default_value='0.25'),
         # [복귀 방식 선택] false(기본) = 정지 후 180도 회전 -> 전진으로 복귀.
         # true = 회전 없이 왔던 길을 그대로 후진으로 복귀 (return_state_machine_node가
         # TURN_180을 건너뛰고, return_path_follower_node가 음수 선속도로 추종 --
@@ -139,6 +158,8 @@ def generate_launch_description():
                 'effective_track_width_m': track_width,
                 'angular_slip_compensation_factor': slip_factor,
                 'use_imu_yaw': use_imu_yaw,
+                'use_imu_gyro': use_imu_gyro,
+                'imu_heading_sign': imu_heading_sign,
             }.items(),
         ),
 
@@ -169,7 +190,11 @@ def generate_launch_description():
             package='return_navigation',
             executable='return_path_follower_node',
             name='return_path_follower_node',
-            parameters=[{'reverse_drive': ParameterValue(reverse_return, value_type=bool)}],
+            parameters=[{
+                'reverse_drive': ParameterValue(reverse_return, value_type=bool),
+                'rotate_max_angular_speed_radps': return_max_w_param,
+                'max_angular_speed_radps': return_max_w_param,
+            }],
             output='screen',
         ),
     ])

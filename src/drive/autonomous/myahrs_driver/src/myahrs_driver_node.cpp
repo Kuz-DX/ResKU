@@ -6,6 +6,7 @@
 #include <vector>
 #include <map>
 #include <cstdint>
+#include <cstdio>
 #include <fcntl.h>
 #include <termios.h>
 #include <unistd.h>
@@ -31,6 +32,40 @@ public:
         this->declare_parameter<double>("orientation_covariance_roll", 0.00000594);
         this->declare_parameter<double>("orientation_covariance_pitch", 0.00003487);
         this->declare_parameter<double>("orientation_covariance_yaw", 0.00051956);
+
+        // [임시 디버그] true면 시리얼에서 받은 모든 줄을 필터링 전에
+        // "[myAHRS RAW] ..."로 출력 -- 센서가 실제로 어떤 output mode로
+        // 무슨 필드를 보내는지(gyro 포함 여부) 확인용. 기본 false라 기존
+        // 동작/로그는 그대로.
+        debug_raw_ = this->declare_parameter<bool>("debug_raw", false);
+
+        // [2026-09-29 신규] myAHRS+ ASCII 출력 포맷. "" = 아무 명령도 안 보내고
+        // 기존 경로 그대로(센서 기본값 $RPY, 레거시 @divider). "RPYIMU" =
+        // 매뉴얼 p.24 "@asc_out,RPYIMU"를 CRC 포함으로 전송 -> $RPYIMU 수신,
+        // orientation은 $RPY와 동일하게 + gyro를 angular_velocity로 publish.
+        // asc_out/divider는 NVRAM에 저장되지 않으므로(매뉴얼 p.28) 매 기동마다 전송.
+        ascii_format_ = this->declare_parameter<std::string>("ascii_format", "");
+        // 센서 축 -> ROS 축 변환 부호. 정지 시 raw accel_z ~ -1g(센서 z축이
+        // 아래 = NED 관례, CW=+) 이고 2026-08-25 실측(CCW 90deg에 raw yaw
+        // 감소)과도 일치해서 기본은 공식 ROS 드라이버(robotpilot/
+        // myahrs_driver)와 같은 (gx, -gy, -gz).
+        // heading_sign은 RPYIMU 경로에서 yaw와 gz에 "같이" 적용된다 --
+        // 둘의 부호가 어긋나면 EKF에서 gyro와 yaw_relative가 서로 싸우므로
+        // 따로 둘 수 없게 묶었다. 실차 TEST A/B(CCW -> angular_velocity.z > 0,
+        // yaw 증가)로 확인하고, 반대면 heading_sign:=1.0.
+        gyro_sign_x_ = this->declare_parameter<double>("gyro_sign_x", 1.0);
+        gyro_sign_y_ = this->declare_parameter<double>("gyro_sign_y", -1.0);
+        heading_sign_ = this->declare_parameter<double>("heading_sign", -1.0);
+        // angular_velocity_covariance 대각 성분 ((rad/s)^2). 0 = REP-145상
+        // "알 수 없음" -- 정지 상태 실측 후 채울 것.
+        angular_velocity_covariance_ =
+            this->declare_parameter<double>("angular_velocity_covariance", 0.0);
+        if (!ascii_format_.empty() && ascii_format_ != "RPY" && ascii_format_ != "RPYIMU") {
+            RCLCPP_ERROR(
+                this->get_logger(), "Unsupported ascii_format='%s' (지원값: '', RPY, RPYIMU)",
+                ascii_format_.c_str());
+            return;
+        }
 
         std::string port = this->get_parameter("port").as_string();
         int baudrate = this->get_parameter("baudrate").as_int();
@@ -69,6 +104,25 @@ public:
         }
 
         RCLCPP_INFO(this->get_logger(), "Success to open myAHRS+ on %s (%d bps)", port.c_str(), baudrate);
+
+        if (!ascii_format_.empty()) {
+            // [2026-09-29] 매뉴얼 p.20 요청 프레임 "@body*CRC\r\n". CRC 없는
+            // 요청은 센서가 "~error,ERROR,no crc field in '@divider,5'"로
+            // 거부함(실측) -- 그래서 이 경로에서는 divider도 CRC 포함으로 보냄.
+            const bool ok =
+                sendCommandWithCrc("@asc_out," + ascii_format_) &&
+                sendCommandWithCrc("@divider," + std::to_string(output_divider));
+            if (!ok) {
+                RCLCPP_ERROR(this->get_logger(), "Failed to write config commands to myAHRS+");
+            }
+            RCLCPP_INFO(
+                this->get_logger(),
+                "[myAHRS] ascii_format=%s, divider=%d (expected %d Hz) -- 응답은 [myAHRS RESP] 로그 확인",
+                ascii_format_.c_str(), output_divider, expected_hz);
+            timer_ = this->create_wall_timer(
+                std::chrono::milliseconds(10), std::bind(&MyAhrsDriverNode::readSerialData, this));
+            return;
+        }
 
         // [2026-08-23 신규] read loop 시작 전에 divider 설정 명령 전송.
         // ⚠️ 이 레포에 myAHRS+ 공식 프로토콜 문서가 없어서 wire format(개행
@@ -137,6 +191,9 @@ private:
     // ACK 응답을 기다리거나 검증하지 않는다 -- 응답 유무/형식이 문서로
     // 확인 안 됐으므로, 여기서 잘못 파싱해서 오히려 문제를 만들지 않기
     // 위해 "보내기만 하고 결과는 런타임 rate 실측으로 확인"하는 쪽을 택함.
+    // [2026-09-29 실측] 센서가 "~error,ERROR,no crc field in '@divider,5'"로
+    // 응답 -- 이 명령은 CRC가 없어 거부되고 있었고 실제 출력은 기본 10Hz였다.
+    // ascii_format을 지정하면 아래 sendCommandWithCrc 경로를 대신 탄다.
     bool sendDividerCommand(int divider)
     {
         const std::string cmd = "@divider," + std::to_string(divider) + "\r\n";
@@ -146,6 +203,28 @@ private:
         }
         // 명령이 실제로 컨트롤러 밖으로 나가도록 flush.
         tcdrain(serial_fd_);
+        return true;
+    }
+
+    // [2026-09-29] 매뉴얼 p.20-21: "@body*CRC\r\n", CRC = '@'부터 body 끝까지
+    // 바이트 XOR을 대문자 hex 2자리로. 매뉴얼 예시("@version*3A")와 실측
+    // 응답("~error,...*70")으로 규칙 검증함. 명령 간 응답이 섞이지 않도록 50ms 대기.
+    bool sendCommandWithCrc(const std::string& body)
+    {
+        uint8_t crc = 0;
+        for (unsigned char c : body) {
+            crc ^= c;
+        }
+        char crc_str[8];
+        std::snprintf(crc_str, sizeof(crc_str), "*%02X\r\n", crc);
+        const std::string frame = body + crc_str;
+        const ssize_t written = write(serial_fd_, frame.data(), frame.size());
+        tcdrain(serial_fd_);
+        usleep(50 * 1000);
+        if (written < 0 || static_cast<size_t>(written) != frame.size()) {
+            return false;
+        }
+        RCLCPP_INFO(this->get_logger(), "[myAHRS CMD] %s*%02X", body.c_str(), crc);
         return true;
     }
 
@@ -182,9 +261,117 @@ private:
             if (!line.empty() && line.back() == '\r') {
                 line.pop_back();
             }
+            if (debug_raw_) {
+                RCLCPP_INFO(this->get_logger(), "[myAHRS RAW] %s", line.c_str());
+            }
             if (line.rfind("$RPY,", 0) == 0) {
                 parseAndPublish(line);
+            } else if (line.rfind("$RPYIMU,", 0) == 0) {
+                parseAndPublishRpyImu(line);
+            } else if (!line.empty() && line[0] == '~') {
+                // 명령 응답(매뉴얼 p.21: "~cmd,OK|ERROR,...")
+                if (line.find(",ERROR") != std::string::npos) {
+                    RCLCPP_WARN(this->get_logger(), "[myAHRS RESP] %s", line.c_str());
+                } else {
+                    RCLCPP_INFO(this->get_logger(), "[myAHRS RESP] %s", line.c_str());
+                }
             }
+        }
+    }
+
+    // [2026-09-29] 수신 프레임 체크섬 검증 후 payload('$'와 "*CS" 제외)를
+    // ','로 분리. 규칙은 parseAndPublish와 동일('$' 포함 XOR).
+    bool splitVerifiedFrame(const std::string& raw_str, std::vector<std::string>& fields)
+    {
+        const size_t star_pos = raw_str.find('*');
+        if (star_pos == std::string::npos || star_pos < 1 || star_pos + 2 >= raw_str.size()) {
+            RCLCPP_WARN(this->get_logger(), "Malformed frame (no checksum): %s", raw_str.c_str());
+            return false;
+        }
+        uint8_t computed = 0;
+        for (size_t i = 0; i < star_pos; ++i) {
+            computed ^= static_cast<unsigned char>(raw_str[i]);
+        }
+        unsigned long received = 0;
+        try {
+            received = std::stoul(raw_str.substr(star_pos + 1, 2), nullptr, 16);
+        } catch (...) {
+            RCLCPP_WARN(this->get_logger(), "Invalid checksum field: %s", raw_str.c_str());
+            return false;
+        }
+        if (computed != received) {
+            RCLCPP_WARN(this->get_logger(), "Checksum mismatch on IMU data: %s", raw_str.c_str());
+            return false;
+        }
+        fields.clear();
+        std::stringstream ss(raw_str.substr(1, star_pos - 1));
+        std::string field;
+        while (std::getline(ss, field, ',')) {
+            fields.push_back(field);
+        }
+        return true;
+    }
+
+    // [2026-09-29] 매뉴얼 p.29 RPYIMU: [0]=RPYIMU,[1]=seq,[2..4]=roll,pitch,yaw(deg),
+    // [5..7]=accel xyz(g),[8..10]=gyro xyz(dps),[11..13]=magnet xyz,[14]=temperature.
+    // orientation은 parseAndPublish($RPY)와 완전히 동일하게 만든다. accel은
+    // 적분 오차 원인이 되지 않도록 의도적으로 publish하지 않음(covariance -1).
+    void parseAndPublishRpyImu(const std::string& raw_str)
+    {
+        std::vector<std::string> fields;
+        if (!splitVerifiedFrame(raw_str, fields)) {
+            return;
+        }
+        if (fields.size() != 15) {
+            RCLCPP_WARN(this->get_logger(), "Unexpected RPYIMU field count %zu: %s",
+                fields.size(), raw_str.c_str());
+            return;
+        }
+        try {
+            const double roll_deg = std::stod(fields[2]);
+            const double pitch_deg = std::stod(fields[3]);
+            const double yaw_deg = std::stod(fields[4]);
+            const double gx_dps = std::stod(fields[8]);
+            const double gy_dps = std::stod(fields[9]);
+            const double gz_dps = std::stod(fields[10]);
+
+            if (debug_raw_) {
+                RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500,
+                    "[myAHRS GYRO] gx=%.4f, gy=%.4f, gz=%.4f (dps, sensor frame)",
+                    gx_dps, gy_dps, gz_dps);
+            }
+
+            auto imu_msg = sensor_msgs::msg::Imu();
+            imu_msg.header.stamp = this->now();
+            imu_msg.header.frame_id = frame_id_;
+
+            // parseAndPublish와 동일(heading_sign 기본 -1 = yaw만 부호 반전) 후 setRPY.
+            tf2::Quaternion q;
+            q.setRPY(
+                roll_deg * M_PI / 180.0, pitch_deg * M_PI / 180.0,
+                heading_sign_ * yaw_deg * M_PI / 180.0);
+            imu_msg.orientation.x = q.x();
+            imu_msg.orientation.y = q.y();
+            imu_msg.orientation.z = q.z();
+            imu_msg.orientation.w = q.w();
+            imu_msg.orientation_covariance[0] = orientation_covariance_roll_;
+            imu_msg.orientation_covariance[4] = orientation_covariance_pitch_;
+            imu_msg.orientation_covariance[8] = orientation_covariance_yaw_;
+
+            // sensor_msgs/Imu angular_velocity는 rad/s: dps * pi / 180
+            constexpr double kDeg2Rad = M_PI / 180.0;
+            imu_msg.angular_velocity.x = gyro_sign_x_ * gx_dps * kDeg2Rad;
+            imu_msg.angular_velocity.y = gyro_sign_y_ * gy_dps * kDeg2Rad;
+            imu_msg.angular_velocity.z = heading_sign_ * gz_dps * kDeg2Rad;
+            imu_msg.angular_velocity_covariance[0] = angular_velocity_covariance_;
+            imu_msg.angular_velocity_covariance[4] = angular_velocity_covariance_;
+            imu_msg.angular_velocity_covariance[8] = angular_velocity_covariance_;
+
+            imu_msg.linear_acceleration_covariance[0] = -1.0;
+
+            imu_pub_->publish(imu_msg);
+        } catch (...) {
+            RCLCPP_WARN(this->get_logger(), "Parsing error on RPYIMU data: %s", raw_str.c_str());
         }
     }
 
@@ -288,6 +475,10 @@ private:
     int serial_fd_;
     std::string rx_buffer_;  // readSerialData() 프레임 재조립용 누적 버퍼
     std::string frame_id_;
+    bool debug_raw_{false};
+    std::string ascii_format_;
+    double gyro_sign_x_{1.0}, gyro_sign_y_{-1.0}, heading_sign_{-1.0};
+    double angular_velocity_covariance_{0.0};
     double orientation_covariance_roll_;
     double orientation_covariance_pitch_;
     double orientation_covariance_yaw_;

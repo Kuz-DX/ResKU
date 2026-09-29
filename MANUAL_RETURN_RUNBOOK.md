@@ -91,6 +91,7 @@ ip -details link show can_drive
 ros2 launch robot_bringup manual_return_bringup.launch.py
 ```
 
+
 `rmd_x8_driver`(CAN 유일 소유, `/wheel/odom`) + `myahrs_driver`(`/imu`) +
 `reduced_odom`(`/odometry/filtered`) + `drive_cmd_mux` +
 `manual_path_recorder` + `return_state_machine` + `return_path_follower`가

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Eigen/Dense>
+#include <algorithm>
 #include <cmath>
 
 namespace reduced_odom
@@ -62,6 +63,11 @@ public:
     P_ = 0.5 * (P_ + P_.transpose());
     return x_.allFinite() && P_.allFinite();
   }
+
+  // 해당 상태의 분산을 최소 variance까지 키운다(대각 성분 증가라 PSD 유지).
+  // 측정원이 바뀔 때(gyro -> wheel 등) 이전 값에 과신하지 않도록 쓰는 용도.
+  void inflateVariance(size_t index, double variance)
+  {P_(index, index) = std::max(P_(index, index), variance);}
 
   const V5 & state() const {return x_;}
   const M5 & covariance() const {return P_;}

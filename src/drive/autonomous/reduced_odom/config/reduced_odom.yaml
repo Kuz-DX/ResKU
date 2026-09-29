@@ -27,3 +27,26 @@ reduced_odom_node:
     r_imu_yaw: 0.01
     wheel_gate_sigma: 5.0
     yaw_gate_sigma: 4.0
+
+    # [2026-09-29] myAHRS+ gyro 경로. use_imu_gyro는 launch에서 넘긴다(기본 false).
+    # 시작 정지 구간 yaw_zero_samples개(20Hz면 2.5s)로 gyro bias와 yaw_zero를
+    # 잡고 odom yaw를 0에서 시작. 정지 판정은 wheel |vx|<stationary_vx,
+    # |wz|<stationary_wz. wheel 없이(책상 시험) 보정하려면
+    # calibration_requires_wheel:=false.
+    yaw_zero_samples: 50
+    calibration_requires_wheel: true
+    stationary_vx: 0.005
+    stationary_wz: 0.01
+    stationary_gyro_max: 0.05
+    # wheel이 zupt_min_time 이상 정지해 있는 동안 bias를 EMA로 천천히 갱신.
+    zupt_min_time: 1.0
+    gyro_bias_alpha: 0.01
+    # gyro wz 분산 (rad/s)^2. 정지 실측 노이즈는 ~0.1 dps(=3e-6)지만 진동/
+    # 잔여 bias를 감안해 크게 잡음 -- r_wheel_wz(0.10) 대비 gyro가 지배.
+    r_gyro_wz: 0.001
+    gyro_gate_sigma: 5.0
+    # use_imu_yaw=true일 때만 쓰는 AHRS yaw_relative 분산 (rad^2).
+    # 0.05 = sigma ~13deg: gyro가 단기 회전을 잡고 AHRS는 장기 드리프트만 천천히 보정.
+    # ⚠️ 모터 구동 후 AHRS yaw가 ~2deg/s 흐른 기록이 있음(MANUAL_RETURN_RUNBOOK) --
+    # 그 상태가 재현되면 use_imu_yaw=false(gyro만)로 둘 것.
+    r_imu_yaw_relative: 0.05
