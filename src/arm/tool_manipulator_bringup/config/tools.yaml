@@ -2,7 +2,7 @@
 # only what becomes valid after that tool is mechanically locked.
 tools:
   1:
-    enabled: true
+    enabled: false
     name: gripper_pinion_tool
     # Existing gripper/pinion URDF values, expressed at gripper_joint = 0.
     # ee_mount -> gripper_actuator is Ry(-90 deg), then pinion -> old TCP was
@@ -22,22 +22,20 @@ tools:
       joint: gripper_joint
       id: 4
       position_limits_rad: [0.0, 2.59396]
-    # Existing first taught coarse approach, formerly tag ID 10.
-    coarse_joint_goal: [0.0, -0.55, 1.10, -0.55, 0.0]
+    # Disabled: re-teach all six joints against the new CAD URDF before enabling.
     lock:
       joint: wrist_yaw_joint
       locked_angle_rad: 0.0  # replace after real lock calibration
 
   2:
-    enabled: true
+    enabled: false
     name: tool_2_case
     dock_fixture: tool_2_case
     # Supplied square-bore upper-centre in arm_world_frame.
     target_entry:
       frame: arm_world_frame
       position: [-0.268, -0.10245, 0.187]
-    # Existing second taught coarse approach, formerly tag ID 11.
-    coarse_joint_goal: [0.20, -0.50, 1.00, -0.50, 0.0]
+    # Disabled: re-teach all six joints against the new CAD URDF before enabling.
 
   3:
     enabled: false

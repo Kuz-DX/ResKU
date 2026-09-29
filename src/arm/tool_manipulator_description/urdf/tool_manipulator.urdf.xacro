@@ -8,6 +8,7 @@
   <!-- ========================================================= -->
 
   <xacro:arg name="use_mesh" default="true"/>
+  <xacro:arg name="tool_id" default="0"/>
 
   <xacro:property
       name="mesh_path"
@@ -509,5 +510,28 @@
 
   </joint>
 
+
+  <!-- RealSense D435 bracket: TCP is the mechanical parent frame. -->
+
+  </link>
+    <link name="cam_link">
+
+    <xacro:mesh_visual
+        mesh="cam_d435"
+        material="motor_grey"/>
+
+  </link>
+
+
+  <joint name="cam_link_mount"
+         type="fixed">
+
+    <parent link="tcp_link"/>
+    <child link="cam_link"/>
+
+    <origin
+        xyz="0 0.0607680 0.074000"
+        rpy="${pi/2} 0 ${-pi/2}"/>
+  </joint>
 
 </robot>

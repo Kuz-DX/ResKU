@@ -15,7 +15,7 @@ import os
 def generate_launch_description():
     share = get_package_share_directory('tool_manipulator_bringup')
     config = (MoveItConfigsBuilder('tool_manipulator', package_name='tool_manipulator_moveit_config')
-              .robot_description(mappings={'use_mock_hardware': 'false', 'use_mesh': 'true'})
+              .robot_description(mappings={'use_mock_hardware': 'true', 'use_mesh': 'true'})
               .planning_pipelines(pipelines=['ompl']).to_moveit_configs())
     params = os.path.join(share, 'config', 'docking.yaml')
     tools = os.path.join(share, 'config', 'tools.yaml')

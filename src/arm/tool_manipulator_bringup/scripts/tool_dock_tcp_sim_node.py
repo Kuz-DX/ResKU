@@ -28,9 +28,9 @@ class ToolDockTcpSimulation(Node):
         # tcp_link is the common yaw-output flange before a tool is attached.
         # Keeping it explicit makes the test's intent match future tool TCP use.
         p('tcp_link', 'tcp_link')
-        p('joint_names', ['base_joint', 'shoulder_joint', 'elbow_joint', 'wrist_joint', 'wrist_yaw_joint'])
+        p('joint_names', ['base_joint', 'shoulder_joint', 'elbow_joint', 'wrist_pitch_joint', 'wrist_yaw_joint'])
         p('target_position_tolerance_m', 0.002)
-        # With only five arm DOF, docking teaching first proves position.  A
+        # With six arm DOF, docking teaching first proves position.  A
         # pi orientation tolerance turns the pose request into a position goal.
         p('orientation_tolerance_rad', 3.14159265)
         p('planning_timeout_sec', 20.0)

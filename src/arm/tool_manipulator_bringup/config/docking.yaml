@@ -14,13 +14,13 @@ apriltag_tool_docking:
     base_link: base_actuator
     end_effector_link: tcp_link
     joint_state_topic: /joint_states
-    joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_joint, wrist_yaw_joint]
+    joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
     # Named common pose: docking_wait. It faces the docking rack before the
     # tag-specific taught approach is planned. base=pi requires a matching
     # base_joint hard/soft limit before real-hardware use.
-    docking_wait_joint_goal: [3.14159265, 0.0, 0.0, 0.0, 0.0]
+    docking_wait_joint_goal: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     # Replace only after collision-checked teaching on the real robot (radians).
-    tool_joint_goals_yaml: '{10: [0.0, -0.55, 1.10, -0.55, 0.0], 11: [0.20, -0.50, 1.00, -0.50, 0.0]}'
+    tool_joint_goals_yaml: '{}'
     # Desired tag centre in servo_command_frame. Only x/y are closed-loop.
     desired_tag_position: [0.0, 0.0, 0.20]
     kp_position: 0.8

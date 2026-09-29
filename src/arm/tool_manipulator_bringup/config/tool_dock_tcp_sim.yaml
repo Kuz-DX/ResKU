@@ -6,11 +6,10 @@ tool_dock_tcp_sim:
     planning_group: arm
     base_link: base_actuator
     tcp_link: tcp_link
-    joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_joint, wrist_yaw_joint]
+    joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
     target_position_tolerance_m: 0.002
     orientation_tolerance_rad: 3.14159265
     planning_timeout_sec: 20.0
     max_velocity: 0.15
     max_acceleration: 0.15
-    target_poses_yaml: >-
-      {2: {frame_id: arm_world_frame, position: [-0.268, -0.10245, 0.187]}}
+    target_poses_yaml: '{}'

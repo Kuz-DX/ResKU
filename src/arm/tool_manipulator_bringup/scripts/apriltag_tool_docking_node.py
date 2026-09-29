@@ -90,7 +90,7 @@ class AprilTagToolDocking(Node):
         p('base_link', 'base_actuator')
         p('end_effector_link', 'tcp_link')
         p('joint_state_topic', '/joint_states')
-        p('joint_names', ['base_joint', 'shoulder_joint', 'elbow_joint', 'wrist_joint', 'wrist_yaw_joint'])
+        p('joint_names', ['base_joint', 'shoulder_joint', 'elbow_joint', 'wrist_pitch_joint', 'wrist_yaw_joint'])
         # Preferred registry.  Each ID owns its taught coarse joint goal and
         # later also owns TCP, collision and actuator metadata.
         p('tools_config_file', '')

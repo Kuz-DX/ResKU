@@ -1,4 +1,18 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="tool_manipulator">
+  <xacro:arg name="use_mock_hardware" default="true"/>
+  <xacro:arg name="use_mesh" default="true"/>
   <xacro:include filename="$(find tool_manipulator_description)/urdf/tool_manipulator.urdf.xacro"/>
+
+  <!-- The CAD description has no hardware tag.  This self-contained mock
+       interface exists only for simulation and MoveIt integration. -->
+  <ros2_control name="ToolManipulatorMockSystem" type="system">
+    <hardware><plugin>mock_components/GenericSystem</plugin></hardware>
+    <joint name="base_joint"><command_interface name="position"/><state_interface name="position"><param name="initial_value">0</param></state_interface><state_interface name="velocity"/></joint>
+    <joint name="shoulder_joint"><command_interface name="position"/><state_interface name="position"><param name="initial_value">0</param></state_interface><state_interface name="velocity"/></joint>
+    <joint name="elbow_joint"><command_interface name="position"/><state_interface name="position"><param name="initial_value">0</param></state_interface><state_interface name="velocity"/></joint>
+    <joint name="wrist_pitch_joint"><command_interface name="position"/><state_interface name="position"><param name="initial_value">0</param></state_interface><state_interface name="velocity"/></joint>
+    <joint name="wrist_roll_joint"><command_interface name="position"/><state_interface name="position"><param name="initial_value">0</param></state_interface><state_interface name="velocity"/></joint>
+    <joint name="wrist_yaw_joint"><command_interface name="position"/><state_interface name="position"><param name="initial_value">0</param></state_interface><state_interface name="velocity"/></joint>
+  </ros2_control>
 </robot>

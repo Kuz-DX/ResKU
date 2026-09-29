@@ -8,6 +8,7 @@
   <!-- ========================================================= -->
 
   <xacro:arg name="use_mesh" default="true"/>
+  <xacro:arg name="tool_id" default="0"/>
 
   <xacro:property
       name="mesh_path"
@@ -509,5 +510,21 @@
 
   </joint>
 
+
+  <!-- RealSense D435 bracket: TCP is the mechanical parent frame. -->
+  <joint name="tcp_to_cam_joint" type="fixed">
+    <parent link="tcp_link"/>
+    <child link="cam_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <link name="cam_link">
+    <xacro:mesh_visual mesh="cam_d435" material="motor_grey"/>
+    <!-- Conservative D435/bracket envelope until a collision STL is supplied. -->
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.025 0.090 0.025"/></geometry>
+    </collision>
+  </link>
 
 </robot>
