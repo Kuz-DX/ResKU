@@ -3,6 +3,9 @@ calib_monitor.csv에 남은 cmd_w 기록에서 "제자리 회전 구간"을 자�
 번호를 매긴다. 사람이 시작/끝 시각을 시계 보고 적을 필요 없이, 각 구간이
 몇 번째였는지와 실제로 잰 각도만 알려주면 effective_track_width_m을 계산한다.
 
+0단계 -- 지난 기록 치우고 새로 시작하고 싶을 때 (지우지 않고 백업만 함):
+    python3 compute_calibration.py --reset
+
 1단계 -- 구간 목록 보기 (회전 시험을 다 마친 뒤):
     python3 compute_calibration.py --list
 
@@ -46,6 +49,8 @@ V_PURITY_THRESHOLD = 0.03
 
 
 def load_rows():
+    if not os.path.exists(CSV_PATH):
+        return None
     rows = []
     with open(CSV_PATH) as f:
         for r in csv.DictReader(f):
@@ -129,11 +134,29 @@ def compute_and_print(items):
             print(f'구간별 편차 = {spread:.3f}  (편차가 크면 시험을 더 해서 평균을 안정시킬 것)')
 
 
+def reset_log():
+    if not os.path.exists(CSV_PATH):
+        print(f'{CSV_PATH}가 없습니다 -- 지울 게 없음.')
+        return
+    backup = f'calib_monitor_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv.bak'
+    os.rename(CSV_PATH, backup)
+    print(f'{CSV_PATH} -> {backup} 로 백업했습니다. calib_monitor.py를 다시 실행하면 '
+          f'새 {CSV_PATH}가 만들어집니다 (--list 결과에 이전 기록은 안 섞임).')
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__)
         return
+
+    if sys.argv[1] == '--reset':
+        reset_log()
+        return
+
     rows = load_rows()
+    if rows is None:
+        print(f'{CSV_PATH}가 없습니다 -- calib_monitor.py를 먼저 실행하세요.')
+        return
     if not rows:
         print('calib_monitor.csv에 yaw 데이터가 없습니다 -- calib_monitor.py가 로봇에 연결됐는지 확인하세요.')
         return
