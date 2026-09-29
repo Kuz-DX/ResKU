@@ -28,7 +28,7 @@ recorder는 제자리 회전 중 같은 위치에 겹쳐 찍힌 점(`min_point_s
 
 | 인자 | manual+return 기본 | MPPI/기존 기본 |
 |---|---|---|
-| `effective_track_width_m` | 1.58 (= 0.4904/0.31) | 0.4904 |
+| `effective_track_width_m` | 1.244 (2026-09-30 재측정, 새 바닥 기준) | 0.4904 |
 | `angular_slip_compensation_factor` | 1.0 | 1.05 |
 | `use_imu_yaw` | false (바퀴만으로 yaw 적분) | true |
 

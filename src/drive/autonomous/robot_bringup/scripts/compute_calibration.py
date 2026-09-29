@@ -30,7 +30,7 @@ CSV_PATH = 'calib_monitor.csv'
 # 시험 당시 로봇에 실제로 적용돼 있던 값이어야 한다 -- launch에서
 # effective_track_width_m:=X 로 다르게 띄웠다면 CALIB_CURRENT_TW=X 환경변수로
 # 넘길 것 (매번 이 파일을 고치지 않도록).
-CURRENT_TRACK_WIDTH = float(os.environ.get('CALIB_CURRENT_TW', 1.58))
+CURRENT_TRACK_WIDTH = float(os.environ.get('CALIB_CURRENT_TW', 1.244))
 
 
 def parse_spec(spec: str, today):

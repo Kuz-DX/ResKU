@@ -96,10 +96,23 @@ RUN_COMMANDS.md 위쪽 "로컬 PC > 1. 조이스틱"과 같은 명령.
 ```bash
 python3 compute_calibration.py "14:32:10-14:32:15:90" "14:35:00-14:35:04:-82"
 ```
-(현재 로봇에 적용된 값이 1.58이 아니면 앞에 `CALIB_CURRENT_TW=값 ` 붙일 것)
+(현재 로봇에 적용된 값이 1.244가 아니면 앞에 `CALIB_CURRENT_TW=값 ` 붙일 것)
 
 ## 🤖 로봇 PC — 새 값으로 재실행
 
 ```bash
 bash ~/ResKU/src/drive/autonomous/robot_bringup/scripts/start_manual_return.sh effective_track_width_m:=<새값>
 ```
+
+## 검증 — 새 값이 맞는지 확인
+
+`calib_monitor.py`를 다시 켜 둔 채(꺼졌으면 다시 실행), 회전 1~2회를 **똑같이** 하고
+시작·끝 시각과 실제 각도를 또 적어둔다. 계산기를 돌릴 때 `CALIB_CURRENT_TW`를
+**방금 넣은 새값**으로 바꿔서 넣는다:
+
+```bash
+CALIB_CURRENT_TW=<새값> python3 compute_calibration.py "15:10:00-15:10:04:88"
+```
+
+여기서 나온 "제안값"이 `<새값>`과 거의 같으면(차이가 작으면) 끝. 여전히 많이 다르면
+그 제안값으로 다시 재실행 → 검증을 한 번 더 반복한다.

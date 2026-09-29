@@ -110,7 +110,9 @@ def generate_launch_description():
         # myAHRS+ yaw는 모터 구동 후 분 단위로 초당 2도씩 흘러서 이 미션에서는
         # 쓰지 않는다(use_imu_yaw=false). 옛 동작으로 되돌리려면:
         #   effective_track_width_m:=0.4904 angular_slip_compensation_factor:=1.05 use_imu_yaw:=true
-        DeclareLaunchArgument('effective_track_width_m', default_value='1.58'),
+        # [2026-09-30 재측정, 새 바닥] 좌/우 각 2회, cmd_w 일정 조건으로 재보정.
+        # compute_calibration.py 결과 1.244m -- 이전 1.58m(다른 바닥, 2회 측정)에서 갱신.
+        DeclareLaunchArgument('effective_track_width_m', default_value='1.244'),
         DeclareLaunchArgument('angular_slip_compensation_factor', default_value='1.0'),
         DeclareLaunchArgument('use_imu_yaw', default_value='false'),
 
