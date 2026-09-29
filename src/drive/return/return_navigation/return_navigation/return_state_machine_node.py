@@ -10,6 +10,14 @@ States (published continuously as std_msgs/String on /mission/return/state):
     IDLE -> MANUAL_RECORDING -> WAIT_RETURN_COMMAND -> STOP_BEFORE_TURN
          -> TURN_180 -> FOLLOW_RETURN_PATH -> FINISHED -> IDLE (loops)
 
+    [reverse_return, 2026-09] When true, STOP_BEFORE_TURN goes straight to
+    FOLLOW_RETURN_PATH -- TURN_180 is skipped entirely, and the robot backs
+    up along /return_path instead (return_path_follower_node's own
+    reverse_drive parameter, set from the SAME launch arg, does the actual
+    backward driving -- see that node's docstring for why this is safe to
+    do with the plain pure-pursuit curvature formula unchanged). Default
+    false = existing behaviour, byte-for-byte unchanged.
+
     IDLE->MANUAL_RECORDING:
         on /path/record rising edge, once /odometry/filtered is available.
         [UI interface, 2026-09] recording is no longer auto-started the
@@ -23,8 +31,11 @@ States (published continuously as std_msgs/String on /mission/return/state):
         actually moved) -- an early RETURN trigger before that is ignored.
     WAIT_RETURN_COMMAND->STOP_BEFORE_TURN:
         on /path/return rising edge
-    STOP_BEFORE_TURN->TURN_180:
+    STOP_BEFORE_TURN->TURN_180 (reverse_return=false, default):
         |vx| and |wz| (from /odometry/filtered) below threshold, sustained
+    STOP_BEFORE_TURN->FOLLOW_RETURN_PATH (reverse_return=true):
+        same stop condition, but TURN_180 is skipped -- /return_path is
+        built and published here instead of at the end of TURN_180
     TURN_180->FOLLOW_RETURN_PATH:
         closed-loop 180-degree turn complete (yaw error within tolerance,
         sustained) -- NOT timer-based. On this transition, /return_path is
@@ -108,6 +119,8 @@ class ReturnStateMachineNode(Node):
         # direction, so leaving it to sensor noise picks a random side.
         self.declare_parameter('turn_direction', 'left')
         self.declare_parameter('turn_settle_duration_s', 0.3)
+        # See module docstring [reverse_return].
+        self.declare_parameter('reverse_return', False)
 
         self.declare_parameter('follow_relay_timeout_s', 0.5)
         self.declare_parameter('goal_tolerance_m', 0.3)
@@ -130,6 +143,7 @@ class ReturnStateMachineNode(Node):
         self.turn_w_max = float(p('turn_w_max_radps').value)
         self.turn_yaw_tolerance = float(p('turn_yaw_tolerance_rad').value)
         self.turn_settle_duration = float(p('turn_settle_duration_s').value)
+        self.reverse_return = bool(p('reverse_return').value)
         self.follow_relay_timeout = float(p('follow_relay_timeout_s').value)
         self.goal_tolerance_m = float(p('goal_tolerance_m').value)
         self.finished_hold_s = float(p('finished_hold_s').value)
@@ -318,6 +332,10 @@ class ReturnStateMachineNode(Node):
             return
         settled_s = (now - self._stop_settle_since).nanoseconds * 1e-9
         if settled_s >= self.stop_settle_duration:
+            if self.reverse_return:
+                self._build_and_publish_return_path()
+                self._go_to(FOLLOW_RETURN_PATH)
+                return
             self._turn_prev_yaw = self._odom_pose.yaw if self._odom_pose else 0.0
             self._turn_accum = 0.0
             self._turn_settle_since = None
