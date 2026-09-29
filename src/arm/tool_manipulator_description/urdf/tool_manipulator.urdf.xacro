@@ -526,12 +526,12 @@
   <joint name="cam_link_mount"
          type="fixed">
 
-    <parent link="tcp_link"/>
+    <parent link="wrist_link_yaw"/>
     <child link="cam_link"/>
 
     <origin
         xyz="0 0.0607680 0.074000"
-        rpy="${pi/2} 0 ${-pi/2}"/>
+        rpy="${pi/2} ${pi} 0"/>
   </joint>
 
 </robot>
