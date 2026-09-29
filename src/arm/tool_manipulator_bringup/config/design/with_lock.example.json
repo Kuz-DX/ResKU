@@ -1,0 +1,65 @@
+{
+  "assumptions": "RMD motor masses and rated torque from user table, hardware revision/thermal conditions unverified. Link/tool/payload masses remain assumptions unless measured by user. Any other segments are preserved. Horizontal pitch-chain screening only.",
+  "safety_factor": 2.0,
+  "payload_kg": 0.5,
+  "tool_mass_kg": 0.4,
+  "tool_offset_m": 0.09,
+  "segments": [
+    {
+      "name": "shoulder",
+      "motor": "RMD-X8-120",
+      "length_m": 0.18,
+      "link_mass_kg": 0.15,
+      "com_fraction": 0.5,
+      "actuator_mass_kg": 1.4,
+      "continuous_output_nm": 43,
+      "motor_spec_note": "User supplied motor-only mass and rated output torque; revision and continuous operating conditions unverified. Add bracket mass separately.",
+      "motor_spec_reference": {
+        "user_reported_stall_nm": 64.5,
+        "voltage_v": 48,
+        "communication": "CAN",
+        "url": "https://www.myactuator.com/x8-120details"
+      }
+    },
+    {
+      "name": "elbow",
+      "motor": "RMD-X6-60",
+      "length_m": 0.22,
+      "link_mass_kg": 0.15,
+      "com_fraction": 0.5,
+      "actuator_mass_kg": 0.82,
+      "continuous_output_nm": 20,
+      "motor_spec_note": "User supplied motor-only mass and rated output torque; revision and continuous operating conditions unverified. Add bracket mass separately.",
+      "motor_spec_reference": {
+        "user_reported_stall_nm": 30,
+        "voltage_v": 48,
+        "communication": "CAN",
+        "url": "https://www.myactuator.com/x6-60details"
+      }
+    },
+    {
+      "name": "wrist",
+      "motor": "RMD-X4-36",
+      "length_m": 0.15,
+      "link_mass_kg": 0.1,
+      "com_fraction": 0.5,
+      "actuator_mass_kg": 0.36,
+      "continuous_output_nm": 10.5,
+      "motor_spec_note": "User supplied motor-only mass and rated output torque; revision and continuous operating conditions unverified. Add bracket mass separately.",
+      "motor_spec_reference": {
+        "user_reported_stall_nm": 17.25,
+        "voltage_v": 24,
+        "communication": "CAN",
+        "url": "https://www.myactuator.com/x4-36details"
+      }
+    }
+  ],
+  "additional_loads": [
+    {
+      "name": "tool_lock_MX106T_with_bracket_ASSUMED",
+      "segment_index": 2,
+      "position_fraction": 1.0,
+      "mass_kg": 0.2
+    }
+  ]
+}

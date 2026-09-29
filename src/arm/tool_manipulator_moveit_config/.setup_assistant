@@ -1,0 +1,9 @@
+moveit_setup_assistant_config:
+  urdf:
+    package: tool_manipulator_description
+    relative_path: urdf/tool_manipulator.urdf.xacro
+  srdf:
+    relative_path: config/tool_manipulator.srdf
+  package_settings:
+    author_name: shu
+    author_email: suhui12334@gmail.com
