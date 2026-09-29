@@ -81,15 +81,14 @@ def main() -> int:
         while rclpy.ok() and node.positions is None and node.get_clock().now().nanoseconds < deadline_ns:
             rclpy.spin_once(node, timeout_sec=0.1)
 
-        if node.positions is None:
-            print(f"No JointState received on {args.topic} within {args.timeout:g}s.", file=sys.stderr)
-            return 1
-
         captured_at = datetime.now(timezone.utc)
         output = args.output or Path.cwd() / (
             "arm_pose_" + captured_at.strftime("%Y%m%dT%H%M%SZ") + ".json")
         output.parent.mkdir(parents=True, exist_ok=True)
-        joint_positions = {name: node.positions.get(name) for name in EXPECTED_JOINTS}
+        # If every reader is disconnected, the bridge has no valid JointState
+        # entries to publish.  Still save a useful all-null measurement.
+        received_positions = node.positions or {}
+        joint_positions = {name: received_positions.get(name) for name in EXPECTED_JOINTS}
         missing = [name for name, value in joint_positions.items() if value is None]
         record = {
             "format": "tool_manipulator_arm_pose/v1",
@@ -97,7 +96,13 @@ def main() -> int:
             "label": args.label or None,
             "joint_state_topic": args.topic,
             "joint_state_stamp": node.stamp,
+            "joint_state_received": node.positions is not None,
             "joint_positions_rad": joint_positions,
+            # Preserve every source value as well.  This makes a live
+            # controller/URDF naming mismatch visible instead of discarding a
+            # measurement (the current read-only bridge still publishes its
+            # RMD wrist as wrist_joint).
+            "observed_joint_positions_rad": received_positions,
             "dynamixel_joint_names": list(DYNAMIXEL_JOINTS),
             "missing_joint_names": missing,
         }

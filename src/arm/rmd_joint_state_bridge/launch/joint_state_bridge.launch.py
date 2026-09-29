@@ -7,10 +7,10 @@ can_arm, actuator id 4/5/6, dxl_port_name=/dev/ttyUSB0 등)와 같다 - 실기
 캘리브레이션 값(sign/q_offset, position_direction/position_zero_offset)이
 그 xacro와 다르면 여기서도 launch argument로 동일하게 넘겨야 한다.
 
-wrist_yaw_dxl_id는 기본 -1(비활성)이다. 실기 ID와 raw encoder 기준 영점/방향을
-확정한 뒤 wrist_yaw_dxl_id:=<ID> wrist_yaw_zero_offset:=<rad>
-wrist_yaw_direction:=<-1|1>로 지정한다. TTL port 또는 개별 ID가 응답하지 않으면
-bridge는 종료하지 않고 해당 joint를 /joint_states에서 생략한다.
+기본 Dynamixel ID는 base=1, wrist_roll=2, wrist_yaw=3, gripper/EE=4이다.
+실기 ID와 raw encoder 기준 영점/방향을 확정한 뒤 해당 *_zero_offset:=<rad>,
+*_direction:=<-1|1>을 지정한다. TTL port 또는 개별 ID가 응답하지 않으면 bridge는
+종료하지 않고 해당 joint를 /joint_states에서 생략한다.
 """
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
@@ -24,6 +24,9 @@ def generate_launch_description():
         DeclareLaunchArgument("shoulder_actuator_id", default_value="4"),
         DeclareLaunchArgument("elbow_actuator_id", default_value="5"),
         DeclareLaunchArgument("wrist_actuator_id", default_value="6"),
+        DeclareLaunchArgument(
+            "rmd_wrist_joint_name", default_value="wrist_joint",
+            description="Published URDF joint name for RMD wrist; use wrist_pitch_joint with tool_manipulator."),
         DeclareLaunchArgument("shoulder_sign", default_value="1.0"),
         DeclareLaunchArgument("elbow_sign", default_value="-1.0"),
         DeclareLaunchArgument("wrist_sign", default_value="-1.0"),
@@ -32,14 +35,20 @@ def generate_launch_description():
         DeclareLaunchArgument("wrist_q_offset", default_value="0.0"),
         DeclareLaunchArgument("dxl_port_name", default_value="/dev/ttyUSB0"),
         DeclareLaunchArgument("dxl_baud_rate", default_value="1000000"),
-        DeclareLaunchArgument("base_dxl_id", default_value="0"),
+        # CAD Xacro joint contract: base=1, wrist roll=2, wrist yaw=3,
+        # tool end-effector/gripper=4. Set an ID to -1 to omit an absent motor.
+        DeclareLaunchArgument("base_dxl_id", default_value="1"),
+        DeclareLaunchArgument("wrist_roll_dxl_id", default_value="2"),
         DeclareLaunchArgument(
-            "wrist_yaw_dxl_id", default_value="-1",
+            "wrist_yaw_dxl_id", default_value="3",
             description="Tool lock wrist-yaw Dynamixel ID; -1 disables it."),
         DeclareLaunchArgument("gripper_dxl_id", default_value="4"),
         DeclareLaunchArgument("base_zero_offset", default_value="-9.314331344042"),
         DeclareLaunchArgument("base_direction", default_value="1.0"),
         DeclareLaunchArgument("base_wraparound", default_value="true"),
+        DeclareLaunchArgument("wrist_roll_zero_offset", default_value="0.0"),
+        DeclareLaunchArgument("wrist_roll_direction", default_value="1.0"),
+        DeclareLaunchArgument("wrist_roll_wraparound", default_value="true"),
         DeclareLaunchArgument("wrist_yaw_zero_offset", default_value="0.0"),
         DeclareLaunchArgument("wrist_yaw_direction", default_value="1.0"),
         DeclareLaunchArgument("wrist_yaw_wraparound", default_value="true"),
@@ -58,6 +67,7 @@ def generate_launch_description():
             "shoulder_actuator_id": LaunchConfiguration("shoulder_actuator_id"),
             "elbow_actuator_id": LaunchConfiguration("elbow_actuator_id"),
             "wrist_actuator_id": LaunchConfiguration("wrist_actuator_id"),
+            "rmd_wrist_joint_name": LaunchConfiguration("rmd_wrist_joint_name"),
             "shoulder_sign": LaunchConfiguration("shoulder_sign"),
             "elbow_sign": LaunchConfiguration("elbow_sign"),
             "wrist_sign": LaunchConfiguration("wrist_sign"),
@@ -67,11 +77,15 @@ def generate_launch_description():
             "dxl_port_name": LaunchConfiguration("dxl_port_name"),
             "dxl_baud_rate": LaunchConfiguration("dxl_baud_rate"),
             "base_dxl_id": LaunchConfiguration("base_dxl_id"),
+            "wrist_roll_dxl_id": LaunchConfiguration("wrist_roll_dxl_id"),
             "wrist_yaw_dxl_id": LaunchConfiguration("wrist_yaw_dxl_id"),
             "gripper_dxl_id": LaunchConfiguration("gripper_dxl_id"),
             "base_zero_offset": LaunchConfiguration("base_zero_offset"),
             "base_direction": LaunchConfiguration("base_direction"),
             "base_wraparound": LaunchConfiguration("base_wraparound"),
+            "wrist_roll_zero_offset": LaunchConfiguration("wrist_roll_zero_offset"),
+            "wrist_roll_direction": LaunchConfiguration("wrist_roll_direction"),
+            "wrist_roll_wraparound": LaunchConfiguration("wrist_roll_wraparound"),
             "wrist_yaw_zero_offset": LaunchConfiguration("wrist_yaw_zero_offset"),
             "wrist_yaw_direction": LaunchConfiguration("wrist_yaw_direction"),
             "wrist_yaw_wraparound": LaunchConfiguration("wrist_yaw_wraparound"),

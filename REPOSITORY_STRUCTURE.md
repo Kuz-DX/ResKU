@@ -48,8 +48,8 @@
 | `army_manipulator_description` | `src/arm/army_manipulator_description` | description | 현재 MARU/army manipulator URDF, mesh, joint calibration |
 | `army_manipulator_moveit_config` | `src/arm/army_manipulator_moveit_config` | MoveIt config | SRDF, kinematics, controllers, OMPL 등 MoveIt 설정 |
 | `army_manipulator_bringup` | `src/arm/army_manipulator_bringup` | launch/scripts | 로봇팔 자동 파지, MoveIt, RealSense, perception bringup |
-| `robot_arm_description` | `src/arm/robot_arm_description` | legacy description | 3축 RMD 수동 팔 제어용 구형/별도 URDF와 controller 설정 |
-| `robot_arm_bringup` | `src/arm/robot_arm_bringup` | launch/scripts | 조이스틱 기반 수동 팔 제어와 안전 모드 관리 |
+| `tool_manipulator_description` | `src/arm/tool_manipulator_description` | description | 현재 CAD 기반 6축 팔 URDF/Xacro, mesh, RViz |
+| `tool_manipulator_bringup` | `src/arm/tool_manipulator_bringup` | launch/scripts | TCP joystick MoveIt Servo, 공구 도킹, 실측 캡처 |
 | `rmd_joint_state_bridge` | `src/arm/rmd_joint_state_bridge` | C++ ROS package | 팔 관절 엔코더를 읽기 전용으로 `/joint_states`에 미러링 |
 
 ## 3. Top-Level Non-ROS 폴더

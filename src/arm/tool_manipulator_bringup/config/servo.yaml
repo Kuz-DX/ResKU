@@ -3,8 +3,8 @@
     move_group_name: arm
     planning_frame: base_actuator
     ee_frame_name: tcp_link
-    # Must be a robot link. Servo transforms the stamped camera-frame twist to it.
-    robot_link_command_frame: tcp_link
+    # TCP commands from tcp_joy_teleop are expressed in this fixed robot link.
+    robot_link_command_frame: base_actuator
     command_in_type: speed_units
     command_out_type: trajectory_msgs/JointTrajectory
     command_out_topic: /arm_controller/joint_trajectory
@@ -16,3 +16,4 @@
     joint_limit_margin: 0.10
     check_collisions: true
     collision_check_rate: 20.0
+    is_primary_planning_scene_monitor: true

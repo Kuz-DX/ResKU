@@ -4,6 +4,7 @@
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
 from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -13,6 +14,7 @@ from launch_ros.substitutions import FindPackageShare
 def generate_launch_description():
     use_mesh = LaunchConfiguration("use_mesh")
     tool_id = LaunchConfiguration("tool_id")
+    publish_joint_states = LaunchConfiguration("publish_joint_states")
 
     robot_description_content = Command([
         PathJoinSubstitution([FindExecutable(name="xacro")]), " ",
@@ -36,6 +38,10 @@ def generate_launch_description():
             "tool_id", default_value="0",
             description="Recognized tool tag ID: 0=no tool, 1=gripper, 2/3=other tools.",
         ),
+        DeclareLaunchArgument(
+            "publish_joint_states", default_value="true",
+            description="Start joint_state_publisher_gui. Set false when a hardware bridge publishes /joint_states.",
+        ),
         Node(
             package="robot_state_publisher",
             executable="robot_state_publisher",
@@ -46,6 +52,7 @@ def generate_launch_description():
             package="joint_state_publisher_gui",
             executable="joint_state_publisher_gui",
             output="screen",
+            condition=IfCondition(publish_joint_states),
             parameters=[{
                 "zeros": {
                     "base_joint": 0.0,

@@ -181,10 +181,9 @@ sudo ip link set can_arm type can bitrate 1000000
 sudo ip link set up can_arm
 ip -details link show can_arm
 #
-ros2 launch robot_arm_bringup robot_arm_bringup.launch.py launch_joy:=false
-# drive 쪽 manual_control.launch.py에서 joy_node를 이미 띄웠으므로 launch_joy:=false로
-# 중복 실행 방지 (drive를 안 띄우고 arm만 단독으로 쓸 거면 이 인자 빼면 됨)
--> 선주야 ros2 launch robot_arm_bringup robot_arm_bringup.launch.py까지만 치면 됨.
+# 현재 tool_manipulator URDF 기반 TCP joystick + MoveIt Servo mock 실행.
+# 로컬 PC의 remote_joy.launch.py가 /joy를 발행할 때 launch_joy:=false로 중복을 막는다.
+ros2 launch tool_manipulator_bringup tcp_joy_teleop.launch.py launch_joy:=false
 
 ### 실기 팔 RViz 미러링 (실측 각도/엔코더, 읽기 전용 - army_manipulator_description 내장)
 # ~/arm_config/rmd_joint_state_bridge.py(외부 스크립트)와 동일한 역할을 하는
@@ -196,7 +195,7 @@ ros2 launch robot_arm_bringup robot_arm_bringup.launch.py launch_joy:=false
 # 터미널 1 - RViz (URDF만, MoveIt 없이 가볍게)
 source /opt/ros/humble/setup.bash
 source ~/dolbotZ/install/setup.bash
-ros2 launch army_manipulator_description display.launch.py
+ros2 launch tool_manipulator_description display.launch.py use_mesh:=true publish_joint_states:=false
 
 # 터미널 2 - CAN 인터페이스 켜기 (위 "CAN 인터페이스 활성화 can_arm" 참고, 이미 켰으면 생략)
 sudo ip link set can_arm type can bitrate 1000000

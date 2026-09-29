@@ -68,6 +68,7 @@ public:
     declare_parameter<int>("shoulder_actuator_id", 4);
     declare_parameter<int>("elbow_actuator_id", 5);
     declare_parameter<int>("wrist_actuator_id", 6);
+    declare_parameter<std::string>("rmd_wrist_joint_name", "wrist_joint");
     // army_manipulator_ros2_control.xacro의 shoulder_sign/elbow_sign/wrist_sign,
     // shoulder_q_offset/elbow_q_offset/wrist_q_offset과 동일한 이름/기본값 -
     // 실기 캘리브레이션 값을 그대로 재사용하면 됨.
@@ -86,10 +87,11 @@ public:
 
     declare_parameter<std::string>("dxl_port_name", "/dev/ttyUSB0");
     declare_parameter<int>("dxl_baud_rate", 1000000);
-    declare_parameter<int>("base_dxl_id", 0);
+    declare_parameter<int>("base_dxl_id", 1);
+    declare_parameter<int>("wrist_roll_dxl_id", 2);
     // -1 disables an optional actuator without making RMD feedback unusable.
     // Set this to the physical tool-lock yaw Dynamixel ID for real hardware.
-    declare_parameter<int>("wrist_yaw_dxl_id", -1);
+    declare_parameter<int>("wrist_yaw_dxl_id", 3);
     declare_parameter<int>("gripper_dxl_id", 4);
     // army_manipulator_ros2_control.xacro의 position_zero_offset/position_direction과
     // 동일한 이름/기본값(실측 JECS 캘리브레이션 값 그대로).
@@ -100,6 +102,9 @@ public:
     declare_parameter<double>("base_zero_offset", -9.314331344042);
     declare_parameter<double>("base_direction", 1.0);
     declare_parameter<bool>("base_wraparound", true);
+    declare_parameter<double>("wrist_roll_zero_offset", 0.0);
+    declare_parameter<double>("wrist_roll_direction", 1.0);
+    declare_parameter<bool>("wrist_roll_wraparound", true);
     declare_parameter<double>("wrist_yaw_zero_offset", 0.0);
     declare_parameter<double>("wrist_yaw_direction", 1.0);
     declare_parameter<bool>("wrist_yaw_wraparound", true);
@@ -117,11 +122,15 @@ public:
     wrist_q_offset_ = get_parameter("wrist_q_offset").as_double();
 
     base_dxl_id_ = get_parameter("base_dxl_id").as_int();
+    wrist_roll_dxl_id_ = get_parameter("wrist_roll_dxl_id").as_int();
     wrist_yaw_dxl_id_ = get_parameter("wrist_yaw_dxl_id").as_int();
     gripper_dxl_id_ = get_parameter("gripper_dxl_id").as_int();
     base_zero_offset_ = get_parameter("base_zero_offset").as_double();
     base_direction_ = get_parameter("base_direction").as_double();
     base_wraparound_ = get_parameter("base_wraparound").as_bool();
+    wrist_roll_zero_offset_ = get_parameter("wrist_roll_zero_offset").as_double();
+    wrist_roll_direction_ = get_parameter("wrist_roll_direction").as_double();
+    wrist_roll_wraparound_ = get_parameter("wrist_roll_wraparound").as_bool();
     wrist_yaw_zero_offset_ = get_parameter("wrist_yaw_zero_offset").as_double();
     wrist_yaw_direction_ = get_parameter("wrist_yaw_direction").as_double();
     wrist_yaw_wraparound_ = get_parameter("wrist_yaw_wraparound").as_bool();
@@ -240,7 +249,7 @@ private:
     std::vector<RmdJoint> const rmd_joints{
       {"shoulder_joint", shoulder_.get(), shoulder_sign_, shoulder_q_offset_},
       {"elbow_joint", elbow_.get(), elbow_sign_, elbow_q_offset_},
-      {"wrist_joint", wrist_.get(), wrist_sign_, wrist_q_offset_},
+      {get_parameter("rmd_wrist_joint_name").as_string(), wrist_.get(), wrist_sign_, wrist_q_offset_},
     };
     std_msgs::msg::Float64MultiArray angle_deg_msg;
     std_msgs::msg::Float64MultiArray raw_angle_deg_msg;
@@ -279,6 +288,11 @@ private:
       {"base_joint", static_cast<std::uint8_t>(base_dxl_id_), base_zero_offset_, base_direction_,
         base_wraparound_},
     };
+    if (wrist_roll_dxl_id_ >= 0) {
+      dxl_joints.push_back(
+        {"wrist_roll_joint", static_cast<std::uint8_t>(wrist_roll_dxl_id_),
+          wrist_roll_zero_offset_, wrist_roll_direction_, wrist_roll_wraparound_});
+    }
     if (wrist_yaw_dxl_id_ >= 0) {
       dxl_joints.push_back(
         {"wrist_yaw_joint", static_cast<std::uint8_t>(wrist_yaw_dxl_id_),
@@ -323,9 +337,11 @@ private:
   // delete하면 안 됨) - 그래서 스마트 포인터로 감싸지 않고 raw pointer로 둔다.
   dynamixel::PortHandler * dxl_port_{nullptr};
   dynamixel::PacketHandler * dxl_packet_{nullptr};
-  int base_dxl_id_{0}, wrist_yaw_dxl_id_{-1}, gripper_dxl_id_{4};
+  int base_dxl_id_{1}, wrist_roll_dxl_id_{2}, wrist_yaw_dxl_id_{3}, gripper_dxl_id_{4};
   double base_zero_offset_{0.0}, base_direction_{1.0};
   bool base_wraparound_{true};
+  double wrist_roll_zero_offset_{0.0}, wrist_roll_direction_{1.0};
+  bool wrist_roll_wraparound_{true};
   double wrist_yaw_zero_offset_{0.0}, wrist_yaw_direction_{1.0};
   bool wrist_yaw_wraparound_{true};
   double gripper_zero_offset_{0.0}, gripper_direction_{1.0};
