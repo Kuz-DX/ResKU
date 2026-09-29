@@ -51,7 +51,11 @@ class PersonDetectionNode(Node):
             background_class_id=-1,
             cache_dir=cache_dir,
         )
-        self.detections_pub = self.create_publisher(String, self.detections_topic, 10)
+        self.detections_pub = self.create_publisher(
+            String,
+            self.detections_topic,
+            qos_profile_sensor_data,
+        )
         self.image_pub = self.create_publisher(
             CompressedImage,
             self.output_topic,
