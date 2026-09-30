@@ -27,7 +27,7 @@ setup(
         ),
         (
             os.path.join('share', package_name, 'models'),
-            glob('models/*.xml') + glob('models/*.bin'),
+            glob('models/*.xml') + glob('models/*.bin') + glob('models/*.pt'),
         ),
         (
             os.path.join('share', package_name, 'models', 'supplyboxv3_int8_openvino_model'),
@@ -43,7 +43,7 @@ setup(
     zip_safe=True,
     maintainer='dolbat',
     maintainer_email='dolbat@example.com',
-    description='ROS 2 vision nodes for AprilTag and OpenVINO person detection.',
+    description='ROS 2 vision nodes for AprilTag and YOLO person detection.',
     license='MIT',
     entry_points={
         'console_scripts': [

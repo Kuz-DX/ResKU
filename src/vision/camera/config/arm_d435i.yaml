@@ -14,5 +14,5 @@
     pointcloud.enable: false
     align_depth.enable: true
 
-    rgb_camera.color_profile: "640x480x15"
-    depth_module.depth_profile: "640x480x15"
+    rgb_camera.color_profile: "640x480x30"
+    depth_module.depth_profile: "640x480x30"

@@ -1,4 +1,4 @@
-"""Run one shared OpenVINO person detector for drive/left/right cameras."""
+"""Run one shared YOLO person detector for drive/left/right cameras."""
 
 from pathlib import Path
 
@@ -11,17 +11,19 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description() -> LaunchDescription:
+    installed_model = (
+        Path(get_package_share_directory("vision")) / "models" / "person.pt"
+    )
+    source_model = Path(__file__).resolve().parents[2] / "models" / "person.pt"
     default_model = str(
-        Path(get_package_share_directory("vision"))
-        / "models"
-        / "mando-dummy-v1.xml"
+        installed_model if installed_model.is_file() else source_model
     )
 
     arguments = [
         DeclareLaunchArgument(
             "model_path",
             default_value=default_model,
-            description="RF-DETR OpenVINO IR XML model path",
+            description="Ultralytics YOLO person.pt model path",
         ),
         DeclareLaunchArgument(
             "input_topic",
@@ -70,16 +72,16 @@ def generate_launch_description() -> LaunchDescription:
         ),
         DeclareLaunchArgument("enable_side_cameras", default_value="true"),
         DeclareLaunchArgument("confidence_threshold", default_value="0.5"),
-        DeclareLaunchArgument("device", default_value="CPU"),
+        DeclareLaunchArgument("infer_size", default_value="640"),
+        DeclareLaunchArgument("device", default_value="cpu"),
         DeclareLaunchArgument("jpeg_quality", default_value="90"),
         DeclareLaunchArgument("publish_visualization", default_value="true"),
-        DeclareLaunchArgument("cache_dir", default_value=""),
     ]
 
     person_detection = Node(
         package="vision",
         executable="person_detection",
-        name="person_detection_openvino",
+        name="person_detection_yolo",
         output="screen",
         emulate_tty=True,
         parameters=[
@@ -120,6 +122,9 @@ def generate_launch_description() -> LaunchDescription:
                 "confidence_threshold": ParameterValue(
                     LaunchConfiguration("confidence_threshold"), value_type=float
                 ),
+                "infer_size": ParameterValue(
+                    LaunchConfiguration("infer_size"), value_type=int
+                ),
                 "device": ParameterValue(
                     LaunchConfiguration("device"), value_type=str
                 ),
@@ -128,9 +133,6 @@ def generate_launch_description() -> LaunchDescription:
                 ),
                 "publish_visualization": ParameterValue(
                     LaunchConfiguration("publish_visualization"), value_type=bool
-                ),
-                "cache_dir": ParameterValue(
-                    LaunchConfiguration("cache_dir"), value_type=str
                 ),
             }
         ],

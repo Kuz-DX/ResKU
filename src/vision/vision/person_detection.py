@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""ROS 2 multi-camera person detector backed by OpenVINO RF-DETR."""
+"""ROS 2 multi-camera person detector backed by an Ultralytics YOLO model."""
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
@@ -13,18 +14,103 @@ from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CompressedImage
 from std_msgs.msg import String
 
-from vision.rfdetr_openvino import RFDETROpenVINO
+try:
+    from ultralytics import YOLO
+except ImportError:  # Give a focused startup error instead of hiding the dependency.
+    YOLO = None
+
+
+@dataclass(frozen=True)
+class Detection:
+    """One person detection in source-image pixel coordinates."""
+
+    xyxy: tuple[float, float, float, float]
+    confidence: float
+    class_id: int
+    class_name: str = 'person'
+
+
+class YOLOPersonDetector:
+    """Small adapter that keeps the node's existing detection output contract."""
+
+    def __init__(
+        self,
+        model_path: str | Path,
+        confidence_threshold: float = 0.5,
+        infer_size: int = 640,
+        device: str = 'cpu',
+    ) -> None:
+        self.model_path = Path(model_path).expanduser().resolve()
+        if not self.model_path.is_file():
+            raise FileNotFoundError(f'YOLO person model not found: {self.model_path}')
+        if not 0.0 <= confidence_threshold <= 1.0:
+            raise ValueError('confidence_threshold must be between 0 and 1.')
+        if infer_size <= 0:
+            raise ValueError('infer_size must be greater than zero.')
+        if YOLO is None:
+            raise RuntimeError(
+                'ultralytics is required for person.pt; install the vision package '
+                'requirements first.'
+            )
+
+        self.confidence_threshold = float(confidence_threshold)
+        self.infer_size = int(infer_size)
+        self.device = str(device).strip().lower() or 'cpu'
+        self.model = YOLO(str(self.model_path), task='detect')
+
+    def predict(self, image_bgr: np.ndarray) -> list[Detection]:
+        if (
+            image_bgr is None
+            or image_bgr.ndim != 3
+            or image_bgr.shape[2] != 3
+            or image_bgr.shape[0] == 0
+            or image_bgr.shape[1] == 0
+        ):
+            raise ValueError('image_bgr must be a non-empty HxWx3 BGR image.')
+
+        results = self.model.predict(
+            source=image_bgr,
+            conf=self.confidence_threshold,
+            imgsz=self.infer_size,
+            device=self.device,
+            verbose=False,
+        )
+        detections = []
+        for result in results:
+            if result.boxes is None:
+                continue
+            for box in result.boxes:
+                class_id = int(box.cls[0])
+                class_name = str(result.names.get(class_id, f'class_{class_id}'))
+                # person.pt is a single-class detector whose training label is
+                # "pedestrian". Preserve that model class id while keeping the
+                # public person-detection topic's class name stable.
+                if class_name.lower() not in {'person', 'pedestrian'}:
+                    continue
+                detections.append(
+                    Detection(
+                        xyxy=tuple(float(value) for value in box.xyxy[0].tolist()),
+                        confidence=float(box.conf[0]),
+                        class_id=class_id,
+                    )
+                )
+        return detections
+
+
+def _default_model_path() -> Path:
+    """Find person.pt in an installed package or a symlink-source workspace."""
+    installed = Path(get_package_share_directory('vision')) / 'models' / 'person.pt'
+    if installed.is_file():
+        return installed
+
+    return Path(__file__).resolve().parents[1] / 'models' / 'person.pt'
 
 
 class PersonDetectionNode(Node):
 
     def __init__(self):
-        super().__init__('person_detection_openvino')
-        default_model = str(
-            Path(get_package_share_directory('vision'))
-            / 'models'
-            / 'mando-dummy-v1.xml'
-        )
+        super().__init__('person_detection_yolo')
+        default_model = str(_default_model_path())
         self.declare_parameter('model_path', default_model)
         self.declare_parameter('input_topic', '/drive/camera/color/image_raw/compressed')
         self.declare_parameter('detections_topic', '/person_detection/detections')
@@ -37,23 +123,20 @@ class PersonDetectionNode(Node):
         self.declare_parameter('right_output_topic', '/right/person/detection')
         self.declare_parameter('enable_side_cameras', True)
         self.declare_parameter('confidence_threshold', 0.5)
-        self.declare_parameter('device', 'CPU')
+        self.declare_parameter('infer_size', 640)
+        self.declare_parameter('device', 'cpu')
         self.declare_parameter('jpeg_quality', 90)
         self.declare_parameter('publish_visualization', True)
-        self.declare_parameter('cache_dir', '')
 
         get = lambda name: self.get_parameter(name).value
         self.jpeg_quality = int(get('jpeg_quality'))
         self.publish_visualization = bool(get('publish_visualization'))
-        cache_dir = str(get('cache_dir')).strip() or None
 
-        self.detector = RFDETROpenVINO(
+        self.detector = YOLOPersonDetector(
             model_path=str(get('model_path')),
-            class_names=('person',),
-            device=str(get('device')),
             confidence_threshold=float(get('confidence_threshold')),
-            background_class_id=-1,
-            cache_dir=cache_dir,
+            infer_size=int(get('infer_size')),
+            device=str(get('device')),
         )
         camera_topics = [
             (
@@ -83,10 +166,10 @@ class PersonDetectionNode(Node):
 
         # Keep publisher/subscription references alive for every camera.  The
         # default single-threaded executor also serializes access to the shared
-        # OpenVINO compiled model.
+        # YOLO model.
         self.detections_pubs = {}
         self.image_pubs = {}
-        self.subscriptions = []
+        self._camera_subscriptions = []
         for camera_name, input_topic, detections_topic, output_topic in camera_topics:
             self.detections_pubs[camera_name] = self.create_publisher(
                 String,
@@ -98,7 +181,7 @@ class PersonDetectionNode(Node):
                 output_topic,
                 qos_profile_sensor_data,
             )
-            self.subscriptions.append(
+            self._camera_subscriptions.append(
                 self.create_subscription(
                     CompressedImage,
                     input_topic,
@@ -111,7 +194,7 @@ class PersonDetectionNode(Node):
                 f'bbox_image={output_topic}'
             )
         self.get_logger().info(
-            f'RF-DETR OpenVINO ready: {get("model_path")} on {get("device")}'
+            f'YOLO person detector ready: {get("model_path")} on {get("device")}'
         )
 
     def image_callback(self, msg: CompressedImage, camera_name: str) -> None:
@@ -125,7 +208,7 @@ class PersonDetectionNode(Node):
         try:
             detections = self.detector.predict(image)
         except Exception as exc:
-            self.get_logger().error(f'[{camera_name}] OpenVINO inference failed: {exc}')
+            self.get_logger().error(f'[{camera_name}] YOLO inference failed: {exc}')
             return
 
         payload = {

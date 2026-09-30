@@ -65,6 +65,13 @@ class AprilTagCompressedNode(Node):
             True
         )
 
+        # Autonomous tool docking uses only tag 0 (gripper) and tag 1 (drill).
+        # Tags with ID 2 or greater are intentionally ignored.
+        self.declare_parameter(
+            'allowed_tag_ids',
+            [0, 1]
+        )
+
         self.input_topic = (
             self.get_parameter('input_topic')
             .get_parameter_value()
@@ -131,6 +138,18 @@ class AprilTagCompressedNode(Node):
             .bool_value
         )
 
+        configured_tag_ids = list(
+            self.get_parameter('allowed_tag_ids')
+            .get_parameter_value()
+            .integer_array_value
+        )
+        if configured_tag_ids != [0, 1]:
+            raise ValueError(
+                'allowed_tag_ids must be exactly [0, 1] '
+                '(0=gripper, 1=drill).'
+            )
+        self.allowed_tag_ids = frozenset(configured_tag_ids)
+
         # ============================================================
         # AprilTag detector
         #
@@ -196,6 +215,10 @@ class AprilTagCompressedNode(Node):
 
         self.get_logger().info(
             f'Tag size: {self.tag_size_cm:.2f} cm'
+        )
+
+        self.get_logger().info(
+            'Allowed tag IDs: 0=gripper, 1=drill'
         )
 
         self.get_logger().info(
@@ -396,6 +419,8 @@ class AprilTagCompressedNode(Node):
                 family = str(detection.tag_family)
 
             tag_id = int(detection.tag_id)
+            if tag_id not in self.allowed_tag_ids:
+                continue
 
             # --------------------------------------------------------
             # AprilTag 원본 corner
