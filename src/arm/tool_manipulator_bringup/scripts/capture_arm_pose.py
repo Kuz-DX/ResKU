@@ -22,8 +22,8 @@ from sensor_msgs.msg import JointState
 
 
 # Keep this list synchronized with tool_manipulator.urdf.xacro. ee_joint
-# is the common optional tool Dynamixel: the read-only bridge publishes it when its ID
-# responds, and null otherwise.
+# is the common optional tool Dynamixel. The bridge calls it gripper_joint;
+# _on_joint_state normalizes that live name to ee_joint below.
 EXPECTED_JOINTS = (
     "base_joint",
     "shoulder_joint",
@@ -33,7 +33,19 @@ EXPECTED_JOINTS = (
     "wrist_yaw_joint",
     "ee_joint",
 )
-DYNAMIXEL_JOINTS = ("base_joint", "wrist_yaw_joint", "ee_joint")
+DYNAMIXEL_JOINTS = ("base_joint", "wrist_roll_joint", "wrist_yaw_joint", "ee_joint")
+
+# Stable, short operator-facing labels. Keep this order aligned with the
+# physical chain so a single Enter yields a readily comparable snapshot.
+DISPLAY_NAMES = {
+    "base_joint": "base",
+    "shoulder_joint": "shoulder",
+    "elbow_joint": "elbow",
+    "wrist_pitch_joint": "wrist_pitch",
+    "wrist_roll_joint": "wrist_roll",
+    "wrist_yaw_joint": "wrist_yaw",
+    "ee_joint": "ee",
+}
 
 
 class PoseCapture(Node):
@@ -125,7 +137,7 @@ def interactive_main() -> int:
     spin_thread = threading.Thread(target=executor.spin, daemon=True)
     spin_thread.start()
     try:
-        print("Enter a label to print the latest joint angles; q, quit, or exit ends the node.")
+        print("Press Enter to print all joint angles; an optional label may be entered. q, quit, or exit ends the node.")
         while rclpy.ok():
             try:
                 label = input("label> ").strip()
@@ -138,10 +150,11 @@ def interactive_main() -> int:
             if not positions:
                 print("No /joint_states received yet; try again.\n")
                 continue
-            print(f"\n[{label or 'capture'}]")
+            print(f"\n[{label or 'capture'}] (rad)")
             for name in EXPECTED_JOINTS:
                 value = positions.get(name)
-                print(f"  {name}: {value:.6f} rad" if value is not None else f"  {name}: unavailable")
+                display_name = DISPLAY_NAMES[name]
+                print(f"  {display_name}: {value:.6f}" if value is not None else f"  {display_name}: unavailable")
             print()
     finally:
         executor.shutdown()
