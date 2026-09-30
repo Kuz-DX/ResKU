@@ -1,0 +1,37 @@
+{
+  "format": "tool_manipulator_arm_pose/v1",
+  "captured_at_utc": "2026-09-30T05:25:58.020961Z",
+  "label": null,
+  "joint_state_topic": "/joint_states",
+  "joint_state_stamp": {
+    "sec": 1790745957,
+    "nanosec": 963977606
+  },
+  "joint_state_received": true,
+  "joint_positions_rad": {
+    "base_joint": null,
+    "shoulder_joint": 0.07836527941980376,
+    "elbow_joint": 1.5282102504356576,
+    "wrist_pitch_joint": null,
+    "wrist_roll_joint": null,
+    "wrist_yaw_joint": null,
+    "gripper_joint": null
+  },
+  "observed_joint_positions_rad": {
+    "shoulder_joint": 0.07836527941980376,
+    "elbow_joint": 1.5282102504356576,
+    "wrist_joint": -2.5078636448012293
+  },
+  "dynamixel_joint_names": [
+    "base_joint",
+    "wrist_yaw_joint",
+    "gripper_joint"
+  ],
+  "missing_joint_names": [
+    "base_joint",
+    "wrist_pitch_joint",
+    "wrist_roll_joint",
+    "wrist_yaw_joint",
+    "gripper_joint"
+  ]
+}
