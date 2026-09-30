@@ -137,16 +137,16 @@
     <origin xyz="$(arg arm_world_x) $(arg arm_world_y) $(arg arm_world_z)" rpy="0 0 0"/>
   </joint>
 
-  <!-- Tool-case outer: 36.8 x 46.8 x 50 mm; insertion void: 16 x 16 x 50 mm. -->
+  <!-- Case 2/3 outer: 36.8(X) x 46.8(Y) x 50(Z) mm.
+       EE entry is local +X; cavity is 16(X depth) x 16(Y) x 50(Z) mm. -->
   <xacro:macro name="tool_case_walls">
-    <visual><origin xyz="-0.0132 0 0"/><geometry><box size="0.0104 0.0468 0.050"/></geometry><material name="tool_case_blue"/></visual>
-    <collision><origin xyz="-0.0132 0 0"/><geometry><box size="0.0104 0.0468 0.050"/></geometry></collision>
-    <visual><origin xyz="0.0132 0 0"/><geometry><box size="0.0104 0.0468 0.050"/></geometry><material name="tool_case_blue"/></visual>
-    <collision><origin xyz="0.0132 0 0"/><geometry><box size="0.0104 0.0468 0.050"/></geometry></collision>
-    <visual><origin xyz="0 -0.0157 0"/><geometry><box size="0.0160 0.0154 0.050"/></geometry><material name="tool_case_blue"/></visual>
-    <collision><origin xyz="0 -0.0157 0"/><geometry><box size="0.0160 0.0154 0.050"/></geometry></collision>
-    <visual><origin xyz="0 0.0157 0"/><geometry><box size="0.0160 0.0154 0.050"/></geometry><material name="tool_case_blue"/></visual>
-    <collision><origin xyz="0 0.0157 0"/><geometry><box size="0.0160 0.0154 0.050"/></geometry></collision>
+    <!-- back wall and two Y rails: open local +X face toward the EE -->
+    <visual><origin xyz="-0.008 0 0"/><geometry><box size="0.0208 0.0468 0.050"/></geometry><material name="tool_case_blue"/></visual>
+    <collision><origin xyz="-0.008 0 0"/><geometry><box size="0.0208 0.0468 0.050"/></geometry></collision>
+    <visual><origin xyz="0.0104 -0.0157 0"/><geometry><box size="0.016 0.0154 0.050"/></geometry><material name="tool_case_blue"/></visual>
+    <collision><origin xyz="0.0104 -0.0157 0"/><geometry><box size="0.016 0.0154 0.050"/></geometry></collision>
+    <visual><origin xyz="0.0104 0.0157 0"/><geometry><box size="0.016 0.0154 0.050"/></geometry><material name="tool_case_blue"/></visual>
+    <collision><origin xyz="0.0104 0.0157 0"/><geometry><box size="0.016 0.0154 0.050"/></geometry></collision>
   </xacro:macro>
 
   <!-- Case 2 (+Y) and case 3 (-Y) centres are arm_world offsets. Their Z
@@ -210,7 +210,7 @@
   <joint name="arm_world_to_tool_case_1" type="fixed">
     <parent link="arm_world"/><child link="tool_case_1"/>
     <!-- arm_world has world orientation, so pitch +55 deg is world-Y tilt. -->
-    <origin xyz="-0.368 0 0.187" rpy="0 0.959931088597 0"/>
+    <origin xyz="-0.468 0 0.187" rpy="0 0.959931088597 0"/>
   </joint>
   <!-- Case-1 local YZ outer faces, at X = +/-18.4 mm. The positive face is the EE entry. -->
   <link name="tool_case_1_x_positive_face"/>

@@ -464,7 +464,7 @@ ros2 topic echo /arm/picking_command
 | `tools.yaml:tools.<id>.lock.attach_yaw_delta_rad` | 현재 yaw에서의 signed rad | 저속 체결 bench에서 시작/끝 joint state 차이를 기록한다. |
 | `tools.yaml:tools.<id>.docking.{descent,retreat}_*` | `frame` 기준 단위 벡터, m, m/s, s | fixture 축을 기준으로 직선 하강·후퇴 거리와 속도·timeout을 티칭한다. |
 
-tool case 1과 case 2(+Y)·case 3(-Y)는 모두 `arm_world`에서 world Y축 기준 `+55°` 기울어진다. 도킹 면은 case의 local YZ 면(outer local X=`±18.4 mm`)이며 TCP의 local XY 면과 일치해야 한다. 따라서 도킹 target에서 TCP `+Z`를 선택한 case face의 local `±X` 법선에 맞추고, case 1은 EE-facing local `+X` 면이 entry로 확정됐다. 기존 case의 실제 사용하는 `+X/-X` 면과 접근 부호는 `tools.yaml`에 입력한다.
+tool case 1과 case 2(+Y)·case 3(-Y)는 모두 `arm_world`에서 world Y축 기준 `+55°` 기울어진다. 도킹 면은 case의 local YZ 면(outer local X=`±18.4 mm`)이며 TCP의 local XY 면과 일치해야 한다. 따라서 도킹 target에서 TCP `+Z`를 선택한 case face의 local `±X` 법선에 맞추고, case 1·2·3 모두 EE-facing local `+X` 면이 entry로 확정됐다. TCP XY는 해당 local +X YZ 면에 맞추며, 접근/후퇴 부호는 `tools.yaml`에 입력한다.
 | `docking.yaml:vision_apriltag.*` | ROS topic, cm | 카메라의 실제 토픽과 인쇄한 tag 한 변 길이를 기록한다. |
 | `docking.yaml:tag_pose_filter.*` | camera `frame_id`, m, s, px | 정상 검출 로그에서 frame, 지연, margin, PnP/depth 오차·범위를 정한다. |
 | `docking.yaml:visual_servo_node.*` | expected tag frame의 m, m/s | docking 목표 tag 위치와 수렴 이득·허용오차를 저속 bench에서 정한다. |
