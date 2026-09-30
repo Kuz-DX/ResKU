@@ -77,8 +77,9 @@ RMD 축은 `raw_deg`와 `raw_encoder`, Dynamixel 축은 `raw_pulse`를 출력한
 ros2 run tool_manipulator_bringup move_to_named_pose.py <pose> [options]
 ```
 
-현재 기본 SRDF pose는 `stand`, `home`, `tagid0_cw`, `tagid0_ccw`, `tagid1`, `dock_pre_cw`, `dock_pre_ccw`,
-`dock_wait1`, `dock_wait2`, `dock_wait3`이다. 빌드 후 다음 순서로 실행한다.
+현재 기본 SRDF pose는 `stand`, `home`, `tagid0_cw`, `tagid0_ccw`, `tagid0_unlock`,
+`tagid0_lock_step1`, `tagid0_lock_step2`, `tagid0_lock`, `tagid1`, `dock_pre_cw`,
+`dock_pre_ccw`, `dock_wait1`, `dock_wait2`, `dock_wait3`이다. 빌드 후 다음 순서로 실행한다.
 
 ```bash
 cd ~/ResKU
