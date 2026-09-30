@@ -1,21 +1,18 @@
 #!/usr/bin/env python3
-"""Capture one read-only arm pose from ``/joint_states`` as JSON.
+"""Interactively print read-only arm poses from ``/joint_states``.
 
 This tool never publishes a command. It is intended to run alongside
-``rmd_joint_state_bridge`` while each joint is moved manually to a mechanical
-limit. The expected names are the current tool_manipulator CAD arm joints,
-plus every Dynamixel joint the bridge can expose. An absent/failed actuator is
-written as JSON ``null`` instead of making the capture fail.
+``rmd_joint_state_bridge`` while each joint is moved manually. Type a label
+and press Enter to print the latest values; type ``q`` to exit. It never
+creates a JSON file.
 """
 
 import argparse
-from datetime import datetime, timezone
-import json
-from pathlib import Path
-import sys
+import threading
 from typing import Dict, Optional
 
 import rclpy
+from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 
@@ -116,5 +113,40 @@ def main() -> int:
         rclpy.shutdown()
 
 
+def interactive_main() -> int:
+    """Print the latest state whenever the operator confirms a label."""
+    rclpy.init()
+    node = PoseCapture("/joint_states")
+    executor = MultiThreadedExecutor()
+    executor.add_node(node)
+    spin_thread = threading.Thread(target=executor.spin, daemon=True)
+    spin_thread.start()
+    try:
+        print("Enter a label to print the latest joint angles; q, quit, or exit ends the node.")
+        while rclpy.ok():
+            try:
+                label = input("label> ").strip()
+            except EOFError:
+                print()
+                break
+            if label.lower() in {"q", "quit", "exit"}:
+                break
+            positions = node.positions or {}
+            if not positions:
+                print("No /joint_states received yet; try again.\n")
+                continue
+            print(f"\n[{label or 'capture'}]")
+            for name in EXPECTED_JOINTS:
+                value = positions.get(name)
+                print(f"  {name}: {value:.6f} rad" if value is not None else f"  {name}: unavailable")
+            print()
+    finally:
+        executor.shutdown()
+        spin_thread.join(timeout=2.0)
+        node.destroy_node()
+        rclpy.shutdown()
+    return 0
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(interactive_main())
