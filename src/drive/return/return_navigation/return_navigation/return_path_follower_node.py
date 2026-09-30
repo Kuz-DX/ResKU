@@ -88,7 +88,7 @@ class ReturnPathFollowerNode(Node):
 
         self.declare_parameter('control_rate_hz', 20.0)
         self.declare_parameter('lookahead_distance_m', 0.6)
-        self.declare_parameter('linear_speed_mps', 0.2)
+        self.declare_parameter('linear_speed_mps', 0.5)
         self.declare_parameter('min_linear_speed_mps', 0.05)
         self.declare_parameter('max_angular_speed_radps', 0.6)
         self.declare_parameter('goal_slowdown_radius_m', 0.8)
@@ -99,8 +99,8 @@ class ReturnPathFollowerNode(Node):
         # hysteresis and rotate-in-place control. Enter/exit thresholds are
         # deliberately different (42 deg enter, 9 deg exit) so a heading
         # error hovering near one boundary doesn't chatter between modes.
-        self.declare_parameter('rotate_enter_angle_deg', 42.0)
-        self.declare_parameter('rotate_exit_angle_deg', 9.0)
+        self.declare_parameter('rotate_enter_angle_deg', 30.0)
+        self.declare_parameter('rotate_exit_angle_deg', 5.0)
         # Real rates (manual_return_bringup calibrates the effective track
         # width so commanded w ~ real rotation). rotate_min is the lowest
         # rate that still overcomes wheel stiction (~100 dps per wheel).
@@ -112,7 +112,7 @@ class ReturnPathFollowerNode(Node):
         self.declare_parameter('rotate_settle_time_s', 0.3)
         # A path vertex whose heading change is >= corner_detection_angle_deg
         # is a temporary goal: drive to it, stop, rotate, continue.
-        self.declare_parameter('corner_detection_angle_deg', 45.0)
+        self.declare_parameter('corner_detection_angle_deg', 25.0)
         self.declare_parameter('corner_reach_distance_m', 0.08)
         self.declare_parameter('corner_slowdown_radius_m', 0.4)
         self.declare_parameter('odom_timeout_s', 0.5)
