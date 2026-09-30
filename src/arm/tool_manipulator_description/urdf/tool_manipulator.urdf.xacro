@@ -10,9 +10,26 @@
   <xacro:arg name="use_mesh" default="true"/>
   <xacro:arg name="tool_id" default="0"/>
 
+  <!-- Vehicle IMU is world origin. Values are metres. -->
+  <xacro:arg name="chassis_length" default="0.78"/>
+  <xacro:arg name="chassis_width" default="0.50"/>
+  <xacro:arg name="chassis_height" default="0.30"/>
+  <xacro:arg name="chassis_mount_x" default="0.0"/>
+  <xacro:arg name="chassis_mount_y" default="0.0"/>
+  <xacro:arg name="chassis_mount_z" default="0.035"/>
+  <xacro:arg name="arm_world_x" default="0.1921"/>
+  <xacro:arg name="arm_world_y" default="0.0"/>
+  <xacro:arg name="arm_world_z" default="0.235"/>
+  <xacro:arg name="imu_height_from_ground" default="0.115"/>
+  <xacro:include filename="tools/tool_1_gripper.xacro"/>
+  <xacro:property name="selected_tool_id" value="$(arg tool_id)"/>
+  <xacro:include filename="tools/tool_2.xacro"/>
+  <xacro:include filename="tools/tool_3.xacro"/>
+
   <xacro:property
       name="mesh_path"
       value="package://tool_manipulator_description/meshes/visual"/>
+  <xacro:property name="collision_mesh_path" value="package://tool_manipulator_description/meshes/collision"/>
 
 
   <!-- ========================================================= -->
@@ -23,6 +40,12 @@
   <material name="petg_charcoal">
     <color rgba="0.20 0.20 0.22 1.0"/>
   </material>
+  <material name="petg_grey"><color rgba="0.40 0.40 0.42 1.0"/></material>
+  <material name="motor_dark"><color rgba="0.12 0.12 0.14 1.0"/></material>
+  <material name="tcp_red"><color rgba="0.90 0.05 0.05 1.0"/></material>
+  <material name="chassis_blue"><color rgba="0.12 0.22 0.34 0.55"/></material>
+  <material name="circuit_box_orange"><color rgba="0.85 0.35 0.05 0.80"/></material>
+  <material name="tool_case_blue"><color rgba="0.10 0.45 0.85 0.70"/></material>
 
   <!-- MOTOR -->
   <material name="motor_grey">
@@ -60,6 +83,12 @@
       <material name="${material}"/>
 
     </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="${collision_mesh_path}/${mesh}.stl" scale="0.001 0.001 0.001"/>
+        </geometry>
+      </collision>
     </xacro:if>
 
   </xacro:macro>
@@ -69,8 +98,131 @@
   <!-- WORLD -->
   <!-- ========================================================= -->
 
+  <!-- Ground is z=0. Vehicle IMU/world is measured 115 mm above it. -->
+  <link name="ground"/>
   <link name="world"/>
+  <joint name="ground_to_world" type="fixed">
+    <parent link="ground"/><child link="world"/>
+    <origin xyz="0 0 $(arg imu_height_from_ground)" rpy="0 0 0"/>
+  </joint>
 
+  <!-- world is the vehicle IMU centre. chassis_mount_* is the chassis centre
+       expressed in world: (0, 0, 0.035) m gives ground z range [0, 0.30] m.
+       arm_world has the separately measured arm offset. -->
+  <link name="chassis">
+    <visual><geometry><box size="$(arg chassis_length) $(arg chassis_width) $(arg chassis_height)"/></geometry><material name="chassis_blue"/></visual>
+    <collision><geometry><box size="$(arg chassis_length) $(arg chassis_width) $(arg chassis_height)"/></geometry></collision>
+  </link>
+  <joint name="world_to_chassis" type="fixed">
+    <parent link="world"/><child link="chassis"/>
+    <origin xyz="$(arg chassis_mount_x) $(arg chassis_mount_y) $(arg chassis_mount_z)" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Circuit-box centre in base_actuator coordinates:
+       (-161.6 - 28 - 170, 0, 36) mm = (-359.6, 0, 36) mm.
+       Top is 137 + 300 = 437 mm above ground; box height 102 mm gives centre z=386 mm ground, or 36 mm from base. -->
+  <link name="circuit_box">
+    <visual><geometry><box size="0.340 0.280 0.102"/></geometry><material name="circuit_box_orange"/></visual>
+    <collision><geometry><box size="0.340 0.280 0.102"/></geometry></collision>
+  </link>
+  <joint name="base_actuator_to_circuit_box" type="fixed">
+    <parent link="base_actuator"/><child link="circuit_box"/>
+    <origin xyz="-0.3596 0 0.036" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Robot-arm reference: base height is 350 mm above ground, therefore 235 mm above the IMU/world at ground z=115 mm. -->
+  <link name="arm_world"/>
+  <joint name="world_to_arm_world" type="fixed">
+    <parent link="world"/><child link="arm_world"/>
+    <origin xyz="$(arg arm_world_x) $(arg arm_world_y) $(arg arm_world_z)" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Case 2/3 outer: 36.8(X) x 46.8(Y) x 50(Z) mm.
+       EE entry is local +X; cavity is 16(X depth) x 16(Y) x 50(Z) mm. -->
+  <xacro:macro name="tool_case_walls">
+    <!-- back wall and two Y rails: open local +X face toward the EE -->
+    <visual><origin xyz="-0.008 0 0"/><geometry><box size="0.0208 0.0468 0.050"/></geometry><material name="tool_case_blue"/></visual>
+    <collision><origin xyz="-0.008 0 0"/><geometry><box size="0.0208 0.0468 0.050"/></geometry></collision>
+    <visual><origin xyz="0.0104 -0.0157 0"/><geometry><box size="0.016 0.0154 0.050"/></geometry><material name="tool_case_blue"/></visual>
+    <collision><origin xyz="0.0104 -0.0157 0"/><geometry><box size="0.016 0.0154 0.050"/></geometry></collision>
+    <visual><origin xyz="0.0104 0.0157 0"/><geometry><box size="0.016 0.0154 0.050"/></geometry><material name="tool_case_blue"/></visual>
+    <collision><origin xyz="0.0104 0.0157 0"/><geometry><box size="0.016 0.0154 0.050"/></geometry></collision>
+  </xacro:macro>
+
+  <!-- Case 2 (+Y) and case 3 (-Y) centres are arm_world offsets. Their Z
+       centres are calibrated so the tilted local +Z outer-face midpoint is
+       z=167.935 mm in arm_world. -->
+  <link name="tool_case_y_plus"><xacro:tool_case_walls/></link>
+  <joint name="arm_world_to_tool_case_y_plus" type="fixed">
+    <parent link="arm_world"/><child link="tool_case_y_plus"/>
+    <!-- arm_world has world orientation, so pitch +55 deg is world-Y tilt. -->
+    <origin xyz="-0.268 0.10245 0.153595589" rpy="0 0.959931088597 0"/>
+  </joint>
+  <!-- Each dock face is the case local YZ plane at outer X = +/-18.4 mm.
+       Its +Z axis is the outward face normal, so an EE TCP XY plane can be
+       made coplanar by aligning TCP +Z with the chosen face normal. -->
+  <link name="tool_case_y_plus_x_positive_face"/>
+  <joint name="tool_case_y_plus_to_x_positive_face" type="fixed">
+    <parent link="tool_case_y_plus"/><child link="tool_case_y_plus_x_positive_face"/>
+    <origin xyz="0.0184 0 0" rpy="0 1.570796326795 0"/>
+  </joint>
+  <link name="tool_case_y_plus_x_negative_face"/>
+  <joint name="tool_case_y_plus_to_x_negative_face" type="fixed">
+    <parent link="tool_case_y_plus"/><child link="tool_case_y_plus_x_negative_face"/>
+    <origin xyz="-0.0184 0 0" rpy="0 -1.570796326795 0"/>
+  </joint>
+
+  <link name="tool_case_y_minus"><xacro:tool_case_walls/></link>
+  <joint name="arm_world_to_tool_case_y_minus" type="fixed">
+    <parent link="arm_world"/><child link="tool_case_y_minus"/>
+    <!-- arm_world has world orientation, so pitch +55 deg is world-Y tilt. -->
+    <origin xyz="-0.268 -0.10245 0.153595589" rpy="0 0.959931088597 0"/>
+  </joint>
+  <link name="tool_case_y_minus_x_positive_face"/>
+  <joint name="tool_case_y_minus_to_x_positive_face" type="fixed">
+    <parent link="tool_case_y_minus"/><child link="tool_case_y_minus_x_positive_face"/>
+    <origin xyz="0.0184 0 0" rpy="0 1.570796326795 0"/>
+  </joint>
+  <link name="tool_case_y_minus_x_negative_face"/>
+  <joint name="tool_case_y_minus_to_x_negative_face" type="fixed">
+    <parent link="tool_case_y_minus"/><child link="tool_case_y_minus_x_negative_face"/>
+    <origin xyz="-0.0184 0 0" rpy="0 -1.570796326795 0"/>
+  </joint>
+
+  <!-- Tool case 1: outer 36.8(X) x 100(Y) x 80(Z) mm.
+       Entry faces the EE at local +X. Cavity is 16(X depth) x 16(Y) x 50(Z) mm. -->
+  <xacro:macro name="tool_case_1_shell">
+    <!-- back wall: cavity ends 16 mm inboard from local +X entry -->
+    <visual><origin xyz="-0.008 0 0"/><geometry><box size="0.0208 0.100 0.080"/></geometry><material name="tool_case_blue"/></visual>
+    <collision><origin xyz="-0.008 0 0"/><geometry><box size="0.0208 0.100 0.080"/></geometry></collision>
+    <!-- two Y rails around the 16 mm opening -->
+    <visual><origin xyz="0.0104 -0.029 0"/><geometry><box size="0.016 0.042 0.080"/></geometry><material name="tool_case_blue"/></visual>
+    <collision><origin xyz="0.0104 -0.029 0"/><geometry><box size="0.016 0.042 0.080"/></geometry></collision>
+    <visual><origin xyz="0.0104 0.029 0"/><geometry><box size="0.016 0.042 0.080"/></geometry><material name="tool_case_blue"/></visual>
+    <collision><origin xyz="0.0104 0.029 0"/><geometry><box size="0.016 0.042 0.080"/></geometry></collision>
+    <!-- top/bottom rails leave a 50 mm opening along local Z -->
+    <visual><origin xyz="0.0104 0 -0.0325"/><geometry><box size="0.016 0.016 0.015"/></geometry><material name="tool_case_blue"/></visual>
+    <collision><origin xyz="0.0104 0 -0.0325"/><geometry><box size="0.016 0.016 0.015"/></geometry></collision>
+    <visual><origin xyz="0.0104 0 0.0325"/><geometry><box size="0.016 0.016 0.015"/></geometry><material name="tool_case_blue"/></visual>
+    <collision><origin xyz="0.0104 0 0.0325"/><geometry><box size="0.016 0.016 0.015"/></geometry></collision>
+  </xacro:macro>
+  <link name="tool_case_1"><xacro:tool_case_1_shell/></link>
+  <joint name="arm_world_to_tool_case_1" type="fixed">
+    <parent link="arm_world"/><child link="tool_case_1"/>
+    <!-- arm_world has world orientation, so pitch +55 deg is world-Y tilt. -->
+    <origin xyz="-0.427272082 0 0.190020943" rpy="0 0.959931088597 0"/>
+  </joint>
+  <!-- Case-1 local YZ outer faces, at X = +/-18.4 mm. The positive face is the EE entry. -->
+  <link name="tool_case_1_x_positive_face"/>
+  <joint name="tool_case_1_to_x_positive_face" type="fixed">
+    <parent link="tool_case_1"/><child link="tool_case_1_x_positive_face"/>
+    <origin xyz="0.0184 0 0" rpy="0 1.570796326795 0"/>
+  </joint>
+  <link name="tool_case_1_x_negative_face"/>
+  <joint name="tool_case_1_to_x_negative_face" type="fixed">
+    <parent link="tool_case_1"/><child link="tool_case_1_x_negative_face"/>
+    <origin xyz="-0.0184 0 0" rpy="0 -1.570796326795 0"/>
+  </joint>
 
   <!-- ========================================================= -->
   <!-- BASE ACTUATOR -->
@@ -85,10 +237,10 @@
   </link>
 
 
-  <joint name="world_to_base_actuator"
+  <joint name="arm_world_to_base_actuator"
          type="fixed">
 
-    <parent link="world"/>
+    <parent link="arm_world"/>
     <child link="base_actuator"/>
 
     <origin xyz="0 0 0"
@@ -384,10 +536,10 @@
     <axis xyz="0 0 1"/>
 
     <limit
-        lower="${-pi}"
-        upper="${pi}"
+        lower="-0.894310799337"
+        upper="0.567572891518"
         effort="1.0"
-        velocity="1.0"/>
+        velocity="5.035176563244"/>
 
   </joint>
 
@@ -511,6 +663,17 @@
   </joint>
 
 
+  <!-- Common end-effector output: Dynamixel ID 4 is always ee_joint.
+       Tools mount downstream of ee_output_link, so each selected tool shares
+       the same physical output shaft rather than declaring its own motor joint. -->
+  <link name="ee_output_link"/>
+  <joint name="ee_joint" type="revolute">
+    <parent link="tcp_link"/><child link="ee_output_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/><axis xyz="0 0 1"/>
+    <!-- raw 1293 = 0 rad; raw 459..3843 are the measured safe endpoints. -->
+    <limit lower="-1.279339977097" upper="3.911651009108" effort="8.4" velocity="5.035177"/>
+  </joint>
+
   <!-- RealSense D435 bracket: TCP is the mechanical parent frame. -->
 
   <link name="cam_link">
@@ -532,5 +695,16 @@
         xyz="0 0.0607680 0.074000"
         rpy="${-pi/2} ${-pi/2} 0"/>
   </joint>
+
+  <!-- The common arm ends at tcp_link; the selected tool is downstream. -->
+  <xacro:if value="${selected_tool_id == 1}">
+    <xacro:tool_1_gripper prefix="" parent="ee_output_link" use_mesh="$(arg use_mesh)"/>
+  </xacro:if>
+  <xacro:if value="${selected_tool_id == 2}">
+    <xacro:tool_2 prefix="" parent="ee_output_link" use_mesh="$(arg use_mesh)"/>
+  </xacro:if>
+  <xacro:if value="${selected_tool_id == 3}">
+    <xacro:tool_3 prefix="" parent="ee_output_link" use_mesh="$(arg use_mesh)"/>
+  </xacro:if>
 
 </robot>

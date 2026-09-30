@@ -61,7 +61,7 @@ def generate_launch_description():
                     "wrist_pitch_joint": 0.0,
                     "wrist_roll_joint": 0.0,
                     "wrist_yaw_joint": 0.0,
-                    "gripper_joint": 0.0,
+                    "ee_joint": 0.0,
                 }
             }],
         ),

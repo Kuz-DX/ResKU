@@ -1,0 +1,135 @@
+# 실기 제어용 단일 설정 원본.
+# null은 아직 실측하지 않음을 뜻한다. hardware_preflight.py는 null 또는
+# 범위가 맞지 않는 항목이 하나라도 있으면 실패하며, real_control.launch.py도
+# controller_manager를 시작하지 않는다. 값을 추정해서 채우지 않는다.
+version: 1
+
+buses:
+  # U2D2 has one USB serial endpoint. TTL and RS-485 are separate electrical
+  # output channels: status feedback is read ID-by-ID, while Protocol 2
+  # Sync Write remains one transmit-only coordinated command. Physical B topology:
+  # TTL -> base ID 1 and branch wrist_yaw ID 3 -> ee_joint ID 4;
+  # RS-485 -> wrist_roll ID 2.
+  dynamixel_u2d2:
+    device: /dev/ttyUSB0
+    baud_rate: 1000000
+    protocol: 2.0
+    adapter: U2D2
+    mixed_ttl_rs485: true
+    feedback_mode: individual_read
+    command_mode: sync_write
+  rmd_can:
+    interface: can_arm
+    bitrate: 1000000
+
+joints:
+  base_joint:
+    vendor: dynamixel
+    model: XH540-W270-T
+    bus: dynamixel_u2d2
+    transport_channel: ttl
+    id: 1
+    operating_mode: 4
+    raw_increases_ccw: true
+    zero_raw: 0
+    soft_limit_raw: [-2276, 2276]
+    soft_limit_rad: [-3.490658503989, 3.490658503989]
+    velocity_limit_rad_s: 4.004484
+    current_limit_ma: 5506.43
+    current_limit_raw: null
+    velocity_limit_raw: null
+    profile_acceleration_raw: null
+    profile_velocity_raw: null
+  shoulder_joint:
+    vendor: rmd
+    model: X8
+    bus: rmd_can
+    id: 4
+    sign: null
+    q_offset_rad: null
+    soft_limit_rad: [null, null]
+    velocity_limit_rad_s: null
+    current_limit_a: null
+    current_release_threshold_a: null
+    current_retreat_velocity_rad_s: null
+    current_max_retreat_distance_rad: null
+    current_limit_duration_ms: null
+  elbow_joint:
+    vendor: rmd
+    model: X6
+    bus: rmd_can
+    id: 5
+    sign: null
+    q_offset_rad: null
+    soft_limit_rad: [null, null]
+    velocity_limit_rad_s: null
+    current_limit_a: null
+    current_release_threshold_a: null
+    current_retreat_velocity_rad_s: null
+    current_max_retreat_distance_rad: null
+    current_limit_duration_ms: null
+  wrist_pitch_joint:
+    vendor: rmd
+    model: X4
+    bus: rmd_can
+    id: 6
+    sign: null
+    q_offset_rad: null
+    soft_limit_rad: [null, null]
+    velocity_limit_rad_s: null
+    current_limit_a: null
+    current_release_threshold_a: null
+    current_retreat_velocity_rad_s: null
+    current_max_retreat_distance_rad: null
+    current_limit_duration_ms: null
+  wrist_roll_joint:
+    vendor: dynamixel
+    model: MX-106R
+    bus: dynamixel_u2d2
+    transport_channel: rs485
+    id: 2
+    operating_mode: 4
+    raw_increases_ccw: true
+    zero_raw: 0
+    soft_limit_raw: [-583, 370]
+    soft_limit_rad: [-0.894310799337, 0.567572891518]
+    velocity_limit_rad_s: 5.035177
+    current_limit_ma: 6877.92
+    current_limit_raw: null
+    velocity_limit_raw: null
+    profile_acceleration_raw: null
+    profile_velocity_raw: null
+  wrist_yaw_joint:
+    vendor: dynamixel
+    model: MX-106T
+    bus: dynamixel_u2d2
+    transport_channel: ttl
+    id: 3
+    operating_mode: 4
+    raw_increases_ccw: true
+    zero_raw: 2048
+    soft_limit_raw: [0, 4096]
+    soft_limit_rad: [-3.141592653590, 3.141592653590]
+    velocity_limit_rad_s: 5.035177
+    current_limit_ma: 6877.92
+    current_limit_raw: null
+    velocity_limit_raw: null
+    profile_acceleration_raw: null
+    profile_velocity_raw: null
+  ee_joint:
+    vendor: dynamixel
+    model: MX-106T
+    bus: dynamixel_u2d2
+    transport_channel: ttl
+    id: 4
+    operating_mode: 4
+    raw_increases_ccw: true
+    zero_raw: 1293
+    soft_limit_raw: [459, 3843]
+    soft_limit_rad: [-1.279339977097, 3.911651009108]
+    velocity_limit_rad_s: 5.035177
+    current_limit_ma: 6877.92
+    current_limit_raw: null
+    velocity_limit_raw: null
+    profile_acceleration_raw: null
+    profile_velocity_raw: null

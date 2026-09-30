@@ -1,27 +1,40 @@
-# This config file is used by ros2_control
 controller_manager:
   ros__parameters:
-    update_rate: 100  # Hz
-
-    arm_controller:
-      type: joint_trajectory_controller/JointTrajectoryController
-
-
-
+    update_rate: 100
     joint_state_broadcaster:
       type: joint_state_broadcaster/JointStateBroadcaster
+    arm_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+    ee_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
 
 arm_controller:
   ros__parameters:
-    joints:
-      - base_joint
-      - shoulder_joint
-      - elbow_joint
-      - wrist_pitch_joint
-      - wrist_roll_joint
-      - wrist_yaw_joint
-    command_interfaces:
-      - position
-    state_interfaces:
-      - position
-      - velocity
+    joints: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
+    command_interfaces: [position]
+    state_interfaces: [position, velocity]
+    allow_partial_joints_goal: false
+    allow_integration_in_goal_trajectories: false
+    open_loop_control: false
+    action_monitor_rate: 20.0
+    constraints:
+      goal_time: 1.0
+      stopped_velocity_tolerance: 0.02
+      base_joint: {trajectory: 0.05, goal: 0.03}
+      shoulder_joint: {trajectory: 0.05, goal: 0.03}
+      elbow_joint: {trajectory: 0.05, goal: 0.03}
+      wrist_pitch_joint: {trajectory: 0.05, goal: 0.03}
+      wrist_roll_joint: {trajectory: 0.05, goal: 0.03}
+      wrist_yaw_joint: {trajectory: 0.05, goal: 0.03}
+
+ee_controller:
+  ros__parameters:
+    joints: [ee_joint]
+    command_interfaces: [position]
+    state_interfaces: [position, velocity]
+    allow_partial_joints_goal: false
+    open_loop_control: false
+    constraints:
+      goal_time: 1.0
+      stopped_velocity_tolerance: 0.02
+      ee_joint: {trajectory: 0.05, goal: 0.03}

@@ -1,14 +1,9 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="tool_manipulator">
-    <xacro:arg name="initial_positions_file" default="initial_positions.yaml" />
-
-    <!-- Import tool_manipulator urdf file -->
-    <xacro:include filename="$(find tool_manipulator_description)/urdf/tool_manipulator.urdf.xacro" />
-
-    <!-- Import control_xacro -->
-    <xacro:include filename="tool_manipulator.ros2_control.xacro" />
-
-
-    <xacro:tool_manipulator_ros2_control name="FakeSystem" initial_positions_file="$(arg initial_positions_file)"/>
-
+  <xacro:arg name="initial_positions_file" default="initial_positions.yaml"/>
+  <xacro:arg name="use_mock_hardware" default="true"/>
+  <xacro:arg name="hardware_config_file" default=""/>
+  <xacro:include filename="$(find tool_manipulator_description)/urdf/tool_manipulator.urdf.xacro"/>
+  <xacro:include filename="tool_manipulator.ros2_control.xacro"/>
+  <xacro:tool_manipulator_ros2_control name="tool_manipulator_system" initial_positions_file="$(arg initial_positions_file)" use_mock_hardware="$(arg use_mock_hardware)" hardware_config_file="$(arg hardware_config_file)"/>
 </robot>

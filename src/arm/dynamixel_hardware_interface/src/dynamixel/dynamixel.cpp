@@ -1067,6 +1067,32 @@ DxlError Dynamixel::ReadMultiDxlData(double period_ms)
   }
 }
 
+DxlError Dynamixel::ReadDxlDataIndividually()
+{
+  for (const auto & read_list : read_data_list_) {
+    for (size_t item_index = 0; item_index < read_list.item_name.size(); ++item_index) {
+      const uint8_t id = read_list.id_arr.at(item_index);
+      uint32_t raw_value = 0;
+      const DxlError result = ReadItem(read_list.comm_id, id, read_list.item_name.at(item_index), raw_value);
+      if (result != DxlError::OK) { return result; }
+      double unit_value = 0.0;
+      bool is_signed = false;
+      if (dxl_info_.GetDxlUnitValue(read_list.comm_id, id, read_list.item_name.at(item_index), unit_value) &&
+          dxl_info_.GetDxlSignType(read_list.comm_id, id, read_list.item_name.at(item_index), is_signed)) {
+        *read_list.item_data_ptr_vec.at(item_index) = ConvertValueWithUnitInfo(
+          read_list.comm_id, id, read_list.item_name.at(item_index), raw_value,
+          read_list.item_size.at(item_index), is_signed);
+      } else if (read_list.item_name.at(item_index) == "Present Position") {
+        *read_list.item_data_ptr_vec.at(item_index) = dxl_info_.ConvertValueToRadian(
+          read_list.comm_id, id, static_cast<int32_t>(raw_value));
+      } else {
+        *read_list.item_data_ptr_vec.at(item_index) = static_cast<double>(raw_value);
+      }
+    }
+  }
+  return DxlError::OK;
+}
+
 DxlError Dynamixel::WriteMultiDxlData()
 {
   if (write_data_list_.empty()) {

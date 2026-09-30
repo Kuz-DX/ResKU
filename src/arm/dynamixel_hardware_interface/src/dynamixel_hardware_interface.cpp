@@ -79,6 +79,12 @@ double DynamixelHardware::wrapToPi(double angle)
   return std::remainder(angle, two_pi);
 }
 
+DxlError DynamixelHardware::readFeedback(double period_ms)
+{
+  return use_individual_feedback_read_ ?
+    dxl_comm_->ReadDxlDataIndividually() : dxl_comm_->ReadMultiDxlData(period_ms);
+}
+
 hardware_interface::CallbackReturn DynamixelHardware::on_init(
   const hardware_interface::HardwareInfo & info)
 {
@@ -124,6 +130,26 @@ hardware_interface::CallbackReturn DynamixelHardware::on_init(
 
   port_name_ = info_.hardware_parameters["port_name"];
   baud_rate_ = info_.hardware_parameters["baud_rate"];
+  const auto mixed_mode = info_.hardware_parameters.find("u2d2_mixed_ttl_rs485");
+  const auto feedback_mode = info_.hardware_parameters.find("feedback_mode");
+  const bool is_mixed_u2d2 = mixed_mode != info_.hardware_parameters.end() &&
+    mixed_mode->second == "true";
+  if (is_mixed_u2d2) {
+    if (feedback_mode == info_.hardware_parameters.end() ||
+      feedback_mode->second != "individual_read")
+    {
+      RCLCPP_ERROR(logger_, "Mixed U2D2 TTL/RS-485 requires feedback_mode=individual_read; group read is unsafe.");
+      return hardware_interface::CallbackReturn::ERROR;
+    }
+    use_individual_feedback_read_ = true;
+    const auto command_mode = info_.hardware_parameters.find("command_mode");
+    if (command_mode == info_.hardware_parameters.end() || command_mode->second != "sync_write") {
+      RCLCPP_ERROR(logger_, "Mixed U2D2 requires command_mode=sync_write.");
+      return hardware_interface::CallbackReturn::ERROR;
+    }
+    mixed_channel_command_mode_ = command_mode->second;
+    RCLCPP_INFO(logger_, "U2D2 mixed TTL/RS-485: individual feedback reads and shared Sync Write enabled.");
+  }
   if (info_.hardware_parameters.find("error_timeout_ms") != info_.hardware_parameters.end()) {
     try {
       err_timeout_ms_ = stod(info_.hardware_parameters["error_timeout_ms"]);
@@ -139,7 +165,6 @@ hardware_interface::CallbackReturn DynamixelHardware::on_init(
   // added in 9d1e707.  Keep the implementation for later diagnosis, but do not
   // make Dynamixel startup depend on these limits while the JECS calibration
   // and the mux limit coordinates are being reconciled.
-#if 0
   if (info_.hardware_parameters.find("position_limit_rejection_margin") !=
     info_.hardware_parameters.end())
   {
@@ -157,7 +182,6 @@ hardware_interface::CallbackReturn DynamixelHardware::on_init(
     RCLCPP_ERROR(logger_, "position_limit_rejection_margin must be finite and non-negative");
     return hardware_interface::CallbackReturn::ERROR;
   }
-#endif
 
   // Add new parameter for torque initialization
   bool disable_torque_at_init = false;
@@ -431,10 +455,8 @@ hardware_interface::CallbackReturn DynamixelHardware::on_init(
       }
       temp_cmd.interface_name_vec.push_back(it.name);
       temp_cmd.value_ptr_vec.push_back(std::make_shared<double>(0.0));
-      // TEMPORARILY DISABLED (2026-08-28, 9d1e707): position min/max are still
-      // present in the URDF, but the Dynamixel plugin does not enforce a second
-      // limit layer until its calibrated coordinates match joint_command_mux.
-#if 0
+      // Position limits from the same hardware.yaml-derived URDF are enforced
+      // again immediately before every physical motor command.
       if (it.name == hardware_interface::HW_IF_POSITION) {
         try {
           const double lower = std::stod(it.min);
@@ -450,7 +472,6 @@ hardware_interface::CallbackReturn DynamixelHardware::on_init(
           return hardware_interface::CallbackReturn::ERROR;
         }
       }
-#endif
     }
     hdl_joint_commands_.push_back(temp_cmd);
   }
@@ -693,7 +714,7 @@ hardware_interface::CallbackReturn DynamixelHardware::start()
   rclcpp::Duration error_duration(0, 0);
   int consecutive_reads = 0;
   while (consecutive_reads < kRequiredConsecutiveReads) {
-    dxl_comm_err_ = CheckError(dxl_comm_->ReadMultiDxlData(0.0));
+    dxl_comm_err_ = CheckError(readFeedback(0.0));
     if (dxl_comm_err_ == DxlError::OK) {
       ++consecutive_reads;
       if (consecutive_reads < kRequiredConsecutiveReads) {
@@ -842,12 +863,12 @@ hardware_interface::return_type DynamixelHardware::read(
     RCLCPP_ERROR_STREAM(logger_, "Dynamixel Read Fail : REBOOTING");
     return hardware_interface::return_type::ERROR;
   } else if (dxl_status_ == DXL_OK || dxl_status_ == COMM_ERROR || dxl_status_ == HW_ERROR) {
-    dxl_comm_err_ = CheckError(dxl_comm_->ReadMultiDxlData(period_ms));
+    dxl_comm_err_ = CheckError(readFeedback(period_ms));
     if (dxl_comm_err_ != DxlError::OK && dxl_comm_err_ != DxlError::DXL_HARDWARE_ERROR) {
       if (!is_read_in_error_) {
         is_read_in_error_ = true;
         read_error_duration_ = rclcpp::Duration(0, 0);
-        RCLCPP_ERROR(logger_, "Dynamixel group read failed");
+        RCLCPP_ERROR(logger_, "Dynamixel feedback read failed");
       }
       read_error_duration_ = read_error_duration_ + period;
 
@@ -960,7 +981,6 @@ hardware_interface::return_type DynamixelHardware::write(
     // TEMPORARILY DISABLED (2026-08-28, 9d1e707): this duplicate hardware
     // position-limit layer can reject the mux's rate-limited recovery command
     // while the measured Dynamixel position starts outside the same limits.
-#if 0
     for (auto & joint : hdl_joint_commands_) {
       const auto limits = position_limits_.find(joint.name);
       for (size_t i = 0; i < joint.interface_name_vec.size(); ++i) {
@@ -1000,38 +1020,21 @@ hardware_interface::return_type DynamixelHardware::write(
         }
       }
     }
-#endif
     dxl_comm_->WriteItemBuf();
 
     ChangeDxlTorqueState();
 
     CalcJointToTransmission();
 
-    // TEMPORARILY DISABLED (2026-08-28, 9d1e707/c154f66): restore the original
-    // best-effort cyclic write and avoid the added write watchdog/global fault.
-#if 0
+    // Final command guard: a failed Sync Write is a controller error, never a best-effort retry.
     const DxlError write_result = dxl_comm_->WriteMultiDxlData();
     if (write_result != DxlError::OK) {
-      if (!is_write_in_error_) {
-        is_write_in_error_ = true;
-        write_error_duration_ = rclcpp::Duration(0, 0);
-      }
-      write_error_duration_ = write_error_duration_ + period;
-      RCLCPP_ERROR_STREAM_THROTTLE(
-        logger_, clock_, 1000, "Dynamixel command transmission failed: " <<
-          Dynamixel::DxlErrorToString(write_result));
-      if (write_error_duration_.seconds() * 1000 >= err_timeout_ms_) {
-        dxl_status_ = COMM_ERROR;
-        latchHardwareFault(
-          "command transmission watchdog expired: " +
-          Dynamixel::DxlErrorToString(write_result));
-        return hardware_interface::return_type::OK;
-      }
-      return hardware_interface::return_type::OK;
+      dxl_status_ = COMM_ERROR;
+      latchHardwareFault("Sync Write failed: " + Dynamixel::DxlErrorToString(write_result));
+      RCLCPP_ERROR_STREAM(logger_, "Rejecting command: Dynamixel Sync Write failed: " <<
+        Dynamixel::DxlErrorToString(write_result));
+      return hardware_interface::return_type::ERROR;
     }
-#else
-    dxl_comm_->WriteMultiDxlData();
-#endif
 
     is_write_in_error_ = false;
     write_error_duration_ = rclcpp::Duration(0, 0);
@@ -1332,7 +1335,8 @@ bool DynamixelHardware::InitItem(const hardware_interface::ComponentInfo & gpio)
       param_name == "Torque Enable" || param_name == "Operating Mode" ||
       param_name == "model_num" || param_name == "comm_id" || param_name == "Reboot" ||
       param_name == "[unit info]" ||
-      param_name.find("Limit") != std::string::npos)
+      param_name.find("Limit") != std::string::npos ||
+      param_name == "transport_channel")
     {
       continue;
     }
@@ -1459,7 +1463,7 @@ bool DynamixelHardware::InitDxlReadItems()
       return false;
     }
   }
-  if (dxl_comm_->SetMultiDxlRead() != DxlError::OK) {
+  if (!use_individual_feedback_read_ && dxl_comm_->SetMultiDxlRead() != DxlError::OK) {
     return false;
   }
   return true;

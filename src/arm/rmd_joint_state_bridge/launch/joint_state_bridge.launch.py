@@ -2,8 +2,8 @@
 읽기 전용으로 미러링한다 - 커맨드를 안 보내므로 팔을 손으로 자유롭게
 움직이며 자세를 캡처할 때 안전하다.
 
-기본 파라미터는 army_manipulator_ros2_control.xacro의 기본 인자(can_ifname=
-can_arm, actuator id 4/5/6, dxl_port_name=/dev/ttyUSB0 등)와 같다 - 실기
+기본 파라미터는 tool_manipulator 기준(can_ifname=can_arm, RMD 관절명
+wrist_pitch_joint, actuator id 4/5/6, dxl_port_name=/dev/ttyUSB0 등)이다 - 실기
 캘리브레이션 값(sign/q_offset, position_direction/position_zero_offset)이
 그 xacro와 다르면 여기서도 launch argument로 동일하게 넘겨야 한다.
 
@@ -25,8 +25,8 @@ def generate_launch_description():
         DeclareLaunchArgument("elbow_actuator_id", default_value="5"),
         DeclareLaunchArgument("wrist_actuator_id", default_value="6"),
         DeclareLaunchArgument(
-            "rmd_wrist_joint_name", default_value="wrist_joint",
-            description="Published URDF joint name for RMD wrist; use wrist_pitch_joint with tool_manipulator."),
+            "rmd_wrist_joint_name", default_value="wrist_pitch_joint",
+            description="Published URDF joint name for the tool manipulator RMD wrist."),
         DeclareLaunchArgument("shoulder_sign", default_value="1.0"),
         DeclareLaunchArgument("elbow_sign", default_value="-1.0"),
         DeclareLaunchArgument("wrist_sign", default_value="-1.0"),
@@ -46,15 +46,15 @@ def generate_launch_description():
         DeclareLaunchArgument("base_zero_offset", default_value="-9.314331344042"),
         DeclareLaunchArgument("base_direction", default_value="1.0"),
         DeclareLaunchArgument("base_wraparound", default_value="true"),
-        DeclareLaunchArgument("wrist_roll_zero_offset", default_value="0.0"),
+        DeclareLaunchArgument("wrist_roll_zero_offset", default_value="-3.141592653590"),
         DeclareLaunchArgument("wrist_roll_direction", default_value="1.0"),
-        DeclareLaunchArgument("wrist_roll_wraparound", default_value="true"),
+        DeclareLaunchArgument("wrist_roll_wraparound", default_value="false"),
         DeclareLaunchArgument("wrist_yaw_zero_offset", default_value="0.0"),
         DeclareLaunchArgument("wrist_yaw_direction", default_value="1.0"),
         DeclareLaunchArgument("wrist_yaw_wraparound", default_value="true"),
-        DeclareLaunchArgument("gripper_zero_offset", default_value="-1.375980766733627"),
+        DeclareLaunchArgument("gripper_zero_offset", default_value="-1.158155494854"),
         DeclareLaunchArgument("gripper_direction", default_value="1.0"),
-        DeclareLaunchArgument("gripper_wraparound", default_value="true"),
+        DeclareLaunchArgument("gripper_wraparound", default_value="false"),
         DeclareLaunchArgument("publish_rate_hz", default_value="20.0"),
     ]
 

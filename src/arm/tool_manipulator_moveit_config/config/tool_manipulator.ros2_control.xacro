@@ -1,56 +1,113 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
-    <xacro:macro name="tool_manipulator_ros2_control" params="name initial_positions_file">
-        <xacro:property name="initial_positions" value="${load_yaml(initial_positions_file)['initial_positions']}"/>
+  <!-- FakeSystem is retained for offline planning only. The real branch consumes
+       tool_manipulator_bringup/config/hardware.yaml after preflight succeeds. -->
+  <xacro:macro name="fake_joint" params="name initial">
+    <joint name="${name}">
+      <command_interface name="position"/>
+      <state_interface name="position"><param name="initial_value">${initial}</param></state_interface>
+      <state_interface name="velocity"/>
+    </joint>
+  </xacro:macro>
 
-        <ros2_control name="${name}" type="system">
-            <hardware>
-                <!-- By default, set up controllers for simulation. This won't work on real hardware -->
-                <plugin>mock_components/GenericSystem</plugin>
-            </hardware>
-            <joint name="base_joint">
-                <command_interface name="position"/>
-                <state_interface name="position">
-                  <param name="initial_value">${initial_positions['base_joint']}</param>
-                </state_interface>
-                <state_interface name="velocity"/>
-            </joint>
-            <joint name="shoulder_joint">
-                <command_interface name="position"/>
-                <state_interface name="position">
-                  <param name="initial_value">${initial_positions['shoulder_joint']}</param>
-                </state_interface>
-                <state_interface name="velocity"/>
-            </joint>
-            <joint name="elbow_joint">
-                <command_interface name="position"/>
-                <state_interface name="position">
-                  <param name="initial_value">${initial_positions['elbow_joint']}</param>
-                </state_interface>
-                <state_interface name="velocity"/>
-            </joint>
-            <joint name="wrist_pitch_joint">
-                <command_interface name="position"/>
-                <state_interface name="position">
-                  <param name="initial_value">${initial_positions['wrist_pitch_joint']}</param>
-                </state_interface>
-                <state_interface name="velocity"/>
-            </joint>
-            <joint name="wrist_roll_joint">
-                <command_interface name="position"/>
-                <state_interface name="position">
-                  <param name="initial_value">${initial_positions['wrist_roll_joint']}</param>
-                </state_interface>
-                <state_interface name="velocity"/>
-            </joint>
-            <joint name="wrist_yaw_joint">
-                <command_interface name="position"/>
-                <state_interface name="position">
-                  <param name="initial_value">${initial_positions['wrist_yaw_joint']}</param>
-                </state_interface>
-                <state_interface name="velocity"/>
-            </joint>
+  <xacro:macro name="rmd_actuator" params="name spec can_ifname">
+    <ros2_control name="rmd_${name}" type="actuator">
+      <hardware>
+        <plugin>rmd_hardware_interface/MyActuatorRmdHardwareInterface</plugin>
+        <param name="ifname">${can_ifname}</param>
+        <param name="actuator_id">${spec['id']}</param>
+        <param name="sign">${spec['sign']}</param>
+        <param name="q_offset">${spec['q_offset_rad']}</param>
+        <param name="max_velocity">${spec['velocity_limit_rad_s']}</param>
+        <param name="software_current_limit">${spec['current_limit_a']}</param>
+        <param name="current_release_threshold">${spec['current_release_threshold_a']}</param>
+        <param name="current_retreat_velocity">${spec['current_retreat_velocity_rad_s']}</param>
+        <param name="current_max_retreat_distance">${spec['current_max_retreat_distance_rad']}</param>
+        <param name="current_limit_duration_ms">${spec['current_limit_duration_ms']}</param>
+        <param name="velocity_alpha">0.1</param>
+        <param name="effort_alpha">0.1</param>
+        <param name="can_receive_timeout_ms">100</param>
+        <param name="initial_feedback_timeout_ms">3000</param>
+        <param name="feedback_timeout_ms">500</param>
+        <param name="position_limit_rejection_margin">0.01745329252</param>
+      </hardware>
+      <joint name="${name}">
+        <command_interface name="position" min="${spec['soft_limit_rad'][0]}" max="${spec['soft_limit_rad'][1]}"/>
+        <state_interface name="position"/><state_interface name="velocity"/><state_interface name="effort"/>
+      </joint>
+    </ros2_control>
+  </xacro:macro>
 
-        </ros2_control>
-    </xacro:macro>
+  <xacro:macro name="dxl_joint" params="name spec wrap">
+    <joint name="${name}">
+      <command_interface name="position" min="${spec['soft_limit_rad'][0]}" max="${spec['soft_limit_rad'][1]}"/>
+      <state_interface name="position"/><state_interface name="velocity"/><state_interface name="effort"/>
+      <!-- Model coordinate is raw_tick*2pi/4096-pi. -->
+      <param name="position_zero_offset">${spec['zero_raw'] * 2.0 * pi / 4096.0 - pi}</param>
+      <param name="position_direction">1.0</param>
+      <param name="position_wraparound">${wrap}</param>
+    </joint>
+  </xacro:macro>
+
+  <xacro:macro name="dxl_gpio" params="name spec">
+    <gpio name="${name}">
+      <param name="type">dxl</param><param name="ID">${spec['id']}</param>
+      <param name="transport_channel">${spec['transport_channel']}</param>
+      <command_interface name="Goal Position"/>
+      <state_interface name="Present Position"/><state_interface name="Present Velocity"/><state_interface name="Present Current"/>
+      <param name="Operating Mode">${spec['operating_mode']}</param>
+      <param name="Current Limit">${spec['current_limit_raw']}</param>
+      <param name="Velocity Limit">${spec['velocity_limit_raw']}</param>
+      <param name="Profile Acceleration">${spec['profile_acceleration_raw']}</param>
+      <param name="Profile Velocity">${spec['profile_velocity_raw']}</param>
+    </gpio>
+  </xacro:macro>
+
+  <xacro:macro name="tool_manipulator_ros2_control" params="name initial_positions_file use_mock_hardware:=true hardware_config_file:=''">
+    <xacro:property name="initial_positions" value="${load_yaml(initial_positions_file)['initial_positions']}"/>
+    <xacro:if value="${use_mock_hardware}">
+      <ros2_control name="${name}" type="system"><hardware><plugin>mock_components/GenericSystem</plugin></hardware>
+        <xacro:fake_joint name="base_joint" initial="${initial_positions['base_joint']}"/>
+        <xacro:fake_joint name="shoulder_joint" initial="${initial_positions['shoulder_joint']}"/>
+        <xacro:fake_joint name="elbow_joint" initial="${initial_positions['elbow_joint']}"/>
+        <xacro:fake_joint name="wrist_pitch_joint" initial="${initial_positions['wrist_pitch_joint']}"/>
+        <xacro:fake_joint name="wrist_roll_joint" initial="${initial_positions['wrist_roll_joint']}"/>
+        <xacro:fake_joint name="wrist_yaw_joint" initial="${initial_positions['wrist_yaw_joint']}"/>
+        <xacro:fake_joint name="ee_joint" initial="0.0"/>
+      </ros2_control>
+    </xacro:if>
+    <xacro:unless value="${use_mock_hardware}">
+      <xacro:property name="hw" value="${load_yaml(hardware_config_file)}"/>
+      <xacro:property name="j" value="${hw['joints']}"/>
+      <!-- One U2D2 serial device owns the confirmed TTL + RS-485 chains. -->
+      <ros2_control name="dynamixel_u2d2" type="system">
+        <hardware>
+          <plugin>dynamixel_hardware_interface/DynamixelHardware</plugin>
+          <param name="number_of_joints">4</param><param name="number_of_transmissions">4</param>
+          <param name="port_name">${hw['buses']['dynamixel_u2d2']['device']}</param>
+          <param name="baud_rate">${hw['buses']['dynamixel_u2d2']['baud_rate']}</param>
+          <param name="u2d2_mixed_ttl_rs485">${hw['buses']['dynamixel_u2d2']['mixed_ttl_rs485']}</param>
+          <param name="feedback_mode">${hw['buses']['dynamixel_u2d2']['feedback_mode']}</param>
+          <param name="command_mode">${hw['buses']['dynamixel_u2d2']['command_mode']}</param>
+          <param name="dynamixel_model_folder">/param/dxl_model</param>
+          <param name="disable_torque_at_init">true</param>
+          <param name="error_timeout_ms">500</param>
+          <param name="position_limit_rejection_margin">0.01745329252</param>
+          <param name="transmission_to_joint_matrix">1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1</param>
+          <param name="joint_to_transmission_matrix">1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1</param>
+        </hardware>
+        <xacro:dxl_joint name="base_joint" spec="${j['base_joint']}" wrap="true"/>
+        <xacro:dxl_joint name="wrist_roll_joint" spec="${j['wrist_roll_joint']}" wrap="false"/>
+        <xacro:dxl_joint name="wrist_yaw_joint" spec="${j['wrist_yaw_joint']}" wrap="true"/>
+        <xacro:dxl_joint name="ee_joint" spec="${j['ee_joint']}" wrap="false"/>
+        <xacro:dxl_gpio name="base_motor" spec="${j['base_joint']}"/>
+        <xacro:dxl_gpio name="wrist_roll_motor" spec="${j['wrist_roll_joint']}"/>
+        <xacro:dxl_gpio name="wrist_yaw_motor" spec="${j['wrist_yaw_joint']}"/>
+        <xacro:dxl_gpio name="ee_motor" spec="${j['ee_joint']}"/>
+      </ros2_control>
+      <xacro:rmd_actuator name="shoulder_joint" spec="${j['shoulder_joint']}" can_ifname="${hw['buses']['rmd_can']['interface']}"/>
+      <xacro:rmd_actuator name="elbow_joint" spec="${j['elbow_joint']}" can_ifname="${hw['buses']['rmd_can']['interface']}"/>
+      <xacro:rmd_actuator name="wrist_pitch_joint" spec="${j['wrist_pitch_joint']}" can_ifname="${hw['buses']['rmd_can']['interface']}"/>
+    </xacro:unless>
+  </xacro:macro>
 </robot>

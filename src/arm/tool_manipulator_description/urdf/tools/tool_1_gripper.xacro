@@ -4,6 +4,10 @@
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
   <xacro:macro name="tool_1_gripper" params="prefix parent use_mesh:=false">
     <xacro:property name="tool_1_tcp_offset" value="0.090"/>
+    <!-- MX-106 raw reference: raw 0 = 0 rad; raw increment = CCW/closing; 4096 tick/rev. -->
+    <xacro:property name="tool_1_gripper_limit_lower" value="-1.279339977097"/> <!-- raw 459; raw 1293 = 0 -->
+    <xacro:property name="tool_1_gripper_open" value="0.0"/> <!-- raw 1293: open reference -->
+    <xacro:property name="tool_1_gripper_limit_upper" value="3.911651009108"/> <!-- raw 3843 -->
     <xacro:property name="tool_1_rack_offset" value="0.018"/>
     <xacro:property name="tool_1_pitch_radius" value="0.017"/>
 
@@ -14,50 +18,147 @@
     <link name="${prefix}tool_1_link">
       <inertial><mass value="0.001"/><inertia ixx="1e-7" ixy="0" ixz="0" iyy="1e-7" iyz="0" izz="1e-7"/></inertial>
     </link>
+    <!-- Common tool geometry frame: from tcp_link, rotate Y +90 deg then Z +90 deg. -->
+    <joint name="${prefix}tool_1_geometry_joint" type="fixed">
+      <parent link="${prefix}tool_1_link"/><child link="${prefix}tool_1_geometry_link"/>
+      <origin xyz="0 0 0" rpy="0 ${pi/2} ${pi/2}"/>
+    </joint>
+    <link name="${prefix}tool_1_geometry_link"/>
 
-    <joint name="${prefix}gripper_actuator_joint" type="fixed">
-      <parent link="${prefix}tool_1_link"/><child link="${prefix}gripper_actuator"/>
-      <origin xyz="0 0 0" rpy="0 -${pi/2} 0"/>
+
+    <!-- ========== ee_joint output -> pinion_gear (revolute, "피니언 구동") ==========-->
+    <joint name="pinion_gear_mount_joint" type="fixed">
+      <parent link="tool_1_geometry_link"/>
+      <child link="pinion_gear"/>
+      <origin xyz="0 0 0" rpy="0 -e 0"/>
     </joint>
-    <link name="${prefix}gripper_actuator">
-      <xacro:if value="${use_mesh}">
-        <visual><origin rpy="0 0 ${pi/2}"/><geometry><mesh filename="package://tool_manipulator_description/meshes/visual/gripper_actuator.stl" scale="0.001 0.001 0.001"/></geometry><material name="motor_dark"/></visual>
-        <collision><origin rpy="0 0 ${pi/2}"/><geometry><mesh filename="package://tool_manipulator_description/meshes/collision/gripper_actuator.stl" scale="0.001 0.001 0.001"/></geometry></collision>
-      </xacro:if>
-      <xacro:unless value="${use_mesh}"><visual><geometry><cylinder radius="0.030" length="0.050"/></geometry><material name="motor_dark"/></visual><collision><geometry><cylinder radius="0.030" length="0.050"/></geometry></collision></xacro:unless>
-      <inertial><mass value="0.001"/><inertia ixx="1e-7" ixy="0" ixz="0" iyy="1e-7" iyz="0" izz="1e-7"/></inertial>
-    </link>
-    <joint name="${prefix}gripper_joint" type="revolute">
-      <parent link="${prefix}gripper_actuator"/><child link="${prefix}pinion_gear"/>
-      <origin xyz="0 0 0" rpy="0 0 0"/><axis xyz="0 0 1"/>
-      <limit lower="0.0" upper="2.59396" effort="8.4" velocity="3.665"/>
-      <dynamics damping="0.05" friction="0.01"/>
-    </joint>
+
+
+    <!-- pinion_gear: m=1, z=34, 피치반경 17mm (module 1 x teeth 34 / 2, 2026-08-30 mesh 개정) -->
     <link name="${prefix}pinion_gear">
-      <xacro:if value="${use_mesh}"><visual><geometry><mesh filename="package://tool_manipulator_description/meshes/visual/pinion_gear.stl" scale="0.001 0.001 0.001"/></geometry><material name="motor_dark"/></visual><collision><geometry><mesh filename="package://tool_manipulator_description/meshes/collision/pinion_gear.stl" scale="0.001 0.001 0.001"/></geometry></collision></xacro:if>
-      <xacro:unless value="${use_mesh}"><visual><geometry><cylinder radius="0.016" length="0.012"/></geometry><material name="motor_dark"/></visual><collision><geometry><cylinder radius="0.016" length="0.012"/></geometry></collision></xacro:unless>
-      <inertial><mass value="0.01"/><inertia ixx="1e-6" ixy="0" ixz="0" iyy="1e-6" iyz="0" izz="1.5e-6"/></inertial>
+      <xacro:if value="${use_mesh}">
+        <visual>
+          <origin xyz="0 0 0" rpy="0 0 0"/>
+          <geometry><mesh filename="package://tool_manipulator_description/meshes/visual/pinion_gear.stl" scale="0.001 0.001 0.001"/></geometry>
+          <material name="motor_dark"/>
+        </visual>
+        <collision>
+          <origin xyz="0 0 0" rpy="0 0 0"/>
+          <geometry><mesh filename="package://tool_manipulator_description/meshes/collision/pinion_gear.stl" scale="0.001 0.001 0.001"/></geometry>
+        </collision>
+      </xacro:if>
+      <xacro:unless value="${use_mesh}">
+        <visual>
+          <origin xyz="0 0 0" rpy="0 0 0"/>
+          <geometry><cylinder radius="0.016" length="0.012"/></geometry>
+          <material name="motor_dark"/>
+        </visual>
+        <collision>
+          <origin xyz="0 0 0" rpy="0 0 0"/>
+          <geometry><cylinder radius="0.016" length="0.012"/></geometry>
+        </collision>
+      </xacro:unless>
+      <inertial>
+        <mass value="0.01"/>
+        <origin xyz="0 0 0"/>
+        <inertia ixx="1.0e-6" ixy="0" ixz="0" iyy="1.0e-6" iyz="0" izz="1.5e-6"/>
+      </inertial>
     </link>
 
+    <!-- ========== wrist_link -> rack_left (prismatic, mimic) ==========-->
     <joint name="${prefix}rack_left_joint" type="prismatic">
-      <parent link="${prefix}tool_1_link"/><child link="${prefix}rack_left"/>
-      <origin xyz="0 ${tool_1_rack_offset} 0.062" rpy="${pi} 0 ${pi}"/><axis xyz="0 0 1"/>
+      <parent link="${prefix}tool_1_geometry_link"/>
+      <child  link="${prefix}rack_left"/>
+      <xacro:property name="pinion_pitch_radius" value="0.017"/>
+      <!-- z: pinion_gear 원점(wrist_link 기준 z=${-off_wrist})에서 +0.062 오프셋.
+           기존에는 wrist_link의 z=0을 중심으로 ±0.062를 줘서 pinion_gear
+           원점(z=${-off_wrist})만큼 어긋나 있었음 - 2026-08-24 수정. -->
+      <origin xyz="-0.016 0.018 0.062" rpy="${pi} 0 ${pi}"/>
+      <axis xyz="0 0 1"/>
       <limit lower="0" upper="0.030" effort="8.4" velocity="0.1"/>
-      <mimic joint="${prefix}gripper_joint" multiplier="${tool_1_pitch_radius}" offset="0"/>
+      <!-- ee_joint 각속도 -> 랙 선속도 변환: v = omega * pinion_pitch_radius.
+           [수정] rack_right와 부호를 통일했다 - 두 rack의 로컬 Z(슬라이드축)가
+           서로 반대(rack_left=-Z, rack_right=+Z)이므로, mimic multiplier
+           부호까지 반대로 주면 world 기준으로는 오히려 같은 방향으로 움직여
+           버린다(실기에서 "한 몸으로 움직인다"고 확인된 원인). -->
+      <mimic joint="ee_joint" multiplier="${pinion_pitch_radius}" offset="0"/>
     </joint>
-    <joint name="${prefix}rack_right_joint" type="prismatic">
-      <parent link="${prefix}tool_1_link"/><child link="${prefix}rack_right"/>
-      <origin xyz="0 -${tool_1_rack_offset} -0.062" rpy="0 0 0"/><axis xyz="0 0 1"/>
-      <limit lower="0" upper="0.030" effort="8.4" velocity="0.1"/>
-      <mimic joint="${prefix}gripper_joint" multiplier="${tool_1_pitch_radius}" offset="0"/>
-    </joint>
-    <link name="${prefix}rack_left"><visual><geometry><box size="0.020 0.020 0.120"/></geometry><material name="petg_grey"/></visual><collision><geometry><box size="0.020 0.020 0.120"/></geometry></collision><inertial><mass value="0.03"/><inertia ixx="4e-5" ixy="0" ixz="0" iyy="4e-5" iyz="0" izz="1e-6"/></inertial></link>
-    <link name="${prefix}rack_right"><visual><geometry><box size="0.020 0.020 0.120"/></geometry><material name="petg_grey"/></visual><collision><geometry><box size="0.020 0.020 0.120"/></geometry></collision><inertial><mass value="0.03"/><inertia ixx="4e-5" ixy="0" ixz="0" iyy="4e-5" iyz="0" izz="1e-6"/></inertial></link>
 
-    <joint name="${prefix}tool_1_tcp_joint" type="fixed">
-      <parent link="${prefix}pinion_gear"/><child link="${prefix}tool_1_tcp"/>
-      <origin xyz="0 0 ${tool_1_tcp_offset}" rpy="0 0 0"/>
+    <link name="${prefix}rack_left">
+      <xacro:if value="${use_mesh}">
+        <!-- [시각화] parent/rpy가 새로 바뀌어 기존 mesh 보정값이 더 이상
+             맞지 않음 - 시각적으로 다시 맞춰야 함(우선 무회전으로 둠). -->
+        <visual>
+          <origin xyz="0 0 0" rpy="0 0 0"/>
+          <geometry><mesh filename="package://tool_manipulator_description/meshes/visual/rack_left.stl" scale="0.001 0.001 0.001"/></geometry>
+          <material name="petg_grey"/>
+        </visual>
+        <collision>
+          <origin xyz="0 0 0" rpy="0 0 0"/>
+          <geometry><mesh filename="package://tool_manipulator_description/meshes/collision/rack_left.stl" scale="0.001 0.001 0.001"/></geometry>
+        </collision>
+      </xacro:if>
+      <xacro:unless value="${use_mesh}">
+        <!-- [플레이스홀더] 구 로컬 X 방향(길이 0.120)이 이제 로컬 Z 방향이 된다. -->
+        <visual>
+          <origin xyz="0 0 0" rpy="0 0 0"/>
+          <geometry><box size="0.020 0.020 0.120"/></geometry>
+          <material name="petg_grey"/>
+        </visual>
+        <collision>
+          <origin xyz="0 0 0" rpy="0 0 0"/>
+          <geometry><box size="0.020 0.020 0.120"/></geometry>
+        </collision>
+      </xacro:unless>
+      <inertial>
+        <mass value="0.03"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <inertia ixx="4.0e-5" ixy="0" ixz="0" iyy="4.0e-5" iyz="0" izz="1.0e-6"/>
+      </inertial>
+    </link>
+
+    <!-- ========== wrist_link -> rack_right (prismatic, mimic, 반대방향) ==========-->
+    <joint name="${prefix}rack_right_joint" type="prismatic">
+      <parent link="${prefix}tool_1_geometry_link"/>
+      <child  link="${prefix}rack_right"/>
+      <!-- z: pinion_gear 원점(wrist_link 기준 z=${-off_wrist})에서 -0.062 오프셋.
+           rack_left_joint와 동일한 수정 - 2026-08-24. -->
+      <origin xyz="-0.016 -0.018 -0.062" rpy="0 0 0"/>
+      <axis xyz="0 0 1"/>
+      <limit lower="0" upper="0.030" effort="8.4" velocity="0.1"/>
+      <mimic joint="ee_joint" multiplier="${pinion_pitch_radius}" offset="0"/>
     </joint>
-    <link name="${prefix}tool_1_tcp"><visual><geometry><sphere radius="0.005"/></geometry><material name="tcp_red"/></visual><inertial><mass value="0.001"/><inertia ixx="1e-7" ixy="0" ixz="0" iyy="1e-7" iyz="0" izz="1e-7"/></inertial></link>
+
+    <link name="${prefix}rack_right">
+      <xacro:if value="${use_mesh}">
+        <!-- [시각화] parent/rpy가 새로 바뀌어 기존 mesh 보정값이 더 이상
+             맞지 않음 - 시각적으로 다시 맞춰야 함(우선 무회전으로 둠). -->
+        <visual>
+          <origin xyz="0 0 0" rpy="0 0 0"/>
+          <geometry><mesh filename="package://tool_manipulator_description/meshes/visual/rack_right.stl" scale="0.001 0.001 0.001"/></geometry>
+          <material name="petg_grey"/>
+        </visual>
+        <collision>
+          <origin xyz="0 0 0" rpy="0 0 0"/>
+          <geometry><mesh filename="package://tool_manipulator_description/meshes/collision/rack_right.stl" scale="0.001 0.001 0.001"/></geometry>
+        </collision>
+      </xacro:if>
+      <xacro:unless value="${use_mesh}">
+        <visual>
+          <origin xyz="0 0 0" rpy="0 0 0"/>
+          <geometry><box size="0.020 0.020 0.120"/></geometry>
+          <material name="petg_grey"/>
+        </visual>
+        <collision>
+          <origin xyz="0 0 0" rpy="0 0 0"/>
+          <geometry><box size="0.020 0.020 0.120"/></geometry>
+        </collision>
+      </xacro:unless>
+      <inertial>
+        <mass value="0.03"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <inertia ixx="4.0e-5" ixy="0" ixz="0" iyy="4.0e-5" iyz="0" izz="1.0e-6"/>
+      </inertial>
+    </link>
   </xacro:macro>
 </robot>
