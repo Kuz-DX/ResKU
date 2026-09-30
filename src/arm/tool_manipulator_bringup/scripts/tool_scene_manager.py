@@ -21,7 +21,8 @@ from tf2_ros import TransformBroadcaster
 
 class ToolSceneManager(Node):
     """Scene changes follow confirmed physical state; restart begins UNKNOWN."""
-    UNKNOWN = -1
+    NONE = -1
+    UNKNOWN = -2
 
     def __init__(self) -> None:
         super().__init__('tool_scene_manager')
@@ -35,7 +36,7 @@ class ToolSceneManager(Node):
             self.declare_parameter(name, default)
         self.tools = self._load_tools(self.get_parameter('tools_config_file').value)
         self.fixtures = self._load_fixtures(self.get_parameter('tools_config_file').value)
-        self.pending_tool_id = 0
+        self.pending_tool_id = self.NONE
         # A process restart cannot infer whether a tool is mechanically retained.
         self.active_tool_id = self.UNKNOWN
         self.physical_engagement_started = False
@@ -80,8 +81,8 @@ class ToolSceneManager(Node):
         tool_id = int(msg.data)
         if self.active_tool_id == self.UNKNOWN:
             self._publish('rejected:unknown_tool_state_requires_recovery')
-        elif tool_id == 0:
-            self.pending_tool_id = 0
+        elif tool_id == self.NONE:
+            self.pending_tool_id = self.NONE
             self._publish('selection_cleared')
         elif tool_id in self.tools:
             self.pending_tool_id = tool_id
@@ -118,12 +119,12 @@ class ToolSceneManager(Node):
         if not self.apply_client.service_is_ready():
             response.success, response.message = False, 'apply_planning_scene unavailable'
             return response
-        self._apply(self._clear_all_tool_scene(), 0, 'recover_empty')
+        self._apply(self._clear_all_tool_scene(), self.NONE, 'recover_empty')
         response.success, response.message = True, 'operator-confirmed empty recovery requested'
         return response
 
     def _mark_unknown(self, reason: str) -> None:
-        self.pending_tool_id = 0
+        self.pending_tool_id = self.NONE
         self.active_tool_id = self.UNKNOWN
         self.physical_engagement_started = False
         self._publish(reason)
@@ -133,10 +134,10 @@ class ToolSceneManager(Node):
         if self.active_tool_id == self.UNKNOWN:
             self._publish('rejected:unknown_tool_state_requires_recovery')
             return False, 'unknown attachment state'
-        if not tool_id:
+        if tool_id == self.NONE:
             self._publish('rejected:no_pending_tool')
             return False, 'no pending tool'
-        if self.active_tool_id != 0:
+        if self.active_tool_id != self.NONE:
             self._publish(f'rejected:tool_{self.active_tool_id}_still_attached')
             return False, 'another tool is active'
         if not spec.get('enabled', False):
@@ -238,11 +239,11 @@ class ToolSceneManager(Node):
                 self._publish(f'{operation}:failed:{tool_id}')
             return
         if operation == 'attach':
-            self.active_tool_id, self.pending_tool_id = tool_id, 0
+            self.active_tool_id, self.pending_tool_id = tool_id, self.NONE
             self.physical_engagement_started = False
             self._publish(f'attached:{tool_id}:after_retreat')
         elif operation == 'recover_empty':
-            self.active_tool_id, self.pending_tool_id = 0, 0
+            self.active_tool_id, self.pending_tool_id = self.NONE, self.NONE
             self._publish('recovered:operator_confirmed_empty')
         elif operation == 'fixture_register':
             self._publish('fixtures_registered')
@@ -254,9 +255,9 @@ class ToolSceneManager(Node):
             self.tcp_pub.publish(String(data=json.dumps({'tool_id': self.UNKNOWN, 'state': 'UNKNOWN'})))
             self.payload_pub.publish(String(data=json.dumps({'tool_id': self.UNKNOWN, 'state': 'UNKNOWN'})))
             return
-        if self.active_tool_id == 0:
-            self.tcp_pub.publish(String(data=json.dumps({'tool_id': 0, 'frame': 'ee_output_link'})))
-            self.payload_pub.publish(String(data=json.dumps({'tool_id': 0, 'mass_kg': 0.0})))
+        if self.active_tool_id == self.NONE:
+            self.tcp_pub.publish(String(data=json.dumps({'tool_id': self.NONE, 'frame': 'ee_output_link'})))
+            self.payload_pub.publish(String(data=json.dumps({'tool_id': self.NONE, 'mass_kg': 0.0})))
             return
         spec = self.tools[self.active_tool_id]
         tcp = dict(spec.get('tcp', {}))
@@ -265,7 +266,7 @@ class ToolSceneManager(Node):
         self._publish_active_tcp_tf()
 
     def _publish_active_tcp_tf(self) -> None:
-        if self.active_tool_id <= 0:
+        if self.active_tool_id < 0:
             return
         spec = self.tools.get(self.active_tool_id, {})
         tcp = dict(spec.get('tcp', {}))

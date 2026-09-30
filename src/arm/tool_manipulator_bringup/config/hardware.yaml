@@ -31,9 +31,9 @@ joints:
     id: 1
     operating_mode: 4
     raw_increases_ccw: true
-    zero_raw: 0
-    soft_limit_raw: [-2276, 2276]
-    soft_limit_rad: [-3.490658503989, 3.490658503989]
+    zero_raw: -20
+    soft_limit_raw: [-2304, 2336]
+    soft_limit_rad: [-3.503612119531, 3.614058736259]
     velocity_limit_rad_s: 4.004484
     current_limit_ma: 5506.43
     current_limit_raw: null
@@ -45,9 +45,9 @@ joints:
     model: X8
     bus: rmd_can
     id: 4
-    sign: null
-    q_offset_rad: null
-    soft_limit_rad: [null, null]
+    sign: -1
+    q_offset_rad: 1.588249619315
+    soft_limit_rad: [-1.459444233251, 1.534842544204]
     velocity_limit_rad_s: null
     current_limit_a: null
     current_release_threshold_a: null
@@ -59,9 +59,9 @@ joints:
     model: X6
     bus: rmd_can
     id: 5
-    sign: null
-    q_offset_rad: null
-    soft_limit_rad: [null, null]
+    sign: -1
+    q_offset_rad: 0.019373154697
+    soft_limit_rad: [-1.475675812748, 1.573239770294]
     velocity_limit_rad_s: null
     current_limit_a: null
     current_release_threshold_a: null
@@ -73,9 +73,9 @@ joints:
     model: X4
     bus: rmd_can
     id: 6
-    sign: null
-    q_offset_rad: null
-    soft_limit_rad: [null, null]
+    sign: 1
+    q_offset_rad: 4.158246942876
+    soft_limit_rad: [-1.643751229155, 1.666265854332]
     velocity_limit_rad_s: null
     current_limit_a: null
     current_release_threshold_a: null
@@ -90,9 +90,9 @@ joints:
     id: 2
     operating_mode: 4
     raw_increases_ccw: true
-    zero_raw: 0
-    soft_limit_raw: [-583, 370]
-    soft_limit_rad: [-0.894310799337, 0.567572891518]
+    zero_raw: -6
+    soft_limit_raw: [-571, 443]
+    soft_limit_rad: [-0.866699145155, 0.688757373761]
     velocity_limit_rad_s: 5.035177
     current_limit_ma: 6877.92
     current_limit_raw: null
@@ -106,10 +106,10 @@ joints:
     transport_channel: ttl
     id: 3
     operating_mode: 4
-    raw_increases_ccw: true
-    zero_raw: 2048
-    soft_limit_raw: [0, 4096]
-    soft_limit_rad: [-3.141592653590, 3.141592653590]
+    raw_increases_ccw: false
+    zero_raw: -4000
+    soft_limit_raw: [-6058, -1970]
+    soft_limit_rad: [-3.113980999408, 3.156932461469]
     velocity_limit_rad_s: 5.035177
     current_limit_ma: 6877.92
     current_limit_raw: null
@@ -124,7 +124,7 @@ joints:
     id: 4
     operating_mode: 4
     raw_increases_ccw: true
-    zero_raw: 1293
+    zero_raw: 1992
     soft_limit_raw: [459, 3843]
     soft_limit_rad: [-1.279339977097, 3.911651009108]
     velocity_limit_rad_s: 5.035177

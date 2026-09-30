@@ -13,13 +13,77 @@
         <chain base_link="base_actuator" tip_link="tcp_link"/>
     </group>
     <!--GROUP STATES: Purpose: Define a named state for a particular group, in terms of joint values. This is useful to define states like 'folded arms'-->
+    <group_state name="stand" group="arm">
+        <joint name="base_joint" value="0.0"/>
+        <joint name="elbow_joint" value="0.0"/>
+        <joint name="shoulder_joint" value="0.0"/>
+        <joint name="wrist_pitch_joint" value="0.0"/>
+        <joint name="wrist_roll_joint" value="0.0"/>
+        <joint name="wrist_yaw_joint" value="0.0"/>
+    </group_state>
     <group_state name="home" group="arm">
-        <joint name="base_joint" value="0"/>
-        <joint name="elbow_joint" value="-1.1976"/>
-        <joint name="shoulder_joint" value="-1.1629"/>
-        <joint name="wrist_pitch_joint" value="1.51"/>
-        <joint name="wrist_roll_joint" value="0"/>
-        <joint name="wrist_yaw_joint" value="0"/>
+        <joint name="base_joint" value="0.000000000000"/>
+        <joint name="elbow_joint" value="1.522974340197"/>
+        <joint name="shoulder_joint" value="1.526290430869"/>
+        <joint name="wrist_pitch_joint" value="-1.643751229155"/>
+        <joint name="wrist_roll_joint" value="0.055223308364"/>
+        <joint name="wrist_yaw_joint" value="0.010737865515"/>
+    </group_state>
+    <group_state name="tagid1" group="arm">
+        <joint name="base_joint" value="2.248815835040"/>
+        <joint name="elbow_joint" value="1.573239770294"/>
+        <joint name="shoulder_joint" value="0.431794422037"/>
+        <joint name="wrist_pitch_joint" value="-1.432740713149"/>
+        <joint name="wrist_roll_joint" value="0.667281642730"/>
+        <joint name="wrist_yaw_joint" value="-0.984815665823"/>
+    </group_state>
+    <group_state name="tagid0_cw" group="arm">
+        <joint name="base_joint" value="-3.136990711226"/>
+        <joint name="elbow_joint" value="1.359436936925"/>
+        <joint name="shoulder_joint" value="0.061959240806"/>
+        <joint name="wrist_pitch_joint" value="-0.811578102177"/>
+        <joint name="wrist_roll_joint" value="-0.085902924122"/>
+        <joint name="wrist_yaw_joint" value="-1.710388578492"/>
+    </group_state>
+    <group_state name="tagid0_ccw" group="arm">
+        <joint name="base_joint" value="3.077165460499"/>
+        <joint name="elbow_joint" value="1.352106588973"/>
+        <joint name="shoulder_joint" value="0.061959240806"/>
+        <joint name="wrist_pitch_joint" value="-0.800931576287"/>
+        <joint name="wrist_roll_joint" value="0.036815538909"/>
+        <joint name="wrist_yaw_joint" value="-1.665903135644"/>
+    </group_state>
+    <group_state name="tagid0_unlock" group="arm">
+        <joint name="base_joint" value="-3.057224"/>
+        <joint name="elbow_joint" value="1.362579"/>
+        <joint name="shoulder_joint" value="-0.065450"/>
+        <joint name="wrist_pitch_joint" value="0.803375"/>
+        <joint name="wrist_roll_joint" value="0.044485"/>
+        <joint name="wrist_yaw_joint" value="0.050621"/>
+    </group_state>
+    <group_state name="tagid0_lock_step1" group="arm">
+        <joint name="base_joint" value="-3.057224"/>
+        <joint name="elbow_joint" value="1.362928"/>
+        <joint name="shoulder_joint" value="-0.065450"/>
+        <joint name="wrist_pitch_joint" value="0.803026"/>
+        <joint name="wrist_roll_joint" value="0.044485"/>
+        <joint name="wrist_yaw_joint" value="-0.420311"/>
+    </group_state>
+    <group_state name="tagid0_lock_step2" group="arm">
+        <joint name="base_joint" value="-3.057224"/>
+        <joint name="elbow_joint" value="1.363277"/>
+        <joint name="shoulder_joint" value="-0.065450"/>
+        <joint name="wrist_pitch_joint" value="0.802328"/>
+        <joint name="wrist_roll_joint" value="0.044485"/>
+        <joint name="wrist_yaw_joint" value="-0.788466"/>
+    </group_state>
+    <group_state name="tagid0_lock" group="arm">
+        <joint name="base_joint" value="-3.055690"/>
+        <joint name="elbow_joint" value="1.363975"/>
+        <joint name="shoulder_joint" value="-0.065450"/>
+        <joint name="wrist_pitch_joint" value="0.802503"/>
+        <joint name="wrist_roll_joint" value="0.044485"/>
+        <joint name="wrist_yaw_joint" value="-1.491029"/>
     </group_state>
     <group_state name="dock_pre_cw" group="arm">
         <joint name="base_joint" value="-3.1415"/>

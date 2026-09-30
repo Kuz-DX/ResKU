@@ -3,7 +3,7 @@
 # real_tool_change.launch.py will refuse to start until the selected IDs below
 # are enabled and every required value is valid.
 real_docking:
-  enabled_tool_ids: []  # set e.g. [1] only after that tool is completely measured
+  enabled_tool_ids: []  # set e.g. [0] only after that tool is completely measured
   physical_detach_supported: false  # no release motion implementation exists yet
 
 # Fixed rack/fixture world collision. Each selected tool's dock_fixture must
@@ -11,10 +11,13 @@ real_docking:
 fixtures: {}
 
 tools:
-  1:
+  # Logical IDs exposed to autonomy/UI are 0/1/2. model_id preserves the
+  # existing CAD/TF numbering (tool_1/tool_2/tool_3).
+  0:
     enabled: false
     name: gripper_pinion_tool
-    tag_id: null                 # AprilTag integer printed on this rack slot
+    model_id: 1
+    tag_id: 0                    # confirmed rack slot AprilTag ID
     coarse_joint_goal: [null, null, null, null, null, null]  # rad, joint_names order
     tcp:
       frame: tool_1_tcp
@@ -33,6 +36,13 @@ tools:
     lock:
       joint: wrist_yaw_joint
       attach_yaw_delta_rad: null  # measured signed rad from current yaw position
+      # positions_rad order: base, shoulder, elbow, wrist_pitch,
+      # wrist_roll, wrist_yaw. ee_observed_rad is telemetry only.
+      joint_path:
+        - {name: unlock, positions_rad: [-3.057224, -0.065450, 1.362579, 0.803375, 0.044485, 0.050621], ee_observed_rad: 0.032214}
+        - {name: lock_step1, positions_rad: [-3.057224, -0.065450, 1.362928, 0.803026, 0.044485, -0.420311], ee_observed_rad: 0.038350}
+        - {name: lock_step2, positions_rad: [-3.057224, -0.065450, 1.363277, 0.802328, 0.044485, -0.788466], ee_observed_rad: 0.038350}
+        - {name: lock, positions_rad: [-3.055690, -0.065450, 1.363975, 0.802503, 0.044485, -1.491029], ee_observed_rad: 0.036816}
     docking:
       descent_frame: null         # existing TF frame; usually measured fixture/world frame
       descent_direction: [null, null, null]  # unitless vector in descent_frame
@@ -45,10 +55,11 @@ tools:
       retreat_speed_mps: null
       retreat_timeout_sec: null
 
-  2:
+  1:
     enabled: false
     name: long_drillbit
-    tag_id: null
+    model_id: 2
+    tag_id: 1
     coarse_joint_goal: [null, null, null, null, null, null]
     mass_kg: 0.050
     tcp:
@@ -79,10 +90,11 @@ tools:
       retreat_speed_mps: null
       retreat_timeout_sec: null
 
-  3:
+  2:
     enabled: false
     name: long_phillipsbit
-    tag_id: null
+    model_id: 3
+    tag_id: 2
     coarse_joint_goal: [null, null, null, null, null, null]
     mass_kg: 0.050
     tcp:

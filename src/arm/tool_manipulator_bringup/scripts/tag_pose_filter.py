@@ -17,6 +17,7 @@ from std_msgs.msg import Int32, String
 
 class TagPoseFilter(Node):
     """The vision package remains unchanged; this node owns docking admission."""
+    NONE = -1
     def __init__(self) -> None:
         super().__init__('tag_pose_filter')
         for name, default in (
@@ -37,7 +38,7 @@ class TagPoseFilter(Node):
         ):
             self.declare_parameter(name, default)
         self.tools = self._load_tools(self.get_parameter('tools_config_file').value)
-        self.requested_tool_id = 0
+        self.requested_tool_id = self.NONE
         self.latest_depth: Image | None = None
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.pose_pub = self.create_publisher(String, self.get_parameter('valid_pose_topic').value, 10)
@@ -59,7 +60,7 @@ class TagPoseFilter(Node):
 
     def _tool_cb(self, msg: Int32) -> None:
         self.requested_tool_id = int(msg.data)
-        self._status('idle:no_tool_selected' if not self.requested_tool_id else f'awaiting_tag:tool_{self.requested_tool_id}')
+        self._status('idle:no_tool_selected' if self.requested_tool_id == self.NONE else f'awaiting_tag:tool_{self.requested_tool_id}')
 
     def _depth_cb(self, msg: Image) -> None:
         # Store only the newest aligned-depth frame. The tag callback verifies its
@@ -116,7 +117,7 @@ class TagPoseFilter(Node):
         return samples[len(samples) // 2], ''
 
     def _source_cb(self, msg: String) -> None:
-        if self.requested_tool_id <= 0:
+        if self.requested_tool_id < 0:
             return
         spec = self.tools.get(self.requested_tool_id)
         if not spec:

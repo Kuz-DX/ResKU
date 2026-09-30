@@ -44,7 +44,7 @@
       <state_interface name="position"/><state_interface name="velocity"/><state_interface name="effort"/>
       <!-- Model coordinate is raw_tick*2pi/4096-pi. -->
       <param name="position_zero_offset">${spec['zero_raw'] * 2.0 * pi / 4096.0 - pi}</param>
-      <param name="position_direction">1.0</param>
+      <param name="position_direction">${1.0 if spec['raw_increases_ccw'] else -1.0}</param>
       <param name="position_wraparound">${wrap}</param>
     </joint>
   </xacro:macro>
@@ -64,7 +64,7 @@
   </xacro:macro>
 
   <xacro:macro name="tool_manipulator_ros2_control" params="name initial_positions_file use_mock_hardware:=true hardware_config_file:=''">
-    <xacro:property name="initial_positions" value="${load_yaml(initial_positions_file)['initial_positions']}"/>
+    <xacro:property name="initial_positions" value="${xacro.load_yaml(initial_positions_file)['initial_positions']}"/>
     <xacro:if value="${use_mock_hardware}">
       <ros2_control name="${name}" type="system"><hardware><plugin>mock_components/GenericSystem</plugin></hardware>
         <xacro:fake_joint name="base_joint" initial="${initial_positions['base_joint']}"/>
@@ -77,7 +77,7 @@
       </ros2_control>
     </xacro:if>
     <xacro:unless value="${use_mock_hardware}">
-      <xacro:property name="hw" value="${load_yaml(hardware_config_file)}"/>
+      <xacro:property name="hw" value="${xacro.load_yaml(hardware_config_file)}"/>
       <xacro:property name="j" value="${hw['joints']}"/>
       <!-- One U2D2 serial device owns the confirmed TTL + RS-485 chains. -->
       <ros2_control name="dynamixel_u2d2" type="system">
@@ -96,9 +96,9 @@
           <param name="transmission_to_joint_matrix">1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1</param>
           <param name="joint_to_transmission_matrix">1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1</param>
         </hardware>
-        <xacro:dxl_joint name="base_joint" spec="${j['base_joint']}" wrap="true"/>
+        <xacro:dxl_joint name="base_joint" spec="${j['base_joint']}" wrap="false"/>
         <xacro:dxl_joint name="wrist_roll_joint" spec="${j['wrist_roll_joint']}" wrap="false"/>
-        <xacro:dxl_joint name="wrist_yaw_joint" spec="${j['wrist_yaw_joint']}" wrap="true"/>
+        <xacro:dxl_joint name="wrist_yaw_joint" spec="${j['wrist_yaw_joint']}" wrap="false"/>
         <xacro:dxl_joint name="ee_joint" spec="${j['ee_joint']}" wrap="false"/>
         <xacro:dxl_gpio name="base_motor" spec="${j['base_joint']}"/>
         <xacro:dxl_gpio name="wrist_roll_motor" spec="${j['wrist_roll_joint']}"/>

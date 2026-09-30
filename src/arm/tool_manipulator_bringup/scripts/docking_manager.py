@@ -33,6 +33,7 @@ class State(str, Enum):
 class DockingManager(Node):
     """Single owner of external docking requests; motion executor stays separate."""
     ATTACH, DETACH = 0, 1
+    NONE, UNKNOWN = -1, -2
 
     def __init__(self) -> None:
         super().__init__('docking_manager')
@@ -49,7 +50,7 @@ class DockingManager(Node):
         self.lock = threading.Lock()
         self.changed = threading.Event()
         self.state, self.reason = State.UNKNOWN, 'restart_requires_operator_recovery'
-        self.active_tool_id, self.requested_tool_id = -1, 0
+        self.active_tool_id, self.requested_tool_id = self.UNKNOWN, self.NONE
         self.active_goal = None
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.status_pub = self.create_publisher(String, '/docking_status', latched)
@@ -76,7 +77,7 @@ class DockingManager(Node):
 
     def _goal(self, goal) -> GoalResponse:
         with self.lock:
-            valid = (goal.mode == self.ATTACH and goal.tool_id in self.enabled_tools and self.active_tool_id == 0)
+            valid = (goal.mode == self.ATTACH and goal.tool_id in self.enabled_tools and self.active_tool_id == self.NONE)
             if self.active_goal is not None or not valid:
                 return GoalResponse.REJECT
             return GoalResponse.ACCEPT
@@ -123,16 +124,16 @@ class DockingManager(Node):
         result.final_state, result.reason = self.state.value, reason
         with self.lock:
             self.active_goal = None
-            self.requested_tool_id = 0
+            self.requested_tool_id = self.NONE
         return result
 
     def _active_cb(self, msg: Int32) -> None:
         self.active_tool_id = int(msg.data)
-        if self.active_tool_id == -1:
+        if self.active_tool_id == self.UNKNOWN:
             self._set(State.UNKNOWN, 'tool_state_unknown_recovery_required')
-        elif self.active_tool_id > 0 and self.requested_tool_id == self.active_tool_id:
+        elif self.active_tool_id >= 0 and self.requested_tool_id == self.active_tool_id:
             self._set(State.ATTACHED, 'scene_attached_after_physical_lock')
-        elif self.active_tool_id == 0 and self.state == State.UNKNOWN:
+        elif self.active_tool_id == self.NONE and self.state == State.UNKNOWN:
             self._set(State.IDLE, 'operator_confirmed_empty')
 
     def _motion_cb(self, msg: String) -> None:
@@ -144,7 +145,7 @@ class DockingManager(Node):
     def _scene_cb(self, msg: String) -> None:
         if msg.data.startswith('unknown:'):
             self._set(State.UNKNOWN, msg.data)
-        elif msg.data.startswith('recovered:') and self.active_tool_id == 0:
+        elif msg.data.startswith('recovered:') and self.active_tool_id == self.NONE:
             self._set(State.IDLE, msg.data)
         elif msg.data.startswith(('attach_failed:', 'detach_failed:', 'rejected:')):
             self._set(State.FAILED, msg.data)

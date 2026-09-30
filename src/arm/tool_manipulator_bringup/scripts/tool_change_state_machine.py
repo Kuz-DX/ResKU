@@ -30,6 +30,7 @@ class ChangeState(str, Enum):
 
 class ToolChangeStateMachine(Node):
     """Coordinate UI intent without inventing a physical release completion."""
+    NONE = -1
 
     def __init__(self):
         super().__init__('tool_change_state_machine')
@@ -56,7 +57,7 @@ class ToolChangeStateMachine(Node):
         self.create_subscription(String, self.get_parameter('docking_status_topic').value, self._docking_cb, 10)
         self.create_subscription(String, self.get_parameter('attachment_status_topic').value, self._attachment_cb, 10)
         self.state = ChangeState.IDLE
-        self.active_tool_id = 0
+        self.active_tool_id = self.NONE
         self.requested_tool_id: int | None = None
         self._publish('ready')
 
@@ -77,9 +78,9 @@ class ToolChangeStateMachine(Node):
             self._reject('unknown_command')
 
     def _request_attach(self, tool_id: int) -> None:
-        if tool_id <= 0:
-            self._reject('tool_id_must_be_positive')
-        elif self.active_tool_id:
+        if tool_id < 0:
+            self._reject('tool_id_must_be_non_negative')
+        elif self.active_tool_id != self.NONE:
             self._reject(f'tool_{self.active_tool_id}_must_be_released_first')
         elif self.state not in (ChangeState.IDLE, ChangeState.FAILED, ChangeState.CANCELLED_HOLD):
             self._reject('change_already_in_progress')
@@ -91,7 +92,7 @@ class ToolChangeStateMachine(Node):
             self.selected_pub.publish(Int32(data=tool_id))
 
     def _request_release(self) -> None:
-        if not self.active_tool_id:
+        if self.active_tool_id == self.NONE:
             self._reject('no_active_tool')
         elif self.state not in (ChangeState.ATTACHED, ChangeState.CANCELLED_HOLD, ChangeState.FAILED):
             self._reject('change_already_in_progress')
@@ -107,16 +108,16 @@ class ToolChangeStateMachine(Node):
         # immediately; an in-flight FollowJointTrajectory is not falsely claimed
         # cancelled until its controller exposes a real cancel result.
         self.cancel_pub.publish(Bool(data=True))
-        self.selected_pub.publish(Int32(data=0))
+        self.selected_pub.publish(Int32(data=self.NONE))
         self.requested_tool_id = None
         self._set(ChangeState.CANCELLED_HOLD, 'hold_requested')
 
     def _active_cb(self, msg: Int32) -> None:
         previous = self.active_tool_id
         self.active_tool_id = int(msg.data)
-        if self.active_tool_id and self.state in (ChangeState.ATTACH_REQUESTED, ChangeState.DOCKING):
+        if self.active_tool_id != self.NONE and self.state in (ChangeState.ATTACH_REQUESTED, ChangeState.DOCKING):
             self._set(ChangeState.ATTACHED, f'tool_{self.active_tool_id}_collision_attached')
-        elif previous and not self.active_tool_id and self.state == ChangeState.WAITING_FOR_RELEASE_CONFIRMATION:
+        elif previous != self.NONE and self.active_tool_id == self.NONE and self.state == ChangeState.WAITING_FOR_RELEASE_CONFIRMATION:
             self.requested_tool_id = None
             self._set(ChangeState.IDLE, 'physical_release_confirmed_collision_detached')
 

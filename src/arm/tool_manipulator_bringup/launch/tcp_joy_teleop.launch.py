@@ -24,7 +24,7 @@ def generate_launch_description():
     from ament_index_python.packages import get_package_share_directory
     servo_path = get_package_share_directory("tool_manipulator_bringup") + "/config/servo.yaml"
     with open(servo_path, encoding="utf-8") as stream:
-        servo_config = {"moveit_servo": yaml.safe_load(stream)["/**"]["ros__parameters"]}
+        servo_config = {"moveit_servo": yaml.safe_load(stream) or {}}
 
     state_broadcaster = Node(
         package="controller_manager", executable="spawner",

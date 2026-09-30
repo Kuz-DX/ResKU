@@ -40,6 +40,7 @@ class DockState(Enum):
 
 class AprilTagToolDocking(Node):
     """Plan once in joint space, then close the last few cm with MoveIt Servo."""
+    NONE = -1
 
     def __init__(self):
         super().__init__('apriltag_tool_docking')
@@ -54,7 +55,7 @@ class AprilTagToolDocking(Node):
         self.joint_positions = {}
         # Latched feedback from tool_scene_manager.  No retreat with a
         # newly attached physical tool is allowed until its collision object is live.
-        self.active_tool_id = 0
+        self.active_tool_id = self.NONE
 
         self.moveit2 = MoveIt2(
             node=self,
@@ -213,7 +214,7 @@ class AprilTagToolDocking(Node):
         if self.state != DockState.IDLE:
             self.get_logger().warning('Docking request ignored: controller is busy, docked, or awaiting operator recovery')
             return
-        if self.active_tool_id != 0:
+        if self.active_tool_id != self.NONE:
             self._publish_status(f'failed:active_tool_{self.active_tool_id}_requires_release')
             return
         if tag_id not in self.goals:
@@ -426,15 +427,33 @@ class AprilTagToolDocking(Node):
             self._fail('lock_joint_state_unavailable')
             return
         lock_spec = self.tool_specs.get(self.target_tag_id, {}).get('lock', {})
+        joint_path = lock_spec.get('joint_path') if isinstance(lock_spec, dict) else None
         yaw_delta = lock_spec.get('attach_yaw_delta_rad') if isinstance(lock_spec, dict) else None
-        if not isinstance(yaw_delta, (int, float)) or not math.isfinite(yaw_delta):
+        if joint_path:
+            goals = [(str(step.get('name', index)), step.get('positions_rad'))
+                     for index, step in enumerate(joint_path)]
+            if any(not isinstance(goal, list) or len(goal) != len(joints) or
+                   any(not isinstance(value, (int, float)) or not math.isfinite(value)
+                       for value in goal) for _, goal in goals):
+                self._terminal_failure('lock_joint_path_invalid')
+                return
+        elif isinstance(yaw_delta, (int, float)) and math.isfinite(yaw_delta):
+            goal = [self.joint_positions[name] for name in joints]
+            goal[joints.index(lock_joint)] += float(yaw_delta)
+            goals = [('yaw_delta', goal)]
+        else:
             self._terminal_failure('attach_yaw_delta_unconfigured')
             return
-        goal = [self.joint_positions[name] for name in joints]
-        goal[joints.index(lock_joint)] += float(yaw_delta)
         try:
-            self.moveit2.move_to_configuration(goal)
-            success = self.moveit2.wait_until_executed() is not False
+            success = True
+            for step_name, goal in goals:
+                if self.state != DockState.LOCK_ROTATING:
+                    return
+                self._publish_status(f'lock_rotating:{step_name}')
+                self.moveit2.move_to_configuration(goal)
+                if self.moveit2.wait_until_executed() is False:
+                    success = False
+                    break
         except Exception as exc:
             self.get_logger().error(f'Lock rotation failed: {exc}')
             success = False
@@ -534,7 +553,7 @@ class AprilTagToolDocking(Node):
         if self.state != DockState.CANCELLED_HOLD:
             response.success, response.message = False, 'executor is not awaiting operator reset'
             return response
-        if self.active_tool_id != 0:
+        if self.active_tool_id != self.NONE:
             response.success, response.message = False, 'active tool must be confirmed empty before reset'
             return response
         self.target_tag_id = None

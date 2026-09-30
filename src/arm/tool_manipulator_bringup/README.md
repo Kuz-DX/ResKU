@@ -33,6 +33,18 @@ source ~/ResKU/install/setup.bash
 ros2 run tool_manipulator_bringup capture_arm_pose.py
 ```
 
+영점과 소프트 리밋을 함께 기록할 때는 보정된 rad와 모터 raw 값을 동시에
+출력하는 다음 노드를 사용한다.
+
+```bash
+source /opt/ros/humble/setup.bash
+source ~/ResKU/install/setup.bash
+ros2 run tool_manipulator_bringup capture_arm_raw.py
+```
+
+RMD 축은 `raw_deg`와 `raw_encoder`, Dynamixel 축은 `raw_pulse`를 출력한다.
+영점 자세와 각 축의 안전한 최소·최대 자세에서 라벨을 입력해 캡처한다.
+
 `label>` 프롬프트에서 아무것도 입력하지 않고 Enter를 누르면 다음 순서로 최신
 `/joint_states` 값이 rad 단위로 출력된다. 필요하면 `shoulder_min`처럼 라벨을
 입력하고 Enter를 눌러 측정 지점을 구분한다.
@@ -59,21 +71,69 @@ ros2 run tool_manipulator_bringup capture_arm_pose.py
 
 `move_to_named_pose.py`는 MoveIt SRDF의 `arm` group state를 읽고
 `/arm_controller/follow_joint_trajectory` action으로 한 개의 목표 trajectory를 보낸다.
-현재 SRDF pose는 `home`, `dock_pre_cw`, `dock_pre_ccw`, `dock_wait1`, `dock_wait2`,
-`dock_wait3`이다.
+명령 형식은 다음과 같다.
+
+```bash
+ros2 run tool_manipulator_bringup move_to_named_pose.py <pose> [options]
+```
+
+현재 기본 SRDF pose는 `stand`, `home`, `tagid0_cw`, `tagid0_ccw`, `tagid1`, `dock_pre_cw`, `dock_pre_ccw`,
+`dock_wait1`, `dock_wait2`, `dock_wait3`이다. 빌드 후 다음 순서로 실행한다.
+
+```bash
+cd ~/ResKU
+source /opt/ros/humble/setup.bash
+colcon build --packages-select tool_manipulator_moveit_config tool_manipulator_bringup
+source ~/ResKU/install/setup.bash
+```
+
+터미널 A에서 실기 controller를 먼저 실행한다.
 
 ```bash
 source /opt/ros/humble/setup.bash
 source ~/ResKU/install/setup.bash
 ros2 launch tool_manipulator_bringup real_control.launch.py
-
-ros2 run tool_manipulator_bringup move_to_named_pose.py --list
-ros2 run tool_manipulator_bringup move_to_named_pose.py home --duration 5.0
-ros2 run tool_manipulator_bringup move_to_named_pose.py dock_pre_cw --dry-run
 ```
 
-목표 관절값과 실행 결과를 콘솔에 표시한다. `--dry-run`은 action을 보내지 않아
-목표값 검토에 쓸 수 있다. 이 실행기는 arm 6축용이며 `ee_joint`(그리퍼)는 포함하지 않는다.
+터미널 B에서 pose를 확인한 뒤 이동 명령을 보낸다.
 
-실기 제어가 기동되어 있고 리밋·전류·통신 preflight를 통과한 경우에만 사용한다.
-`rmd_joint_state_bridge` 또는 수동 캡처와 동시에 실행하지 않는다.
+```bash
+source /opt/ros/humble/setup.bash
+source ~/ResKU/install/setup.bash
+
+# 사용 가능한 pose 이름 확인
+ros2 run tool_manipulator_bringup move_to_named_pose.py --list
+
+# 목표값만 출력하고 모터 명령은 보내지 않음
+ros2 run tool_manipulator_bringup move_to_named_pose.py home --dry-run
+
+# 8초 동안 home pose로 이동하고 action server를 최대 10초 기다림
+ros2 run tool_manipulator_bringup move_to_named_pose.py home \
+  --duration 8.0 \
+  --wait-for-server 10.0
+```
+
+지원 인자는 다음과 같다.
+
+| 인자 | 기본값 | 설명 |
+| --- | --- | --- |
+| `pose` | 없음 | 이동할 SRDF pose 이름. `--list`를 사용할 때는 생략 가능 |
+| `--list` | 꺼짐 | 사용 가능한 `arm` pose 목록을 출력하고 종료 |
+| `--duration <초>` | `5.0` | 현재 자세에서 목표 자세까지 이동할 trajectory 시간. 0보다 커야 함 |
+| `--wait-for-server <초>` | `5.0` | `arm_controller` action server를 기다리는 시간. 0 이상이어야 함 |
+| `--dry-run` | 꺼짐 | 관절 목표값만 출력하고 action goal을 보내지 않음 |
+| `--srdf <경로>` | 설치된 기본 SRDF | 다른 SRDF 파일에서 named pose를 읽을 때 사용 |
+
+다른 SRDF를 시험할 때도 먼저 `--dry-run`으로 목표값을 확인한다.
+
+```bash
+ros2 run tool_manipulator_bringup move_to_named_pose.py home \
+  --srdf /absolute/path/to/tool_manipulator.srdf \
+  --dry-run
+```
+
+이 실행기는 `base_joint`부터 `wrist_yaw_joint`까지 arm 6축만 제어하며
+`ee_joint`(그리퍼)는 포함하지 않는다. 실행 전에 출력되는 6개 목표값과 이동 시간을
+확인한다. 실기 제어가 기동되어 있고 리밋·전류·통신 preflight를 통과한 경우에만
+실제 이동 명령을 사용한다. `rmd_joint_state_bridge` 또는 수동 캡처 노드와 동시에
+실행하지 않는다.

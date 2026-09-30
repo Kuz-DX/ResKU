@@ -78,12 +78,12 @@ public:
     // 바로 띄우면(launch가 오버라이드 안 됨) elbow/wrist 부호가 실제와
     // 반대로 읽혀서 capture_arm_pose.py 캡처값이 좌표계가 뒤집힌 채로
     // 나오는 원인이었다.
-    declare_parameter<double>("shoulder_sign", 1.0);
+    declare_parameter<double>("shoulder_sign", -1.0);
     declare_parameter<double>("elbow_sign", -1.0);
-    declare_parameter<double>("wrist_sign", -1.0);
-    declare_parameter<double>("shoulder_q_offset", 0.0);
-    declare_parameter<double>("elbow_q_offset", 0.0);
-    declare_parameter<double>("wrist_q_offset", 0.0);
+    declare_parameter<double>("wrist_sign", 1.0);
+    declare_parameter<double>("shoulder_q_offset", 1.588249619315);
+    declare_parameter<double>("elbow_q_offset", 0.019373154697);
+    declare_parameter<double>("wrist_q_offset", 4.158246942876);
 
     declare_parameter<std::string>("dxl_port_name", "/dev/ttyUSB0");
     declare_parameter<int>("dxl_baud_rate", 1000000);
@@ -99,16 +99,16 @@ public:
     // joint_state_bridge.launch.py의 실제 실측값(-9.314331344042)과 전혀
     // 달랐다 - launch 파일 없이 바로 띄우면 base_joint 영점이 완전히
     // 틀어진 채로 읽혔다.
-    declare_parameter<double>("base_zero_offset", -9.314331344042);
+    declare_parameter<double>("base_zero_offset", -3.172272269348);
     declare_parameter<double>("base_direction", 1.0);
-    declare_parameter<bool>("base_wraparound", true);
-    declare_parameter<double>("wrist_roll_zero_offset", -3.141592653590);
+    declare_parameter<bool>("base_wraparound", false);
+    declare_parameter<double>("wrist_roll_zero_offset", -3.150796538317);
     declare_parameter<double>("wrist_roll_direction", 1.0);
     declare_parameter<bool>("wrist_roll_wraparound", false);
-    declare_parameter<double>("wrist_yaw_zero_offset", 0.0);
-    declare_parameter<double>("wrist_yaw_direction", 1.0);
-    declare_parameter<bool>("wrist_yaw_wraparound", true);
-    declare_parameter<double>("gripper_zero_offset", -1.158155494854);
+    declare_parameter<double>("wrist_yaw_zero_offset", -9.277515805132);
+    declare_parameter<double>("wrist_yaw_direction", -1.0);
+    declare_parameter<bool>("wrist_yaw_wraparound", false);
+    declare_parameter<double>("gripper_zero_offset", -0.085902924122);
     declare_parameter<double>("gripper_direction", 1.0);
     declare_parameter<bool>("gripper_wraparound", false);
 

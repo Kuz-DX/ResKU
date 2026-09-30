@@ -108,9 +108,15 @@ def validate_tools(config: dict) -> list[str]:
                     'must reference measured fixtures.<name>')
 
         lock = spec.get('lock')
-        _tool_error(errors, f'{path}.lock.attach_yaw_delta_rad',
-                    isinstance(lock, dict) and lock.get('joint') == 'wrist_yaw_joint' and _number(lock.get('attach_yaw_delta_rad')),
-                    'measured signed radian delta required')
+        joint_path = lock.get('joint_path') if isinstance(lock, dict) else None
+        path_valid = (isinstance(joint_path, list) and len(joint_path) >= 2 and
+                      all(isinstance(step, dict) and isinstance(step.get('name'), str) and
+                          _number_list(step.get('positions_rad'), 6) for step in joint_path))
+        delta_valid = isinstance(lock, dict) and _number(lock.get('attach_yaw_delta_rad'))
+        _tool_error(errors, f'{path}.lock',
+                    isinstance(lock, dict) and lock.get('joint') == 'wrist_yaw_joint' and
+                    (path_valid or delta_valid),
+                    'measured joint_path or signed attach_yaw_delta_rad required')
 
         docking = spec.get('docking')
         if not isinstance(docking, dict):

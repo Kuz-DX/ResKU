@@ -276,8 +276,8 @@
 
     <!-- 임시 limit -->
     <limit
-        lower="${-pi}"
-        upper="${pi}"
+        lower="-3.503612119531"
+        upper="3.614058736259"
         effort="1.0"
         velocity="1.0"/>
 
@@ -341,8 +341,8 @@
     <axis xyz="0 0 -1"/>
 
     <limit
-        lower="${-pi}"
-        upper="${pi}"
+        lower="-1.459444233251"
+        upper="1.534842544204"
         effort="1.0"
         velocity="1.0"/>
 
@@ -406,8 +406,8 @@
     <axis xyz="0 0 -1"/>
 
     <limit
-        lower="${-pi}"
-        upper="${pi}"
+        lower="-1.475675812748"
+        upper="1.573239770294"
         effort="1.0"
         velocity="1.0"/>
 
@@ -471,8 +471,8 @@
     <axis xyz="0 0 -1"/>
 
     <limit
-        lower="${-pi}"
-        upper="${pi}"
+        lower="-1.643751229155"
+        upper="1.666265854332"
         effort="1.0"
         velocity="1.0"/>
 
@@ -536,8 +536,8 @@
     <axis xyz="0 0 1"/>
 
     <limit
-        lower="-0.894310799337"
-        upper="0.567572891518"
+        lower="-0.866699145155"
+        upper="0.688757373761"
         effort="1.0"
         velocity="5.035176563244"/>
 
@@ -601,8 +601,8 @@
     <axis xyz="0 0 1"/>
 
     <limit
-        lower="${-pi}"
-        upper="${pi}"
+        lower="-3.113980999408"
+        upper="3.156932461469"
         effort="1.0"
         velocity="1.0"/>
 

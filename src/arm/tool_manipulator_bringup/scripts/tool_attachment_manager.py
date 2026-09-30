@@ -15,6 +15,7 @@ from std_msgs.msg import Bool, Int32, String
 
 class ToolAttachmentManager(Node):
     """The UI selects a tool; only physical confirmation changes collisions."""
+    NONE = -1
 
     def __init__(self):
         super().__init__('tool_attachment_manager')
@@ -27,7 +28,7 @@ class ToolAttachmentManager(Node):
         ):
             self.declare_parameter(name, default)
         self.tools = self._read_registry(self.get_parameter('tools_config_file').value)
-        self.pending_tool_id = self.active_tool_id = 0
+        self.pending_tool_id = self.active_tool_id = self.NONE
         self.request_lock = threading.Lock()
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.active_pub = self.create_publisher(Int32, '/active_tool_id', latched)
@@ -51,8 +52,8 @@ class ToolAttachmentManager(Node):
 
     def _selected_cb(self, msg):
         tool_id = int(msg.data)
-        if tool_id == 0:
-            self.pending_tool_id = 0
+        if tool_id == self.NONE:
+            self.pending_tool_id = self.NONE
             self._publish('selection_cleared')
         elif tool_id in self.tools:
             self.pending_tool_id = tool_id
@@ -65,9 +66,9 @@ class ToolAttachmentManager(Node):
             return
         tool_id = self.pending_tool_id
         spec = self.tools.get(tool_id, {})
-        if not tool_id:
+        if tool_id == self.NONE:
             self._publish('rejected:no_pending_tool')
-        elif self.active_tool_id:
+        elif self.active_tool_id != self.NONE:
             self._publish(f'rejected:tool_{self.active_tool_id}_still_attached')
         elif not spec.get('enabled', False):
             self._publish(f'rejected:tool_{tool_id}_disabled')
@@ -77,7 +78,7 @@ class ToolAttachmentManager(Node):
             self._apply(self._attach_scene(tool_id, spec), tool_id, True)
 
     def _released_cb(self, msg):
-        if msg.data and self.active_tool_id:
+        if msg.data and self.active_tool_id != self.NONE:
             self._apply(self._detach_scene(self.active_tool_id), self.active_tool_id, False)
         elif msg.data:
             self._publish('rejected:no_attached_tool')
@@ -139,9 +140,9 @@ class ToolAttachmentManager(Node):
         if not success:
             self._publish(('attach_failed:' if attaching else 'detach_failed:') + str(tool_id))
             return
-        self.active_tool_id = tool_id if attaching else 0
+        self.active_tool_id = tool_id if attaching else self.NONE
         if attaching:
-            self.pending_tool_id = 0
+            self.pending_tool_id = self.NONE
         self._publish(('attached:' if attaching else 'detached:') + str(tool_id))
 
     def _publish(self, state):
