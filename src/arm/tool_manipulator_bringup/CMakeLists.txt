@@ -7,6 +7,7 @@ install(PROGRAMS scripts/apriltag_tool_docking_node.py DESTINATION lib/${PROJECT
 install(PROGRAMS scripts/tool_dock_tcp_sim_node.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/capture_arm_pose.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/tcp_joy_teleop.py DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS scripts/gripper_gox.py DESTINATION lib/${PROJECT_NAME})
 install(FILES scripts/design_sizing.py DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY config/design/ DESTINATION share/${PROJECT_NAME}/design)
 install(DIRECTORY config DESTINATION share/${PROJECT_NAME})
