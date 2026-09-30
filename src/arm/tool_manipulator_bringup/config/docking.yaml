@@ -3,13 +3,16 @@ apriltag_tool_docking:
     # UI contract: publish std_msgs/Int32(tag_id) to /selected_tool_id.
     tool_id_topic: /selected_tool_id
     tool_id_message_type: int32
-    detection_topic: /tag_detections
+    # Existing vision.apriltag emits PnP pose JSON in its image header frame.
+    detection_topic: /arm/apriltag/centers
+    detection_message_type: vision_json
     # Humble apriltag_msgs default. Change only for a bridge with different fields.
     tag_id_field: id
     tag_pose_field: pose.pose.pose
     servo_twist_topic: /servo_node/delta_twist_cmds
-    # Detector poses and TwistStamped commands must use this same frame.
-    servo_command_frame: camera_color_optical_frame
+    # Leave empty: JSON frame_id from the arm camera is propagated to Servo.
+    # Set explicitly only after verifying the live optical-frame name.
+    servo_command_frame: ''
     planning_group: arm
     base_link: base_actuator
     end_effector_link: tcp_link
@@ -44,3 +47,15 @@ apriltag_tool_docking:
     lock_joint_name: wrist_yaw_joint
     lock_rotation_rad: 1.5708
     lock_timeout_sec: 15.0
+    # Post-lock safety sequence.  The negative ascent distance is intentional:
+    # do not move upward until the fixture-specific distance is measured.
+    active_tool_id_topic: /active_tool_id
+    attachment_timeout_sec: 5.0
+    ascent_distance_m: -1.0
+    ascent_speed_mps: 0.008
+    ascent_timeout_sec: 5.0
+    post_lock_motion_timeout_sec: 45.0
+    # Six taught joint values for the front-facing mission standby pose.
+    # Keep empty until this pose is measured; the controller then holds safely
+    # at docking_wait after a successful tool change.
+    mission_wait_joint_goal_yaml: '[]'

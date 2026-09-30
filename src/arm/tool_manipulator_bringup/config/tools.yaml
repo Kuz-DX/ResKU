@@ -4,7 +4,7 @@ tools:
   1:
     enabled: false
     name: gripper_pinion_tool
-    # Existing gripper/pinion URDF values, expressed at gripper_joint = 0.
+    # MX-106 mapping: joint_rad = raw * 2pi/4096 (raw 0 = 0 rad; raw increase = close).
     # ee_mount -> gripper_actuator is Ry(-90 deg), then pinion -> old TCP was
     # +90 mm in local Z, yielding the offset below in ee_mount coordinates.
     tcp:
@@ -21,7 +21,8 @@ tools:
       type: dynamixel
       joint: gripper_joint
       id: 4
-      position_limits_rad: [0.0, 2.59396]
+      position_limits_rad: [-1.279339977097, 3.911651009108]  # raw 459..3843; raw 1293 = 0
+      open_position_rad: 0.0  # raw 1293
     # Disabled: re-teach all six joints against the new CAD URDF before enabling.
     lock:
       joint: wrist_yaw_joint
@@ -30,6 +31,12 @@ tools:
   2:
     enabled: false
     name: tool_2_case
+    mass_kg: 0.050
+    tcp:
+      frame: tool_2_tcp
+      parent: tcp_link
+      xyz: [0.0, 0.0600, 0.0]
+      quat_xyzw: [0.0, 0.0, 0.0, 1.0]
     dock_fixture: tool_2_case
     # Supplied square-bore upper-centre in arm_world_frame.
     target_entry:
@@ -39,6 +46,12 @@ tools:
 
   3:
     enabled: false
-    name: tool_3_unconfigured
-    # Fill fixture, TCP, collision, actuator, and teaching values after
+    name: long_phillips_bit
+    mass_kg: 0.050
+    tcp:
+      frame: tool_3_tcp
+      parent: tcp_link
+      xyz: [0.0, 0.0508, 0.0]
+      quat_xyzw: [0.0, 0.0, 0.0, 1.0]
+    # TCP and mass are defined in URDF. Fill fixture, collision, actuator, and teaching values after
     # mechanical dimensions are available.

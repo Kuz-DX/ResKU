@@ -102,15 +102,15 @@ public:
     declare_parameter<double>("base_zero_offset", -9.314331344042);
     declare_parameter<double>("base_direction", 1.0);
     declare_parameter<bool>("base_wraparound", true);
-    declare_parameter<double>("wrist_roll_zero_offset", 0.0);
+    declare_parameter<double>("wrist_roll_zero_offset", -3.141592653590);
     declare_parameter<double>("wrist_roll_direction", 1.0);
-    declare_parameter<bool>("wrist_roll_wraparound", true);
+    declare_parameter<bool>("wrist_roll_wraparound", false);
     declare_parameter<double>("wrist_yaw_zero_offset", 0.0);
     declare_parameter<double>("wrist_yaw_direction", 1.0);
     declare_parameter<bool>("wrist_yaw_wraparound", true);
-    declare_parameter<double>("gripper_zero_offset", -1.375980766733627);
+    declare_parameter<double>("gripper_zero_offset", -1.158155494854);
     declare_parameter<double>("gripper_direction", 1.0);
-    declare_parameter<bool>("gripper_wraparound", true);
+    declare_parameter<bool>("gripper_wraparound", false);
 
     declare_parameter<double>("publish_rate_hz", 20.0);
 
@@ -341,11 +341,11 @@ private:
   double base_zero_offset_{0.0}, base_direction_{1.0};
   bool base_wraparound_{true};
   double wrist_roll_zero_offset_{0.0}, wrist_roll_direction_{1.0};
-  bool wrist_roll_wraparound_{true};
+  bool wrist_roll_wraparound_{false};
   double wrist_yaw_zero_offset_{0.0}, wrist_yaw_direction_{1.0};
   bool wrist_yaw_wraparound_{true};
   double gripper_zero_offset_{0.0}, gripper_direction_{1.0};
-  bool gripper_wraparound_{true};
+  bool gripper_wraparound_{false};
 
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_states_pub_;
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr rmd_angle_pub_;

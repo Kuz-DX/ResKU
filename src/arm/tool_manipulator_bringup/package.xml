@@ -30,5 +30,7 @@
   <exec_depend>apriltag_msgs</exec_depend>
   <exec_depend>moveit_servo</exec_depend>
   <exec_depend>pymoveit2</exec_depend>
+  <exec_depend>moveit_msgs</exec_depend>
+  <exec_depend>shape_msgs</exec_depend>
   <export><build_type>ament_cmake</build_type></export>
 </package>

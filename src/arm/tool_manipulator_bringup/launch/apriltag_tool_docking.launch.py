@@ -28,4 +28,7 @@ def generate_launch_description():
         Node(package='tool_manipulator_bringup', executable='apriltag_tool_docking_node.py',
              name='apriltag_tool_docking', output='screen',
              parameters=[LaunchConfiguration('docking_params'), {'tools_config_file': tools}]),
+        Node(package='tool_manipulator_bringup', executable='tool_attachment_manager.py',
+             name='tool_attachment_manager', output='screen',
+             parameters=[{'tools_config_file': tools}]),
     ])

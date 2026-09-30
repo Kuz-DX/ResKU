@@ -4,6 +4,7 @@
 The visual-servo frame must be the same frame used by the AprilTag detector's
 poses.  In the supplied configuration this is the RealSense optical frame.
 """
+import json
 import math
 import threading
 from enum import Enum, auto
@@ -26,6 +27,12 @@ class DockState(Enum):
     FINE_XY_ALIGNING = auto()
     DESCENDING = auto()
     LOCK_ROTATING = auto()
+    ATTACHING_SCENE = auto()
+    ASCENDING = auto()
+    RETREATING = auto()
+    RETURNING_TO_WAIT = auto()
+    MISSION_WAIT = auto()
+    POST_LOCK_HOLD = auto()
     DOCKED = auto()
 
 
@@ -47,6 +54,9 @@ class AprilTagToolDocking(Node):
         self.best_error = float('inf')
         self.diverging_frames = 0
         self.joint_positions = {}
+        # Latched feedback from tool_attachment_manager.  No retreat with a
+        # newly attached physical tool is allowed until its collision object is live.
+        self.active_tool_id = 0
 
         self.moveit2 = MoveIt2(
             node=self,
@@ -61,11 +71,15 @@ class AprilTagToolDocking(Node):
         status_qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.status_pub = self.create_publisher(String, 'docking_status', status_qos)
         self.complete_pub = self.create_publisher(Bool, 'docking_complete', status_qos)
-        self.create_subscription(
-            AprilTagDetectionArray, self.get_parameter('detection_topic').value,
-            self._detections_cb, 10, callback_group=self.cb_group)
+        detection_topic = self.get_parameter('detection_topic').value
+        if self.get_parameter('detection_message_type').value == 'vision_json':
+            self.create_subscription(String, detection_topic, self._json_detections_cb, 10, callback_group=self.cb_group)
+        else:
+            self.create_subscription(AprilTagDetectionArray, detection_topic, self._detections_cb, 10, callback_group=self.cb_group)
         self.create_subscription(
             JointState, self.get_parameter('joint_state_topic').value, self._joint_state_cb, 20)
+        self.create_subscription(
+            Int32, self.get_parameter('active_tool_id_topic').value, self._active_tool_cb, 10)
         tool_topic = self.get_parameter('tool_id_topic').value
         # UI default is Int32. Set tool_id_message_type:=string when the UI emits String.
         if self.get_parameter('tool_id_message_type').value.lower() == 'string':
@@ -80,7 +94,9 @@ class AprilTagToolDocking(Node):
         p = self.declare_parameter
         p('tool_id_topic', '/selected_tool_id')
         p('tool_id_message_type', 'int32')
-        p('detection_topic', '/tag_detections')
+        p('active_tool_id_topic', '/active_tool_id')
+        p('detection_topic', '/arm/apriltag/centers')
+        p('detection_message_type', 'vision_json')
         # Dotted fields accommodate apriltag_msgs variants/bridge message layouts.
         p('tag_id_field', 'id')
         p('tag_pose_field', 'pose.pose.pose')
@@ -124,6 +140,15 @@ class AprilTagToolDocking(Node):
         p('lock_joint_name', 'wrist_yaw_joint')
         p('lock_rotation_rad', 1.5708)
         p('lock_timeout_sec', 15.0)
+        # Negative ascent_distance_m deliberately means "not taught": after a
+        # successful physical lock the arm holds instead of guessing a retreat.
+        p('attachment_timeout_sec', 5.0)
+        p('ascent_distance_m', -1.0)
+        p('ascent_speed_mps', 0.008)
+        p('ascent_timeout_sec', 5.0)
+        p('post_lock_motion_timeout_sec', 45.0)
+        # Final front-facing mission posture is intentionally empty until taught.
+        p('mission_wait_joint_goal_yaml', '[]')
 
     def _validate_motion_params(self):
         if self.get_parameter('servo_rate_hz').value <= 0.0:
@@ -134,8 +159,20 @@ class AprilTagToolDocking(Node):
             raise RuntimeError('descent_direction must not be a zero vector')
         if self.get_parameter('lock_joint_name').value not in self.get_parameter('joint_names').value:
             raise RuntimeError('lock_joint_name must be one of joint_names')
-        if len(self.get_parameter('docking_wait_joint_goal').value) != len(self.get_parameter('joint_names').value):
+        joint_count = len(self.get_parameter('joint_names').value)
+        if len(self.get_parameter('docking_wait_joint_goal').value) != joint_count:
             raise RuntimeError('docking_wait_joint_goal must have one value per joint_names entry')
+        mission_goal = self._mission_wait_goal()
+        if mission_goal and len(mission_goal) != joint_count:
+            raise RuntimeError('mission_wait_joint_goal must be empty or have one value per joint_names entry')
+
+    def _mission_wait_goal(self):
+        """Return an optional taught mission pose from a ROS-safe YAML string."""
+        try:
+            values = yaml.safe_load(self.get_parameter('mission_wait_joint_goal_yaml').value)
+            return [] if values is None else [float(value) for value in values]
+        except (TypeError, ValueError, yaml.YAMLError) as exc:
+            raise RuntimeError('mission_wait_joint_goal_yaml must be a YAML list') from exc
 
     def _read_goals(self):
         tools_file = self.get_parameter('tools_config_file').value
@@ -178,8 +215,11 @@ class AprilTagToolDocking(Node):
             self.get_logger().warning('Ignoring non-integer tool String: %r' % msg.data)
 
     def _start_request(self, tag_id):
-        if self.state not in (DockState.IDLE, DockState.DOCKED):
-            self.get_logger().warning('Docking request ignored: controller is busy')
+        if self.state != DockState.IDLE:
+            self.get_logger().warning('Docking request ignored: controller is busy or already docked')
+            return
+        if self.active_tool_id != 0:
+            self._publish_status(f'failed:active_tool_{self.active_tool_id}_requires_release')
             return
         if tag_id not in self.goals:
             self.get_logger().error(f'No taught joint goal for requested tag {tag_id}')
@@ -223,6 +263,27 @@ class AprilTagToolDocking(Node):
         else:
             self._fail('docking_wait_or_coarse_execution')
 
+    def _json_detections_cb(self, msg):
+        """Use the existing vision.apriltag PnP JSON without inventing a pose type."""
+        if self.state != DockState.FINE_XY_ALIGNING or self.target_tag_id is None:
+            return
+        try:
+            payload = json.loads(msg.data)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            self.get_logger().warning('Ignoring malformed AprilTag JSON')
+            return
+        frame_id = payload.get('frame_id', '')
+        match = next((item for item in payload.get('detections', [])
+                      if int(item.get('id', -1)) == self.target_tag_id), None)
+        position_cm = match.get('position_camera_cm') if match else None
+        if not frame_id or not position_cm:
+            return
+        try:
+            position = [float(position_cm[axis]) / 100.0 for axis in ('x', 'y', 'z')]
+        except (KeyError, TypeError, ValueError):
+            return
+        self.detection_frame = frame_id
+        self._accept_detection_position(position)
     def _detections_cb(self, msg):
         if self.state != DockState.FINE_XY_ALIGNING or self.target_tag_id is None:
             return
@@ -234,9 +295,12 @@ class AprilTagToolDocking(Node):
             self.get_logger().warning('Target tag detection has no usable pose')
             return
         position, _quaternion = pose
-        desired_p = self.get_parameter('desired_tag_position').value
+        self._accept_detection_position(position)
+
+    def _accept_detection_position(self, position):
         # Tool geometry defines insertion Z and lock angle. The camera only closes
         # the two lateral degrees of freedom; tag depth/orientation are ignored.
+        desired_p = self.get_parameter('desired_tag_position').value
         exy = [position[0] - desired_p[0], position[1] - desired_p[1]]
         self.error = exy
         self.last_detection_time = self._now_sec()
@@ -245,11 +309,10 @@ class AprilTagToolDocking(Node):
             self.stable_frames += 1
         else:
             self.stable_frames = 0
-        total = xy_norm
-        if total < self.best_error:
-            self.best_error = total
+        if xy_norm < self.best_error:
+            self.best_error = xy_norm
             self.diverging_frames = 0
-        elif self.best_error > 0.0 and total > self.best_error * self.get_parameter('divergence_ratio').value:
+        elif self.best_error > 0.0 and xy_norm > self.best_error * self.get_parameter('divergence_ratio').value:
             self.diverging_frames += 1
         else:
             self.diverging_frames = 0
@@ -280,6 +343,9 @@ class AprilTagToolDocking(Node):
     def _joint_state_cb(self, msg):
         self.joint_positions.update(zip(msg.name, msg.position))
 
+    def _active_tool_cb(self, msg):
+        self.active_tool_id = int(msg.data)
+
     def _control_tick(self):
         now = self._now_sec()
         if self.state == DockState.COARSE_MOVING and now - self.phase_started > self.get_parameter('coarse_timeout_sec').value:
@@ -292,6 +358,23 @@ class AprilTagToolDocking(Node):
             if now - self.phase_started > self.get_parameter('lock_timeout_sec').value:
                 self._fail('lock_rotation_timeout')
             return
+        if self.state == DockState.ATTACHING_SCENE:
+            if self.active_tool_id == self.target_tag_id:
+                if self.get_parameter('ascent_distance_m').value < 0.0:
+                    self._enter(DockState.POST_LOCK_HOLD)
+                    self._publish_status('hold:ascent_distance_unconfigured')
+                else:
+                    self._enter(DockState.ASCENDING)
+            elif now - self.phase_started > self.get_parameter('attachment_timeout_sec').value:
+                self._fail('planning_scene_attach_timeout')
+            return
+        if self.state == DockState.ASCENDING:
+            self._ascent_tick(now)
+            return
+        if self.state in (DockState.RETREATING, DockState.RETURNING_TO_WAIT, DockState.MISSION_WAIT):
+            if now - self.phase_started > self.get_parameter('post_lock_motion_timeout_sec').value:
+                self._fail('post_lock_motion_timeout')
+            return
         if self.state != DockState.FINE_XY_ALIGNING:
             return
         if now - self.phase_started > self.get_parameter('xy_align_timeout_sec').value:
@@ -299,7 +382,7 @@ class AprilTagToolDocking(Node):
             return
         if self.last_detection_time is None or now - self.last_detection_time > self.get_parameter('detection_timeout_sec').value:
             self._stop_servo()
-            return  # Hold safely; xy_align_timeout eventually returns to IDLE.
+            return
         if self.diverging_frames >= self.get_parameter('divergence_frames').value:
             self._fail('visual_servo_diverging')
             return
@@ -348,16 +431,64 @@ class AprilTagToolDocking(Node):
         if self.state != DockState.LOCK_ROTATING:
             return
         if success:
-            self._enter(DockState.DOCKED)
-            self._publish_status('docking_complete')
+            # Physical lock is complete.  Attachment manager now creates the
+            # collision object; ascent cannot start until it confirms active_tool_id.
+            self._enter(DockState.ATTACHING_SCENE)
+            self._publish_status('lock_complete:awaiting_scene_attach')
             self.complete_pub.publish(Bool(data=True))
         else:
             self._fail('lock_rotation')
 
+    def _ascent_tick(self, now):
+        speed = self.get_parameter('ascent_speed_mps').value
+        distance = self.get_parameter('ascent_distance_m').value
+        duration = distance / max(speed, 1e-6)
+        if now - self.phase_started > self.get_parameter('ascent_timeout_sec').value:
+            self._fail('ascent_timeout')
+        elif now - self.phase_started >= duration:
+            self._stop_servo()
+            self._enter(DockState.RETREATING)
+            threading.Thread(target=self._post_lock_worker, args=(self.target_tag_id,), daemon=True).start()
+        else:
+            direction = self._unit(self.get_parameter('descent_direction').value)
+            self._publish_twist([-speed * value for value in direction], [0.0, 0.0, 0.0],
+                                frame=self.get_parameter('descent_command_frame').value)
+
+    def _post_lock_worker(self, tag_id):
+        try:
+            # Step 8: use the same taught per-tag approach posture as the final
+            # safe rack retreat.  It is executed after the collision object exists.
+            self.moveit2.move_to_configuration(self.goals[tag_id])
+            if self.moveit2.wait_until_executed() is False:
+                raise RuntimeError('tag retreat execution failed')
+            if self.state != DockState.RETREATING:
+                return
+            self._enter(DockState.RETURNING_TO_WAIT)
+            self.moveit2.move_to_configuration(list(self.get_parameter('docking_wait_joint_goal').value))
+            if self.moveit2.wait_until_executed() is False:
+                raise RuntimeError('docking_wait return execution failed')
+            if self.state != DockState.RETURNING_TO_WAIT:
+                return
+            mission_goal = self._mission_wait_goal()
+            if not mission_goal:
+                self._enter(DockState.DOCKED)
+                self._publish_status('ready:mission_wait_pose_unconfigured')
+                return
+            self._enter(DockState.MISSION_WAIT)
+            self.moveit2.move_to_configuration(mission_goal)
+            if self.moveit2.wait_until_executed() is False:
+                raise RuntimeError('mission_wait execution failed')
+            if self.state == DockState.MISSION_WAIT:
+                self._enter(DockState.DOCKED)
+                self._publish_status('ready:mission_wait')
+        except Exception as exc:
+            self.get_logger().error(f'Post-lock retreat failed: {exc}')
+            self._fail('post_lock_motion')
+
     def _publish_twist(self, linear, angular, frame=None):
         msg = TwistStamped()
         msg.header.stamp = self.get_clock().now().to_msg()
-        msg.header.frame_id = frame or self.get_parameter('servo_command_frame').value
+        msg.header.frame_id = frame or self.get_parameter('servo_command_frame').value or getattr(self, 'detection_frame', '')
         msg.twist.linear.x, msg.twist.linear.y, msg.twist.linear.z = linear
         msg.twist.angular.x, msg.twist.angular.y, msg.twist.angular.z = angular
         self.twist_pub.publish(msg)

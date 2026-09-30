@@ -391,10 +391,10 @@
     <axis xyz="0 0 1"/>
 
     <limit
-        lower="${-pi}"
-        upper="${pi}"
+        lower="-0.894310799337"
+        upper="0.567572891518"
         effort="1.0"
-        velocity="1.0"/>
+        velocity="5.035176563244"/>
 
   </joint>
 

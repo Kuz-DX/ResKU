@@ -4,6 +4,10 @@
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
   <xacro:macro name="tool_1_gripper" params="prefix parent use_mesh:=false">
     <xacro:property name="tool_1_tcp_offset" value="0.090"/>
+    <!-- MX-106 raw reference: raw 0 = 0 rad; raw increment = CCW/closing; 4096 tick/rev. -->
+    <xacro:property name="tool_1_gripper_limit_lower" value="-1.279339977097"/> <!-- raw 459; raw 1293 = 0 -->
+    <xacro:property name="tool_1_gripper_open" value="0.0"/> <!-- raw 1293: open reference -->
+    <xacro:property name="tool_1_gripper_limit_upper" value="3.911651009108"/> <!-- raw 3843 -->
     <xacro:property name="tool_1_rack_offset" value="0.018"/>
     <xacro:property name="tool_1_pitch_radius" value="0.017"/>
 
@@ -14,31 +18,24 @@
     <link name="${prefix}tool_1_link">
       <inertial><mass value="0.001"/><inertia ixx="1e-7" ixy="0" ixz="0" iyy="1e-7" iyz="0" izz="1e-7"/></inertial>
     </link>
+    <!-- Common tool geometry frame: from tcp_link, rotate Y +90 deg then Z +90 deg. -->
+    <joint name="${prefix}tool_1_geometry_joint" type="fixed">
+      <parent link="${prefix}tool_1_link"/><child link="${prefix}tool_1_geometry_link"/>
+      <origin xyz="0 0 0" rpy="0 ${pi/2} ${pi/2}"/>
+    </joint>
+    <link name="${prefix}tool_1_geometry_link"/>
+
 
     <!-- ========== gripper_actuator -> pinion_gear (revolute, "피니언 구동") ==========-->
     <joint name="${prefix}gripper_joint" type="revolute">
-      <parent link="${prefix}ee_actuator"/>
+      <parent link="${prefix}tool_1_geometry_link"/>
       <child  link="${prefix}pinion_gear"/>
-      <origin xyz=" 0 0 0" rpy="0 0 0"/>
+      <origin xyz="0 0 0" rpy="0 ${pi/2} 0"/>
       <axis xyz="0 0 1"/>
-      <limit lower="${gripper_limit_lower}" upper="${gripper_limit_upper}" effort="8.4" velocity="3.665"/>
+      <limit lower="${tool_1_gripper_limit_lower}" upper="${tool_1_gripper_limit_upper}" effort="8.4" velocity="3.665"/>
       <dynamics damping="0.05" friction="0.01"/>
     </joint>
 
-    <!-- gripper_actuator: MX-106T stator, wrist_link의 형제(fixed) 링크. -->
-    <joint name="${prefix}gripper_actuator_joint" type="fixed">
-      <parent link="${prefix}wrist_link_yaw"/>
-      <child link="${prefix}ee_actuator"/>
-      <origin xyz="-${L3} 0 ${-off_wrist}" rpy="0 -${pi/2} 0"/>
-    </joint>
-    <link name="${prefix}gripper_actuator">
-      <xacro:if value="${use_mesh}">
-        <visual><origin xyz="0 0 0" rpy="0 0 ${pi/2}"/><geometry><mesh filename="package:/tool_manipulator_description/meshes/visual/ee_actuator.stl" scale="0.001 0.001 0.001"/></geometry><material name="motor_dark"/></visual>
-        <collision><origin xyz="0 0 0" rpy="0 0 ${pi/2}"/><geometry><mesh filename="package://tool_manipulator_description/meshes/collision/ee_actuator.stl" scale="0.001 0.001 0.001"/></geometry></collision>
-      </xacro:if>
-      <xacro:unless value="${use_mesh}"><visual><geometry><cylinder radius="0.030" length="0.050"/></geometry><material name="motor_dark"/></visual><collision><geometry><cylinder radius="0.030" length="0.050"/></geometry></collision></xacro:unless>
-      <inertial><mass value="0.001"/><inertia ixx="1e-7" ixy="0" ixz="0" iyy="1e-7" iyz="0" izz="1e-7"/></inertial>
-    </link>
 
     <!-- pinion_gear: m=1, z=34, 피치반경 17mm (module 1 x teeth 34 / 2, 2026-08-30 mesh 개정) -->
     <link name="${prefix}pinion_gear">
@@ -73,13 +70,13 @@
 
     <!-- ========== wrist_link -> rack_left (prismatic, mimic) ==========-->
     <joint name="${prefix}rack_left_joint" type="prismatic">
-      <parent link="${prefix}wrist_link"/>
+      <parent link="${prefix}tool_1_geometry_link"/>
       <child  link="${prefix}rack_left"/>
       <xacro:property name="pinion_pitch_radius" value="0.017"/>
       <!-- z: pinion_gear 원점(wrist_link 기준 z=${-off_wrist})에서 +0.062 오프셋.
            기존에는 wrist_link의 z=0을 중심으로 ±0.062를 줘서 pinion_gear
            원점(z=${-off_wrist})만큼 어긋나 있었음 - 2026-08-24 수정. -->
-      <origin xyz="${-L3} 0.018 ${-off_wrist + 0.062}" rpy="${pi} 0 ${pi}"/>
+      <origin xyz="-0.016 0.018 0.062" rpy="${pi} 0 ${pi}"/>
       <axis xyz="0 0 1"/>
       <limit lower="0" upper="0.030" effort="8.4" velocity="0.1"/>
       <!-- 피니언 각속도 -> 랙 선속도 변환: v = omega * pinion_pitch_radius.
@@ -125,11 +122,11 @@
 
     <!-- ========== wrist_link -> rack_right (prismatic, mimic, 반대방향) ==========-->
     <joint name="${prefix}rack_right_joint" type="prismatic">
-      <parent link="${prefix}wrist_link"/>
+      <parent link="${prefix}tool_1_geometry_link"/>
       <child  link="${prefix}rack_right"/>
       <!-- z: pinion_gear 원점(wrist_link 기준 z=${-off_wrist})에서 -0.062 오프셋.
            rack_left_joint와 동일한 수정 - 2026-08-24. -->
-      <origin xyz="${-L3} -0.018 ${-off_wrist - 0.062}" rpy="0 0 0"/>
+      <origin xyz="-0.016 -0.018 -0.062" rpy="0 0 0"/>
       <axis xyz="0 0 1"/>
       <limit lower="0" upper="0.030" effort="8.4" velocity="0.1"/>
       <mimic joint="${prefix}gripper_joint" multiplier="${pinion_pitch_radius}" offset="0"/>
@@ -166,4 +163,5 @@
         <inertia ixx="4.0e-5" ixy="0" ixz="0" iyy="4.0e-5" iyz="0" izz="1.0e-6"/>
       </inertial>
     </link>
+  </xacro:macro>
 </robot>
