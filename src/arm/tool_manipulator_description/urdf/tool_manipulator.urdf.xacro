@@ -9,6 +9,10 @@
 
   <xacro:arg name="use_mesh" default="true"/>
   <xacro:arg name="tool_id" default="0"/>
+  <xacro:include filename="tools/tool_1_gripper.xacro"/>
+  <xacro:property name="selected_tool_id" value="$(arg tool_id)"/>
+  <xacro:include filename="tools/tool_2.xacro"/>
+  <xacro:include filename="tools/tool_3.xacro"/>
 
   <xacro:property
       name="mesh_path"
@@ -23,6 +27,9 @@
   <material name="petg_charcoal">
     <color rgba="0.20 0.20 0.22 1.0"/>
   </material>
+  <material name="petg_grey"><color rgba="0.40 0.40 0.42 1.0"/></material>
+  <material name="motor_dark"><color rgba="0.12 0.12 0.14 1.0"/></material>
+  <material name="tcp_red"><color rgba="0.90 0.05 0.05 1.0"/></material>
 
   <!-- MOTOR -->
   <material name="motor_grey">
@@ -532,5 +539,16 @@
         xyz="0 0.0607680 0.074000"
         rpy="${-pi/2} ${-pi/2} 0"/>
   </joint>
+
+  <!-- The common arm ends at tcp_link; the selected tool is downstream. -->
+  <xacro:if value="${selected_tool_id == 1}">
+    <xacro:tool_1_gripper prefix="" parent="tcp_link" use_mesh="$(arg use_mesh)"/>
+  </xacro:if>
+  <xacro:if value="${selected_tool_id == 2}">
+    <xacro:tool_2 prefix="" parent="tcp_link" use_mesh="$(arg use_mesh)"/>
+  </xacro:if>
+  <xacro:if value="${selected_tool_id == 3}">
+    <xacro:tool_3 prefix="" parent="tcp_link" use_mesh="$(arg use_mesh)"/>
+  </xacro:if>
 
 </robot>

@@ -2,8 +2,12 @@
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
   <xacro:macro name="tool_3" params="prefix parent use_mesh:=false">
     <joint name="${prefix}tool_3_mount_joint" type="fixed"><parent link="${parent}"/><child link="${prefix}tool_3_link"/><origin xyz="0 0 0"/></joint>
-    <link name="${prefix}tool_3_link"><inertial><mass value="0.001"/><inertia ixx="1e-7" ixy="0" ixz="0" iyy="1e-7" iyz="0" izz="1e-7"/></inertial></link>
-    <joint name="${prefix}tool_3_tcp_joint" type="fixed"><parent link="${prefix}tool_3_link"/><child link="${prefix}tool_3_tcp"/><origin xyz="0 0 0"/></joint>
+    <link name="${prefix}tool_3_link">
+      <visual><geometry><mesh filename="package://tool_manipulator_description/meshes/visual/long_phillipsbit.stl" scale="0.001 0.001 0.001"/></geometry></visual>
+      <collision><geometry><mesh filename="package://tool_manipulator_description/meshes/collision/long_phillipsbit.stl" scale="0.001 0.001 0.001"/></geometry></collision>
+      <inertial><origin xyz="0 0.0283 0"/><mass value="0.050"/><inertia ixx="0.00002" ixy="0" ixz="0" iyy="0.000004" iyz="0" izz="0.00002"/></inertial>
+    </link>
+    <joint name="${prefix}tool_3_tcp_joint" type="fixed"><parent link="${prefix}tool_3_link"/><child link="${prefix}tool_3_tcp"/><origin xyz="0 0.0508 0"/></joint>
     <link name="${prefix}tool_3_tcp"/>
   </xacro:macro>
 </robot>
