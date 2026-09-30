@@ -1,6 +1,6 @@
-"""여름 미션 — side_cameras + summer_traffic + summer_supply.
+"""여름 미션 — side_cameras + summer_traffic + vision/supply.
 
-summer_supply는 사이드캠이 아니라 로봇팔 카메라(/arm/camera/...)를 쓰므로
+vision/supply는 로봇팔 카메라(/arm/camera/...)를 쓰므로
 side_cameras.launch.py와는 무관하다 — side_cameras는 summer_traffic(좌측
 사이드캠 단일)용으로만 쓰인다.
 
@@ -61,9 +61,9 @@ def generate_launch_description():
             }],
         ),
         Node(
-            package='dolbotz',
-            executable='summer_supply',
-            name='summer_supply_node',
+            package='vision',
+            executable='supply',
+            name='supply_node',
             output='screen',
             parameters=[{
                 'stop_base_x_m': ParameterValue(

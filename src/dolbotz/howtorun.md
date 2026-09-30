@@ -1,5 +1,32 @@
 # dolbotz 실행 방법
 
+## Supply box 인식 (vision 패키지)
+
+팔 카메라 RGB·정렬 Depth·CameraInfo와 팔 TF를 실행한 후:
+
+```bash
+ros2 launch vision supply.launch.py
+```
+
+구현은 `src/vision/vision/supply.py`이며, 모델은 vision 패키지의
+`models/supplyboxv3_int8_openvino_model`을 사용한다.
+카메라 드라이버와 팔 제어기는 이 launch가 실행하지 않는다.
+기존 미션 launch가 supply 노드를 실행 중이면 중복 실행하지 않는다.
+
+- 입력: `/arm/camera/color/image_raw/compressed`,
+  `/arm/camera/aligned_depth_to_color/image_raw/compressedDepth`,
+  `/arm/camera/color/camera_info`
+- UI bbox: `/arm/supply/detections` (`vision_msgs/msg/Detection2DArray`)
+- 3D 목표: `/arm/target_point`, 카메라 거리: `/arm/target_depth_m`
+- 디버그 JPEG: `/arm/debug_image/compressed`
+
+DolBot_Center의 로봇팔 카메라 패널은 원본 영상 위에 supply bbox를 표시한다.
+MediaMTX와 compressed 모드 모두 rosbridge 연결이 필요하다.
+Bbox는 Depth 값/TF/파지 범위 필터 적용 전에 발행한다. 다만 기존 처리 흐름대로
+RGB와 Depth가 동기화되고 CameraInfo가 수신되어야 추론이 시작된다.
+목표 발행은 중심 11×11 Depth 중앙값, 최대 1m, base X 절댓값 0.32m 이하
+3프레임 확인 조건을 유지한다. `/arm/picking_command` 수신 후 추론은 종료된다.
+
 
 https://github.com/sw-works-log/manual100_combined.git
 https://github.com/harim-54/only_manual.git

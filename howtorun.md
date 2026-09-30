@@ -1,22 +1,41 @@
 ## Person Detection 비전 모델
 
-주행 카메라의 압축 컬러 영상(`/drive/camera/color/image_raw/compressed`)을
-입력받아 사람 bbox를 `/person_detection/detections`로 발행한다. bbox 발행
-주기를 우선할 때는 시각화 이미지 생성과 JPEG 재인코딩을 끈 상태로 실행한다.
+주행/좌/우 카메라의 압축 컬러 영상을 하나의 OpenVINO 모델로 순차 추론한다.
+사람 bbox가 그려진 `sensor_msgs/msg/CompressedImage` 출력은 다음과 같다.
+
+- `/drive/person/detecion`
+- `/left/person/detection`
+- `/right/person/detection`
+
+입력은 각각 `/drive/camera/color/image_raw/compressed`,
+`/side/left/image_raw/compressed`, `/side/right/image_raw/compressed`이다.
 
 ```bash
 source /home/shu/ResKU/install/setup.bash
-ros2 run vision person_detection --ros-args \
-  -p publish_visualization:=false
+ros2 launch vision person_detection.launch.py
 ```
 
-이 모드에서는 `/person_detection/image/compressed`가 발행되지 않으며,
-탐지 결과(`/person_detection/detections`)만 발행된다. 동작 주기는 다음 명령으로
-확인한다.
+JSON 검출 결과는 drive의 기존 `/person_detection/detections`와 side cam의
+`/left/person/detections`, `/right/person/detections`로 발행된다. bbox 이미지가
+필요 없고 JSON 발행 주기를 우선할 때는 `publish_visualization:=false`로 실행한다.
 
 ```bash
-ros2 topic hz /person_detection/detections --wall-time
+ros2 launch vision person_detection.launch.py publish_visualization:=false
 ```
+
+## Supply box 인식
+
+팔 카메라의 컬러·정렬 Depth·CameraInfo와 팔 TF를 실행한 후:
+
+```bash
+ros2 launch vision supply.launch.py
+```
+
+모델은 vision 패키지에 포함된 `supplyboxv3_int8_openvino_model`이다.
+노드 구현은 `src/vision/vision/supply.py`이며, bbox는
+`/arm/supply/detections`로 발행하여 DolBot_Center 로봇팔 카메라 패널에 표시한다.
+기존 3D 목표 `/arm/target_point`와 거리 `/arm/target_depth_m`는 유지한다.
+기존 미션 launch도 새 supply 실행 파일을 호출하므로 두 launch를 중복 실행하지 않는다.
 
 ## 3. 계절별 미션
 

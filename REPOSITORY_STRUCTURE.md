@@ -88,7 +88,7 @@
 | 실행 이름 | 소스 | 역할 |
 |---|---|---|
 | `purepursuit` | `purepursuit.py` | `/path`를 직접 추종해 `/motor_speed_cmd` 좌우 dps를 발행하는 Nav2 우회 경로 |
-| `summer_supply` | `missions/summer_supply.py` | 팔 카메라에서 보급품 3D 위치를 찾아 `/arm/target_point` 발행 |
+| `vision/supply` | `src/vision/vision/supply.py` | 팔 카메라 보급품 bbox·3D 위치 발행. 기존 dolbotz 실행 경로는 호환 모듈 |
 | `drive_supply_detector` | `missions/drive_supply_detector.py` | 주행 카메라에서 보급품 접근/검출 이벤트를 판단 |
 | `summer_traffic` | `missions/summer_traffic.py` | 여름 신호등 상태를 `MissionResult`와 go/stop 신호로 발행 |
 | `spring_ifof` | `missions/spring_ifof.py` | 좌/우 카메라 피아식별 결과를 디바운싱 후 `MissionResult`와 LED 명령으로 발행 |
@@ -96,7 +96,7 @@
 | `escort_follow` | `missions/escort_follow.py` | 선도 로봇/로봇개 객체를 인식해 상대 위치, debug image, 추종 path를 발행 |
 | `led_relay` | `missions/led_relay.py` | `MissionResult`를 `roka/enemy/none` LED 문자열로 매핑 |
 | `led_bridge_node` | `missions/led_bridge_node.py` | `/led_control` 문자열을 Arduino 시리얼 포트로 전달 |
-| `arm_visualizer` | `arm_visualizer.py` | `summer_supply` debug image와 target point를 OpenCV 창으로 표시 |
+| `arm_visualizer` | `arm_visualizer.py` | `vision/supply` debug image와 target point를 OpenCV 창으로 표시 |
 
 ### 대표 launch
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ROS 2 compressed-image person detector backed by OpenVINO RF-DETR."""
+"""ROS 2 multi-camera person detector backed by OpenVINO RF-DETR."""
 
 import json
 from pathlib import Path
@@ -28,7 +28,14 @@ class PersonDetectionNode(Node):
         self.declare_parameter('model_path', default_model)
         self.declare_parameter('input_topic', '/drive/camera/color/image_raw/compressed')
         self.declare_parameter('detections_topic', '/person_detection/detections')
-        self.declare_parameter('output_topic', '/person_detection/image/compressed')
+        self.declare_parameter('output_topic', '/drive/person/detecion')
+        self.declare_parameter('left_input_topic', '/side/left/image_raw/compressed')
+        self.declare_parameter('left_detections_topic', '/left/person/detections')
+        self.declare_parameter('left_output_topic', '/left/person/detection')
+        self.declare_parameter('right_input_topic', '/side/right/image_raw/compressed')
+        self.declare_parameter('right_detections_topic', '/right/person/detections')
+        self.declare_parameter('right_output_topic', '/right/person/detection')
+        self.declare_parameter('enable_side_cameras', True)
         self.declare_parameter('confidence_threshold', 0.5)
         self.declare_parameter('device', 'CPU')
         self.declare_parameter('jpeg_quality', 90)
@@ -36,9 +43,6 @@ class PersonDetectionNode(Node):
         self.declare_parameter('cache_dir', '')
 
         get = lambda name: self.get_parameter(name).value
-        self.input_topic = str(get('input_topic'))
-        self.detections_topic = str(get('detections_topic'))
-        self.output_topic = str(get('output_topic'))
         self.jpeg_quality = int(get('jpeg_quality'))
         self.publish_visualization = bool(get('publish_visualization'))
         cache_dir = str(get('cache_dir')).strip() or None
@@ -51,40 +55,81 @@ class PersonDetectionNode(Node):
             background_class_id=-1,
             cache_dir=cache_dir,
         )
-        self.detections_pub = self.create_publisher(
-            String,
-            self.detections_topic,
-            qos_profile_sensor_data,
-        )
-        self.image_pub = self.create_publisher(
-            CompressedImage,
-            self.output_topic,
-            qos_profile_sensor_data,
-        )
-        self.subscription = self.create_subscription(
-            CompressedImage,
-            self.input_topic,
-            self.image_callback,
-            qos_profile_sensor_data,
-        )
+        camera_topics = [
+            (
+                'drive',
+                str(get('input_topic')),
+                str(get('detections_topic')),
+                str(get('output_topic')),
+            ),
+        ]
+        if bool(get('enable_side_cameras')):
+            camera_topics.extend(
+                [
+                    (
+                        'left',
+                        str(get('left_input_topic')),
+                        str(get('left_detections_topic')),
+                        str(get('left_output_topic')),
+                    ),
+                    (
+                        'right',
+                        str(get('right_input_topic')),
+                        str(get('right_detections_topic')),
+                        str(get('right_output_topic')),
+                    ),
+                ]
+            )
+
+        # Keep publisher/subscription references alive for every camera.  The
+        # default single-threaded executor also serializes access to the shared
+        # OpenVINO compiled model.
+        self.detections_pubs = {}
+        self.image_pubs = {}
+        self.subscriptions = []
+        for camera_name, input_topic, detections_topic, output_topic in camera_topics:
+            self.detections_pubs[camera_name] = self.create_publisher(
+                String,
+                detections_topic,
+                qos_profile_sensor_data,
+            )
+            self.image_pubs[camera_name] = self.create_publisher(
+                CompressedImage,
+                output_topic,
+                qos_profile_sensor_data,
+            )
+            self.subscriptions.append(
+                self.create_subscription(
+                    CompressedImage,
+                    input_topic,
+                    lambda msg, name=camera_name: self.image_callback(msg, name),
+                    qos_profile_sensor_data,
+                )
+            )
+            self.get_logger().info(
+                f'{camera_name}: input={input_topic}, detections={detections_topic}, '
+                f'bbox_image={output_topic}'
+            )
         self.get_logger().info(
-            f'RF-DETR OpenVINO ready: {get("model_path")} on {get("device")}; '
-            f'input={self.input_topic}, bbox_image={self.output_topic}'
+            f'RF-DETR OpenVINO ready: {get("model_path")} on {get("device")}'
         )
 
-    def image_callback(self, msg: CompressedImage) -> None:
+    def image_callback(self, msg: CompressedImage, camera_name: str) -> None:
         image = cv2.imdecode(np.frombuffer(msg.data, dtype=np.uint8), cv2.IMREAD_COLOR)
         if image is None:
-            self.get_logger().warning('Could not decode compressed input image.')
+            self.get_logger().warning(
+                f'[{camera_name}] Could not decode compressed input image.'
+            )
             return
 
         try:
             detections = self.detector.predict(image)
         except Exception as exc:
-            self.get_logger().error(f'OpenVINO inference failed: {exc}')
+            self.get_logger().error(f'[{camera_name}] OpenVINO inference failed: {exc}')
             return
 
         payload = {
+            'camera': camera_name,
             'stamp': {'sec': msg.header.stamp.sec, 'nanosec': msg.header.stamp.nanosec},
             'frame_id': msg.header.frame_id,
             'image_size': {'width': image.shape[1], 'height': image.shape[0]},
@@ -100,7 +145,7 @@ class PersonDetectionNode(Node):
         }
         output = String()
         output.data = json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
-        self.detections_pub.publish(output)
+        self.detections_pubs[camera_name].publish(output)
 
         if self.publish_visualization:
             for detection in detections:
@@ -121,14 +166,16 @@ class PersonDetectionNode(Node):
                 '.jpg', image, [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality]
             )
             if not success:
-                self.get_logger().warning('Could not encode bbox visualization as JPEG.')
+                self.get_logger().warning(
+                    f'[{camera_name}] Could not encode bbox visualization as JPEG.'
+                )
                 return
 
             image_msg = CompressedImage()
             image_msg.header = msg.header
             image_msg.format = 'jpeg'
             image_msg.data = encoded.tobytes()
-            self.image_pub.publish(image_msg)
+            self.image_pubs[camera_name].publish(image_msg)
 
 
 def main(args=None):

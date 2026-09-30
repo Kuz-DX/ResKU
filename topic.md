@@ -19,8 +19,10 @@
 | `fall_marker` | `/mission/fall_marker/result` | `mission_manager_interfaces/msg/MissionResult` | 가을 비전 마커 인식 결과 |
 | `escort_follow` | `/mission/escort_follow/result` | `mission_manager_interfaces/msg/MissionResult` | 선도 로봇 추종 결과 |
 | `escort_follow` | `/mission/escort_follow/debug_image/compressed` | `sensor_msgs/msg/CompressedImage` | 추종 인식 디버그 영상 |
-| `summer_supply` | `/arm/target_point` | `geometry_msgs/msg/PointStamped` | 보급품의 3차원 위치 |
-| `summer_supply` | `/arm/debug_image/compressed` | `sensor_msgs/msg/CompressedImage` | 보급품 검출 디버그 영상 |
+| `vision/supply` | `/arm/target_point` | `geometry_msgs/msg/PointStamped` | 보급품의 3차원 위치 |
+| `vision/supply` | `/arm/target_depth_m` | `std_msgs/msg/Float64` | 카메라 optical Z 거리 |
+| `vision/supply` | `/arm/supply/detections` | `vision_msgs/msg/Detection2DArray` | 로봇팔 UI용 전체 bbox |
+| `vision/supply` | `/arm/debug_image/compressed` | `sensor_msgs/msg/CompressedImage` | 보급품 검출 디버그 영상 |
 | `led_relay` | `/led_control` | `std_msgs/msg/String` | 피아식별 결과를 변환한 LED 명령 |
 | `purepursuit` | `/motor_speed_cmd` | `std_msgs/msg/Float32MultiArray` | Pure Pursuit가 계산한 좌/우 모터 속도 명령 |
 

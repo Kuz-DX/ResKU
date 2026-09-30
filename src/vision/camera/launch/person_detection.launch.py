@@ -1,4 +1,4 @@
-"""Run the OpenVINO person detector as a ROS 2 node."""
+"""Run one shared OpenVINO person detector for drive/left/right cameras."""
 
 from pathlib import Path
 
@@ -35,9 +35,40 @@ def generate_launch_description() -> LaunchDescription:
         ),
         DeclareLaunchArgument(
             "output_topic",
-            default_value="/person_detection/image/compressed",
-            description="CompressedImage output with person bounding boxes",
+            default_value="/drive/person/detecion",
+            description="Drive CompressedImage output with person bounding boxes",
         ),
+        DeclareLaunchArgument(
+            "left_input_topic",
+            default_value="/side/left/image_raw/compressed",
+            description="Left camera CompressedImage input",
+        ),
+        DeclareLaunchArgument(
+            "left_detections_topic",
+            default_value="/left/person/detections",
+            description="Left camera JSON detection result topic",
+        ),
+        DeclareLaunchArgument(
+            "left_output_topic",
+            default_value="/left/person/detection",
+            description="Left camera CompressedImage output with person bounding boxes",
+        ),
+        DeclareLaunchArgument(
+            "right_input_topic",
+            default_value="/side/right/image_raw/compressed",
+            description="Right camera CompressedImage input",
+        ),
+        DeclareLaunchArgument(
+            "right_detections_topic",
+            default_value="/right/person/detections",
+            description="Right camera JSON detection result topic",
+        ),
+        DeclareLaunchArgument(
+            "right_output_topic",
+            default_value="/right/person/detection",
+            description="Right camera CompressedImage output with person bounding boxes",
+        ),
+        DeclareLaunchArgument("enable_side_cameras", default_value="true"),
         DeclareLaunchArgument("confidence_threshold", default_value="0.5"),
         DeclareLaunchArgument("device", default_value="CPU"),
         DeclareLaunchArgument("jpeg_quality", default_value="90"),
@@ -64,6 +95,27 @@ def generate_launch_description() -> LaunchDescription:
                 ),
                 "output_topic": ParameterValue(
                     LaunchConfiguration("output_topic"), value_type=str
+                ),
+                "left_input_topic": ParameterValue(
+                    LaunchConfiguration("left_input_topic"), value_type=str
+                ),
+                "left_detections_topic": ParameterValue(
+                    LaunchConfiguration("left_detections_topic"), value_type=str
+                ),
+                "left_output_topic": ParameterValue(
+                    LaunchConfiguration("left_output_topic"), value_type=str
+                ),
+                "right_input_topic": ParameterValue(
+                    LaunchConfiguration("right_input_topic"), value_type=str
+                ),
+                "right_detections_topic": ParameterValue(
+                    LaunchConfiguration("right_detections_topic"), value_type=str
+                ),
+                "right_output_topic": ParameterValue(
+                    LaunchConfiguration("right_output_topic"), value_type=str
+                ),
+                "enable_side_cameras": ParameterValue(
+                    LaunchConfiguration("enable_side_cameras"), value_type=bool
                 ),
                 "confidence_threshold": ParameterValue(
                     LaunchConfiguration("confidence_threshold"), value_type=float
