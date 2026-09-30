@@ -26,7 +26,7 @@ class AprilTagCompressedNode(Node):
         # ============================================================
         self.declare_parameter(
             'input_topic',
-            '/camera/camera/color/image_raw/compressed'
+            '/arm/camera/color/image_raw/compressed'
         )
 
         self.declare_parameter(

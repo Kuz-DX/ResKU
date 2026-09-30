@@ -15,6 +15,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from std_msgs.msg import Bool, Int32, String
+from tool_ids import NO_TOOL_ID
 
 
 class ChangeState(str, Enum):
@@ -30,7 +31,7 @@ class ChangeState(str, Enum):
 
 class ToolChangeStateMachine(Node):
     """Coordinate UI intent without inventing a physical release completion."""
-    NONE = -1
+    NONE = NO_TOOL_ID
 
     def __init__(self):
         super().__init__('tool_change_state_machine')

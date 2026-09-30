@@ -6,7 +6,7 @@ vision_apriltag:
     input_topic: /arm/camera/color/image_raw/compressed
     camera_info_topic: /arm/camera/color/camera_info
     centers_topic: /arm/apriltag/centers
-    tag_size_cm: null             # measured physical printed side in cm
+    tag_size_cm: 2.0             # measured physical printed side in cm
 
 # Every null is a required measurement or commissioning choice. The real launch
 # runs config_validator before it opens any motor port.

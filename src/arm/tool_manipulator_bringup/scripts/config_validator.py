@@ -10,6 +10,7 @@ from pathlib import Path
 import yaml
 
 from hardware_preflight import validate as validate_hardware
+from tool_ids import NO_TOOL_ID, UNKNOWN_TOOL_ID
 
 
 def _number(value) -> bool:
@@ -60,6 +61,26 @@ def validate_tools(config: dict) -> list[str]:
     real = config.get('real_docking')
     if not isinstance(real, dict):
         return ['tools.yaml.real_docking: required map']
+    state_ids = config.get('state_ids')
+    if not isinstance(state_ids, dict):
+        errors.append('tools.yaml.state_ids: required map')
+        state_ids = {}
+    _tool_error(errors, 'tools.yaml.state_ids.no_tool',
+                state_ids.get('no_tool') == NO_TOOL_ID,
+                f'must be reserved ID {NO_TOOL_ID}')
+    _tool_error(errors, 'tools.yaml.state_ids.unknown',
+                state_ids.get('unknown') == UNKNOWN_TOOL_ID,
+                f'must be reserved ID {UNKNOWN_TOOL_ID}')
+    registered_ids = set()
+    for key in tools:
+        try:
+            registered_ids.add(int(key))
+        except (TypeError, ValueError):
+            errors.append(f'tools.yaml.tools.{key}: integer tool ID required')
+    _tool_error(errors, 'tools.yaml.tools',
+                not registered_ids.intersection((NO_TOOL_ID, UNKNOWN_TOOL_ID)),
+                'reserved NO_TOOL/UNKNOWN IDs must not be physical tools')
+
     _tool_error(errors, 'tools.yaml.real_docking.physical_detach_supported',
                 real.get('physical_detach_supported') is False,
                 'must remain false until a physical release procedure is implemented')
@@ -70,6 +91,9 @@ def validate_tools(config: dict) -> list[str]:
     elif any(not isinstance(tool_id, int) for tool_id in requested) or len(set(requested)) != len(requested):
         errors.append('tools.yaml.real_docking.enabled_tool_ids: unique integer tool IDs required')
         requested = []
+
+    if any(tool_id in (NO_TOOL_ID, UNKNOWN_TOOL_ID) for tool_id in requested):
+        errors.append('tools.yaml.real_docking.enabled_tool_ids: reserved state IDs are not tools')
 
     fixtures = config.get('fixtures')
     if not isinstance(fixtures, dict) or not fixtures:

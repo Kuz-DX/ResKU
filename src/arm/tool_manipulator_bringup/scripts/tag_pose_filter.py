@@ -13,11 +13,12 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import Image
 from std_msgs.msg import Int32, String
+from tool_ids import NO_TOOL_ID
 
 
 class TagPoseFilter(Node):
     """The vision package remains unchanged; this node owns docking admission."""
-    NONE = -1
+    NONE = NO_TOOL_ID
     def __init__(self) -> None:
         super().__init__('tag_pose_filter')
         for name, default in (

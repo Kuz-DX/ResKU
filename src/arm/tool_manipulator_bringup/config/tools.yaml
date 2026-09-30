@@ -6,13 +6,19 @@ real_docking:
   enabled_tool_ids: []  # set e.g. [0] only after that tool is completely measured
   physical_detach_supported: false  # no release motion implementation exists yet
 
+# Reserved state IDs published on /active_tool_id. They are not AprilTag IDs
+# and must not appear as keys under tools.
+state_ids:
+  no_tool: 99
+  unknown: -2
+
 # Fixed rack/fixture world collision. Each selected tool's dock_fixture must
 # reference an entry here; frame is a measured existing TF frame.
 fixtures: {}
 
 tools:
-  # Logical IDs exposed to autonomy/UI are 0/1/2. model_id preserves the
-  # existing CAD/TF numbering (tool_1/tool_2/tool_3).
+  # Logical IDs exposed to autonomy/UI are 0/1. ID 99 is the reserved
+  # NO_TOOL state. model_id preserves the existing CAD/TF numbering.
   0:
     enabled: false
     name: gripper_pinion_tool
@@ -66,41 +72,6 @@ tools:
       frame: tool_2_tcp
       parent: ee_output_link
       xyz: [0.0, 0.0600, 0.0]
-      quat_xyzw: [0.0, 0.0, 0.0, 1.0]
-    collision:
-      primitives: null
-    dock_fixture: null
-    actuator:
-      type: dynamixel
-      joint: ee_joint
-      id: 4
-      position_limits_rad: [-1.279339977097, 3.911651009108]
-    lock:
-      joint: wrist_yaw_joint
-      attach_yaw_delta_rad: null
-    docking:
-      descent_frame: null
-      descent_direction: [null, null, null]
-      descent_distance_m: null
-      descent_speed_mps: null
-      descent_timeout_sec: null
-      retreat_frame: null
-      retreat_direction: [null, null, null]
-      retreat_distance_m: null
-      retreat_speed_mps: null
-      retreat_timeout_sec: null
-
-  2:
-    enabled: false
-    name: long_phillipsbit
-    model_id: 3
-    tag_id: 2
-    coarse_joint_goal: [null, null, null, null, null, null]
-    mass_kg: 0.050
-    tcp:
-      frame: tool_3_tcp
-      parent: ee_output_link
-      xyz: [0.0, 0.0508, 0.0]
       quat_xyzw: [0.0, 0.0, 0.0, 1.0]
     collision:
       primitives: null

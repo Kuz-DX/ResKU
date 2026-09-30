@@ -1,7 +1,7 @@
 tool_dock_tcp_sim:
   ros__parameters:
-    # UI receives Int32 tool_id.  ID 2 is the taught upper-centre of tool dock 2,
-    # docking fixture bore, expressed in the world-aligned arm reference.
+    # UI receives Int32 tool_id. Physical targets may use only tool IDs 0 or 1;
+    # ID 99 is the reserved NO_TOOL state and never has a target pose.
     tool_id_topic: /selected_tool_id
     planning_group: arm
     base_link: base_actuator

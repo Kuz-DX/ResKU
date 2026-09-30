@@ -2,6 +2,14 @@
 
 실기 팔 제어와 **attach-only** AprilTag tool docking 패키지다. 실제 실행 순서와 Jetson/로컬 토픽 표는 저장소 루트의 [`howtorun.md`](../../../../howtorun.md) `Tool Manipulator — 실기 제어·툴 교체 실행 절차`를 따른다.
 
+논리 ID 규약은 다음과 같다.
+
+| ID | 의미 |
+| ---: | --- |
+| `0` | gripper (`gripper_pinion_tool`, AprilTag 0) |
+| `1` | drill (`long_drillbit`, AprilTag 1) |
+| `99` | `NO_TOOL`; 물리 도구/AprilTag가 아닌 비장착 상태 |
+
 - URDF `world`는 차량 IMU 중심이며, `arm_world`는 IMU/world 기준 `(0.1921, 0, 0.235)` m offset이며 지면 기준 높이는 `0.350` m이다. 차체, 회로박스, 대칭 tool case는 fixed visual/collision links로 표시된다.
 - `config/hardware.yaml`: U2D2 TTL/RS-485와 RMD CAN, 모든 관절 영점·리밋·register 설정의 단일 원본
 - `config/tools.yaml`: tool/fixture collision, TCP, tag, 접근·yaw·직선 motion 설정의 단일 원본
@@ -13,7 +21,7 @@
 
 도킹은 `yaw trajectory 성공 → /wrist_yaw_rotation_complete → configured retreat 성공 → /docking_complete → scene attach` 순서다. yaw 성공은 물리 체결이나 scene 부착 검증이 아니다. 별도 체결 센서는 현재 사용하지 않는다.
 
-물리 detach/unlock 절차는 아직 구현되지 않았다. `Dock.mode=1`과 scene detach service는 명시적으로 거부되며 성공으로 보고하지 않는다. 재시작·도킹 실패 뒤 tool 상태가 불명확하면 scene manager는 `UNKNOWN`으로 시작/전환하며, 실물이 비어 있음을 확인한 운영자만 `~/operator_confirm_empty`로 복구할 수 있다.
+물리 detach/unlock 절차는 아직 구현되지 않았다. `Dock.mode=1`과 scene detach service는 명시적으로 거부되며 성공으로 보고하지 않는다. 재시작·도킹 실패 뒤 tool 상태가 불명확하면 scene manager는 `UNKNOWN=-2`로 시작/전환하며, 실물이 비어 있음을 확인한 운영자만 `~/operator_confirm_empty`로 `NO_TOOL=99` 상태로 복구할 수 있다.
 
 ## 수동 관절값 캡처 (RMD 리밋 측정)
 
@@ -31,10 +39,8 @@ ros2 launch rmd_joint_state_bridge joint_state_bridge.launch.py
 source /opt/ros/humble/setup.bash
 source ~/ResKU/install/setup.bash
 ros2 run tool_manipulator_bringup capture_arm_pose.py
-```
 
-영점과 소프트 리밋을 함께 기록할 때는 보정된 rad와 모터 raw 값을 동시에
-출력하는 다음 노드를 사용한다.
+raw 값 출력
 
 ```bash
 source /opt/ros/humble/setup.bash
@@ -80,6 +86,9 @@ ros2 run tool_manipulator_bringup move_to_named_pose.py <pose> [options]
 현재 기본 SRDF pose는 `stand`, `home`, `tagid0_cw`, `tagid0_ccw`, `tagid0_unlock`,
 `tagid0_lock_step1`, `tagid0_lock_step2`, `tagid0_lock`, `tagid1`, `dock_pre_cw`,
 `dock_pre_ccw`, `dock_wait1`, `dock_wait2`, `dock_wait3`이다. 빌드 후 다음 순서로 실행한다.
+
+자율 tool/tag ID 계약은 `0 = gripper`, `1 = drill` 두 개뿐이다. ID 2 이상은
+비전 출력과 도킹 요청에서 허용하지 않으며, `99`는 물리 tag가 아닌 NO_TOOL 상태다.
 
 ```bash
 cd ~/ResKU
@@ -140,16 +149,117 @@ ros2 run tool_manipulator_bringup move_to_named_pose.py home \
 실행하지 않는다.
 
 
-매뉴얼 매니퓰
+## 조이스틱 TCP 수동 구동
 
-# 터미널 1  (local)
+`tcp_joy_teleop.py`는 조이스틱 입력을 `base_actuator` 기준 TCP 직선 속도로
+변환한다. 각 관절을 직접 조작하지 않으며 TCP 회전과 `ee_joint` 제어도 하지 않는다.
+기본 속도는 `0.03 m/s`이고, **L1 버튼을 누르고 있는 동안만** 움직인다.
 
-ros2 launch tool_manipulator_bringup remote_joy.launch.py
+실기에서는 `rmd_joint_state_bridge`를 먼저 종료하고 CAN/U2D2를 다른 프로세스가
+사용하지 않는지 확인한다. `tcp_joy_teleop.launch.py`를 두 번 실행하거나
+`real_control.launch.py`를 별도로 동시에 실행하면 controller와 하드웨어 포트가
+충돌하므로 금지한다. 실기 launch는 `hardware.yaml`의 필수 안전값이 비어 있으면
+모터를 시작하기 전에 의도적으로 종료된다.
 
-# 터미널 2 (jecs)
+### 원격 조이스틱으로 실기 구동
 
-ros2 launch tool_manipulator_bringup tcp_joy_teleop.launch.py launch_joy:=false
+두 PC에서 `ROS_DOMAIN_ID`를 동일하게 설정하고 외부 통신을 허용한다. 숫자 `0`은
+예시이므로 현장 네트워크에서 사용하는 값으로 맞춘다.
 
-오른쪽 스틱 상하: TCP X
-오른쪽 스틱 좌우: TCP Y
-왼쪽 스틱 상하: TCP Z
+```bash
+export ROS_DOMAIN_ID=0
+export ROS_LOCALHOST_ONLY=0
+source /opt/ros/humble/setup.bash
+source ~/ResKU/install/setup.bash
+```
+
+조이스틱이 연결된 원격 PC에서 `/joy`를 발행한다.
+
+```bash
+ros2 launch tool_manipulator_bringup remote_joy.launch.py joy_dev:=/dev/input/js0
+
+# 다른 터미널에서 버튼과 축 번호 확인
+ros2 topic echo /joy
+```
+
+로봇 PC에서 CAN과 U2D2 장치를 먼저 확인한다. 이미 `can_arm`이 정상적으로 올라와
+있다면 재설정하지 않아도 된다.
+
+```bash
+ip -details link show can_arm
+ls -l /dev/ttyUSB0
+
+# can_arm이 아직 설정되지 않았을 때만 실행
+sudo ip link set can_arm down
+sudo ip link set can_arm type can bitrate 1000000
+sudo ip link set can_arm up
+```
+
+> **현재 설정 상태:** `hardware.yaml`의 Dynamixel current/velocity/profile 값과
+> RMD velocity/current 보호값 일부가 아직 `null`이다. 따라서 현재 소스 그대로는
+> 실기 launch가 안전 preflight에서 중단된다. 각 모터 사양과 실측값으로 채우기 전에는
+> 검사를 우회하거나 임의의 값을 넣지 않는다.
+
+현재 누락된 필드만 확인하려면 다음 읽기 전용 검사기를 실행한다. 모든 필수 필드와
+현재값까지 보려면 `--show-values`를 붙인다. 이 명령은 모터와 통신하지 않는다.
+
+```bash
+ros2 run tool_manipulator_bringup check_hardware_config.py
+ros2 run tool_manipulator_bringup check_hardware_config.py --show-values
+```
+
+로봇 PC에서는 실기 controller, MoveIt, Servo와 TCP teleop을 한 번에 실행한다.
+
+```bash
+ros2 launch tool_manipulator_bringup tcp_joy_teleop.launch.py \
+  real_hardware:=true \
+  launch_joy:=false
+```
+
+다른 로봇 PC 터미널에서 controller 상태를 확인한 후 Servo를 시작한다.
+
+```bash
+ros2 control list_controllers
+# arm_controller와 joint_state_broadcaster가 active인지 확인
+
+ros2 service call /servo_node/start_servo std_srvs/srv/Trigger "{}"
+```
+
+원격 PC의 `/joy`가 로봇 PC에서 보이지 않으면 팔을 움직이지 말고 두 PC의
+`ROS_DOMAIN_ID`, `ROS_LOCALHOST_ONLY`, 같은 네트워크 연결과 방화벽을 먼저 확인한다.
+
+### 조작 방법
+
+축 번호는 현재 Logitech 계열 매핑 기준이다. 패드 종류에 따라 달라질 수 있으므로
+반드시 `/joy` 출력과 아래 매핑을 비교한다.
+
+| 조작 | 동작 |
+| --- | --- |
+| L1 계속 누름 (`button 4`) | 데드맨 활성화 |
+| 오른쪽 스틱 상하 (`axis 4`, 기본 반전) | TCP X 이동 |
+| 오른쪽 스틱 좌우 (`axis 3`) | TCP Y 이동 |
+| 왼쪽 스틱 상하 (`axis 1`) | TCP Z 이동 |
+
+L1을 놓거나 `/joy`가 `0.25초` 이상 끊기면 zero Twist를 발행한다. 수동 구동은
+TCP 직선 이동만 지원하므로 wrist 회전이나 그리퍼 개폐는 별도 명령이 필요하다.
+처음에는 장애물과 특이점에서 충분히 떨어진 자세에서 짧게 시험한다.
+
+종료할 때는 L1을 놓고 Servo를 먼저 정지한 다음 각 launch를 `Ctrl-C`로 종료한다.
+
+```bash
+ros2 service call /servo_node/stop_servo std_srvs/srv/Trigger "{}"
+```
+
+### 한 PC에서 mock 구동
+
+실기 없이 확인할 때만 기본 mock 모드를 사용한다. 이 모드는 실제 모터를 구동하지 않는다.
+
+```bash
+ros2 launch tool_manipulator_bringup tcp_joy_teleop.launch.py \
+  real_hardware:=false \
+  launch_joy:=true \
+  joy_dev:=/dev/input/js0
+
+# 다른 터미널에서 실행
+ros2 service call /servo_node/start_servo std_srvs/srv/Trigger "{}"
+```

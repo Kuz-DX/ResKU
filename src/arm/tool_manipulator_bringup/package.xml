@@ -12,6 +12,8 @@
   <exec_depend>tool_manipulator_design_moveit_config</exec_depend>
   <exec_depend>joint_state_publisher_gui</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>python3-tk</exec_depend>
+  <exec_depend>dynamixel_sdk</exec_depend>
   <exec_depend>moveit_configs_utils</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
@@ -19,6 +21,7 @@
   <exec_depend>action_msgs</exec_depend>
   <exec_depend>control_msgs</exec_depend>
   <exec_depend>std_msgs</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
   <exec_depend>python3-serial</exec_depend>
   <exec_depend>visualization_msgs</exec_depend>
   <exec_depend>tf2_ros</exec_depend>

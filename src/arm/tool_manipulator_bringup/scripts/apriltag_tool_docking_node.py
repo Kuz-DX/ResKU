@@ -20,6 +20,7 @@ from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, Int32, String
 from std_srvs.srv import SetBool, Trigger
+from tool_ids import NO_TOOL_ID
 
 
 class DockState(Enum):
@@ -40,7 +41,7 @@ class DockState(Enum):
 
 class AprilTagToolDocking(Node):
     """Plan once in joint space, then close the last few cm with MoveIt Servo."""
-    NONE = -1
+    NONE = NO_TOOL_ID
 
     def __init__(self):
         super().__init__('apriltag_tool_docking')
@@ -211,6 +212,11 @@ class AprilTagToolDocking(Node):
             self.get_logger().warning('Ignoring non-integer tool String: %r' % msg.data)
 
     def _start_request(self, tag_id):
+        if tag_id == self.NONE:
+            if self.state == DockState.IDLE:
+                self._publish_status('idle:no_tool_selected')
+            return
+
         if self.state != DockState.IDLE:
             self.get_logger().warning('Docking request ignored: controller is busy, docked, or awaiting operator recovery')
             return

@@ -11,11 +11,12 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from shape_msgs.msg import SolidPrimitive
 from std_msgs.msg import Bool, Int32, String
+from tool_ids import NO_TOOL_ID
 
 
 class ToolAttachmentManager(Node):
     """The UI selects a tool; only physical confirmation changes collisions."""
-    NONE = -1
+    NONE = NO_TOOL_ID
 
     def __init__(self):
         super().__init__('tool_attachment_manager')

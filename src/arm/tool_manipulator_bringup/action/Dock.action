@@ -1,4 +1,6 @@
 # mode: 0 = attach, 1 = detach
+# tool_id: 0 = gripper, 1 = drill. 99 is reserved for NO_TOOL state and is
+# not a valid attach target.
 int32 tool_id
 uint8 mode
 ---

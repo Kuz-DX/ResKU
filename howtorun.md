@@ -199,10 +199,24 @@ candump can_drive
 sudo ip link set can_arm type can bitrate 1000000
 sudo ip link set up can_arm
 ip -details link show can_arm
-#
-# 현재 tool_manipulator URDF 기반 TCP joystick + MoveIt Servo mock 실행.
-# 로컬 PC의 remote_joy.launch.py가 /joy를 발행할 때 launch_joy:=false로 중복을 막는다.
-ros2 launch tool_manipulator_bringup tcp_joy_teleop.launch.py launch_joy:=false
+### 매니퓰레이터 원격 조이스틱 수동 구동
+
+# 두 PC에서 동일한 ROS_DOMAIN_ID와 ROS_LOCALHOST_ONLY=0을 설정한다.
+# 원격 PC: 물리 조이스틱의 /joy 발행
+ros2 launch tool_manipulator_bringup remote_joy.launch.py joy_dev:=/dev/input/js0
+
+# 로봇 PC: real_control + MoveIt Servo + TCP teleop
+# real_control.launch.py를 별도로 동시에 실행하지 않는다.
+ros2 launch tool_manipulator_bringup tcp_joy_teleop.launch.py \
+  real_hardware:=true \
+  launch_joy:=false
+
+# 로봇 PC의 다른 터미널: controller active 확인 후 Servo 시작
+ros2 control list_controllers
+ros2 service call /servo_node/start_servo std_srvs/srv/Trigger "{}"
+
+# L1(button 4)을 누르는 동안만 이동한다. 상세 축 매핑과 종료 절차는
+# src/arm/tool_manipulator_bringup/README.md의 조이스틱 TCP 수동 구동 절을 따른다.
 
 ### 실기 팔 RViz 미러링 (실측 각도/엔코더, 읽기 전용 - tool_manipulator_description)
 # ~/arm_config/rmd_joint_state_bridge.py(외부 스크립트)와 동일한 역할을 하는
@@ -509,7 +523,7 @@ tool case 1과 case 2(+Y)·case 3(-Y)는 모두 `arm_world`에서 world Y축 기
 
 `/wrist_yaw_rotation_complete`는 **yaw 궤적 성공만** 뜻한다. 체결 센서 검증이나 Planning Scene 부착 완료가 아니다. 이 설계는 별도 `/engagement_ok` 센서 판단을 사용하지 않으므로 실제 물리 체결을 독립적으로 보증하지 않는다.
 
-회전 실패·timeout, tag/depth/filter 실패, 하강/후퇴 값 미설정, 후퇴 실패, cancel, hardware fault에서는 이후 이동과 두 완료 토픽을 모두 발행하지 않고 hold한다. 실패 중 fixture 안에 들어간 뒤에는 자동 후퇴 fallback도 하지 않는다. 통신/stale/limit fault는 모션 금지 hold이며, scene 갱신 실패 또는 물리 상태 불명은 `active_tool_id=-1 (UNKNOWN)`으로 격리한다. 실물이 비어 있음이 확인된 경우만 다음 service로 `0 (NONE)`으로 복구한다.
+회전 실패·timeout, tag/depth/filter 실패, 하강/후퇴 값 미설정, 후퇴 실패, cancel, hardware fault에서는 이후 이동과 두 완료 토픽을 모두 발행하지 않고 hold한다. 실패 중 fixture 안에 들어간 뒤에는 자동 후퇴 fallback도 하지 않는다. 통신/stale/limit fault는 모션 금지 hold이며, scene 갱신 실패 또는 물리 상태 불명은 `active_tool_id=-2 (UNKNOWN)`으로 격리한다. 실물이 비어 있음이 확인된 경우만 다음 service로 `99 (NO_TOOL)`로 복구한다.
 
 ```bash
 ros2 service call /tool_scene_manager/operator_confirm_empty std_srvs/srv/Trigger "{}"

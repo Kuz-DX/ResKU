@@ -1,0 +1,64 @@
+version: 1
+
+# Captured joint solutions are replayed as joint-space waypoints. They are
+# already IK solutions; no Cartesian pose was captured from which to solve IK
+# again. Every waypoint includes arm_controller's six joints plus ee_joint.
+joint_names:
+  [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint,
+   wrist_roll_joint, wrist_yaw_joint, ee_joint]
+
+sequences:
+  supplybox_delivery:
+    description: Semi-automatic supply-box grasp and handover path
+    max_joint_speed_rad_s: 0.20
+    min_segment_duration_sec: 1.0
+    start_tolerance_rad: 0.08
+    stages:
+      - {name: home_to_grasp_wait, label: "2. Home -> Grasp Wait", start_index: 1, end_index: 8}
+      - {name: grasp, label: "3. Grasp", start_index: 9, end_index: 11}
+      - {name: grasp_to_home, label: "4. Grasp -> Home", start_index: 12, end_index: 16}
+    waypoints:
+      - {name: home_start, positions_rad: [-0.021476, 1.535890, 1.541649, -1.655619, -0.078233, -0.073631, 5.744758]}
+      - {name: outbound_01, positions_rad: [-0.021476, 1.245991, 1.523323, -1.330639, -0.076699, -0.130388, 5.746292]}
+      - {name: outbound_02, positions_rad: [-0.308330, 0.667414, 1.217018, -1.137606, -0.085903, 0.062893, 5.744758]}
+      - {name: outbound_03, positions_rad: [-2.221204, 0.877028, 0.904604, -1.547583, -0.085903, 0.118117, 5.744758]}
+      - {name: outbound_04, positions_rad: [-2.587826, 0.828857, 1.108982, -1.608670, -0.073631, -0.078233, 5.744758]}
+      - {name: outbound_05, positions_rad: [-2.661457, 0.742812, 1.051386, -1.630312, -0.081301, -0.084369, 5.747826]}
+      - {name: open_01, positions_rad: [-2.661457, 0.731467, 1.075297, -1.643402, -0.079767, -0.081301, 4.715457]}
+      - {name: open_02, positions_rad: [-2.661457, 0.741765, 1.092576, -1.643402, -0.081301, -0.081301, 3.802738]}
+      - {name: grasp_wait, positions_rad: [-2.662991, 0.283616, 0.943350, -1.647242, -0.081301, -0.225495, 3.810408]}
+      - {name: close_01, positions_rad: [-2.661457, 0.307003, 0.968483, -1.647765, -0.088971, -0.204019, 5.141904]}
+      - {name: close_02, positions_rad: [-2.661457, 0.339816, 0.983144, -1.646195, -0.090505, -0.478602, 5.470175]}
+      - {name: grasp, positions_rad: [-2.661457, 0.349415, 0.993092, -1.643926, -0.088971, -0.472466, 5.465574]}
+      - {name: return_01, positions_rad: [-2.662991, 0.355174, 0.730246, -1.655096, -0.079767, -0.477068, 5.468642]}
+      - {name: return_02, positions_rad: [-1.938952, 0.455880, 0.773704, -1.644449, -0.078233, -0.616660, 5.543807]}
+      - {name: return_03, positions_rad: [-0.960272, 0.773181, 0.953473, -1.644100, -0.079767, -0.125786, 5.540739]}
+      - {name: return_04, positions_rad: [-0.116583, 0.936718, 1.021367, -1.648463, -0.087437, -0.176408, 5.539205]}
+      - {name: home_finish, positions_rad: [-0.024544, 1.526814, 1.503776, -1.656143, -0.090505, -0.142660, 5.537671]}
+
+  tagid0_gripper:
+    tool_id: 0
+    tag_id: 0
+    description: Taught gripper docking, lock, pull, and retreat path
+    max_joint_speed_rad_s: 0.25
+    min_segment_duration_sec: 1.0
+    start_tolerance_rad: 0.08
+    waypoints:
+      - {name: start, positions_rad: [-0.124252, 1.492955, 1.550376, -1.649336, -0.082835, -0.038350, 0.038350]}
+      - {name: approach_01, positions_rad: [-0.124252, 0.992743, 1.319992, -1.472883, -0.082835, -0.038350, 0.036816]}
+      - {name: approach_02, positions_rad: [0.544563, 0.839329, 1.322087, -1.335700, -0.082835, -0.038350, 0.038350]}
+      - {name: approach_03, positions_rad: [1.862253, 0.804073, 1.362229, -1.337620, -0.082835, -0.432583, 0.038350]}
+      - {name: approach_04, positions_rad: [2.454369, 0.787493, 1.495398, -1.602212, 0.179476, -0.971010, 0.038350]}
+      - {name: approach_05, positions_rad: [2.454369, 0.654848, 1.547234, -1.506045, 0.188680, -1.144350, 0.038350]}
+      - {name: approach_06, positions_rad: [2.287165, 0.473159, 1.555961, -1.419825, 0.536893, -1.081456, 0.035282]}
+      - {name: pre_lock, positions_rad: [2.287165, 0.437729, 1.559975, -1.405339, 0.590583, -1.069185, -0.098175]}
+      - {name: lock, positions_rad: [2.287165, 0.430049, 1.555437, -1.405339, 0.590583, -1.082990, -0.101243]}
+      - {name: extract_01, positions_rad: [2.287165, 0.451168, 1.562419, -1.403943, 0.590583, -0.598253, 0.513884]}
+      - {name: extract_02, positions_rad: [2.287165, 0.449771, 1.562768, -1.410575, 0.590583, 0.605922, 1.523243]}
+      - {name: pull, positions_rad: [2.285631, 0.448201, 1.562593, -1.410401, 0.590583, 0.602854, 1.521709]}
+      - {name: retreat_01, positions_rad: [2.287165, 0.552746, 1.562244, -1.435184, 0.582913, 0.595185, 1.521709]}
+      - {name: retreat_02, positions_rad: [2.287165, 0.712792, 1.561023, -1.487370, 0.581379, 0.585981, 1.521709]}
+      - {name: retreat_03, positions_rad: [2.287165, 1.265189, 1.549678, -1.260826, -0.075165, 0.039884, 1.520175]}
+      - {name: return_01, positions_rad: [0.731709, 0.966912, 1.227316, -1.054353, -0.079767, 0.030680, 1.520175]}
+      - {name: return_02, positions_rad: [0.023010, 0.995012, 1.172861, -1.088911, -0.078233, 0.024544, 1.520175]}
+      - {name: finish, positions_rad: [0.023010, 1.521753, 1.142318, -1.653001, -0.076699, 0.015340, 1.520175]}

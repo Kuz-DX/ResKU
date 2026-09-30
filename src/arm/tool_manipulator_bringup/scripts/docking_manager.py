@@ -18,6 +18,7 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from std_msgs.msg import Bool, Int32, String
 from tool_manipulator_bringup.action import Dock
+from tool_ids import NO_TOOL_ID, UNKNOWN_TOOL_ID
 
 
 class State(str, Enum):
@@ -33,7 +34,7 @@ class State(str, Enum):
 class DockingManager(Node):
     """Single owner of external docking requests; motion executor stays separate."""
     ATTACH, DETACH = 0, 1
-    NONE, UNKNOWN = -1, -2
+    NONE, UNKNOWN = NO_TOOL_ID, UNKNOWN_TOOL_ID
 
     def __init__(self) -> None:
         super().__init__('docking_manager')
@@ -131,7 +132,8 @@ class DockingManager(Node):
         self.active_tool_id = int(msg.data)
         if self.active_tool_id == self.UNKNOWN:
             self._set(State.UNKNOWN, 'tool_state_unknown_recovery_required')
-        elif self.active_tool_id >= 0 and self.requested_tool_id == self.active_tool_id:
+        elif (self.active_tool_id not in (self.NONE, self.UNKNOWN) and
+              self.requested_tool_id == self.active_tool_id):
             self._set(State.ATTACHED, 'scene_attached_after_physical_lock')
         elif self.active_tool_id == self.NONE and self.state == State.UNKNOWN:
             self._set(State.IDLE, 'operator_confirmed_empty')

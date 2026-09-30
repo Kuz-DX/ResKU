@@ -17,12 +17,13 @@ from shape_msgs.msg import SolidPrimitive
 from std_msgs.msg import Bool, Int32, String
 from std_srvs.srv import Trigger
 from tf2_ros import TransformBroadcaster
+from tool_ids import NO_TOOL_ID, UNKNOWN_TOOL_ID
 
 
 class ToolSceneManager(Node):
     """Scene changes follow confirmed physical state; restart begins UNKNOWN."""
-    NONE = -1
-    UNKNOWN = -2
+    NONE = NO_TOOL_ID
+    UNKNOWN = UNKNOWN_TOOL_ID
 
     def __init__(self) -> None:
         super().__init__('tool_scene_manager')
@@ -266,7 +267,7 @@ class ToolSceneManager(Node):
         self._publish_active_tcp_tf()
 
     def _publish_active_tcp_tf(self) -> None:
-        if self.active_tool_id < 0:
+        if self.active_tool_id in (self.NONE, self.UNKNOWN):
             return
         spec = self.tools.get(self.active_tool_id, {})
         tcp = dict(spec.get('tcp', {}))
