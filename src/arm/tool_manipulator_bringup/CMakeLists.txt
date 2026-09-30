@@ -18,6 +18,7 @@ install(PROGRAMS
   scripts/tool_dock_tcp_sim_node.py
   scripts/capture_arm_pose.py
   scripts/capture_rmd_calibration.py
+  scripts/move_to_named_pose.py
   scripts/docking_motion_recorder.py
   scripts/hardware_preflight.py
   scripts/config_validator.py
