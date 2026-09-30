@@ -137,3 +137,18 @@ ros2 run tool_manipulator_bringup move_to_named_pose.py home \
 확인한다. 실기 제어가 기동되어 있고 리밋·전류·통신 preflight를 통과한 경우에만
 실제 이동 명령을 사용한다. `rmd_joint_state_bridge` 또는 수동 캡처 노드와 동시에
 실행하지 않는다.
+
+
+매뉴얼 매니퓰
+
+# 터미널 1  (local)
+
+ros2 launch tool_manipulator_bringup remote_joy.launch.py
+
+# 터미널 2 (jecs)
+
+ros2 launch tool_manipulator_bringup tcp_joy_teleop.launch.py launch_joy:=false
+
+오른쪽 스틱 상하: TCP X
+오른쪽 스틱 좌우: TCP Y
+왼쪽 스틱 상하: TCP Z
