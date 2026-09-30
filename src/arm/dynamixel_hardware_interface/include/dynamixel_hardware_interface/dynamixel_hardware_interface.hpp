@@ -191,6 +191,8 @@ private:
   rclcpp::Duration write_error_duration_{0, 0};
   bool is_read_in_error_{false};
   bool is_write_in_error_{false};
+  bool use_individual_feedback_read_{false};
+  std::string mixed_channel_command_mode_{"sync_write"};
   bool hardware_fault_latched_{false};
   bool hardware_fault_published_{false};
   double position_limit_rejection_margin_{0.0872665};
@@ -208,6 +210,7 @@ private:
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr hardware_fault_pub_;
 
   void latchHardwareFault(const std::string & reason, bool stop_bus = true);
+  DxlError readFeedback(double period_ms);
 
   static double wrapToPi(double angle);
 

@@ -1,0 +1,12 @@
+# mode: 0 = attach, 1 = detach
+int32 tool_id
+uint8 mode
+---
+bool success
+int32 active_tool_id
+string final_state
+string reason
+---
+string state
+int32 active_tool_id
+string detail

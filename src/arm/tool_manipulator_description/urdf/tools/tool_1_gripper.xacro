@@ -26,14 +26,11 @@
     <link name="${prefix}tool_1_geometry_link"/>
 
 
-    <!-- ========== gripper_actuator -> pinion_gear (revolute, "피니언 구동") ==========-->
-    <joint name="${prefix}gripper_joint" type="revolute">
-      <parent link="${prefix}tool_1_geometry_link"/>
-      <child  link="${prefix}pinion_gear"/>
-      <origin xyz="0 0 0" rpy="0 ${pi/2} 0"/>
-      <axis xyz="0 0 1"/>
-      <limit lower="${tool_1_gripper_limit_lower}" upper="${tool_1_gripper_limit_upper}" effort="8.4" velocity="3.665"/>
-      <dynamics damping="0.05" friction="0.01"/>
+    <!-- ========== ee_joint output -> pinion_gear (revolute, "피니언 구동") ==========-->
+    <joint name="pinion_gear_mount_joint" type="fixed">
+      <parent link="tool_1_geometry_link"/>
+      <child link="pinion_gear"/>
+      <origin xyz="0 0 0" rpy="0 -e 0"/>
     </joint>
 
 
@@ -79,12 +76,12 @@
       <origin xyz="-0.016 0.018 0.062" rpy="${pi} 0 ${pi}"/>
       <axis xyz="0 0 1"/>
       <limit lower="0" upper="0.030" effort="8.4" velocity="0.1"/>
-      <!-- 피니언 각속도 -> 랙 선속도 변환: v = omega * pinion_pitch_radius.
+      <!-- ee_joint 각속도 -> 랙 선속도 변환: v = omega * pinion_pitch_radius.
            [수정] rack_right와 부호를 통일했다 - 두 rack의 로컬 Z(슬라이드축)가
            서로 반대(rack_left=-Z, rack_right=+Z)이므로, mimic multiplier
            부호까지 반대로 주면 world 기준으로는 오히려 같은 방향으로 움직여
            버린다(실기에서 "한 몸으로 움직인다"고 확인된 원인). -->
-      <mimic joint="${prefix}gripper_joint" multiplier="${pinion_pitch_radius}" offset="0"/>
+      <mimic joint="ee_joint" multiplier="${pinion_pitch_radius}" offset="0"/>
     </joint>
 
     <link name="${prefix}rack_left">
@@ -129,7 +126,7 @@
       <origin xyz="-0.016 -0.018 -0.062" rpy="0 0 0"/>
       <axis xyz="0 0 1"/>
       <limit lower="0" upper="0.030" effort="8.4" velocity="0.1"/>
-      <mimic joint="${prefix}gripper_joint" multiplier="${pinion_pitch_radius}" offset="0"/>
+      <mimic joint="ee_joint" multiplier="${pinion_pitch_radius}" offset="0"/>
     </joint>
 
     <link name="${prefix}rack_right">

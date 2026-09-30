@@ -260,6 +260,8 @@ public:
 
   // Read Item (sync or bulk)
   DxlError ReadMultiDxlData(double period_ms);
+  // U2D2 mixed TTL/RS-485: unicast feedback avoids simultaneous status replies.
+  DxlError ReadDxlDataIndividually();
   // Write Item (sync or bulk)
   DxlError WriteMultiDxlData();
 

@@ -68,7 +68,7 @@ public:
     declare_parameter<int>("shoulder_actuator_id", 4);
     declare_parameter<int>("elbow_actuator_id", 5);
     declare_parameter<int>("wrist_actuator_id", 6);
-    declare_parameter<std::string>("rmd_wrist_joint_name", "wrist_joint");
+    declare_parameter<std::string>("rmd_wrist_joint_name", "wrist_pitch_joint");
     // army_manipulator_ros2_control.xacro의 shoulder_sign/elbow_sign/wrist_sign,
     // shoulder_q_offset/elbow_q_offset/wrist_q_offset과 동일한 이름/기본값 -
     // 실기 캘리브레이션 값을 그대로 재사용하면 됨.

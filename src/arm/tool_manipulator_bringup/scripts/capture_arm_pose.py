@@ -8,7 +8,11 @@ creates a JSON file.
 """
 
 import argparse
+import json
+import sys
 import threading
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Dict, Optional
 
 import rclpy
@@ -17,8 +21,8 @@ from rclpy.node import Node
 from sensor_msgs.msg import JointState
 
 
-# Keep this list synchronized with tool_manipulator.urdf.xacro. gripper_joint
-# is an optional tool Dynamixel: the read-only bridge publishes it when its ID
+# Keep this list synchronized with tool_manipulator.urdf.xacro. ee_joint
+# is the common optional tool Dynamixel: the read-only bridge publishes it when its ID
 # responds, and null otherwise.
 EXPECTED_JOINTS = (
     "base_joint",
@@ -27,9 +31,9 @@ EXPECTED_JOINTS = (
     "wrist_pitch_joint",
     "wrist_roll_joint",
     "wrist_yaw_joint",
-    "gripper_joint",
+    "ee_joint",
 )
-DYNAMIXEL_JOINTS = ("base_joint", "wrist_yaw_joint", "gripper_joint")
+DYNAMIXEL_JOINTS = ("base_joint", "wrist_yaw_joint", "ee_joint")
 
 
 class PoseCapture(Node):
@@ -43,7 +47,7 @@ class PoseCapture(Node):
         # A bridge can publish a partial state when an individual CAN/TTL
         # actuator is disconnected. Missing expected joints become null later.
         self.positions = {
-            name: float(position)
+            ("ee_joint" if name == "gripper_joint" else name): float(position)
             for name, position in zip(message.name, message.position)
         }
         self.stamp = {
@@ -95,10 +99,9 @@ def main() -> int:
             "joint_state_stamp": node.stamp,
             "joint_state_received": node.positions is not None,
             "joint_positions_rad": joint_positions,
-            # Preserve every source value as well.  This makes a live
+            # Preserve every source value as well. This makes a live
             # controller/URDF naming mismatch visible instead of discarding a
-            # measurement (the current read-only bridge still publishes its
-            # RMD wrist as wrist_joint).
+            # measurement; the bridge default matches wrist_pitch_joint.
             "observed_joint_positions_rad": received_positions,
             "dynamixel_joint_names": list(DYNAMIXEL_JOINTS),
             "missing_joint_names": missing,

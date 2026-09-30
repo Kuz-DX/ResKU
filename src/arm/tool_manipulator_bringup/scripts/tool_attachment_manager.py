@@ -22,7 +22,7 @@ class ToolAttachmentManager(Node):
             ('tools_config_file', ''), ('tool_id_topic', '/selected_tool_id'),
             ('docking_complete_topic', '/docking_complete'),
             ('release_complete_topic', '/tool_release_complete'),
-            ('attach_link', 'tcp_link'),
+            ('attach_link', 'ee_output_link'),
             ('apply_planning_scene_service', '/apply_planning_scene'),
         ):
             self.declare_parameter(name, default)

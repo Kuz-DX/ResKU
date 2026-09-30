@@ -47,7 +47,7 @@ ros2 run dolbotz arm_pickup --ros-args \
 
 ```bash
 source /opt/ros/humble/setup.bash
-cd /home/j/dolbotZ/src/dolbotz
+cd /home/shu/ResKU/src/dolbotz
 python3 -m pytest test/ -v
 ```
 
