@@ -8,8 +8,8 @@ bridge 출력의 rad는 bridge 자체 영점을 사용하므로 현재 `hardware
 관절값으로 복사하면 안 된다. 기존 `poses.yaml`의 named_poses는 이 출력값을
 담고 있어 현재 보정 기준으로 재검증이 필요하다.
 
-작업공간 루트에서 다음 명령은 장치를 열거나 이동 명령을 보내지 않고
-현재 보정값으로 변환한 7축 값과 raw/rad 한계 초과 항목을 출력한다:
+아래 경로 예시는 모두 작업공간 루트에서 실행한다. 다음 명령은 장치를 열거나
+이동 명령을 보내지 않고 현재 보정값으로 변환한 7축 값과 raw/rad 한계 초과 항목을 출력한다:
 
 ```bash
 python3 src/arm/tool_change_min/scripts/convert_raw_poses.py
@@ -24,9 +24,9 @@ EE raw `305`, `281`도 허용 범위 `[459, 3843]` 밖이다. 오류 시 종료�
 확인된 raw 기록으로 갱신한 후 적용 후보 파일 생성:
 
 ```bash
-source /opt/ros/humble/setup.bash
+source ../../../opt/ros/humble/setup.bash
 python3 src/arm/tool_change_min/scripts/convert_raw_poses.py \
-  --output /tmp/tool_change_poses_candidate.yaml
+  --output ./tool_change_poses_candidate.yaml
 ```
 
 검사 통과 시 6축 named_poses와 도킹 raw 기반 FK 목표를 생성한다. 기존 파일은
@@ -95,11 +95,11 @@ URDF의 0 rad 자세에 맞춘다. 임의의 도킹 자세를 영점으로 저�
 아래 보정기는 ROS의 소프트웨어 영점을 저장하며 모터 EEPROM 영점은 쓰지 않는다.
 세 축을 동시에 맞추기 어려우면 `--joints`에 한 축만 지정해 차례로 수행한다.
 
-각 터미널 공통 환경 (`${HOME}/ResKU`는 현재 사용자의 `~/ResKU` 작업공간):
+각 터미널 공통 환경 (작업공간 루트에서 실행):
 
 ```bash
-source /opt/ros/humble/setup.bash
-source ${HOME}/ResKU/install/setup.bash
+source ../../../opt/ros/humble/setup.bash
+source install/setup.bash
 ```
 
 `ModuleNotFoundError: No module named 'rmd_sdk'`가 발생하면 위 환경 설정을
@@ -112,8 +112,8 @@ python3 -c 'from rmd_sdk import rmd_sdk_py; print(rmd_sdk_py.__file__)'
 계속 실패하면 구동 PC에서 설치 파일과 기존 CMake 설정을 확인한다:
 
 ```bash
-find "${HOME}/ResKU/install" -name '*rmd_sdk*' -print
-grep '^PYTHON_BINDINGS:' "${HOME}/ResKU/build/rmd_sdk/CMakeCache.txt"
+find install -name '*rmd_sdk*' -print
+grep '^PYTHON_BINDINGS:' build/rmd_sdk/CMakeCache.txt
 ```
 
 `rmd_sdk`는 C++ SDK와 Python 확장 모듈을 제공한다. C++ 라이브러리만
@@ -126,22 +126,22 @@ grep '^PYTHON_BINDINGS:' "${HOME}/ResKU/build/rmd_sdk/CMakeCache.txt"
 보정 터미널 A — 읽기 전용 raw bridge (운영 컨트롤러와 동시 실행 금지):
 
 ```bash
-python3 ${HOME}/ResKU/src/arm/rmd_joint_state_bridge/scripts/joint_state_bridge_node.py
+python3 src/arm/rmd_joint_state_bridge/scripts/joint_state_bridge_node.py
 ```
 
 보정 터미널 B — RMD 3축만 미리보기:
 
 ```bash
-python3 ${HOME}/ResKU/src/arm/tool_manipulator_bringup/scripts/set_current_zero.py \
-  --config ${HOME}/ResKU/src/arm/tool_manipulator_bringup/config/hardware.yaml \
+python3 src/arm/tool_manipulator_bringup/scripts/set_current_zero.py \
+  --config src/arm/tool_manipulator_bringup/config/hardware.yaml \
   --joints shoulder_joint elbow_joint wrist_pitch_joint
 ```
 
 값을 확인한 뒤 같은 자세에서 저장:
 
 ```bash
-python3 ${HOME}/ResKU/src/arm/tool_manipulator_bringup/scripts/set_current_zero.py \
-  --config ${HOME}/ResKU/src/arm/tool_manipulator_bringup/config/hardware.yaml \
+python3 src/arm/tool_manipulator_bringup/scripts/set_current_zero.py \
+  --config src/arm/tool_manipulator_bringup/config/hardware.yaml \
   --joints shoulder_joint elbow_joint wrist_pitch_joint --apply
 ```
 
@@ -188,7 +188,7 @@ T_base_target = T_base_tag × T_tag_target
 다른 터미널에서 아래 명령을 실행하고 정지 자세에서 Enter를 눌러 기록한다:
 
 ```bash
-python3 ${HOME}/ResKU/src/arm/tool_manipulator_bringup/scripts/capture_arm_raw.py
+python3 src/arm/tool_manipulator_bringup/scripts/capture_arm_raw.py
 ```
 
 출력 중 `raw_pulse`와 `raw_deg`를 보관한다. bridge의 이전 보정 기준 `rad`는
@@ -213,7 +213,7 @@ IK 간격은 2 mm/0.02 rad, 관절 한계 여유는 0.01 rad,
 먼저 동일한 실기 PC에서 ROS 환경을 source한 뒤, 모터 명령 없는 준비 검사를 실행한다:
 
 ```bash
-python3 ${HOME}/ResKU/src/arm/tool_change_min/scripts/check_real_readiness.py
+python3 src/arm/tool_change_min/scripts/check_real_readiness.py
 ```
 
 이 검사는 설치된 노드·생성 서비스, 선택 단계의 티칭값, 장치 경로, 카메라 TF
@@ -233,7 +233,7 @@ python3 ${HOME}/ResKU/src/arm/tool_change_min/scripts/check_real_readiness.py
 
 ```bash
 ros2 launch tool_manipulator_bringup real_control.launch.py \
-  hardware_config:=${HOME}/ResKU/src/arm/tool_manipulator_bringup/config/hardware.yaml
+  hardware_config:=src/arm/tool_manipulator_bringup/config/hardware.yaml
 ```
 
 이 단계는 실기 하드웨어를 활성화한다. 보정·리밋 확인을 끝낸 뒤 실행한다.
@@ -250,8 +250,8 @@ ros2 launch vision cameras.launch.py
 ### 터미널 3 — 카메라 장착 TF (보정 파일 활성화 후)
 
 ```bash
-python3 ${HOME}/ResKU/src/arm/tool_manipulator_bringup/scripts/arm_camera_extrinsics_broadcaster.py \
-  --ros-args --params-file ${HOME}/ResKU/src/arm/tool_manipulator_bringup/config/arm_camera_extrinsics.yaml
+python3 src/arm/tool_manipulator_bringup/scripts/arm_camera_extrinsics_broadcaster.py \
+  --ros-args --params-file src/arm/tool_manipulator_bringup/config/arm_camera_extrinsics.yaml
 ```
 
 기존 노드가 이미 `cam_link → arm_camera_link`를 발행한다면 중복 실행하지 않는다.
@@ -277,23 +277,23 @@ supply는 공급상자 인식 노드이며 모델 파일과 카메라·TF가 필
 
 ```bash
 ros2 run tool_change_min ik_node.py --ros-args \
-  -p poses_yaml:=${HOME}/ResKU/src/arm/tool_change_min/config/poses.yaml \
-  -p hardware_yaml:=${HOME}/ResKU/src/arm/tool_manipulator_bringup/config/hardware.yaml
+  -p poses_yaml:=src/arm/tool_change_min/config/poses.yaml \
+  -p hardware_yaml:=src/arm/tool_manipulator_bringup/config/hardware.yaml
 ```
 
 ### 터미널 7 — 궤적 실행기
 
 ```bash
 ros2 run tool_change_min motion_executor.py --ros-args \
-  -p poses_yaml:=${HOME}/ResKU/src/arm/tool_change_min/config/poses.yaml \
-  -p hardware_yaml:=${HOME}/ResKU/src/arm/tool_manipulator_bringup/config/hardware.yaml
+  -p poses_yaml:=src/arm/tool_change_min/config/poses.yaml \
+  -p hardware_yaml:=src/arm/tool_manipulator_bringup/config/hardware.yaml
 ```
 
 ### 터미널 8 — 장착 FSM
 
 ```bash
 ros2 run tool_change_min tool_change_fsm.py --ros-args \
-  -p poses_yaml:=${HOME}/ResKU/src/arm/tool_change_min/config/poses.yaml
+  -p poses_yaml:=src/arm/tool_change_min/config/poses.yaml
 ```
 
 처음에는 `development.stop_after_state: home`을 유지한다.
@@ -342,7 +342,7 @@ ros2 topic echo /tool_change/status
 ```bash
 ros2 run tool_change_min measure_apriltag_docking.py --ros-args \
   -p tag_id:=1 -p tag_size_m:=0.02 -p sample_count:=100 \
-  -p output_csv:=${HOME}/ResKU/tag1_target_offset.csv \
+  -p output_csv:=./tag1_target_offset.csv \
   -p base_frame:=base_actuator -p target_frame:=tcp_link
 ```
 
@@ -352,9 +352,9 @@ ros2 run tool_change_min measure_apriltag_docking.py --ros-args \
 통합 launch로 대체한다. 카메라, AprilTag(2 cm), supply, IK, 실행기, FSM을 포함한다:
 
 ```bash
-ros2 launch ${HOME}/ResKU/src/arm/tool_change_min/launch/tool1_attach.launch.py \
-  poses_yaml:=${HOME}/ResKU/src/arm/tool_change_min/config/poses.yaml \
-  hardware_yaml:=${HOME}/ResKU/src/arm/tool_manipulator_bringup/config/hardware.yaml
+ros2 launch src/arm/tool_change_min/launch/tool1_attach.launch.py \
+  poses_yaml:=src/arm/tool_change_min/config/poses.yaml \
+  hardware_yaml:=src/arm/tool_manipulator_bringup/config/hardware.yaml
 ```
 
 소스 launch를 지정해도 노드 실행 파일은 설치 트리에서 찾는다.
@@ -425,7 +425,7 @@ IK 노드는 현재 `/joint_states` 전체를 읽어 여러 점으로 된 Cartes
    노드를 실행합니다.
 
    ```bash
-   ros2 launch tool_change_min tool1_attach.launch.py poses_yaml:=/secure/poses_mock.yaml
+    ros2 launch tool_change_min tool1_attach.launch.py poses_yaml:=./poses_mock.yaml
    ```
 
 3. 도구 1 장착을 요청하고 `/tool_change/status`가 아래 순서대로 바뀌는지
@@ -457,7 +457,7 @@ IK 노드는 현재 `/joint_states` 전체를 읽어 여러 점으로 된 Cartes
       -p tag_id:=1 \
       -p tag_size_m:=<실측한-검은-정사각형-한변-m> \
       -p sample_count:=<승인한-프레임수> \
-      -p output_csv:=/절대경로/tag1_stationary.csv
+      -p output_csv:=./tag1_stationary.csv
 
 프레임별 CSV와 `tag1_stationary.summary.json`이 생성됩니다. 요약 파일에는
 기존 검출기의 XYZ와 보정 코너·CameraInfo 왜곡계수로 다시 푼 PnP XYZ의 비교,
@@ -472,7 +472,7 @@ IK 노드는 현재 `/joint_states` 전체를 읽어 여러 점으로 된 Cartes
       -p tag_id:=1 \
       -p tag_size_m:=<실측한-검은-정사각형-한변-m> \
       -p sample_count:=<승인한-프레임수> \
-      -p output_csv:=/절대경로/tag1_target_offset.csv \
+      -p output_csv:=./tag1_target_offset.csv \
       -p base_frame:=base_actuator \
       -p target_frame:=tcp_link
 

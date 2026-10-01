@@ -9,8 +9,9 @@
 # been entered.  The zero values are placeholders, not calibrated geometry.
 arm_camera_extrinsics:
   ros__parameters:
-    enabled: false
+    enabled: True
     parent_frame: cam_link
     child_frame: arm_camera_link
-    translation_xyz: [0.0, 0.0, 0.0]
-    rotation_rpy: [0.0, 0.0, 0.0]
+    translation_xyz: [0.02075, 0.0325, 0.0]
+    rotation_rpy: [-1.57079632679, 0.0, -1.57079632679]
+   
