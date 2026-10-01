@@ -1,6 +1,6 @@
 ## Person Detection 비전 모델
 
-주행/좌/우 카메라의 압축 컬러 영상을 `vision/models/person.pt` YOLO 모델
+주행/좌/우/로봇팔 카메라의 압축 컬러 영상을 `vision/models/person.pt` YOLO 모델
 하나로 순차 추론한다. 모델의 학습 클래스 `pedestrian`은 출력 JSON에서 기존
 인터페이스와 같은 `person`으로 발행된다.
 사람 bbox가 그려진 `sensor_msgs/msg/CompressedImage` 출력은 다음과 같다.
@@ -8,9 +8,11 @@
 - `/drive/person/detecion`
 - `/left/person/detection`
 - `/right/person/detection`
+- `/arm/person/detection`
 
 입력은 각각 `/drive/camera/color/image_raw/compressed`,
-`/side/left/image_raw/compressed`, `/side/right/image_raw/compressed`이다.
+`/side/left/image_raw/compressed`, `/side/right/image_raw/compressed`,
+`/arm/camera/color/image_raw/compressed`이다. 카메라 노드는 별도로 실행해야 한다.
 
 ```bash
 source /home/shu/ResKU/install/setup.bash
@@ -21,12 +23,17 @@ ros2 launch vision person_detection.launch.py
 예를 들어 `device:=0 infer_size:=320`을 launch 인자로 전달한다.
 
 JSON 검출 결과는 drive의 기존 `/person_detection/detections`와 side cam의
-`/left/person/detections`, `/right/person/detections`로 발행된다. bbox 이미지가
+`/left/person/detections`, `/right/person/detections`, 로봇팔의
+`/arm/person/detections`로 발행된다. 로봇팔 결과의 JSON `camera` 값은 `arm`이다. bbox 이미지가
 필요 없고 JSON 발행 주기를 우선할 때는 `publish_visualization:=false`로 실행한다.
 
 ```bash
 ros2 launch vision person_detection.launch.py publish_visualization:=false
 ```
+
+로봇팔 카메라 추론은 기본 활성화되며, `enable_arm_camera:=false`로 끌 수 있다.
+입력과 출력 토픽은 `arm_input_topic`, `arm_detections_topic`, `arm_output_topic`
+launch 인자로 변경할 수 있다. 좌우 카메라 옵션 `enable_side_cameras`와는 독립적이다.
 
 ## Supply box 인식
 

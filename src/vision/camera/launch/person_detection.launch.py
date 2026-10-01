@@ -1,4 +1,4 @@
-"""Run one shared YOLO person detector for drive/left/right cameras."""
+"""Run one shared YOLO person detector for drive/left/right/arm cameras."""
 
 from pathlib import Path
 
@@ -71,6 +71,22 @@ def generate_launch_description() -> LaunchDescription:
             description="Right camera CompressedImage output with person bounding boxes",
         ),
         DeclareLaunchArgument("enable_side_cameras", default_value="true"),
+        DeclareLaunchArgument(
+            "arm_input_topic",
+            default_value="/arm/camera/color/image_raw/compressed",
+            description="Arm camera CompressedImage input",
+        ),
+        DeclareLaunchArgument(
+            "arm_detections_topic",
+            default_value="/arm/person/detections",
+            description="Arm camera JSON detection result topic",
+        ),
+        DeclareLaunchArgument(
+            "arm_output_topic",
+            default_value="/arm/person/detection",
+            description="Arm camera CompressedImage output with person bounding boxes",
+        ),
+        DeclareLaunchArgument("enable_arm_camera", default_value="true"),
         DeclareLaunchArgument("confidence_threshold", default_value="0.5"),
         DeclareLaunchArgument("infer_size", default_value="640"),
         DeclareLaunchArgument("device", default_value="cpu"),
@@ -118,6 +134,18 @@ def generate_launch_description() -> LaunchDescription:
                 ),
                 "enable_side_cameras": ParameterValue(
                     LaunchConfiguration("enable_side_cameras"), value_type=bool
+                ),
+                "arm_input_topic": ParameterValue(
+                    LaunchConfiguration("arm_input_topic"), value_type=str
+                ),
+                "arm_detections_topic": ParameterValue(
+                    LaunchConfiguration("arm_detections_topic"), value_type=str
+                ),
+                "arm_output_topic": ParameterValue(
+                    LaunchConfiguration("arm_output_topic"), value_type=str
+                ),
+                "enable_arm_camera": ParameterValue(
+                    LaunchConfiguration("enable_arm_camera"), value_type=bool
                 ),
                 "confidence_threshold": ParameterValue(
                     LaunchConfiguration("confidence_threshold"), value_type=float
