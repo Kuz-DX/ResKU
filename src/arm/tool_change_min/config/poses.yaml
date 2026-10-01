@@ -1,0 +1,48 @@
+# All values below require an operator measurement or an approved timing value.
+# The nodes require only the values needed through development.stop_after_state.
+# Start by teaching HOME, then advance one state at a time.  Use "done" only
+# after every state has been measured and reviewed.
+development:
+  stop_after_state: home
+feedback:
+  # /joint_states receive-age upper bound; set from the approved publisher rate.
+  joint_state_max_age_s: 0.5
+joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
+named_poses:
+  home: {base_joint: null, shoulder_joint: null, elbow_joint: null, wrist_pitch_joint: null, wrist_roll_joint: null, wrist_yaw_joint: null}
+  docking_wait: {base_joint: null, shoulder_joint: null, elbow_joint: null, wrist_pitch_joint: null, wrist_roll_joint: null, wrist_yaw_joint: null}
+  tool0_pre: {base_joint: null, shoulder_joint: null, elbow_joint: null, wrist_pitch_joint: null, wrist_roll_joint: null, wrist_yaw_joint: null}
+  tool1_pre: {base_joint: null, shoulder_joint: null, elbow_joint: null, wrist_pitch_joint: null, wrist_roll_joint: null, wrist_yaw_joint: null}
+  tool_lock: {wrist_yaw_joint: null, delta_rad: null}
+  supply_pre: {base_joint: null, shoulder_joint: null, elbow_joint: null, wrist_pitch_joint: null, wrist_roll_joint: null, wrist_yaw_joint: null}
+  supply_grasp: {base_joint: null, shoulder_joint: null, elbow_joint: null, wrist_pitch_joint: null, wrist_roll_joint: null, wrist_yaw_joint: null}
+  stand: {base_joint: 0, shoulder_joint: 0, elbow_joint: 0, wrist_pitch_joint: 0, wrist_roll_joint: 0, wrist_yaw_joint: 0}
+cartesian_targets:
+  # Fixed tool-1 target expressed in base_actuator, not a teach joint pose.
+  tool1_target:
+    frame_id: base_actuator
+    position_m: [null, null, null]
+    orientation_xyzw: [null, null, null, null]
+motion:
+  # CCW in the ROS wrist_yaw_joint convention: +90 degrees.
+  yaw_delta_rad: 1.5707963267948966
+  # 현재 FSM은 insert.speed_m_s만 사용한다 (0.005 m/s = 5 mm/s).
+  # 삽입 거리는 현재 TCP에서 tool1_target까지 계산하며 distance_m은 예약 필드다.
+  insert: {distance_m: null, speed_m_s: 0.005}
+  # 현재 FSM에서 retreat 두 필드는 미사용. null은 이동거리 0을 뜻하지 않는다.
+  # 복귀는 docking_wait 이름 자세로 named_pose_duration_s 동안 이동한다.
+  retreat: {distance_m: null, speed_m_s: 0.005}
+  named_pose_duration_s: 60.0
+  lock_duration_s: 30.0
+  # Maximum spacing used to choose Cartesian position/orientation IK waypoints.
+  ik_step_m: 0.002
+  ik_orientation_step_rad: 0.02
+  ik_limit_margin_rad: 0.01
+timeouts_s:
+  home: 120.0
+  docking_wait: 120.0
+  tool1_pre: 120.0
+  tool1_target: 180.0
+  lock: 90.0
+  return_docking_wait: 120.0
+  return_home: 120.0

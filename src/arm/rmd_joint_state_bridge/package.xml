@@ -14,11 +14,12 @@
   <maintainer email="shu@example.com">shu</maintainer>
   <license>MIT</license>
 
-  <buildtool_depend>ament_cmake_ros</buildtool_depend>
+  <buildtool_depend>ament_cmake</buildtool_depend>
 
-  <depend>rclcpp</depend>
+  <depend>rclpy</depend>
   <depend>rmd_sdk</depend>
   <depend>dynamixel_sdk</depend>
+  <exec_depend>python3-serial</exec_depend>
   <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>
 

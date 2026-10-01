@@ -6,7 +6,7 @@ vision_apriltag:
     input_topic: /arm/camera/color/image_raw/compressed
     camera_info_topic: /arm/camera/color/camera_info
     centers_topic: /arm/apriltag/centers
-    tag_size_cm: 2.0             # measured physical printed side in cm
+    tag_size_cm: 2.0             # tag is 2 cm x 2 cm; this is one side length
     allowed_tag_ids: [0, 1]      # 0=gripper, 1=drill; ignore every tag ID >= 2
 
 # Every null is a required measurement or commissioning choice. The real launch
@@ -71,6 +71,10 @@ docking_motion_executor:
     # tag-1 lock must not be accepted on action success alone.
     lock_feedback_min_delta_rad: 1.2
     lock_feedback_timeout_sec: 1.0
+    # Measured stop criterion after cancel/fault. A state change is not accepted
+    # as a stopped arm until fresh joint feedback satisfies this threshold.
+    cancel_stop_timeout_sec: null
+    stopped_velocity_rad_s: null
     hardware_fault_topic: /control/hardware_fault
     attachment_timeout_sec: null
     post_lock_motion_timeout_sec: null

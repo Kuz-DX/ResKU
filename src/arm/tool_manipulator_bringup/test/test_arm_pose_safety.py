@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from arm_pose_safety import pose_errors, validate_joint_positions  # noqa: E402
+from arm_pose_safety import joints_stopped, pose_errors, validate_joint_positions  # noqa: E402
 
 
 class ArmPoseSafetyTest(unittest.TestCase):
@@ -30,6 +30,11 @@ class ArmPoseSafetyTest(unittest.TestCase):
             pose_errors({"a": 0.1, "b": -0.2}, {"a": 0.4, "b": 0.0}, ("a", "b")),
             {"a": 0.30000000000000004, "b": 0.2},
         )
+
+    def test_joints_stopped_requires_all_finite_velocities_below_threshold(self):
+        self.assertTrue(joints_stopped({"a": 0.01, "b": -0.02}, ("a", "b"), 0.02))
+        self.assertFalse(joints_stopped({"a": 0.01}, ("a", "b"), 0.02))
+        self.assertFalse(joints_stopped({"a": 0.03, "b": 0.0}, ("a", "b"), 0.02))
 
 
 if __name__ == "__main__":

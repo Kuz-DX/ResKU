@@ -1,0 +1,7 @@
+# Fixed target pose expressed in base_actuator; orientation is required for 6-DOF IK.
+geometry_msgs/PoseStamped target_pose
+---
+bool success
+string[] joint_names
+float64[] positions
+string message

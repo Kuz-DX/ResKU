@@ -1,5 +1,22 @@
 # Tool-manipulator control TODO
 
+## 실행 순서
+
+1. **[구현 완료 · 실측값 대기] cancel/fault의 실제 trajectory 취소와 정지 확인**
+   - executor는 활성 `FollowJointTrajectory`를 `MoveIt2.cancel_execution()`으로 취소한다.
+   - 취소 action의 종료와 최신 6축 velocity가 설정 threshold 아래임을 확인할 때까지
+     `hold:..._unconfirmed` 상태를 유지한다.
+   - `docking.yaml`의 `cancel_stop_timeout_sec`, `stopped_velocity_rad_s`는 실측 후 입력한다.
+2. **[다음] tool 2 collision/TCP 일치**: `ee_output_link` 기준 tool 2 TCP의 +Y 60 mm offset을
+   attached collision에 반영하고 RViz/실물 치수로 검증한다.
+3. **[다음] active tool TCP를 MoveIt/Servo의 실제 EE frame으로 전환**: `/active_tool_tcp` 단순
+   상태 토픽이 아니라 planning/Servo가 사용하는 TCP가 되게 한다.
+4. **[다음] fixed 10초 대기 제거**: controller, MoveGroup, Servo, scene service, camera, 최신
+   joint state를 모두 확인하는 readiness gate를 만든다.
+5. **[다음] arm command ownership**: 도킹 중 teleop·recorded replay·다른 trajectory goal을 거부한다.
+6. **[다음] FK/TF 기반 tag 목표점과 실측 vision gate를 설정한다.**
+7. **[다음] planning 속도/가속도 제한을 hardware.yaml과 일치시키고 phase timeout을 실측한다.**
+
 ## 현재 구현됨
 
 - `hardware.yaml` + `tools.yaml` + `docking.yaml` 통합 fail-closed 사전검사. `null`, placeholder, 비활성 selected tool, 빈 fixture, 누락 tag/pose/collision/yaw/descent/retreat/mission pose, tag/depth/servo gate를 모두 launch 전에 보고한다.

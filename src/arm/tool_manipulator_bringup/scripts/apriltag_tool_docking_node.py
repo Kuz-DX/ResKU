@@ -21,6 +21,7 @@ from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, Int32, String
 from std_srvs.srv import SetBool, Trigger
+from arm_pose_safety import joints_stopped
 from tool_ids import NO_TOOL_ID
 
 
@@ -58,7 +59,14 @@ class AprilTagToolDocking(Node):
         self.phase_started = self._now_sec()
         self.last_detection_time = None
         self.joint_positions = {}
+        self.joint_velocities = {}
         self.joint_state_sequence = 0
+        self.joint_state_received_at = 0.0
+        self.joint_state_event = threading.Event()
+        self.motion_lock = threading.Lock()
+        self.trajectory_active = False
+        self.trajectory_finished = threading.Event()
+        self.trajectory_finished.set()
         # Latched feedback from tool_scene_manager.  No retreat with a
         # newly attached physical tool is allowed until its collision object is live.
         self.active_tool_id = self.NONE
@@ -146,6 +154,8 @@ class AprilTagToolDocking(Node):
         # yaw direction before publishing the lock-complete event.
         p('lock_feedback_min_delta_rad', -1.0)
         p('lock_feedback_timeout_sec', -1.0)
+        p('cancel_stop_timeout_sec', -1.0)
+        p('stopped_velocity_rad_s', -1.0)
         p('attachment_timeout_sec', -1.0)
         p('post_lock_motion_timeout_sec', -1.0)
         # A planned joint trajectory gives a completion-confirmed yaw rotation.
@@ -157,6 +167,7 @@ class AprilTagToolDocking(Node):
         positive = ('servo_rate_hz', 'coarse_timeout_sec', 'xy_align_timeout_sec',
                     'detection_timeout_sec', 'lock_timeout_sec',
                     'lock_feedback_min_delta_rad', 'lock_feedback_timeout_sec',
+                    'cancel_stop_timeout_sec', 'stopped_velocity_rad_s',
                     'attachment_timeout_sec', 'post_lock_motion_timeout_sec')
         if any(not isinstance(self.get_parameter(name).value, (int, float)) or
                self.get_parameter(name).value <= 0.0 for name in positive):
@@ -256,18 +267,16 @@ class AprilTagToolDocking(Node):
             # docking_wait is the shared rack-facing joint posture. It is kept
             # separate from the tag goal so every UI request begins identically.
             self._publish_status('coarse_moving:docking_wait')
-            self.moveit2.move_to_configuration(
+            wait_result = self._execute_joint_goal(
                 list(self.get_parameter('docking_wait_joint_goal').value))
-            wait_result = self.moveit2.wait_until_executed()
             if wait_result is False:
                 raise RuntimeError('docking_wait action returned failure')
             if self.state != DockState.COARSE_MOVING or self.target_tag_id != tag_id:
                 return
             self._publish_status(f'coarse_moving:tool_{tag_id}')
-            self.moveit2.move_to_configuration(self.goals[tag_id])
             # pymoveit2 waits for the FollowJointTrajectory action result here;
             # transition only after it reports completion (or raises on failure).
-            result = self.moveit2.wait_until_executed()
+            result = self._execute_joint_goal(self.goals[tag_id])
             success = result is not False
         except Exception as exc:  # Planning/action failures are returned to a safe state.
             self.get_logger().error(f'Coarse move or docking_wait failed: {exc}')
@@ -345,7 +354,10 @@ class AprilTagToolDocking(Node):
 
     def _joint_state_cb(self, msg):
         self.joint_positions.update(zip(msg.name, msg.position))
+        self.joint_velocities.update(zip(msg.name, msg.velocity))
         self.joint_state_sequence += 1
+        self.joint_state_received_at = time.monotonic()
+        self.joint_state_event.set()
 
     def _active_tool_cb(self, msg):
         self.active_tool_id = int(msg.data)
@@ -495,8 +507,7 @@ class AprilTagToolDocking(Node):
                     return
                 prefix = 'lock_rotating' if self.operation == 'attach' else 'unlock_rotating'
                 self._publish_status(f'{prefix}:{step_name}')
-                self.moveit2.move_to_configuration(goal)
-                if self.moveit2.wait_until_executed() is False:
+                if self._execute_joint_goal(goal) is False:
                     success = False
                     break
         except Exception as exc:
@@ -576,14 +587,12 @@ class AprilTagToolDocking(Node):
     def _post_lock_worker(self, tag_id, operation='attach'):
         try:
             # Planning begins only after the newly attached collision object is live.
-            self.moveit2.move_to_configuration(self.goals[tag_id])
-            if self.moveit2.wait_until_executed() is False:
+            if self._execute_joint_goal(self.goals[tag_id]) is False:
                 raise RuntimeError('tag retreat execution failed')
             if self.state != DockState.RETREATING:
                 return
             self._enter(DockState.RETURNING_TO_WAIT)
-            self.moveit2.move_to_configuration(list(self.get_parameter('docking_wait_joint_goal').value))
-            if self.moveit2.wait_until_executed() is False:
+            if self._execute_joint_goal(list(self.get_parameter('docking_wait_joint_goal').value)) is False:
                 raise RuntimeError('docking_wait return execution failed')
             if self.state != DockState.RETURNING_TO_WAIT:
                 return
@@ -592,8 +601,7 @@ class AprilTagToolDocking(Node):
                 self._finish_post_motion(operation, 'mission_wait_pose_unconfigured')
                 return
             self._enter(DockState.MISSION_WAIT)
-            self.moveit2.move_to_configuration(mission_goal)
-            if self.moveit2.wait_until_executed() is False:
+            if self._execute_joint_goal(mission_goal) is False:
                 raise RuntimeError('mission_wait execution failed')
             if self.state == DockState.MISSION_WAIT:
                 self._finish_post_motion(operation, 'mission_wait')
@@ -609,6 +617,39 @@ class AprilTagToolDocking(Node):
         else:
             self._enter(DockState.DOCKED)
             self._publish_status(f'ready:{detail}')
+
+    def _execute_joint_goal(self, goal):
+        """Track one trajectory so cancel/fault can stop the real goal."""
+        with self.motion_lock:
+            self.trajectory_active = True
+            self.trajectory_finished.clear()
+        try:
+            self.moveit2.move_to_configuration(goal)
+            return self.moveit2.wait_until_executed()
+        finally:
+            with self.motion_lock:
+                self.trajectory_active = False
+                self.trajectory_finished.set()
+
+    def _confirm_motion_stopped_after_cancel(self, had_trajectory, cancel_accepted):
+        """Require a terminal action and fresh stopped joint feedback after HOLD."""
+        timeout = float(self.get_parameter('cancel_stop_timeout_sec').value)
+        if had_trajectory and not self.trajectory_finished.wait(timeout=timeout):
+            self._publish_status('hold:trajectory_cancel_unconfirmed')
+            return
+        deadline = time.monotonic() + timeout
+        threshold = float(self.get_parameter('stopped_velocity_rad_s').value)
+        joint_names = list(self.get_parameter('joint_names').value)
+        while time.monotonic() <= deadline:
+            if (time.monotonic() - self.joint_state_received_at <= timeout and
+                    joints_stopped(self.joint_velocities, joint_names, threshold)):
+                status = ('hold:trajectory_cancelled_and_stopped'
+                          if had_trajectory and cancel_accepted else 'hold:servo_stopped')
+                self._publish_status(status)
+                return
+            self.joint_state_event.wait(timeout=0.02)
+            self.joint_state_event.clear()
+        self._publish_status('hold:joint_stop_unconfirmed')
 
     def _publish_twist(self, linear, angular, frame=None):
         msg = TwistStamped()
@@ -628,11 +669,21 @@ class AprilTagToolDocking(Node):
         self.get_logger().info(f'Docking state -> {state.name}')
 
     def _terminal_failure(self, reason):
+        if self.state == DockState.CANCELLED_HOLD:
+            return
         self._set_servo_enabled(False)
         self._stop_servo()
+        with self.motion_lock:
+            had_trajectory = self.trajectory_active
+        # State changes do not stop an active FollowJointTrajectory.  Cancel
+        # the tracked MoveIt execution explicitly, then verify it settles.
+        cancel_accepted = self.moveit2.cancel_execution() if had_trajectory else False
         self.get_logger().error(f'Docking aborted: {reason}')
         self._publish_status(f'failed:{reason}')
         self.state, self.target_tag_id, self.operation = DockState.CANCELLED_HOLD, None, None
+        threading.Thread(
+            target=self._confirm_motion_stopped_after_cancel,
+            args=(had_trajectory, cancel_accepted), daemon=True).start()
 
     def _fail(self, reason):
         # There is deliberately no automatic recovery retreat after failure:

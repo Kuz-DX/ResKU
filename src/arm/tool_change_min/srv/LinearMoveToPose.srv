@@ -1,0 +1,8 @@
+# Target is expressed in base_actuator. Position follows a Cartesian straight
+# line; orientation follows the shortest SO(3) interpolation to the target.
+geometry_msgs/PoseStamped target_pose
+float64 speed_m_s
+---
+bool success
+trajectory_msgs/JointTrajectory trajectory
+string message

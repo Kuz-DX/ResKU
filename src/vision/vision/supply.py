@@ -40,18 +40,7 @@ except ImportError:
     # 발행은 이 값과 무관하게 항상 정상 동작.
     _VISION_MSGS_OK = False
 
-# [2026-08-30] RF-DETR/YOLO 비교 끝나고 yolo(supplyboxv3.pt)로 확정 -
-# RF-DETR 코드/모델(supplybox_v2.pt)과 detector_backend 선택 로직 제거.
-# [2026-09-03] supplyboxv3.pt(FP32, PyTorch)를 OpenVINO INT8로 교체 -
-# spring_ifof.py/fall_marker.py에 적용한 것과 동일 절차/근거
-# (config/models/README.md 참고). 캘리브레이션/검증 데이터는 팀원 컴퓨터의
-# 원본 학습셋(supplybox-combined) 대신 Roboflow supplybox-l57zm project
-# version 2(전용 다운로드 스크립트: /home/j/vision_marker/supplybox/
-# supplybox.py, 833장 중 단일클래스 'supplybox' - supplyboxv3.pt와 일치)로
-# 대체 사용 - 원본과 완전히 같은 셋은 아니지만 같은 도메인 재현.
-# valid 158장 검증: mAP50 0.99053->0.98789, mAP50-95 0.97792->0.95347,
-# recall 1.00000->0.99363(거의 유지) - 추론시간은 15.42ms->2.43ms(약 6.3배).
-# 이전 FP32로 되돌리려면 아래 주석 처리된 줄로 바꿀 것.
+
 _DEFAULT_MODEL_FILE = 'supplyboxv3_int8_openvino_model'
 # _DEFAULT_MODEL_FILE = 'supplyboxv3.pt'
 

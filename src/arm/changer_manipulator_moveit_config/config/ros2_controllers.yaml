@@ -1,0 +1,13 @@
+# Verified controller action and six-axis order.  This package is external to
+# tool_change_min's exact-five-node launcher.
+controller_manager:
+  ros__parameters:
+    update_rate: 100
+    joint_state_broadcaster: {type: joint_state_broadcaster/JointStateBroadcaster}
+    arm_controller: {type: joint_trajectory_controller/JointTrajectoryController}
+arm_controller:
+  ros__parameters:
+    joints: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
+    command_interfaces: [position]
+    state_interfaces: [position, velocity]
+    allow_partial_joints_goal: false

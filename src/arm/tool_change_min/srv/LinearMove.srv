@@ -1,0 +1,8 @@
+# Direction is expressed in base_actuator.  The initial TCP orientation is held.
+geometry_msgs/Vector3 direction_base
+float64 distance_m
+float64 speed_m_s
+---
+bool success
+trajectory_msgs/JointTrajectory trajectory
+string message

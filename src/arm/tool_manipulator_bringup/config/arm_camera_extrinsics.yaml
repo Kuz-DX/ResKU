@@ -1,0 +1,16 @@
+# The one authoritative rigid transform from the arm URDF camera bracket to
+# the RealSense body frame.  Do not duplicate this transform in supply or
+# AprilTag launches: both consume the resulting TF tree.
+#
+# Calibration target (parent <- child):
+#   cam_link <- arm_camera_link
+#
+# Leave this disabled until the measured xyz [m] and rpy [rad] values have
+# been entered.  The zero values are placeholders, not calibrated geometry.
+arm_camera_extrinsics:
+  ros__parameters:
+    enabled: false
+    parent_frame: cam_link
+    child_frame: arm_camera_link
+    translation_xyz: [0.0, 0.0, 0.0]
+    rotation_rpy: [0.0, 0.0, 0.0]

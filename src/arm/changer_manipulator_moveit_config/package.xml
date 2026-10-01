@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>changer_manipulator_moveit_config</name>
+  <version>0.1.0</version>
+  <description>Controller configuration namespace for the minimal changer arm.</description>
+  <maintainer email="shu@example.invalid">shu</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <exec_depend>tool_manipulator_description</exec_depend>
+  <exec_depend>joint_trajectory_controller</exec_depend>
+  <exec_depend>joint_state_broadcaster</exec_depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>
