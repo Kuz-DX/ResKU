@@ -16,7 +16,13 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/RotateWristYaw.srv"
   DEPENDENCIES geometry_msgs trajectory_msgs)
 
-ament_python_install_package(${PROJECT_NAME})
+# rosidl_generator_py already installs the Python package and its __init__.py.
+# Install only our implementation modules to avoid duplicate ament targets.
+ament_get_python_install_dir(PYTHON_INSTALL_DIR)
+install(FILES
+  ${PROJECT_NAME}/config.py
+  ${PROJECT_NAME}/kinematics.py
+  DESTINATION "${PYTHON_INSTALL_DIR}/${PROJECT_NAME}")
 install(PROGRAMS
   scripts/ik_node.py
   scripts/measure_apriltag_docking.py
