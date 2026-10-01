@@ -1,15 +1,5 @@
-# 실기 제어용 단일 설정 원본.
-# null은 아직 실측하지 않음을 뜻한다. hardware_preflight.py는 null 또는
-# 범위가 맞지 않는 항목이 하나라도 있으면 실패하며, real_control.launch.py도
-# controller_manager를 시작하지 않는다. 값을 추정해서 채우지 않는다.
 version: 1
-
 buses:
-  # U2D2 has one USB serial endpoint. TTL and RS-485 are separate electrical
-  # output channels: status feedback is read ID-by-ID, while Protocol 2
-  # Sync Write remains one transmit-only coordinated command. Physical B topology:
-  # TTL -> base ID 1 and branch wrist_yaw ID 3 -> ee_joint ID 4;
-  # RS-485 -> wrist_roll ID 2.
   dynamixel_u2d2:
     device: /dev/ttyUSB0
     baud_rate: 1000000
@@ -21,7 +11,6 @@ buses:
   rmd_can:
     interface: can_arm
     bitrate: 1000000
-
 joints:
   base_joint:
     vendor: dynamixel
@@ -125,15 +114,26 @@ joints:
     operating_mode: 4
     raw_increases_ccw: true
     zero_raw: 1992
+<<<<<<< HEAD
     soft_limit_raw: [459, 3843]
 <<<<<<< HEAD
     soft_limit_rad: [-1.279339977097, 3.911651009108]
     velocity_limit_rad_s: 0.240
+=======
+    soft_limit_raw:
+    - 459
+    - 3843
+    soft_limit_rad:
+    - -2.351592547829
+    - 2.839398438376
+    velocity_limit_rad_s: 0.24
+>>>>>>> 2a3c8a5 (null 값 삭제)
     current_limit_ma: 2690.0
     current_limit_raw: 800
     velocity_limit_raw: 20
     profile_acceleration_raw: 5
     profile_velocity_raw: 10
+<<<<<<< HEAD
 =======
     # (raw - zero_raw) * 2*pi/4096. The previous rad limits still used the
     # obsolete raw-1293 zero and did not match live joint-state conversion.
@@ -145,3 +145,5 @@ joints:
     profile_acceleration_raw: null
     profile_velocity_raw: null
 >>>>>>> 6272307 (실측값 추가)
+=======
+>>>>>>> 2a3c8a5 (null 값 삭제)
