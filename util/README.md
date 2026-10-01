@@ -1,5 +1,12 @@
 # ROS CompressedImage → MediaMTX RTSP 브리지
 
+로봇 SSH 실행, 카메라, 조이스틱, UI 및 RTSP 브리지 13개 명령을 분할 터미널에
+준비하려면 [ResKU 터미널 런처](terminal_launcher/README.md)를 사용한다.
+
+```bash
+~/ResKU/util/terminal_launcher/launch.py
+```
+
 `usb_cam`이 발행하는 JPEG `sensor_msgs/msg/CompressedImage`를 구독하고,
 GStreamer로 H.264 baseline 영상을 인코딩해 MediaMTX에 RTSP/TCP로 publish한다.
 Python에서는 JPEG를 디코딩하지 않으며 ROS 패키지 빌드가 필요 없다.
