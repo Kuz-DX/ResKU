@@ -1,5 +1,41 @@
 # 도구 1 장착
 
+## 기록한 raw 자세 검증
+
+7개 자세의 raw·출력 rad·RMD encoder 기록을
+`config/measured_raw_poses.yaml`에 보존했다. `too1_pre`는 `tool1_pre`로 정규화했다.
+bridge 출력의 rad는 bridge 자체 영점을 사용하므로 현재 `hardware.yaml`의
+관절값으로 복사하면 안 된다. 기존 `poses.yaml`의 named_poses는 이 출력값을
+담고 있어 현재 보정 기준으로 재검증이 필요하다.
+
+작업공간 루트에서 다음 명령은 장치를 열거나 이동 명령을 보내지 않고
+현재 보정값으로 변환한 7축 값과 raw/rad 한계 초과 항목을 출력한다:
+
+```bash
+python3 src/arm/tool_change_min/scripts/convert_raw_poses.py
+```
+
+현재 기록은 모든 자세의 wrist_yaw raw가 허용 범위 `[-1887, 2201]` 밖이다.
+HOME의 shoulder/elbow, 일부 자세의 elbow/wrist_roll도 변환 후 한계를 초과한다.
+EE raw `305`, `281`도 허용 범위 `[459, 3843]` 밖이다. 오류 시 종료코드는 2이며
+적용용 파일을 생성하지 않는다. 이 값들을 맞추기 위해 자동으로 각도를 wrap하거나
+영점·리밋을 변경하지 않는다. 실제 영점 기준과 허용 범위를 확인한 뒤 재티칭한다.
+
+확인된 raw 기록으로 갱신한 후 적용 후보 파일 생성:
+
+```bash
+source /opt/ros/humble/setup.bash
+python3 src/arm/tool_change_min/scripts/convert_raw_poses.py \
+  --output /tmp/tool_change_poses_candidate.yaml
+```
+
+검사 통과 시 6축 named_poses와 도킹 raw 기반 FK 목표를 생성한다. 기존 파일은
+덮어쓰지 않는다. EE 측정값은 검증·보존하되 6축 팔 자세에 넣지 않는다.
+`tool_lock`은 측정 차이의 참고값이며 FSM의 +90° 명령은 그대로다.
+EE_ALIGN 시간·허용오차·기준과 개발 정지 단계도 자동 변경하지 않는다.
+공급 자세는 저장되지만 현재 tool1 FSM에는 공급 이동 단계가 없다.
+한계/FK 검사 통과만으로 이동 경로·충돌·실기 구동이 검증되지는 않는다.
+
 ## 도킹 전 EE_ALIGN
 
 현재 요청 ID 1 흐름은 HOME → DOCKING_WAIT → EE_ALIGN → TOOL1_PRE →

@@ -2,6 +2,10 @@
 # The nodes require only the values needed through development.stop_after_state.
 # Start by teaching HOME, then advance one state at a time.  Use "done" only
 # after every state has been measured and reviewed.
+# WARNING: named_poses below contain bridge-reported rad values from an older
+# calibration convention. They are NOT validated against current hardware.yaml.
+# Raw captures are in measured_raw_poses.yaml; run scripts/convert_raw_poses.py.
+# Current captures fail joint limits. Do not enable later stages before re-teaching.
 development:
   stop_after_state: home
 feedback:

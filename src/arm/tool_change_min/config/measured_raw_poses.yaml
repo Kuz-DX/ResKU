@@ -1,0 +1,35 @@
+# Operator capture; not executable poses. No wrapping or offset adjustment applied.
+# reported_rad uses the capture bridge's calibration, NOT hardware.yaml calibration.
+# Original label too1_pre is normalized to tool1_pre.
+joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint, ee_joint]
+raw_units: [raw_pulse, raw_deg, raw_deg, raw_deg, raw_pulse, raw_pulse, raw_pulse]
+rmd_encoder_joint_names: [shoulder_joint, elbow_joint, wrist_pitch_joint]
+captures:
+  home:
+    raw: [0, 1.850000, -87.119995, 143.619995, 0, -4125, 678]
+    reported_rad: [0.030680, 1.555786, 1.539904, -1.651605, 0.009204, 0.191748, -2.015651]
+    raw_encoder: [7718, 32172, 119288]
+  docking_wait:
+    raw: [2026, 41.379997, -78.290001, 167.149994, -1, -4134, 305]
+    reported_rad: [3.138525, 0.866032, 1.385966, -1.241802, 0.007670, 0.205553, -2.587826]
+    raw_encoder: [22108, 35386, 136424]
+  tool1_pre:
+    raw: [1410, 62.309998, -88.000000, 155.569992, 488, -3662, 281]
+    reported_rad: [2.193593, 0.500735, 1.555263, -1.441991, 0.757787, -0.518486, -2.624641]
+    raw_encoder: [29730, 31849, 127990]
+  tool1_docking:
+    raw: [1457, 66.000000, -89.000000, 157.209991, 429, -3486, 281]
+    reported_rad: [2.265690, 0.436332, 1.572716, -1.414415, 0.667282, -0.788466, -2.624641]
+    raw_encoder: [31071, 31487, 129183]
+  tool_lock1:
+    raw: [1457, 66.059998, -88.729996, 157.190002, 429, -4564, 958]
+    reported_rad: [2.265690, 0.435285, 1.568004, -1.414764, 0.667282, 0.865165, -1.586136]
+    raw_encoder: [31095, 31586, 129166]
+  supply_pre:
+    raw: [-1571, 35.930000, -87.040001, 148.339996, -93, -4081, 956]
+    reported_rad: [-2.379204, 0.974941, 1.538508, -1.569575, -0.133456, 0.124252, -1.589204]
+    raw_encoder: [20129, 32200, 122727]
+  supply_grasp:
+    raw: [-1492, 51.239998, -86.559998, 155.069992, -403, -3723, 956]
+    reported_rad: [-2.258020, 0.694117, 1.530130, -1.451765, -0.608990, -0.424913, -1.589204]
+    raw_encoder: [25697, 32373, 127623]
