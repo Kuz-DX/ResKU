@@ -73,7 +73,7 @@ EE 초기값을 허용 범위 안에 둔다. 승인된 설정 복사본에서 �
 전체 흐름은 stop_after_state=done으로 확인한다. 실패 시험은 mock EE를
 범위 밖으로 놓거나 ee_controller를 비활성화하여 수행한다.
 EE_ALIGN → HOLD 뒤 TOOL1_PRE나 추가 목표가 발생하지 않아야 한다.
-기존 5개 메인 노드 launch에 새 노드를 추가하지 않는다.
+IK·실행기·FSM 3개 노드 launch에 새 노드를 추가하지 않는다.
 
 ## 실기 준비 상태와 보정
 
@@ -348,8 +348,10 @@ ros2 run tool_change_min measure_apriltag_docking.py --ros-args \
 
 ### 통합 실행을 선택할 때
 
-터미널 1·3은 그대로 필요하다. 위 터미널 **2·4·5·6·7·8을 종료한 뒤** 다음
-통합 launch로 대체한다. 카메라, AprilTag(2 cm), supply, IK, 실행기, FSM을 포함한다:
+위 터미널 **6·7·8을 종료한 뒤** 다음 launch로 IK·실행기·FSM을 함께 실행한다.
+터미널 1의 팔 컨트롤러와 로봇 TF는 별도로 실행한다.
+터미널 2·3·4·5의 카메라·장착 TF·AprilTag·supply는 이 launch에 포함되지 않으며,
+필요한 경우 별도로 실행한 상태를 유지한다:
 
 ```bash
 ros2 launch src/arm/tool_change_min/launch/tool1_attach.launch.py \
@@ -358,13 +360,12 @@ ros2 launch src/arm/tool_change_min/launch/tool1_attach.launch.py \
 ```
 
 소스 launch를 지정해도 노드 실행 파일은 설치 트리에서 찾는다.
-개별 실행과 통합 실행을 동시에 사용하지 않는다.
+IK·실행기·FSM의 개별 실행과 통합 실행을 동시에 사용하지 않는다.
 
 ## 구성
 
-`tool1_attach.launch.py`는 기존 `vision/camera/launch/cameras.launch.py`를
-포함하고, 수정하지 않은 `vision`의 AprilTag·공급 관련 실행 파일과 다음 세
-노드를 시작합니다.
+`tool1_attach.launch.py`는 다음 세 노드만 시작합니다.
+카메라 launch, AprilTag, supply는 실행하지 않습니다.
 
 - `ik_node`: Cartesian 목표의 역기구학 경로를 생성합니다.
 - `motion_executor`: 궤적을 검증하고 팔 컨트롤러에 전달합니다.
@@ -449,7 +450,7 @@ IK 노드는 현재 `/joint_states` 전체를 읽어 여러 점으로 된 Cartes
 
 ## AprilTag 도킹 계측
 
-이 읽기 전용 계측 유틸리티는 5개 운영 노드 launch에 포함하지 않습니다.
+이 읽기 전용 계측 유틸리티는 3개 운영 노드 launch에 포함하지 않습니다.
 기존 카메라와 AprilTag 노드를 먼저 실행하고 팔을 정지시킨 뒤 아래처럼
 실행합니다.
 
