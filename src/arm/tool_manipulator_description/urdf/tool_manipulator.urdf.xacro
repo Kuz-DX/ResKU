@@ -149,8 +149,8 @@
     <collision><origin xyz="0.0104 0.0157 0"/><geometry><box size="0.016 0.0154 0.050"/></geometry></collision>
   </xacro:macro>
 
-  <!-- Case 2 (+Y) and case 3 (-Y) centres are arm_world offsets. Their Z
-       centres are calibrated so the tilted local +Z outer-face midpoint is
+  <!-- Case 2 (+Y) centre is an arm_world offset. Its Z
+       centre is calibrated so the tilted local +Z outer-face midpoint is
        z=167.935 mm in arm_world. -->
   <link name="tool_case_y_plus"><xacro:tool_case_walls/></link>
   <joint name="arm_world_to_tool_case_y_plus" type="fixed">
@@ -172,21 +172,12 @@
     <origin xyz="-0.0184 0 0" rpy="0 -1.570796326795 0"/>
   </joint>
 
-  <link name="tool_case_y_minus"><xacro:tool_case_walls/></link>
-  <joint name="arm_world_to_tool_case_y_minus" type="fixed">
-    <parent link="arm_world"/><child link="tool_case_y_minus"/>
-    <!-- arm_world has world orientation, so pitch +55 deg is world-Y tilt. -->
-    <origin xyz="-0.268 -0.10245 0.153595589" rpy="0 0.959931088597 0"/>
-  </joint>
-  <link name="tool_case_y_minus_x_positive_face"/>
-  <joint name="tool_case_y_minus_to_x_positive_face" type="fixed">
-    <parent link="tool_case_y_minus"/><child link="tool_case_y_minus_x_positive_face"/>
-    <origin xyz="0.0184 0 0" rpy="0 1.570796326795 0"/>
-  </joint>
-  <link name="tool_case_y_minus_x_negative_face"/>
-  <joint name="tool_case_y_minus_to_x_negative_face" type="fixed">
-    <parent link="tool_case_y_minus"/><child link="tool_case_y_minus_x_negative_face"/>
-    <origin xyz="-0.0184 0 0" rpy="0 -1.570796326795 0"/>
+  <!-- Former case 3 location: supply-box pickup area, not a measured grasp pose.
+       No permanent collision; reference axes are parallel to world. -->
+  <link name="supplybox_pickup_area"/>
+  <joint name="arm_world_to_supplybox_pickup_area" type="fixed">
+    <parent link="arm_world"/><child link="supplybox_pickup_area"/>
+    <origin xyz="-0.268 -0.10245 0.153595589" rpy="0 0 0"/>
   </joint>
 
   <!-- Tool case 1: outer 36.8(X) x 100(Y) x 80(Z) mm.

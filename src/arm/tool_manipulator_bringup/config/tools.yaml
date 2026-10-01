@@ -5,7 +5,7 @@
 # Autonomous IDs are fixed: tool/tag 0=gripper and tool/tag 1=drill. No tool or
 # tag ID >= 2 may be added. model_id is an independent legacy CAD model number.
 real_docking:
-  enabled_tool_ids: [0, 1]  # requested: tag 0=gripper, tag 1=drill; preflight still required
+  enabled_tool_ids: [1]  # commission tag 1 drill first; full preflight still required
   # Set true only after tag 1's encoder-taught joint_path, rack collision, and
   # insertion/retreat measurements below have been bench-verified.
   physical_detach_supported: false
@@ -18,13 +18,29 @@ state_ids:
 
 # Fixed rack/fixture world collision. Each selected tool's dock_fixture must
 # reference an entry here; frame is a measured existing TF frame.
-fixtures: {}
+fixtures:
+  case_1:
+    frame: tool_case_1
+    # Wall geometry copied from the URDF tool_case_1_shell, metres.
+    primitives:
+      - {type: box, size: [0.0208, 0.100, 0.080], xyz: [-0.008, 0.0, 0.0]}
+      - {type: box, size: [0.016, 0.042, 0.080], xyz: [0.0104, -0.029, 0.0]}
+      - {type: box, size: [0.016, 0.042, 0.080], xyz: [0.0104, 0.029, 0.0]}
+      - {type: box, size: [0.016, 0.016, 0.015], xyz: [0.0104, 0.0, -0.0325]}
+      - {type: box, size: [0.016, 0.016, 0.015], xyz: [0.0104, 0.0, 0.0325]}
+  case_2:
+    frame: tool_case_y_plus
+    # Wall geometry copied from the URDF tool_case_walls, metres.
+    primitives:
+      - {type: box, size: [0.0208, 0.0468, 0.050], xyz: [-0.008, 0.0, 0.0]}
+      - {type: box, size: [0.016, 0.0154, 0.050], xyz: [0.0104, -0.0157, 0.0]}
+      - {type: box, size: [0.016, 0.0154, 0.050], xyz: [0.0104, 0.0157, 0.0]}
 
 tools:
   # Logical IDs exposed to autonomy/UI are 0/1. ID 99 is the reserved
   # NO_TOOL state. model_id preserves the existing CAD/TF numbering.
   0:
-    enabled: true
+    enabled: false
     name: gripper_pinion_tool
     model_id: 1
     tag_id: 0                    # confirmed rack slot AprilTag ID
@@ -35,8 +51,15 @@ tools:
       xyz: [-0.090, 0.0, 0.0]       # m, CAD attachment->TCP; bench verify before enabling
       quat_xyzw: [0.0, -0.70710678, 0.0, 0.70710678]
     collision:
-      primitives: null            # measured boxes/cylinders in ee_output_link, m/rad
-    dock_fixture: null            # key under fixtures
+      # Attached tool: diameter 30 mm, length 50 mm, bottom at tcp_link +Z 12 mm.
+      # ee_output_link shares TCP origin/+Z; its Z rotation leaves this cylinder unchanged.
+      primitives:
+        - type: cylinder
+          radius: 0.015
+          length: 0.050
+          xyz: [0.0, 0.0, 0.037]
+          quat_xyzw: [0.0, 0.0, 0.0, 1.0]
+    dock_fixture: case_1          # tag 0 gripper
     actuator:
       type: dynamixel
       joint: ee_joint
@@ -47,24 +70,19 @@ tools:
       close_position_rad: 1.251728
     lock:
       joint: wrist_yaw_joint
-      attach_yaw_delta_rad: null  # measured signed rad from current yaw position
-      # positions_rad order: base, shoulder, elbow, wrist_pitch,
-      # wrist_roll, wrist_yaw. ee_observed_rad is telemetry only.
-      joint_path:
-        - {name: unlock, positions_rad: [-3.057224, -0.065450, 1.362579, 0.803375, 0.044485, 0.050621], ee_observed_rad: 0.032214}
-        - {name: lock_step1, positions_rad: [-3.057224, -0.065450, 1.362928, 0.803026, 0.044485, -0.420311], ee_observed_rad: 0.038350}
-        - {name: lock_step2, positions_rad: [-3.057224, -0.065450, 1.363277, 0.802328, 0.044485, -0.788466], ee_observed_rad: 0.038350}
-        - {name: lock, positions_rad: [-3.055690, -0.065450, 1.363975, 0.802503, 0.044485, -1.491029], ee_observed_rad: 0.036816}
+      # Relative wrist_yaw rotation: clockwise viewed from TCP +Z toward the origin.
+      attach_yaw_delta_rad: -1.5707963267948966
+      joint_path: null  # use the 90-degree delta, not the previous taught path
     docking:
-      descent_frame: null         # existing TF frame; usually measured fixture/world frame
-      descent_direction: [null, null, null]  # unitless vector in descent_frame
-      descent_distance_m: null
-      descent_speed_mps: null
+      descent_frame: world
+      descent_direction: [1.0, 0.0, 0.0]  # insertion along world +X
+      descent_distance_m: 0.030
+      descent_speed_mps: 0.03  # same TCP linear speed as tcp_joy_teleop.py
       descent_timeout_sec: null
-      retreat_frame: null
-      retreat_direction: [null, null, null]  # unitless vector in retreat_frame
-      retreat_distance_m: null
-      retreat_speed_mps: null
+      retreat_frame: world
+      retreat_direction: [-1.0, 0.0, 0.0]  # retreat along world -X
+      retreat_distance_m: 0.030
+      retreat_speed_mps: 0.03  # same TCP linear speed as tcp_joy_teleop.py
       retreat_timeout_sec: null
 
   1:
@@ -80,13 +98,19 @@ tools:
       xyz: [0.0, 0.0600, 0.0]
       quat_xyzw: [0.0, 0.0, 0.0, 1.0]
     collision:
-      primitives: null
+      # Same attached-tool envelope: bottom/top at TCP +Z 12/62 mm.
+      primitives:
+        - type: cylinder
+          radius: 0.015
+          length: 0.050
+          xyz: [0.0, 0.0, 0.037]
+          quat_xyzw: [0.0, 0.0, 0.0, 1.0]
     # World-frame collision occupied by the drill after autonomous release.
     # Uses the same primitive format as collision.primitives.
     rack_collision:
       frame: null
       primitives: null
-    dock_fixture: null
+    dock_fixture: case_2          # tag 1 drill, +Y
     actuator:
       type: dynamixel
       joint: ee_joint
@@ -94,19 +118,17 @@ tools:
       position_limits_rad: [-1.279339977097, 3.911651009108]
     lock:
       joint: wrist_yaw_joint
-      attach_yaw_delta_rad: null
-      # Paste encoder-calibrated /joint_states snapshots in physical order:
-      # seated+unlocked -> intermediate(s) -> seated+locked. Attachment plays
-      # this list forward; detachment plays the identical list in reverse.
-      joint_path: null
+      # Relative wrist_yaw rotation: clockwise viewed from TCP +Z toward the origin.
+      attach_yaw_delta_rad: -1.5707963267948966
+      joint_path: null  # use the same 90-degree delta for every tool
     docking:
-      descent_frame: null
-      descent_direction: [null, null, null]
-      descent_distance_m: null
-      descent_speed_mps: null
+      descent_frame: world
+      descent_direction: [1.0, 0.0, 0.0]  # insertion along world +X
+      descent_distance_m: 0.030
+      descent_speed_mps: 0.03  # same TCP linear speed as tcp_joy_teleop.py
       descent_timeout_sec: null
-      retreat_frame: null
-      retreat_direction: [null, null, null]
-      retreat_distance_m: null
-      retreat_speed_mps: null
+      retreat_frame: world
+      retreat_direction: [-1.0, 0.0, 0.0]  # retreat along world -X
+      retreat_distance_m: 0.030
+      retreat_speed_mps: 0.03  # same TCP linear speed as tcp_joy_teleop.py
       retreat_timeout_sec: null

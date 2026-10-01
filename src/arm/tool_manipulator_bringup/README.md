@@ -62,6 +62,34 @@ RMD 축은 `raw_deg`와 `raw_encoder`, Dynamixel 축은 `raw_pulse`를 출력한
 `ros2_control`/`real_control.launch.py`, MoveIt 또는 named-pose 제어와 동시에 실행하지 않는다.
 리밋 측정 중에는 모터 명령을 보내지 말고, 안전한 기계 범위 안에서만 수동으로 이동한다.
 
+## 현재 자세를 새 영점으로 설정
+
+6축 팔을 정확한 기계 영점 자세에 수동으로 놓은 뒤 `set_current_zero.py`로 현재 raw
+엔코더 위치를 `hardware.yaml`의 새 영점으로 저장할 수 있다. 이 노드는 위의 읽기 전용
+bridge 토픽만 구독하며 모터 명령을 보내지 않는다. 먼저 `real_control`을 완전히 종료하고
+터미널 A에서 bridge만 실행한다.
+
+```bash
+# 터미널 A
+ros2 launch rmd_joint_state_bridge joint_state_bridge.launch.py
+
+# 터미널 B: 10개 샘플의 정지 상태를 검사하고 변경값만 미리보기
+ros2 run tool_manipulator_bringup set_current_zero.py \
+  --config ~/ResKU/src/arm/tool_manipulator_bringup/config/hardware.yaml
+
+# 출력값을 확인한 뒤 실제 저장
+ros2 run tool_manipulator_bringup set_current_zero.py \
+  --config ~/ResKU/src/arm/tool_manipulator_bringup/config/hardware.yaml \
+  --apply
+```
+
+기본 대상은 `ee_joint`를 제외한 팔 6축이다. 일부 축만 다시 맞추려면 예를 들어
+`--joints shoulder_joint elbow_joint`를 지정한다. Dynamixel은 `zero_raw`의 변화량만큼
+`soft_limit_raw`도 함께 이동하여 기존 영점 기준 좌우 가동 범위를 보존한다. RMD의
+`soft_limit_rad`와 모든 축의 `soft_limit_rad`는 영점 기준 범위이므로 바꾸지 않는다.
+저장 전 원본은 같은 폴더의 시간표시 `.bak-*` 파일로 백업되며, 새 값은 bridge를 종료하고
+`real_control`을 다시 기동할 때부터 적용된다.
+
 ## Arm named pose 이동
 
 `move_to_named_pose.py`는 MoveIt SRDF의 `arm` group state를 읽고

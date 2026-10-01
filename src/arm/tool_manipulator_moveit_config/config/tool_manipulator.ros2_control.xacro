@@ -93,7 +93,7 @@
           <param name="number_of_joints">4</param><param name="number_of_transmissions">4</param>
           <param name="port_name">${hw['buses']['dynamixel_u2d2']['device']}</param>
           <param name="baud_rate">${hw['buses']['dynamixel_u2d2']['baud_rate']}</param>
-          <param name="u2d2_mixed_ttl_rs485">${hw['buses']['dynamixel_u2d2']['mixed_ttl_rs485']}</param>
+          <param name="u2d2_mixed_ttl_rs485">${'true' if hw['buses']['dynamixel_u2d2']['mixed_ttl_rs485'] else 'false'}</param>
           <param name="feedback_mode">${hw['buses']['dynamixel_u2d2']['feedback_mode']}</param>
           <param name="command_mode">${hw['buses']['dynamixel_u2d2']['command_mode']}</param>
           <param name="dynamixel_model_folder">/param/dxl_model</param>

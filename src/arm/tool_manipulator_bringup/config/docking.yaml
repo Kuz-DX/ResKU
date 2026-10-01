@@ -21,9 +21,9 @@ tag_pose_filter:
     expected_frame_id: arm_camera_color_optical_frame  # observed in /arm/apriltag/centers
     max_age_sec: 3.0              # maximum detector stamp age at filter receipt
     min_decision_margin: null     # lowest accepted recorded decision margin
-    depth_range_m: [null, null]  # measured Euclidean PnP [min,max]
+    depth_range_m: [0.030, 0.110]  # user-specified 30..110 mm, Euclidean PnP distance
     max_depth_age_sec: null       # maximum RGB/depth timestamp skew
-    max_depth_pnp_error_m: null   # measured allowed |aligned depth - PnP z|
+    max_depth_pnp_error_m: 0.010  # user-specified 10 mm: |aligned depth - PnP z|
     depth_window_radius_px: null  # median window radius in aligned-depth pixels
 
 visual_servo_node:
@@ -33,7 +33,7 @@ visual_servo_node:
     command_frame: ''             # intentionally use the filter-validated tag frame
     desired_tag_position_m: [null, null, null]  # [x,y,z] m in expected_frame_id
     kp_xy: null
-    max_linear_velocity_mps: null
+    max_linear_velocity_mps: 0.03  # same TCP linear speed as tcp_joy_teleop.py
     rate_hz: 50.0                 # software loop rate, not a measured geometry value
     xy_tolerance_m: null
     stable_frame_count: null

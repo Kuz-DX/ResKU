@@ -687,3 +687,26 @@ show
 `show`가 출력한 `sign`, `q_offset_rad`, `soft_limit_rad`만
 `hardware.yaml`에 복사한다. RMD 속도·전류·후퇴 보호값은 이 읽기 전용
 스크립트가 추정하지 않으며 별도 안전 시험 결과로 입력해야 한다.
+
+### 현재 자세로 6축 영점만 다시 맞추기
+
+기존 영점 기준 소프트 리밋 범위는 유지하고 현재 정지 자세를 새 0 rad로 설정할 때는
+같은 읽기 전용 bridge를 실행한 상태에서 다음 노드를 사용한다. 실기 controller와
+bridge를 동시에 실행하지 않는다.
+
+```bash
+# 먼저 변경 예정값만 확인
+ros2 run tool_manipulator_bringup set_current_zero.py \
+  --config ~/ResKU/src/arm/tool_manipulator_bringup/config/hardware.yaml
+
+# 팔을 영점 자세에 계속 고정하고 확인한 값을 저장
+ros2 run tool_manipulator_bringup set_current_zero.py \
+  --config ~/ResKU/src/arm/tool_manipulator_bringup/config/hardware.yaml \
+  --apply
+```
+
+기본적으로 `ee_joint`를 제외한 6축을 갱신한다. `--joints <joint ...>`로 일부 축만
+선택할 수도 있다. 노드는 10개 raw 샘플이 정지 허용범위 안인지 확인한다. Dynamixel의
+절대 pulse 리밋인 `soft_limit_raw`는 `zero_raw` 변화량과 똑같이 이동하고,
+영점 기준 rad 리밋인 `soft_limit_rad`는 그대로 둔다. RMD는 `q_offset_rad`만 바꾼다.
+`--apply` 전에는 파일을 쓰지 않으며, 적용 시 원본 `hardware.yaml.bak-*`를 남긴다.

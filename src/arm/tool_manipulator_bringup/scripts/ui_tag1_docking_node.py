@@ -88,7 +88,6 @@ class UiTag1Docking(Node):
         p('cancel_topic', '/tool_change/cancel')
         p('hardware_fault_topic', '/control/hardware_fault')
         p('joint_state_topic', '/joint_states')
-        p('arm_action', '/arm_controller/follow_joint_trajectory')
         p('joint_names', [
             'base_joint', 'shoulder_joint', 'elbow_joint',
             'wrist_pitch_joint', 'wrist_roll_joint', 'wrist_yaw_joint', 'ee_joint',
