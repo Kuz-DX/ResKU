@@ -94,22 +94,16 @@ ros2 run tool_manipulator_bringup set_current_zero.py \
 
 `move_to_named_pose.py`는 MoveIt SRDF의 `arm` group state를 읽고
 `/arm_controller/follow_joint_trajectory` action으로 한 개의 목표 trajectory를 보낸다.
-명령 형식은 다음과 같다.
+현재 install 트리에 이 스크립트가 없을 수 있으므로, 소스와 현재 설정을 명시하는
+워크스페이스 런처를 사용한다. 명령 형식은 다음과 같다.
 
 ```bash
-ros2 run tool_manipulator_bringup move_to_named_pose.py <pose> [options]
+bash ~/ResKU/utils/move_to_pose.sh <pose> [options]
 ```
 
-현재 기본 SRDF pose는 `stand`, `home`, `tagid0_cw`, `tagid0_ccw`, `tagid0_unlock`,
+현재 기본 SRDF pose는 `stand`, `home`, `back`, `tagid0_cw`, `tagid0_ccw`, `tagid0_unlock`,
 `tagid0_lock_step1`, `tagid0_lock_step2`, `tagid0_lock`, `tagid1`, `dock_pre_cw`,
-`dock_pre_ccw`, `dock_wait1`, `dock_wait2`, `dock_wait3`이다. 빌드 후 다음 순서로 실행한다.
-
-```bash
-cd ~/ResKU
-source /opt/ros/humble/setup.bash
-colcon build --packages-select tool_manipulator_moveit_config tool_manipulator_bringup
-source ~/ResKU/install/setup.bash
-```
+`dock_pre_ccw`, `dock_wait1`, `dock_wait2`, `dock_wait3`이다.
 
 터미널 A에서 실기 controller를 먼저 실행한다.
 
@@ -126,13 +120,13 @@ source /opt/ros/humble/setup.bash
 source ~/ResKU/install/setup.bash
 
 # 사용 가능한 pose 이름 확인
-ros2 run tool_manipulator_bringup move_to_named_pose.py --list
+bash ~/ResKU/utils/move_to_pose.sh --list
 
 # 목표값만 출력하고 모터 명령은 보내지 않음
-ros2 run tool_manipulator_bringup move_to_named_pose.py home --dry-run
+bash ~/ResKU/utils/move_to_pose.sh home --dry-run
 
 # 8초 동안 home pose로 이동하고 action server를 최대 10초 기다림
-ros2 run tool_manipulator_bringup move_to_named_pose.py home \
+bash ~/ResKU/utils/move_to_pose.sh home \
   --duration 8.0 \
   --wait-for-server 10.0
 ```
@@ -151,7 +145,7 @@ ros2 run tool_manipulator_bringup move_to_named_pose.py home \
 다른 SRDF를 시험할 때도 먼저 `--dry-run`으로 목표값을 확인한다.
 
 ```bash
-ros2 run tool_manipulator_bringup move_to_named_pose.py home \
+bash ~/ResKU/utils/move_to_pose.sh home \
   --srdf /absolute/path/to/tool_manipulator.srdf \
   --dry-run
 ```
