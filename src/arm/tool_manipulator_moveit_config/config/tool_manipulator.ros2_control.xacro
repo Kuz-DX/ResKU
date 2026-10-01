@@ -18,7 +18,8 @@
         <param name="actuator_id">${spec['id']}</param>
         <param name="sign">${spec['sign']}</param>
         <param name="q_offset">${spec['q_offset_rad']}</param>
-        <param name="max_velocity">${spec['velocity_limit_rad_s']}</param>
+        <!-- hardware.yaml stores SI rad/s; rmd_sdk expects this argument in deg/s. -->
+        <param name="max_velocity">${spec['velocity_limit_rad_s'] * 180.0 / 3.141592653589793}</param>
         <param name="software_current_limit">${spec['current_limit_a']}</param>
         <param name="current_release_threshold">${spec['current_release_threshold_a']}</param>
         <param name="current_retreat_velocity">${spec['current_retreat_velocity_rad_s']}</param>
