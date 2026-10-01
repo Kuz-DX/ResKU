@@ -4,7 +4,6 @@
     <General>
       <Interfaces>
         <NetworkInterface name="enp4s0f1" multicast="true"/>
-        <NetworkInterface name="enp45s0" multicast="true"/>
       </Interfaces>
       <AllowMulticast>true</AllowMulticast>
     </General>

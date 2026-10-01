@@ -1,5 +1,10 @@
 # Tool Manipulator Bringup
 
+**Tag 1 측정 경로 자동실행:** [연결·사전 검사·실행 절차](docs/tag1_recorded_replay.md).
+`ui_tag1_docking.launch.py`와 기존 UI 노드 진입점은 검토된 6축 기록 재생기로 연결된다.
+현재 측정 파일은 단계·영점·경로 검토가 미완료라 실행을 차단한다.
+이 모드를 아래의 시각 서보/조이스틱 절차와 동시에 실행하지 않는다.
+
 실기 팔 제어와 **attach-only** AprilTag tool docking 패키지다. 실제 실행 순서와 Jetson/로컬 토픽 표는 저장소 루트의 [`howtorun.md`](../../../../howtorun.md) `Tool Manipulator — 실기 제어·툴 교체 실행 절차`를 따른다.
 
 - URDF `world`는 차량 IMU 중심이며, `arm_world`는 IMU/world 기준 `(0.1921, 0, 0.235)` m offset이며 지면 기준 높이는 `0.350` m이다. 차체, 회로박스, 대칭 tool case는 fixed visual/collision links로 표시된다.
