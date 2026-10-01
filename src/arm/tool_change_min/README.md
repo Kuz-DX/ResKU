@@ -233,7 +233,7 @@ python3 src/arm/tool_change_min/scripts/check_real_readiness.py
 
 ```bash
 ros2 launch tool_manipulator_bringup real_control.launch.py \
-  hardware_config:=src/arm/tool_manipulator_bringup/config/hardware.yaml
+  hardware_config:="${HOME}/ResKU/src/arm/tool_manipulator_bringup/config/hardware.yaml"
 ```
 
 이 단계는 실기 하드웨어를 활성화한다. 보정·리밋 확인을 끝낸 뒤 실행한다.

@@ -56,6 +56,9 @@ def _validate(path):
 
 def _start_real(context):
     hardware_file = LaunchConfiguration('hardware_config').perform(context)
+    # Resolve against the launch caller's cwd before xacro resolves YAML paths
+    # relative to the installed robot-description file.
+    hardware_file = str(Path(hardware_file).expanduser().resolve(strict=True))
     _validate(hardware_file)
     controllers = str(Path(get_package_share_directory('tool_manipulator_moveit_config')) / 'config' / 'ros2_controllers.yaml')
     moveit_config = (
