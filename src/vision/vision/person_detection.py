@@ -121,6 +121,10 @@ class PersonDetectionNode(Node):
         self.declare_parameter('right_input_topic', '/side/right/image_raw/compressed')
         self.declare_parameter('right_detections_topic', '/right/person/detections')
         self.declare_parameter('right_output_topic', '/right/person/detection')
+        self.declare_parameter('arm_input_topic', '/arm/camera/color/image_raw/compressed')
+        self.declare_parameter('arm_detections_topic', '/arm/person/detections')
+        self.declare_parameter('arm_output_topic', '/arm/person/detection')
+        self.declare_parameter('enable_arm_camera', True)
         self.declare_parameter('enable_side_cameras', True)
         self.declare_parameter('confidence_threshold', 0.5)
         self.declare_parameter('infer_size', 640)
@@ -162,6 +166,16 @@ class PersonDetectionNode(Node):
                         str(get('right_output_topic')),
                     ),
                 ]
+            )
+
+        if bool(get('enable_arm_camera')):
+            camera_topics.append(
+                (
+                    'arm',
+                    str(get('arm_input_topic')),
+                    str(get('arm_detections_topic')),
+                    str(get('arm_output_topic')),
+                )
             )
 
         # Keep publisher/subscription references alive for every camera.  The
