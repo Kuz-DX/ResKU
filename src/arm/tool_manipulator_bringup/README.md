@@ -290,3 +290,47 @@ ros2 service call /servo_node/start_servo std_srvs/srv/Trigger "{}"
 ros2 topic echo /joint_states
 ros2 topic echo /joy
 ros2 topic echo /servo_node/delta_twist_cmds
+
+터미널 1:
+sudo ip link set can_arm type can bitrate 1000000
+sudo ip link set up can_arm
+
+cd ~/ResKU
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+ros2 launch tool_manipulator_bringup real_control.launch.py
+터미널 3:
+cd ~/ResKU
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+ros2 launch vision cameras.launch.py
+터미널 4:
+cd ~/ResKU
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+ros2 launch tool_manipulator_bringup arm_tag_docking_vision.launch.py
+터미널 5:
+cd ~/ResKU
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+
+python3 src/arm/tool_manipulator_bringup/scripts/tag_pose_filter.py \
+  --ros-args \
+  --params-file src/arm/tool_manipulator_bringup/config/docking.yaml \
+  -p tools_config_file:=src/arm/tool_manipulator_bringup/config/tools.yaml
+터미널 6:
+cd ~/ResKU
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+
+python3 src/arm/tool_manipulator_bringup/scripts/visual_servo_node.py \
+  --ros-args \
+  --params-file src/arm/tool_manipulator_bringup/config/docking.yaml
+터미널 7:
+cd ~/ResKU
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+
+python3 src/arm/tool_manipulator_bringup/scripts/ui_tag1_docking_node.py \
+  --ros-args \
+  --params-file src/arm/tool_manipulator_bringup/config/ui_tag1_docking.yaml

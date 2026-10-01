@@ -57,6 +57,9 @@ class UiTag1Docking(Node):
         self.arm_client = ActionClient(
             self, FollowJointTrajectory,
             self.get_parameter('arm_action').value)
+        self.ee_client = ActionClient(
+            self, FollowJointTrajectory,
+            self.get_parameter('ee_action').value)
         self.visual_servo_client = self.create_client(
             SetBool, self.get_parameter('visual_servo_enable_service').value)
         self.twist_pub = self.create_publisher(
@@ -88,14 +91,17 @@ class UiTag1Docking(Node):
         p('arm_action', '/arm_controller/follow_joint_trajectory')
         p('joint_names', [
             'base_joint', 'shoulder_joint', 'elbow_joint',
-            'wrist_pitch_joint', 'wrist_roll_joint', 'wrist_yaw_joint',
+            'wrist_pitch_joint', 'wrist_roll_joint', 'wrist_yaw_joint', 'ee_joint',
         ])
+        p('arm_action', '/arm_controller/follow_joint_trajectory')
+        p('ee_action', '/ee_controller/follow_joint_trajectory')
         # These correspond to SRDF home, dock_wait3, and tagid1 respectively.
         p('home_goal', [0.0, 1.526290430869, 1.522974340197,
-                        -1.643751229155, 0.055223308364, 0.010737865515])
-        p('back_goal', [2.9332, 0.3298, -1.024, 1.5794, -0.4686, 1.3017])
-        p('tag1_wait_goal', [2.248815835040, 0.431794422037, 1.573239770294,
-                             -1.432740713149, 0.667281642730, -0.984815665823])
+                        -1.643751229155, 0.055223308364, 0.010737865515, 3.153864])
+        p('back_goal', [2.819457, 0.864811, 1.531177,
+                        -1.282643, -0.000000, -0.038350, 3.153864])
+        p('tag1_wait_goal', [2.175185, 0.718203, 1.566433,
+                             -1.463459, 0.556835, -1.050777, 3.153864])
         p('max_joint_speed_rad_s', 0.15)
         p('min_segment_duration_sec', 1.0)
         p('action_wait_timeout_sec', 10.0)
@@ -222,17 +228,28 @@ class UiTag1Docking(Node):
         speed = float(self.get_parameter('max_joint_speed_rad_s').value)
         duration = max(float(self.get_parameter('min_segment_duration_sec').value),
                        max(abs(goal - actual) for goal, actual in zip(target, current)) / speed)
-        point = JointTrajectoryPoint(positions=target)
-        point.time_from_start = Duration(sec=int(duration), nanosec=int((duration % 1.0) * 1e9))
-        goal = FollowJointTrajectory.Goal()
-        goal.trajectory.joint_names = list(self.get_parameter('joint_names').value)
-        goal.trajectory.points = [point]
-        sent = self.arm_client.send_goal_async(goal)
-        handle = self._future_result(sent, timeout)
-        if handle is None or not handle.accepted:
+        time_from_start = Duration(sec=int(duration), nanosec=int((duration % 1.0) * 1e9))
+        arm_goal = FollowJointTrajectory.Goal()
+        arm_goal.trajectory.joint_names = list(self.get_parameter('joint_names').value[:6])
+        arm_goal.trajectory.points = [JointTrajectoryPoint(
+            positions=target[:6], time_from_start=time_from_start)]
+        ee_goal = FollowJointTrajectory.Goal()
+        ee_goal.trajectory.joint_names = ['ee_joint']
+        ee_goal.trajectory.points = [JointTrajectoryPoint(
+            positions=[target[6]], time_from_start=time_from_start)]
+        if not self.ee_client.wait_for_server(timeout_sec=timeout):
+            self.get_logger().error('ee_controller action server unavailable')
             return False
-        result = self._future_result(handle.get_result_async(), duration + timeout)
-        return result is not None and result.status == GoalStatus.STATUS_SUCCEEDED and not self.cancelled.is_set()
+        arm_handle = self._future_result(self.arm_client.send_goal_async(arm_goal), timeout)
+        ee_handle = self._future_result(self.ee_client.send_goal_async(ee_goal), timeout)
+        if (arm_handle is None or not arm_handle.accepted or
+                ee_handle is None or not ee_handle.accepted):
+            return False
+        arm_result = self._future_result(arm_handle.get_result_async(), duration + timeout)
+        ee_result = self._future_result(ee_handle.get_result_async(), duration + timeout)
+        return (arm_result is not None and ee_result is not None and
+                arm_result.status == GoalStatus.STATUS_SUCCEEDED and
+                ee_result.status == GoalStatus.STATUS_SUCCEEDED and not self.cancelled.is_set())
 
     @staticmethod
     def _future_result(future, timeout: float):

@@ -37,6 +37,22 @@
         <joint name="wrist_roll_joint" value="0.667281642730"/>
         <joint name="wrist_yaw_joint" value="-0.984815665823"/>
     </group_state>
+    <group_state name="back" group="arm">
+        <joint name="base_joint" value="2.819457"/>
+        <joint name="elbow_joint" value="1.531177"/>
+        <joint name="shoulder_joint" value="0.864811"/>
+        <joint name="wrist_pitch_joint" value="-1.282643"/>
+        <joint name="wrist_roll_joint" value="0.000000"/>
+        <joint name="wrist_yaw_joint" value="-0.038350"/>
+    </group_state>
+    <group_state name="tag1_wait" group="arm">
+        <joint name="base_joint" value="2.175185"/>
+        <joint name="elbow_joint" value="1.566433"/>
+        <joint name="shoulder_joint" value="0.718203"/>
+        <joint name="wrist_pitch_joint" value="-1.463459"/>
+        <joint name="wrist_roll_joint" value="0.556835"/>
+        <joint name="wrist_yaw_joint" value="-1.050777"/>
+    </group_state>
     <group_state name="tagid0_cw" group="arm">
         <joint name="base_joint" value="-3.136990711226"/>
         <joint name="elbow_joint" value="1.359436936925"/>

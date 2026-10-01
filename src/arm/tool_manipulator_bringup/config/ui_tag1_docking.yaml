@@ -8,12 +8,17 @@ ui_tag1_docking:
     hardware_fault_topic: /control/hardware_fault
     joint_state_topic: /joint_states
     arm_action: /arm_controller/follow_joint_trajectory
-    joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
+    ee_action: /ee_controller/follow_joint_trajectory
+    joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint, ee_joint]
 
-    # Existing SRDF states: home -> dock_wait3 (back) -> tagid1 (tag1_wait).
-    home_goal: [0.0, 1.526290430869, 1.522974340197, -1.643751229155, 0.055223308364, 0.010737865515]
-    back_goal: [2.9332, 0.3298, -1.024, 1.5794, -0.4686, 1.3017]
-    tag1_wait_goal: [2.248815835040, 0.431794422037, 1.573239770294, -1.432740713149, 0.667281642730, -0.984815665823]
+    # Order: base, shoulder, elbow, wrist_pitch, wrist_roll, wrist_yaw, ee.
+    # back raw: base=1818, shoulder=22134, elbow=32354, wrist_pitch=134680,
+    #           wrist_roll=-6, wrist_yaw=-3975, ee=4048.
+    # tag1_wait raw: base=1398, shoulder=25194, elbow=31619, wrist_pitch=127134,
+    #                wrist_roll=357, wrist_yaw=-3315, ee=4048.
+    home_goal: [0.0, 1.526290430869, 1.522974340197, -1.643751229155, 0.055223308364, 0.010737865515, 3.153864]
+    back_goal: [2.819457, 0.864811, 1.531177, -1.282643, -0.000000, -0.038350, 3.153864]
+    tag1_wait_goal: [2.175185, 0.718203, 1.566433, -1.463459, 0.556835, -1.050777, 3.153864]
     max_joint_speed_rad_s: 0.15
     min_segment_duration_sec: 1.0
     action_wait_timeout_sec: 10.0
