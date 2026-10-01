@@ -5,9 +5,17 @@ controller_manager:
     update_rate: 100
     joint_state_broadcaster: {type: joint_state_broadcaster/JointStateBroadcaster}
     arm_controller: {type: joint_trajectory_controller/JointTrajectoryController}
+    ee_controller: {type: joint_trajectory_controller/JointTrajectoryController}
 arm_controller:
   ros__parameters:
     joints: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
     command_interfaces: [position]
     state_interfaces: [position, velocity]
     allow_partial_joints_goal: false
+ee_controller:
+  ros__parameters:
+    joints: [ee_joint]
+    command_interfaces: [position]
+    state_interfaces: [position, velocity]
+    allow_partial_joints_goal: false
+    open_loop_control: false

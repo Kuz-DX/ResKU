@@ -1,5 +1,44 @@
 # 도구 1 장착
 
+## 도킹 전 EE_ALIGN
+
+현재 요청 ID 1 흐름은 HOME → DOCKING_WAIT → EE_ALIGN → TOOL1_PRE →
+TOOL1_TARGET → LOCK → RETURN_DOCKING_WAIT → RETURN_HOME → DONE이다.
+새 툴 ID나 그리퍼 파지 동작은 추가하지 않는다.
+
+EE_ALIGN은 motion_executor의 align_ee 서비스를 호출한다. /joint_states의
+ee_joint만 읽고 q=sign*(pulse-zero_raw)*2*pi/4096으로 기준 위상을 변환한다.
+q_ref+n*pi 후보 중 리밋 안의 가장 가까운 점을 선택한다. 현재 EE도 리밋
+안에 있어야 하며 범위 밖이면 복구 이동 없이 HOLD다. 이 검사는 관절 범위
+검사이며 충돌 검사가 아니므로 docking_wait 자세의 EE 회전 여유를 확인한다.
+
+poses.yaml에서 다음 네 키를 측정·승인 후 입력한다:
+motion.ee_align.reference_raw, motion.ee_align.duration_s,
+motion.ee_align.tolerance_rad, timeouts_s.ee_align.
+현재는 null이다. development.stop_after_state가 ee_align 이후이면 미입력
+키를 로그로 출력하고 종료한다. 기준 raw=0이면 기존 허용 범위 459..3843
+안의 후보는 raw=2048 하나이다. raw=0으로 자동 복귀하지 않는다.
+
+기존 URDF 및 raw 리밋에 맞춰 hardware.yaml의 EE rad 리밋만
+[-2.351592547829, 2.839398438376]로 정정했다. zero_raw=1992와 raw 범위는
+유지한다. 모델은 시작 시 EE raw/rad/URDF 리밋의 일치를 검사한다.
+
+외부 ee_controller가 활성화되어 있어야 한다. 액션 주소는 launch 인자
+ee_action (기본 /ee_controller/follow_joint_trajectory)로 변경 가능하다.
+EE 궤적에는 ee_joint만 들어가며 팔 컨트롤러에는 새 명령을 보내지 않는다.
+액션 성공 후 새 피드백에서 목표 오차가 tolerance_rad 이내인지 확인한다.
+결과 timeout에는 취소를 요청하고 모션을 잠근다. 취소 요청은 물리적 정지를
+보장하지 않으며 실패 후 재시작 전 실제 정지 여부를 확인해야 한다.
+
+Mock 확인: 외부 mock 스택의 arm_controller와 ee_controller를 활성화하고
+EE 초기값을 허용 범위 안에 둔다. 승인된 설정 복사본에서 정렬 기준과 시간,
+허용오차를 입력하고 development.stop_after_state=ee_align로 실행한다.
+요청 ID 1 후 EE_ALIGN → PAUSED_EE_ALIGN 및 실제 ee_joint 값을 확인한다.
+전체 흐름은 stop_after_state=done으로 확인한다. 실패 시험은 mock EE를
+범위 밖으로 놓거나 ee_controller를 비활성화하여 수행한다.
+EE_ALIGN → HOLD 뒤 TOOL1_PRE나 추가 목표가 발생하지 않아야 한다.
+기존 5개 메인 노드 launch에 새 노드를 추가하지 않는다.
+
 ## 실기 준비 상태와 보정
 
 `tool_manipulator_bringup/config/hardware.yaml`에는 ID, 버스, 영점,
