@@ -20,14 +20,10 @@ joints:
     id: 1
     operating_mode: 4
     raw_increases_ccw: true
-    zero_raw: 11
-    soft_limit_raw:
-    - -2273
-    - 2367
-    soft_limit_rad:
-    - -3.503612119531
-    - 3.614058736259
-    velocity_limit_rad_s: 0.48
+    zero_raw: -20
+    soft_limit_raw: [-2304, 2336]
+    soft_limit_rad: [-3.503612119531, 3.614058736259]
+    velocity_limit_rad_s: 0.480
     current_limit_ma: 2690.0
     current_limit_raw: 1000
     velocity_limit_raw: 20
@@ -39,14 +35,12 @@ joints:
     bus: rmd_can
     id: 4
     sign: -1
-    q_offset_rad: 1.6467181226250391
-    soft_limit_rad:
-    - -1.459444233251
-    - 1.534842544204
+    q_offset_rad: 1.588249619315
+    soft_limit_rad: [-1.459444233251, 1.534842544204]
     velocity_limit_rad_s: 0.35
     current_limit_a: 4.0
     current_release_threshold_a: 3.0
-    current_retreat_velocity_rad_s: 0.1
+    current_retreat_velocity_rad_s: 0.10
     current_max_retreat_distance_rad: 0.052
     current_limit_duration_ms: 100
   elbow_joint:
@@ -55,14 +49,12 @@ joints:
     bus: rmd_can
     id: 5
     sign: -1
-    q_offset_rad: 0.09669123989469558
-    soft_limit_rad:
-    - -1.475675812748
-    - 1.573239770294
-    velocity_limit_rad_s: 0.3
+    q_offset_rad: 0.019373154697
+    soft_limit_rad: [-1.475675812748, 1.573239770294]
+    velocity_limit_rad_s: 0.30
     current_limit_a: 3.0
     current_release_threshold_a: 2.2
-    current_retreat_velocity_rad_s: 0.1
+    current_retreat_velocity_rad_s: 0.10
     current_max_retreat_distance_rad: 0.052
     current_limit_duration_ms: 100
   wrist_pitch_joint:
@@ -71,14 +63,12 @@ joints:
     bus: rmd_can
     id: 6
     sign: 1
-    q_offset_rad: 4.108854093087118
-    soft_limit_rad:
-    - -1.643751229155
-    - 1.666265854332
-    velocity_limit_rad_s: 0.3
+    q_offset_rad: 4.158246942876
+    soft_limit_rad: [-1.643751229155, 1.666265854332]
+    velocity_limit_rad_s: 0.30
     current_limit_a: 2.0
     current_release_threshold_a: 1.5
-    current_retreat_velocity_rad_s: 0.1
+    current_retreat_velocity_rad_s: 0.10
     current_max_retreat_distance_rad: 0.052
     current_limit_duration_ms: 100
   wrist_roll_joint:
@@ -89,14 +79,10 @@ joints:
     id: 2
     operating_mode: 4
     raw_increases_ccw: true
-    zero_raw: 15
-    soft_limit_raw:
-    - -550
-    - 464
-    soft_limit_rad:
-    - -0.866699145155
-    - 0.688757373761
-    velocity_limit_rad_s: 0.24
+    zero_raw: -6
+    soft_limit_raw: [-571, 443]
+    soft_limit_rad: [-0.866699145155, 0.688757373761]
+    velocity_limit_rad_s: 0.240
     current_limit_ma: 2690.0
     current_limit_raw: 800
     velocity_limit_raw: 20
@@ -110,14 +96,10 @@ joints:
     id: 3
     operating_mode: 4
     raw_increases_ccw: false
-    zero_raw: 171
-    soft_limit_raw:
-    - -1887
-    - 2201
-    soft_limit_rad:
-    - -3.113980999408
-    - 3.156932461469
-    velocity_limit_rad_s: 0.24
+    zero_raw: -4000
+    soft_limit_raw: [-6058, -1970]
+    soft_limit_rad: [-3.113980999408, 3.156932461469]
+    velocity_limit_rad_s: 0.240
     current_limit_ma: 2690.0
     current_limit_raw: 800
     velocity_limit_raw: 20
@@ -132,13 +114,9 @@ joints:
     operating_mode: 4
     raw_increases_ccw: true
     zero_raw: 1992
-    soft_limit_raw:
-    - 459
-    - 3843
-    soft_limit_rad:
-    - -1.279339977097
-    - 3.911651009108
-    velocity_limit_rad_s: 0.24
+    soft_limit_raw: [459, 3843]
+    soft_limit_rad: [-1.279339977097, 3.911651009108]
+    velocity_limit_rad_s: 0.240
     current_limit_ma: 2690.0
     current_limit_raw: 800
     velocity_limit_raw: 20

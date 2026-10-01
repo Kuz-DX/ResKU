@@ -1,0 +1,59 @@
+# Operator-provided /joint_states captures, in original capture order.
+# ARCHIVE ONLY: no launch/executor loads this file. Not ROS node parameters.
+# Do not wrap yaw, clamp points, expand limits, or replay until calibration and
+# approach / docking / return boundaries have been confirmed on the real arm.
+format: tool_manipulator_recorded_path/v1
+tag_id: 1
+executable: false
+units: rad
+calibration_verified: false
+capture_source:
+  setup: source ~/ResKU/install/setup.bash
+  command: ros2 launch rmd_joint_state_bridge joint_state_bridge.launch.py
+  # Current installed launch resolves to the source launch; its default
+  # calibration matches hardware.yaml (rounded offsets, no yaw wrapping).
+  # This does not verify the encoder turn count or historical runtime params.
+  launch_defaults_match_hardware_calibration: true
+docking_waypoint_index: null  # 1-based; operator confirmation required
+joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint, ee_joint]
+# ee is retained as measured evidence, NOT a commanded goal.
+ee_policy: no_new_command
+waypoints:
+  - [0.084369, 1.532399, 1.536937, -1.568876, -0.073631, -6.428913, -1.768680]  # 1
+  - [0.084369, 1.196598, 1.404641, -1.350885, -0.075165, -6.435049, -1.767146]  # 2
+  - [0.084369, 0.954172, 1.256288, -1.268331, -0.082835, -6.431981, -1.768680]  # 3
+  - [0.084369, 0.828159, 1.158899, -1.234995, -0.078233, -6.428913, -1.767146]  # 4
+  - [0.314466, 0.825017, 1.164135, -1.234820, -0.075165, -6.428913, -1.767146]  # 5
+  - [0.969476, 0.825017, 1.210386, -1.240755, -0.082835, -6.428913, -1.768680]  # 6
+  - [1.328427, 0.824144, 1.323832, -1.229236, -0.075165, -6.372156, -1.768680]  # 7
+  - [1.691981, 0.773704, 1.501507, -1.198692, -0.075165, -6.168137, -1.767146]  # 8
+  - [1.891398, 0.717854, 1.531352, -1.200089, -0.073631, -6.128253, -1.767146]  # 9
+  - [1.903670, 0.713491, 1.553867, -1.396263, 0.590583, -6.008603, -1.767146]  # 10
+  - [1.938952, 0.733562, 1.587377, -1.461364, 0.734777, -5.996331, -1.767146]  # 11
+  - [2.119961, 0.644899, 1.586504, -1.515295, 0.697961, -5.628176, -1.768680]  # 12
+  - [2.121495, 0.583464, 1.573589, -1.515120, 0.701029, -5.760098, -1.767146]  # 13
+  - [2.124563, 0.393746, 1.568876, -1.436755, 0.826816, -5.749360, -1.768680]  # 14
+  - [2.124563, 0.392525, 1.569051, -1.436755, 0.828350, -5.749360, -1.768680]  # 15
+  - [2.067806, 0.505098, 1.540602, -1.461713, 0.690291, -5.784642, -1.768680]  # 16
+  - [1.988039, 0.551000, 1.540602, -1.461713, 0.690291, -5.784642, -1.768680]  # 17
+  - [1.770214, 0.624828, 1.445307, -1.455954, 0.688757, -5.784642, -1.768680]  # 18
+  - [1.187301, 0.838631, 1.469218, -1.166229, 0.630466, -5.895088, -1.768680]  # 19
+  - [0.326738, 0.887151, 1.372876, -1.142842, -0.079767, -6.039282, -1.768680]  # 20
+  - [0.044485, 1.025905, 1.348965, -1.208466, -0.069029, -6.157399, -1.768680]  # 21
+  - [0.044485, 1.141969, 1.403594, -1.214226, -0.069029, -6.152797, -1.768680]  # 22
+  - [0.044485, 1.491209, 1.525418, -1.564339, -0.069029, -6.126719, -1.768680]  # 23
+  - [0.044485, 1.540253, 1.526640, -1.642180, -0.070563, -6.138991, -1.768680]  # 24
+# Separate later capture session. These are not appended after the return path,
+# and do not establish which of the original 24 points precedes insertion.
+docking_samples:
+  - label: 체결
+    positions: [2.159845, 0.411549, 1.565386, -1.420000, 0.699495, -7.133011, -1.756408]
+  - label: capture
+    positions: [2.159845, 0.409978, 1.565735, -1.418953, 0.697961, -7.142215, -1.756408]
+  - label: 체결회전
+    positions: [2.159845, 0.410152, 1.565386, -1.424363, 0.697961, -5.612836, -1.753340]
+  - label: 뒤로빠짐
+    positions: [2.159845, 0.618545, 1.534493, -1.548282, 0.690291, -5.597496, -1.756408]
+# Last pre-rotation sample -> rotation sample: +1.529379 rad (~+87.63 deg).
+# Earlier operator instruction was -pi/2. Resolve before changing tools.yaml.
+lock_direction_confirmed: false
