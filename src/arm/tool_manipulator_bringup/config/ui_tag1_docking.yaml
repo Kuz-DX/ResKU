@@ -1,0 +1,33 @@
+ui_tag1_docking:
+  ros__parameters:
+    # UI publishes Int32 tag ID; send any other ID (normally 99) before the
+    # next 1 request to arm another run.
+    request_topic: /selected_tool_id
+    target_tag_id: 1
+    cancel_topic: /tool_change/cancel
+    hardware_fault_topic: /control/hardware_fault
+    joint_state_topic: /joint_states
+    arm_action: /arm_controller/follow_joint_trajectory
+    joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
+
+    # Existing SRDF states: home -> dock_wait3 (back) -> tagid1 (tag1_wait).
+    home_goal: [0.0, 1.526290430869, 1.522974340197, -1.643751229155, 0.055223308364, 0.010737865515]
+    back_goal: [2.9332, 0.3298, -1.024, 1.5794, -0.4686, 1.3017]
+    tag1_wait_goal: [2.248815835040, 0.431794422037, 1.573239770294, -1.432740713149, 0.667281642730, -0.984815665823]
+    max_joint_speed_rad_s: 0.15
+    min_segment_duration_sec: 1.0
+    action_wait_timeout_sec: 10.0
+
+    visual_servo_enable_service: /visual_servo_node/enable
+    servo_aligned_topic: /servo_aligned
+    align_timeout_sec: 15.0
+    servo_twist_topic: /servo_node/delta_twist_cmds
+
+    # A short first descent after visual alignment.  base_actuator z- is the
+    # vehicle-down direction; adjust only after confirming the rack geometry.
+    descent_frame: base_actuator
+    descent_direction: [0.0, 0.0, -1.0]
+    descent_distance_m: 0.010
+    descent_speed_mps: 0.002
+    descent_timeout_sec: 10.0
+    status_topic: /ui_tag1_docking/status

@@ -263,3 +263,30 @@ ros2 launch tool_manipulator_bringup tcp_joy_teleop.launch.py \
 # 다른 터미널에서 실행
 ros2 service call /servo_node/start_servo std_srvs/srv/Trigger "{}"
 ```
+
+
+
+터미널 1에서 먼저 can_arm과 실제 제어를 시작합니다.
+sudo ip link set can_arm type can bitrate 1000000
+sudo ip link set up can_arm
+
+source /opt/ros/humble/setup.bash
+source ~/ResKU/install/setup.bash
+ros2 launch tool_manipulator_bringup real_control.launch.py
+터미널 2는 조이스틱 PC에서 실행합니다.
+export ROS_DOMAIN_ID=99
+export ROS_LOCALHOST_ONLY=0
+source /opt/ros/humble/setup.bash
+source ~/ResKU/install/setup.bash
+ros2 launch tool_manipulator_bringup remote_joy.launch.py joy_dev:=/dev/input/js0
+터미널 4에서 controller가 모두 active인지 확인합니다.
+source /opt/ros/humble/setup.bash
+source ~/ResKU/install/setup.bash
+ros2 control list_controllers
+그 뒤 터미널 3의 Servo와 tcp_joy_teleop.py를 켜고, 터미널 4에서 Servo를 시작합니다.
+ros2 service call /servo_node/start_servo std_srvs/srv/Trigger "{}"
+현재 소스에는 실기용 Servo + TCP teleop 통합 launch가 없습니다. tcp_joy_teleop.launch.py는 mock 하드웨어용이므로 실기에서 실행하면 안 됩니다. 실기용으로는 real_control과 연결된 servo_node_main 및 tcp_joy_teleop.py launch를 추가해야 합니다.
+확인용 터미널에서는 아래만 보면 됩니다.
+ros2 topic echo /joint_states
+ros2 topic echo /joy
+ros2 topic echo /servo_node/delta_twist_cmds

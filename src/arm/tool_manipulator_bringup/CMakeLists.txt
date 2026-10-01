@@ -25,6 +25,7 @@ install(PROGRAMS scripts/read_hardware_safety_params.py DESTINATION lib/${PROJEC
 install(PROGRAMS scripts/move_to_named_pose.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/manual_docking_path_ui.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/tcp_joy_teleop.py DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS scripts/ui_tag1_docking_node.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/gripper_gox.py DESTINATION lib/${PROJECT_NAME})
 install(FILES scripts/design_sizing.py DESTINATION lib/${PROJECT_NAME})
 install(FILES scripts/tool_ids.py DESTINATION lib/${PROJECT_NAME})
