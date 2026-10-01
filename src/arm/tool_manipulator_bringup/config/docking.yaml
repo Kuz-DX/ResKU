@@ -66,6 +66,11 @@ docking_motion_executor:
     detection_timeout_sec: null
     lock_joint_name: wrist_yaw_joint
     lock_timeout_sec: null
+    # Require live encoder feedback to move at least this far in the commanded
+    # yaw direction after the lock trajectory reports success.  The 1.529379-rad
+    # tag-1 lock must not be accepted on action success alone.
+    lock_feedback_min_delta_rad: 1.2
+    lock_feedback_timeout_sec: 1.0
     hardware_fault_topic: /control/hardware_fault
     attachment_timeout_sec: null
     post_lock_motion_timeout_sec: null

@@ -1,4 +1,9 @@
-"""Offline/fake docking stack; real hardware must use real_control.launch.py too."""
+"""Tool-change docking stack for the real controller started by tool_change.launch.py.
+
+This launch deliberately owns only MoveIt Servo and the docking nodes.  The
+real ros2_control node and move_group are owned by real_control.launch.py, so
+there is exactly one owner of the arm hardware and controller actions.
+"""
 import os
 
 import yaml
@@ -12,8 +17,14 @@ from moveit_configs_utils import MoveItConfigsBuilder
 
 def generate_launch_description():
     share = get_package_share_directory('tool_manipulator_bringup')
+    hardware_config = LaunchConfiguration('hardware_config')
     config = (MoveItConfigsBuilder('tool_manipulator', package_name='tool_manipulator_moveit_config')
-              .robot_description(mappings={'use_mock_hardware': 'true', 'use_mesh': 'true'})
+              .robot_description(mappings={
+                  'use_mock_hardware': 'false',
+                  'hardware_config_file': hardware_config,
+                  'tool_id': '0',
+                  'use_mesh': 'true',
+              })
               .planning_pipelines(pipelines=['ompl']).to_moveit_configs())
     docking = os.path.join(share, 'config', 'docking.yaml')
     servo = os.path.join(share, 'config', 'servo.yaml')
@@ -22,6 +33,7 @@ def generate_launch_description():
     docking_params = LaunchConfiguration('docking_params')
     tools_config = LaunchConfiguration('tools_config')
     return LaunchDescription([
+        DeclareLaunchArgument('hardware_config', default_value=os.path.join(share, 'config', 'hardware.yaml')),
         DeclareLaunchArgument('docking_params', default_value=docking),
         DeclareLaunchArgument('tools_config', default_value=os.path.join(share, 'config', 'tools.yaml')),
         Node(package='moveit_servo', executable='servo_node_main', name='servo_node', output='screen',

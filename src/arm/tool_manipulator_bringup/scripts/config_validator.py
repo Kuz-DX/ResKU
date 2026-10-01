@@ -260,7 +260,8 @@ def validate_docking(config: dict) -> list[str]:
     require('docking_motion_executor.ros__parameters.mission_wait_joint_goal_yaml',
             _number_list(mission_values, 6), 'six measured joint radians YAML list required')
     for key in ('servo_rate_hz', 'coarse_timeout_sec', 'xy_align_timeout_sec', 'detection_timeout_sec',
-                'lock_timeout_sec', 'attachment_timeout_sec', 'post_lock_motion_timeout_sec'):
+                'lock_timeout_sec', 'lock_feedback_min_delta_rad', 'lock_feedback_timeout_sec',
+                'attachment_timeout_sec', 'post_lock_motion_timeout_sec'):
         require(f'docking_motion_executor.ros__parameters.{key}', _positive(executor.get(key)), 'positive s/Hz required')
     require('topic_contract.vision_to_tag_filter',
             vision.get('centers_topic') == tag.get('source_topic'), 'AprilTag centers topic must match')

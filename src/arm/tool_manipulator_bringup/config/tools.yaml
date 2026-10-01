@@ -1,6 +1,6 @@
 # Tool registry: the single source for selectable physical tools, TCP, rack
 # collision, taught approach, and attachment motion. null means "measure it";
-# real_tool_change.launch.py will refuse to start until the selected IDs below
+# tool_change.launch.py will refuse to start until the selected IDs below
 # are enabled and every required value is valid.
 # Autonomous IDs are fixed: tool/tag 0=gripper and tool/tag 1=drill. No tool or
 # tag ID >= 2 may be added. model_id is an independent legacy CAD model number.
@@ -78,12 +78,12 @@ tools:
       descent_direction: [1.0, 0.0, 0.0]  # insertion along world +X
       descent_distance_m: 0.030
       descent_speed_mps: 0.03  # same TCP linear speed as tcp_joy_teleop.py
-      descent_timeout_sec: null
+      descent_timeout_sec: 3.0
       retreat_frame: world
       retreat_direction: [-1.0, 0.0, 0.0]  # retreat along world -X
       retreat_distance_m: 0.030
       retreat_speed_mps: 0.03  # same TCP linear speed as tcp_joy_teleop.py
-      retreat_timeout_sec: null
+      retreat_timeout_sec: 3.0
 
   1:
     enabled: true
@@ -128,9 +128,11 @@ tools:
       descent_direction: [1.0, 0.0, 0.0]  # insertion along world +X
       descent_distance_m: 0.030
       descent_speed_mps: 0.03  # same TCP linear speed as tcp_joy_teleop.py
-      descent_timeout_sec: null
+      # 30 mm at 30 mm/s is a nominal 1 s move.  Three seconds permits
+      # controller settling without letting an insertion run indefinitely.
+      descent_timeout_sec: 3.0
       retreat_frame: world
       retreat_direction: [-1.0, 0.0, 0.0]  # retreat along world -X
       retreat_distance_m: 0.030
       retreat_speed_mps: 0.03  # same TCP linear speed as tcp_joy_teleop.py
-      retreat_timeout_sec: null
+      retreat_timeout_sec: 3.0

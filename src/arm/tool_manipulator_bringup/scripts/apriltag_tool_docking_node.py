@@ -7,6 +7,7 @@ poses.  In the supplied configuration this is the RealSense optical frame.
 import json
 import math
 import threading
+import time
 from enum import Enum, auto
 
 import rclpy
@@ -57,6 +58,7 @@ class AprilTagToolDocking(Node):
         self.phase_started = self._now_sec()
         self.last_detection_time = None
         self.joint_positions = {}
+        self.joint_state_sequence = 0
         # Latched feedback from tool_scene_manager.  No retreat with a
         # newly attached physical tool is allowed until its collision object is live.
         self.active_tool_id = self.NONE
@@ -139,6 +141,11 @@ class AprilTagToolDocking(Node):
         p('xy_align_timeout_sec', -1.0)
         p('detection_timeout_sec', -1.0)
         p('lock_timeout_sec', -1.0)
+        # A successful action result alone is not enough to claim a mechanical
+        # lock: require fresh encoder-backed joint feedback in the commanded
+        # yaw direction before publishing the lock-complete event.
+        p('lock_feedback_min_delta_rad', -1.0)
+        p('lock_feedback_timeout_sec', -1.0)
         p('attachment_timeout_sec', -1.0)
         p('post_lock_motion_timeout_sec', -1.0)
         # A planned joint trajectory gives a completion-confirmed yaw rotation.
@@ -149,10 +156,11 @@ class AprilTagToolDocking(Node):
     def _validate_motion_params(self):
         positive = ('servo_rate_hz', 'coarse_timeout_sec', 'xy_align_timeout_sec',
                     'detection_timeout_sec', 'lock_timeout_sec',
+                    'lock_feedback_min_delta_rad', 'lock_feedback_timeout_sec',
                     'attachment_timeout_sec', 'post_lock_motion_timeout_sec')
         if any(not isinstance(self.get_parameter(name).value, (int, float)) or
                self.get_parameter(name).value <= 0.0 for name in positive):
-            raise RuntimeError('real docking timing parameters must be positive; run real_tool_change.launch.py preflight')
+            raise RuntimeError('real docking timing parameters must be positive; run tool_change.launch.py preflight')
         if self.get_parameter('lock_joint_name').value not in self.get_parameter('joint_names').value:
             raise RuntimeError('lock_joint_name must be one of joint_names')
         joint_count = len(self.get_parameter('joint_names').value)
@@ -337,6 +345,7 @@ class AprilTagToolDocking(Node):
 
     def _joint_state_cb(self, msg):
         self.joint_positions.update(zip(msg.name, msg.position))
+        self.joint_state_sequence += 1
 
     def _active_tool_cb(self, msg):
         self.active_tool_id = int(msg.data)
@@ -454,6 +463,8 @@ class AprilTagToolDocking(Node):
         lock_spec = self.tool_specs.get(self.target_tag_id, {}).get('lock', {})
         joint_path = lock_spec.get('joint_path') if isinstance(lock_spec, dict) else None
         yaw_delta = lock_spec.get('attach_yaw_delta_rad') if isinstance(lock_spec, dict) else None
+        lock_start_yaw = self.joint_positions[lock_joint]
+        joint_state_sequence = self.joint_state_sequence
         if joint_path:
             goals = [(str(step.get('name', index)), step.get('positions_rad'))
                      for index, step in enumerate(joint_path)]
@@ -471,6 +482,11 @@ class AprilTagToolDocking(Node):
             goals = [('yaw_delta', goal)]
         else:
             self._terminal_failure('attach_yaw_delta_unconfigured')
+            return
+        final_yaw_delta = goals[-1][1][joints.index(lock_joint)] - lock_start_yaw
+        minimum_delta = float(self.get_parameter('lock_feedback_min_delta_rad').value)
+        if abs(final_yaw_delta) < minimum_delta:
+            self._terminal_failure('lock_feedback_delta_exceeds_command')
             return
         try:
             success = True
@@ -491,8 +507,15 @@ class AprilTagToolDocking(Node):
         if not success:
             self._fail('lock_rotation')
             return
+        if not self._wait_for_lock_encoder_motion(
+                lock_joint, lock_start_yaw, final_yaw_delta, joint_state_sequence):
+            self._fail('lock_encoder_feedback_not_confirmed')
+            return
         # This means only that the configured yaw trajectory succeeded.  It is
         # not a sensor-confirmed mechanical engagement or a Planning Scene update.
+        # It does prove that the live joint-state feedback moved through the
+        # configured minimum in the commanded direction.
+        self._publish_status('wrist_yaw_encoder_motion_confirmed')
         self.yaw_complete_pub.publish(Bool(data=True))
         if self.operation == 'attach':
             self._publish_status('wrist_yaw_rotation_complete')
@@ -504,6 +527,22 @@ class AprilTagToolDocking(Node):
             self._publish_status('wrist_yaw_unlock_complete:awaiting_scene_detach')
             self._enter(DockState.DETACHING_SCENE)
             self.undocking_complete_pub.publish(Bool(data=True))
+
+    def _wait_for_lock_encoder_motion(self, joint, start, expected_delta, start_sequence):
+        """Require one fresh encoder feedback sample with commanded yaw motion."""
+        deadline = time.monotonic() + float(self.get_parameter('lock_feedback_timeout_sec').value)
+        minimum = float(self.get_parameter('lock_feedback_min_delta_rad').value)
+        while time.monotonic() <= deadline:
+            measured = self.joint_positions.get(joint)
+            fresh = self.joint_state_sequence > start_sequence
+            if isinstance(measured, (int, float)) and math.isfinite(measured) and fresh:
+                delta = measured - start
+                if delta * expected_delta > 0.0 and abs(delta) >= minimum:
+                    return True
+            if self.state != DockState.LOCK_ROTATING:
+                return False
+            time.sleep(0.01)
+        return False
 
     def _retreat_tick(self, now):
         distance = self._tool_motion_value('retreat_distance_m')

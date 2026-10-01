@@ -492,7 +492,7 @@ ros2 topic echo /arm/picking_command
 
 > 안전 조건
 >
-> - `real_tool_change.launch.py`는 `hardware.yaml`, `tools.yaml`, `docking.yaml` 전체를 먼저 검사한다. 누락·`null`·음수 placeholder·형식 오류가 하나라도 있으면 controller manager와 모터 포트를 시작하지 않는다.
+> - `tool_change.launch.py`는 `hardware.yaml`, `tools.yaml`, `docking.yaml` 전체를 먼저 검사한다. 누락·`null`·음수 placeholder·형식 오류가 하나라도 있으면 controller manager와 모터 포트를 시작하지 않는다.
 > - 실기 control 실행 중에는 `rmd_joint_state_bridge`, Dynamixel Wizard처럼 `can_arm` 또는 `/dev/ttyUSB0`을 여는 프로그램을 함께 실행하지 않는다.
 > - 자율 tool/tag ID는 `0 = gripper`, `1 = drill`만 사용한다. ID 2 이상은 비전·도킹 대상에서 제외하며 `99`는 NO_TOOL 상태다.
 
@@ -589,8 +589,7 @@ source /opt/ros/humble/setup.bash
 source install/setup.bash
 ros2 launch vision cameras.launch.py
 
-# J4: 기존 vision.apriltag를 docking.yaml 단일 원본으로 실행
-ros2 launch tool_manipulator_bringup arm_tag_docking_vision.launch.py
+# J4는 J5의 tool_change.launch.py에 포함된다. 카메라만 별도로 기동한다.
 ```
 
 J4는 `/arm/camera/color/image_raw/compressed`, `/arm/camera/color/camera_info`를 구독하고 `/arm/apriltag/centers`를 발행한다. `tag_size_cm`은 J2가 검사한 `docking.yaml.vision_apriltag.ros__parameters.tag_size_cm` 하나만 사용한다. `allowed_tag_ids: [0, 1]`에 따라 gripper와 drill tag만 발행하고 ID 2 이상은 무시한다. `tag_pose_filter`는 추가로 `/arm/camera/aligned_depth_to_color/image_raw`를 구독한다.
@@ -601,7 +600,7 @@ J4는 `/arm/camera/color/image_raw/compressed`, `/arm/camera/color/camera_info`�
 cd ~/ResKU
 source /opt/ros/humble/setup.bash
 source install/setup.bash
-ros2 launch tool_manipulator_bringup real_tool_change.launch.py
+ros2 launch tool_manipulator_bringup tool_change.launch.py
 ```
 
 실기 launch는 preflight 성공 후에만 real `ros2_control`, joint state broadcaster, 6축 `arm_controller`, `ee_controller`, MoveIt, Servo, filter, docking manager, scene manager를 기동한다. 시작 상태는 UNKNOWN이다. 실제로 tool이 비어 있을 때만 앞의 `operator_confirm_empty` recovery를 실행한다.
@@ -651,7 +650,8 @@ ros2 topic pub --once /tool_change/cancel std_msgs/msg/Bool "{data: true}"
 | `/tool_attachment_status`, `/active_tool_id` | scene manager | UI, manager | scene 갱신 결과와 attached tool |
 | `/control/hardware_fault` | hardware interface | executor/UI | fault 시 hold; 이후 도킹 단계 금지 |
 
-`apriltag_tool_docking.launch.py`는 FakeSystem 소프트웨어 검증용이다. 실기 모터 제어에는 사용하지 않는다.
+`apriltag_tool_docking.launch.py`는 `tool_change.launch.py`가 내부적으로 포함하는
+실기 docking stack이다. hardware/controller ownership은 `real_control.launch.py` 한 곳에만 있다.
 
 
 ## RMD 3축 영점·리밋 측정 (읽기 전용)

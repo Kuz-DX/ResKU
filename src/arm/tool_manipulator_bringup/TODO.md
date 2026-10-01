@@ -3,7 +3,7 @@
 ## 현재 구현됨
 
 - `hardware.yaml` + `tools.yaml` + `docking.yaml` 통합 fail-closed 사전검사. `null`, placeholder, 비활성 selected tool, 빈 fixture, 누락 tag/pose/collision/yaw/descent/retreat/mission pose, tag/depth/servo gate를 모두 launch 전에 보고한다.
-- 통과 전에는 `real_tool_change.launch.py`가 `controller_manager`, U2D2, CAN 포트를 시작하지 않는다.
+- 통과 전에는 `tool_change.launch.py`가 `controller_manager`, U2D2, CAN 포트를 시작하지 않는다.
 - attach action은 접근 pose → filter/depth gate → XY servo → tool별 straight descent → MoveIt yaw delta → one-shot `/wrist_yaw_rotation_complete` → configured straight retreat → one-shot `/docking_complete` 순서로 실행한다.
 - `/docking_complete`만 `tool_scene_manager`의 attach trigger다. attach 뒤 collision/TCP/active tool 상태를 갱신한다.
 - failure/cancel/fault/filter failure/회전 또는 후퇴 실패는 hold하고 완료 토픽·scene attach를 막는다. 자동 retreat fallback은 없다.
