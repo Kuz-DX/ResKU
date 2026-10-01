@@ -45,27 +45,6 @@ ros2 run tool_manipulator_bringup capture_arm_raw.py
 RMD 축은 `raw_deg`와 `raw_encoder`, Dynamixel 축은 `raw_pulse`를 출력한다.
 영점 자세와 각 축의 안전한 최소·최대 자세에서 라벨을 입력해 캡처한다.
 
-`label>` 프롬프트에서 아무것도 입력하지 않고 Enter를 누르면 다음 순서로 최신
-`/joint_states` 값이 rad 단위로 출력된다. 필요하면 `shoulder_min`처럼 라벨을
-입력하고 Enter를 눌러 측정 지점을 구분한다.
-
-```text
-[capture] (rad)
-  base: ...
-  shoulder: ...
-  elbow: ...
-  wrist_pitch: ...
-  wrist_roll: ...
-  wrist_yaw: ...
-  ee: ...
-```
-
-각 Dynamixel 또는 RMD가 통신하지 않으면 해당 축은 `unavailable`로 표시된다.
-`q`, `quit`, `exit` 중 하나를 입력하면 캡처를 끝낸다.
-
-`rmd_joint_state_bridge`는 CAN과 `/dev/ttyUSB0`를 직접 소유한다. 따라서 실제
-`ros2_control`/`real_control.launch.py`, MoveIt 또는 named-pose 제어와 동시에 실행하지 않는다.
-리밋 측정 중에는 모터 명령을 보내지 말고, 안전한 기계 범위 안에서만 수동으로 이동한다.
 
 ## 현재 자세를 새 영점으로 설정
 
