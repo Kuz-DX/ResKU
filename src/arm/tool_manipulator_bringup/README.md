@@ -181,13 +181,12 @@ sudo ip link set can_arm type can bitrate 1000000
 sudo ip link set can_arm up
 ```
 
-> **현재 설정 상태:** `hardware.yaml`의 Dynamixel current/velocity/profile 값과
-> RMD velocity/current 보호값 일부가 아직 `null`이다. 따라서 현재 소스 그대로는
-> 실기 launch가 안전 preflight에서 중단된다. 각 모터 사양과 실측값으로 채우기 전에는
-> 검사를 우회하거나 임의의 값을 넣지 않는다.
+> **실기 시작 전 필수:** 아래 검사 결과가 `READY`인지 확인한다. 이 검사는 필수값의
+> 존재 여부만 확인하므로, 영점·리밋·속도·전류 값이 해당 실기와 일치하는지도 별도로
+> 확인해야 한다. 실패하면 검사를 우회하거나 임의의 값을 넣지 않는다.
 
-현재 누락된 필드만 확인하려면 다음 읽기 전용 검사기를 실행한다. 모든 필수 필드와
-현재값까지 보려면 `--show-values`를 붙인다. 이 명령은 모터와 통신하지 않는다.
+누락된 필드만 확인하려면 다음 읽기 전용 검사기를 실행한다. 모든 필수 필드와 현재값까지
+보려면 `--show-values`를 붙인다. 이 명령은 모터와 통신하지 않는다.
 
 ```bash
 ros2 run tool_manipulator_bringup check_hardware_config.py

@@ -19,7 +19,7 @@ tag_pose_filter:
     valid_pose_topic: /tag_pose_valid
     status_topic: /tag_status
     expected_frame_id: arm_camera_color_optical_frame  # observed in /arm/apriltag/centers
-    max_age_sec: null             # maximum detector stamp age at filter receipt
+    max_age_sec: 3.0              # maximum detector stamp age at filter receipt
     min_decision_margin: null     # lowest accepted recorded decision margin
     depth_range_m: [null, null]  # measured Euclidean PnP [min,max]
     max_depth_age_sec: null       # maximum RGB/depth timestamp skew
@@ -58,7 +58,8 @@ docking_motion_executor:
     end_effector_link: tcp_link
     joint_state_topic: /joint_states
     joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
-    docking_wait_joint_goal: [null, null, null, null, null, null]  # rad, joint_names order
+    # SRDF arm/back, reordered to joint_names above (rad).
+    docking_wait_joint_goal: [2.819457, 0.864811, 1.531177, -1.282643, 0.0, -0.038350]
     servo_rate_hz: 50.0
     coarse_timeout_sec: null
     xy_align_timeout_sec: null

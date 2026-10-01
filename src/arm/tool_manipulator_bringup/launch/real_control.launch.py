@@ -88,7 +88,7 @@ def _start_real(context):
         package='controller_manager', executable='spawner',
         arguments=['ee_controller', '--controller-manager', '/controller_manager'], output='screen',
     )
-    return [
+    actions = [
         state_publisher,
         control_node,
         TimerAction(period=3.0, actions=[broadcaster]),
@@ -97,10 +97,56 @@ def _start_real(context):
         TimerAction(period=7.0, actions=generate_move_group_launch(moveit_config).entities),
     ]
 
+    launch_servo = LaunchConfiguration('launch_servo').perform(context).lower() in ('1', 'true', 'yes')
+    launch_teleop = (
+        LaunchConfiguration('launch_tcp_joy_teleop').perform(context).lower()
+        in ('1', 'true', 'yes')
+    )
+    launch_joy = LaunchConfiguration('launch_joy').perform(context).lower() in ('1', 'true', 'yes')
+    if launch_teleop and not launch_servo:
+        raise RuntimeError('real control blocked: TCP joystick teleop requires launch_servo:=true')
+
+    delayed_actions = []
+    if launch_servo:
+        servo_file = LaunchConfiguration('servo_config').perform(context)
+        with open(servo_file, encoding='utf-8') as stream:
+            servo_config = {'moveit_servo': yaml.safe_load(stream) or {}}
+        delayed_actions.append(Node(
+            package='moveit_servo', executable='servo_node_main', name='servo_node',
+            parameters=[servo_config, moveit_config.robot_description,
+                        moveit_config.robot_description_semantic,
+                        moveit_config.robot_description_kinematics],
+            output='screen',
+        ))
+    if launch_joy:
+        delayed_actions.append(Node(
+            package='joy', executable='joy_node', name='joy_node',
+            parameters=[{
+                'dev': LaunchConfiguration('joy_dev'),
+                'deadzone': 0.05,
+                'autorepeat_rate': 50.0,
+            }],
+            output='screen',
+        ))
+    if launch_teleop:
+        delayed_actions.append(Node(
+            package='tool_manipulator_bringup', executable='tcp_joy_teleop.py',
+            output='screen',
+        ))
+    if delayed_actions:
+        actions.append(TimerAction(period=8.0, actions=delayed_actions))
+    return actions
+
 
 def generate_launch_description():
-    default_config = str(Path(get_package_share_directory('tool_manipulator_bringup')) / 'config' / 'hardware.yaml')
+    share = Path(get_package_share_directory('tool_manipulator_bringup'))
+    default_config = str(share / 'config' / 'hardware.yaml')
     return LaunchDescription([
         DeclareLaunchArgument('hardware_config', default_value=default_config),
+        DeclareLaunchArgument('servo_config', default_value=str(share / 'config' / 'servo.yaml')),
+        DeclareLaunchArgument('launch_servo', default_value='false'),
+        DeclareLaunchArgument('launch_tcp_joy_teleop', default_value='false'),
+        DeclareLaunchArgument('launch_joy', default_value='false'),
+        DeclareLaunchArgument('joy_dev', default_value='/dev/input/js0'),
         OpaqueFunction(function=_start_real),
     ])

@@ -5,7 +5,7 @@
 # Autonomous IDs are fixed: tool/tag 0=gripper and tool/tag 1=drill. No tool or
 # tag ID >= 2 may be added. model_id is an independent legacy CAD model number.
 real_docking:
-  enabled_tool_ids: []  # set e.g. [0] only after that tool is completely measured
+  enabled_tool_ids: [0, 1]  # requested: tag 0=gripper, tag 1=drill; preflight still required
   # Set true only after tag 1's encoder-taught joint_path, rack collision, and
   # insertion/retreat measurements below have been bench-verified.
   physical_detach_supported: false
@@ -24,7 +24,7 @@ tools:
   # Logical IDs exposed to autonomy/UI are 0/1. ID 99 is the reserved
   # NO_TOOL state. model_id preserves the existing CAD/TF numbering.
   0:
-    enabled: false
+    enabled: true
     name: gripper_pinion_tool
     model_id: 1
     tag_id: 0                    # confirmed rack slot AprilTag ID
@@ -68,7 +68,7 @@ tools:
       retreat_timeout_sec: null
 
   1:
-    enabled: false
+    enabled: true
     name: long_drillbit
     model_id: 2
     tag_id: 1
