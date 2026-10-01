@@ -59,32 +59,53 @@ URDF의 0 rad 자세에 맞춘다. 임의의 도킹 자세를 영점으로 저�
 아래 보정기는 ROS의 소프트웨어 영점을 저장하며 모터 EEPROM 영점은 쓰지 않는다.
 세 축을 동시에 맞추기 어려우면 `--joints`에 한 축만 지정해 차례로 수행한다.
 
-각 터미널 공통 환경:
+각 터미널 공통 환경 (`${HOME}/ResKU`는 현재 사용자의 `~/ResKU` 작업공간):
 
 ```bash
 source /opt/ros/humble/setup.bash
-source /home/shu/ResKU/install/setup.bash
+source ${HOME}/ResKU/install/setup.bash
 ```
+
+`ModuleNotFoundError: No module named 'rmd_sdk'`가 발생하면 위 환경 설정을
+**bridge를 실행할 터미널에서** 적용하고, 하드웨어에 연결하지 않는 import 확인을 먼저 한다:
+
+```bash
+python3 -c 'from rmd_sdk import rmd_sdk_py; print(rmd_sdk_py.__file__)'
+```
+
+계속 실패하면 구동 PC에서 설치 파일과 기존 CMake 설정을 확인한다:
+
+```bash
+find "${HOME}/ResKU/install" -name '*rmd_sdk*' -print
+grep '^PYTHON_BINDINGS:' "${HOME}/ResKU/build/rmd_sdk/CMakeCache.txt"
+```
+
+`rmd_sdk`는 C++ SDK와 Python 확장 모듈을 제공한다. C++ 라이브러리만
+설치되어 있으면 이 Python bridge는 실행할 수 없다. `PYTHON_BINDINGS:BOOL=OFF`이면
+기존 설정에서 Python 바인딩을 비활성화한 것이다. `ON`이어도 설치 완료를
+보장하지 않으므로 `rmd_sdk_py*.so`의 존재와 위 import 결과를 함께 확인한다.
+소스 경로만 `PYTHONPATH`에 추가해도 누락된 확장 모듈은 해결되지 않는다.
+여기서는 ROS 패키지 빌드를 실행하지 않는다.
 
 보정 터미널 A — 읽기 전용 raw bridge (운영 컨트롤러와 동시 실행 금지):
 
 ```bash
-python3 /home/shu/ResKU/src/arm/rmd_joint_state_bridge/scripts/joint_state_bridge_node.py
+python3 ${HOME}/ResKU/src/arm/rmd_joint_state_bridge/scripts/joint_state_bridge_node.py
 ```
 
 보정 터미널 B — RMD 3축만 미리보기:
 
 ```bash
-python3 /home/shu/ResKU/src/arm/tool_manipulator_bringup/scripts/set_current_zero.py \
-  --config /home/shu/ResKU/src/arm/tool_manipulator_bringup/config/hardware.yaml \
+python3 ${HOME}/ResKU/src/arm/tool_manipulator_bringup/scripts/set_current_zero.py \
+  --config ${HOME}/ResKU/src/arm/tool_manipulator_bringup/config/hardware.yaml \
   --joints shoulder_joint elbow_joint wrist_pitch_joint
 ```
 
 값을 확인한 뒤 같은 자세에서 저장:
 
 ```bash
-python3 /home/shu/ResKU/src/arm/tool_manipulator_bringup/scripts/set_current_zero.py \
-  --config /home/shu/ResKU/src/arm/tool_manipulator_bringup/config/hardware.yaml \
+python3 ${HOME}/ResKU/src/arm/tool_manipulator_bringup/scripts/set_current_zero.py \
+  --config ${HOME}/ResKU/src/arm/tool_manipulator_bringup/config/hardware.yaml \
   --joints shoulder_joint elbow_joint wrist_pitch_joint --apply
 ```
 
@@ -131,7 +152,7 @@ T_base_target = T_base_tag × T_tag_target
 다른 터미널에서 아래 명령을 실행하고 정지 자세에서 Enter를 눌러 기록한다:
 
 ```bash
-python3 /home/shu/ResKU/src/arm/tool_manipulator_bringup/scripts/capture_arm_raw.py
+python3 ${HOME}/ResKU/src/arm/tool_manipulator_bringup/scripts/capture_arm_raw.py
 ```
 
 출력 중 `raw_pulse`와 `raw_deg`를 보관한다. bridge의 이전 보정 기준 `rad`는
@@ -156,7 +177,7 @@ IK 간격은 2 mm/0.02 rad, 관절 한계 여유는 0.01 rad,
 먼저 동일한 실기 PC에서 ROS 환경을 source한 뒤, 모터 명령 없는 준비 검사를 실행한다:
 
 ```bash
-python3 /home/shu/ResKU/src/arm/tool_change_min/scripts/check_real_readiness.py
+python3 ${HOME}/ResKU/src/arm/tool_change_min/scripts/check_real_readiness.py
 ```
 
 이 검사는 설치된 노드·생성 서비스, 선택 단계의 티칭값, 장치 경로, 카메라 TF
@@ -176,7 +197,7 @@ python3 /home/shu/ResKU/src/arm/tool_change_min/scripts/check_real_readiness.py
 
 ```bash
 ros2 launch tool_manipulator_bringup real_control.launch.py \
-  hardware_config:=/home/shu/ResKU/src/arm/tool_manipulator_bringup/config/hardware.yaml
+  hardware_config:=${HOME}/ResKU/src/arm/tool_manipulator_bringup/config/hardware.yaml
 ```
 
 이 단계는 실기 하드웨어를 활성화한다. 보정·리밋 확인을 끝낸 뒤 실행한다.
@@ -193,8 +214,8 @@ ros2 launch vision cameras.launch.py
 ### 터미널 3 — 카메라 장착 TF (보정 파일 활성화 후)
 
 ```bash
-python3 /home/shu/ResKU/src/arm/tool_manipulator_bringup/scripts/arm_camera_extrinsics_broadcaster.py \
-  --ros-args --params-file /home/shu/ResKU/src/arm/tool_manipulator_bringup/config/arm_camera_extrinsics.yaml
+python3 ${HOME}/ResKU/src/arm/tool_manipulator_bringup/scripts/arm_camera_extrinsics_broadcaster.py \
+  --ros-args --params-file ${HOME}/ResKU/src/arm/tool_manipulator_bringup/config/arm_camera_extrinsics.yaml
 ```
 
 기존 노드가 이미 `cam_link → arm_camera_link`를 발행한다면 중복 실행하지 않는다.
@@ -220,23 +241,23 @@ supply는 공급상자 인식 노드이며 모델 파일과 카메라·TF가 필
 
 ```bash
 ros2 run tool_change_min ik_node.py --ros-args \
-  -p poses_yaml:=/home/shu/ResKU/src/arm/tool_change_min/config/poses.yaml \
-  -p hardware_yaml:=/home/shu/ResKU/src/arm/tool_manipulator_bringup/config/hardware.yaml
+  -p poses_yaml:=${HOME}/ResKU/src/arm/tool_change_min/config/poses.yaml \
+  -p hardware_yaml:=${HOME}/ResKU/src/arm/tool_manipulator_bringup/config/hardware.yaml
 ```
 
 ### 터미널 7 — 궤적 실행기
 
 ```bash
 ros2 run tool_change_min motion_executor.py --ros-args \
-  -p poses_yaml:=/home/shu/ResKU/src/arm/tool_change_min/config/poses.yaml \
-  -p hardware_yaml:=/home/shu/ResKU/src/arm/tool_manipulator_bringup/config/hardware.yaml
+  -p poses_yaml:=${HOME}/ResKU/src/arm/tool_change_min/config/poses.yaml \
+  -p hardware_yaml:=${HOME}/ResKU/src/arm/tool_manipulator_bringup/config/hardware.yaml
 ```
 
 ### 터미널 8 — 장착 FSM
 
 ```bash
 ros2 run tool_change_min tool_change_fsm.py --ros-args \
-  -p poses_yaml:=/home/shu/ResKU/src/arm/tool_change_min/config/poses.yaml
+  -p poses_yaml:=${HOME}/ResKU/src/arm/tool_change_min/config/poses.yaml
 ```
 
 처음에는 `development.stop_after_state: home`을 유지한다.
@@ -285,7 +306,7 @@ ros2 topic echo /tool_change/status
 ```bash
 ros2 run tool_change_min measure_apriltag_docking.py --ros-args \
   -p tag_id:=1 -p tag_size_m:=0.02 -p sample_count:=100 \
-  -p output_csv:=/home/shu/ResKU/tag1_target_offset.csv \
+  -p output_csv:=${HOME}/ResKU/tag1_target_offset.csv \
   -p base_frame:=base_actuator -p target_frame:=tcp_link
 ```
 
@@ -295,9 +316,9 @@ ros2 run tool_change_min measure_apriltag_docking.py --ros-args \
 통합 launch로 대체한다. 카메라, AprilTag(2 cm), supply, IK, 실행기, FSM을 포함한다:
 
 ```bash
-ros2 launch /home/shu/ResKU/src/arm/tool_change_min/launch/tool1_attach.launch.py \
-  poses_yaml:=/home/shu/ResKU/src/arm/tool_change_min/config/poses.yaml \
-  hardware_yaml:=/home/shu/ResKU/src/arm/tool_manipulator_bringup/config/hardware.yaml
+ros2 launch ${HOME}/ResKU/src/arm/tool_change_min/launch/tool1_attach.launch.py \
+  poses_yaml:=${HOME}/ResKU/src/arm/tool_change_min/config/poses.yaml \
+  hardware_yaml:=${HOME}/ResKU/src/arm/tool_manipulator_bringup/config/hardware.yaml
 ```
 
 소스 launch를 지정해도 노드 실행 파일은 설치 트리에서 찾는다.

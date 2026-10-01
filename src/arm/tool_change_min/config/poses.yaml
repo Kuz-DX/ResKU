@@ -9,13 +9,17 @@ feedback:
   joint_state_max_age_s: 0.5
 joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
 named_poses:
-  home: {base_joint: null, shoulder_joint: null, elbow_joint: null, wrist_pitch_joint: null, wrist_roll_joint: null, wrist_yaw_joint: null}
-  docking_wait: {base_joint: null, shoulder_joint: null, elbow_joint: null, wrist_pitch_joint: null, wrist_roll_joint: null, wrist_yaw_joint: null}
+  home: {base_joint: 0.030680, shoulder_joint: 1.555786, elbow_joint: 1.539904, wrist_pitch_joint: -1.651605, wrist_roll_joint: 0.009204, wrist_yaw_joint: 0.191748}
+  docking_wait: {base_joint: 3.138525, shoulder_joint: 0.866032, elbow_joint: 1.385966, wrist_pitch_joint: -1.241802, wrist_roll_joint: 0.007670, wrist_yaw_joint: 0.205553}
   tool0_pre: {base_joint: null, shoulder_joint: null, elbow_joint: null, wrist_pitch_joint: null, wrist_roll_joint: null, wrist_yaw_joint: null}
-  tool1_pre: {base_joint: null, shoulder_joint: null, elbow_joint: null, wrist_pitch_joint: null, wrist_roll_joint: null, wrist_yaw_joint: null}
-  tool_lock: {wrist_yaw_joint: null, delta_rad: null}
-  supply_pre: {base_joint: null, shoulder_joint: null, elbow_joint: null, wrist_pitch_joint: null, wrist_roll_joint: null, wrist_yaw_joint: null}
-  supply_grasp: {base_joint: null, shoulder_joint: null, elbow_joint: null, wrist_pitch_joint: null, wrist_roll_joint: null, wrist_yaw_joint: null}
+  tool1_pre: {base_joint: 2.193593, shoulder_joint: 0.500735, elbow_joint: 1.555263, wrist_pitch_joint: -1.441991, wrist_roll_joint: 0.757787, wrist_yaw_joint: -0.518486}
+  # Measured joint poses for reference; the FSM uses Cartesian docking and relative yaw.
+  tool1_docking: {base_joint: 2.265690, shoulder_joint: 0.436332, elbow_joint: 1.572716, wrist_pitch_joint: -1.414415, wrist_roll_joint: 0.667282, wrist_yaw_joint: -0.788466}
+  tool_lock1: {base_joint: 2.265690, shoulder_joint: 0.435285, elbow_joint: 1.568004, wrist_pitch_joint: -1.414764, wrist_roll_joint: 0.667282, wrist_yaw_joint: 0.865165}
+  # Measured yaw difference: tool_lock1 - tool1_docking (not the FSM command).
+  tool_lock: {wrist_yaw_joint: 0.865165, delta_rad: 1.653631}
+  supply_pre: {base_joint: -2.379204, shoulder_joint: 0.974941, elbow_joint: 1.538508, wrist_pitch_joint: -1.569575, wrist_roll_joint: -0.133456, wrist_yaw_joint: 0.124252}
+  supply_grasp: {base_joint: -2.258020, shoulder_joint: 0.694117, elbow_joint: 1.530130, wrist_pitch_joint: -1.451765, wrist_roll_joint: -0.608990, wrist_yaw_joint: -0.424913}
   stand: {base_joint: 0, shoulder_joint: 0, elbow_joint: 0, wrist_pitch_joint: 0, wrist_roll_joint: 0, wrist_yaw_joint: 0}
 cartesian_targets:
   # Fixed tool-1 target expressed in base_actuator, not a teach joint pose.
