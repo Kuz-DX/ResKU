@@ -138,8 +138,8 @@ joints:
     - 459
     - 3843
     soft_limit_rad:
-    - -1.279339977097
-    - 3.911651009108
+    - -2.351592547829
+    - 2.839398438376
     velocity_limit_rad_s: 0.24
     current_limit_ma: 2690.0
     current_limit_raw: 800

@@ -55,6 +55,38 @@ def harness(acceptance):
 
 
 class MotionActionTests(unittest.TestCase):
+    def test_ee_alignment_requires_post_result_feedback(self):
+        namespace.update(JointTrajectory=NS, JointTrajectoryPoint=NS,
+                         _duration=lambda seconds: seconds)
+        node, _ = harness(Future())
+        node.config["motion"]["ee_align"] = {
+            "reference_raw": 0, "duration_s": 0.001, "tolerance_rad": 0.01}
+        node.ee_model = NS(target=lambda *args: 0.05, velocity=100)
+        node.ee_client = object()
+        node.get_logger = lambda: NS(error=lambda message: None, info=lambda message: None)
+        feedback = iter([(0.0, time.monotonic()), (0.05, time.monotonic())])
+        node._current_ee = lambda: next(feedback, (0.05, time.monotonic()))
+        sent = []
+        node._send_action = lambda client, trajectory, timeout: sent.append(trajectory)
+        response = node._align_ee(NS(timeout_s=1.0), NS())
+        self.assertTrue(response.success)
+        self.assertEqual(sent[0].joint_names, ["ee_joint"])
+        self.assertEqual(response.actual_rad, 0.05)
+
+    def test_ee_wrong_feedback_latches_fault(self):
+        namespace.update(JointTrajectory=NS, JointTrajectoryPoint=NS,
+                         _duration=lambda seconds: seconds)
+        node, _ = harness(Future())
+        node.config["motion"]["ee_align"] = {
+            "reference_raw": 0, "duration_s": 0.001, "tolerance_rad": 0.001}
+        node.ee_model = NS(target=lambda *args: 0.05, velocity=100)
+        node.ee_client = object()
+        node._current_ee = lambda: (0.0, time.monotonic())
+        node._send_action = lambda *args: None
+        response = node._align_ee(NS(timeout_s=0.02), NS())
+        self.assertFalse(response.success)
+        self.assertTrue(node.motion_fault)
+
     def test_success_requires_action_and_controller_success(self):
         for code in (0, -1):
             handle = Handle(ready(NS(status=4, result=NS(error_code=code, error_string='test'))))

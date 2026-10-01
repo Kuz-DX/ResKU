@@ -6,7 +6,7 @@ import yaml
 
 
 STAGES = (
-    "home", "docking_wait", "tool1_pre", "tool1_target", "lock",
+    "home", "docking_wait", "ee_align", "tool1_pre", "tool1_target", "lock",
     "return_docking_wait", "return_home",
 )
 STOP_AFTER_STATES = frozenset((*STAGES, "done"))
@@ -74,6 +74,10 @@ def _required_paths(stop_after: str) -> list[str]:
         pose = _NAMED_POSE_BY_STAGE.get(stage)
         if pose is not None:
             required.extend((f"named_poses.{pose}", "motion.named_pose_duration_s"))
+        elif stage == "ee_align":
+            required.extend(("motion.ee_align.reference_raw",
+                             "motion.ee_align.duration_s",
+                             "motion.ee_align.tolerance_rad"))
         elif stage == "tool1_target":
             required.extend((
                 "cartesian_targets.tool1_target.frame_id",

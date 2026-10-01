@@ -14,6 +14,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/MoveNamedPose.srv"
   "srv/ExecuteTrajectory.srv"
   "srv/RotateWristYaw.srv"
+  "srv/AlignEe.srv"
   DEPENDENCIES geometry_msgs trajectory_msgs)
 
 ament_python_install_package(${PROJECT_NAME})

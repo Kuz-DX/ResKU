@@ -24,6 +24,9 @@ cartesian_targets:
     position_m: [null, null, null]
     orientation_xyzw: [null, null, null, null]
 motion:
+  # Physical EE alignment phase; 180-degree spacing is 2048 motor pulses.
+  # Confirm the measured reference in the current Homing Offset convention.
+  ee_align: {reference_raw: null, duration_s: null, tolerance_rad: null}
   # CCW in the ROS wrist_yaw_joint convention: +90 degrees.
   yaw_delta_rad: 1.5707963267948966
   # 현재 FSM은 insert.speed_m_s만 사용한다 (0.005 m/s = 5 mm/s).
@@ -39,6 +42,7 @@ motion:
   ik_orientation_step_rad: 0.02
   ik_limit_margin_rad: 0.01
 timeouts_s:
+  ee_align: null
   home: 120.0
   docking_wait: 120.0
   tool1_pre: 120.0

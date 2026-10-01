@@ -2,7 +2,7 @@
 # 이 파일을 직접 실행할 때 Python 3 인터프리터를 사용하도록 지정합니다.
 """One-shot, hold-on-failure FSM for the tool-1 Cartesian target routine.
 
-The state order is HOME, DOCKING_WAIT, TOOL1_PRE, TOOL1_TARGET, LOCK,
+The state order is HOME, DOCKING_WAIT, EE_ALIGN, TOOL1_PRE, TOOL1_TARGET, LOCK,
 RETURN_DOCKING_WAIT, RETURN_HOME, DONE.  TOOL1_TARGET reads a fixed
 ``base_actuator`` XYZ+quaternion from YAML and asks IK for a Cartesian path.
 Position waypoint k is ``p0 + (k/N)(pt-p0)`` and orientation follows the
@@ -13,6 +13,8 @@ LOCK then snapshots the actual wrist yaw and commands ``baseline + pi/2`` in
 the positive (CCW) ROS joint direction; it is a relative action, not a pose.
 Every service/controller failure or timeout enters HOLD without retry or any
 speculative return motion.
+EE_ALIGN chooses the nearest bounded q_ref+n*pi EE angle and verifies actual
+feedback through motion_executor before entering the docking approach.
 """
 # 이 모듈은 도구 1 장착 절차를 한 번 실행하고 실패 시 HOLD에 머뭅니다.
 # 목표 자세는 base_actuator 기준 XYZ와 quaternion을 모두 IK에 전달합니다.
@@ -29,6 +31,7 @@ import rclpy
 from ament_index_python.packages import get_package_share_directory
 # 여러 스레드에서 ROS 콜백을 처리하는 실행기를 사용합니다.
 from rclpy.executors import MultiThreadedExecutor
+from rclpy.callback_groups import ReentrantCallbackGroup
 # ROS 2 노드 기본 기능을 상속하기 위해 가져옵니다.
 from rclpy.node import Node
 # 요청 번호와 상태 문자열을 토픽으로 주고받는 메시지 형식입니다.
@@ -37,7 +40,7 @@ from std_msgs.msg import Int32, String
 # 정지 상태 설정 검증과 개발 단계별 정지 지점을 처리합니다.
 from tool_change_min.config import require_for_stop_state, stop_after_state
 # 이 FSM이 호출하는 자세 이동, IK, 궤적 실행 서비스 형식입니다.
-from tool_change_min.srv import ExecuteTrajectory, LinearMoveToPose, MoveNamedPose, RotateWristYaw
+from tool_change_min.srv import AlignEe, ExecuteTrajectory, LinearMoveToPose, MoveNamedPose, RotateWristYaw
 
 
 # 도구 장착 절차의 상태와 서비스 호출을 관리하는 ROS 2 노드입니다.
@@ -61,13 +64,19 @@ class ToolChangeFsm(Node):
         # 도구 변경 요청 토픽을 구독하고 수신 시 _request 콜백을 호출합니다.
         self.create_subscription(Int32, "/tool_change/request", self._request, 10)
         # 미리 지정한 관절 자세로 이동하는 서비스 클라이언트를 만듭니다.
-        self.named = self.create_client(MoveNamedPose, "move_to_named_pose")
+        self.client_group = ReentrantCallbackGroup()
+        self.named = self.create_client(MoveNamedPose, "move_to_named_pose",
+                                       callback_group=self.client_group)
+        self.align = self.create_client(AlignEe, "align_ee", callback_group=self.client_group)
         # 고정 Cartesian pose까지 다점 직선 IK 경로를 만드는 서비스 클라이언트입니다.
-        self.linear_pose = self.create_client(LinearMoveToPose, "linear_move_to_pose")
+        self.linear_pose = self.create_client(LinearMoveToPose, "linear_move_to_pose",
+                                             callback_group=self.client_group)
         # 계획된 관절 궤적을 컨트롤러에 실행시키는 서비스 클라이언트를 만듭니다.
-        self.execute = self.create_client(ExecuteTrajectory, "execute_trajectory")
+        self.execute = self.create_client(ExecuteTrajectory, "execute_trajectory",
+                                         callback_group=self.client_group)
         # 기준 관절 상태에서 손목 요 회전을 요청하는 서비스 클라이언트를 만듭니다.
-        self.rotate = self.create_client(RotateWristYaw, "rotate_wrist_yaw_relative")
+        self.rotate = self.create_client(RotateWristYaw, "rotate_wrist_yaw_relative",
+                                        callback_group=self.client_group)
         # 초기 상태를 토픽과 로그에 알립니다.
         self._publish("IDLE")
 
@@ -167,6 +176,12 @@ class ToolChangeFsm(Node):
             self._named("DOCKING_WAIT", "docking_wait", "docking_wait")
             # 도킹 대기 단계가 정지 지점이면 절차를 반환합니다.
             if self._pause_after("docking_wait"):
+                return
+            self._publish("EE_ALIGN")
+            alignment = AlignEe.Request()
+            alignment.timeout_s = float(self.config["timeouts_s"]["ee_align"])
+            self._call(self.align, alignment, alignment.timeout_s)
+            if self._pause_after("ee_align"):
                 return
             # tool 1 목표 pose를 풀기 전의 teach pre-pose로 이동합니다.
             self._named("TOOL1_PRE", "tool1_pre", "tool1_pre")
