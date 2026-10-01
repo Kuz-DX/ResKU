@@ -8,8 +8,9 @@ import signal
 import tempfile
 import time
 import unittest
+from unittest import mock
 
-from remote_shell import remote_rc
+from remote_shell import PaneColourForwarder, remote_rc, run_ssh
 
 
 class RemoteShellTest(unittest.TestCase):
@@ -22,12 +23,22 @@ class RemoteShellTest(unittest.TestCase):
                 "alias si='export TEST_WS=loaded'\n"
             )
             rc = root / 'rc'
+            colours = root / 'colours'
+            tmux = root / 'tmux'
+            tmux.write_text('#!/bin/bash\nprintf "%s\\n" "$*" >> "$TEST_COLOUR_LOG"\n')
+            tmux.chmod(0o755)
             command = "printf 'NODE_RUNNING\\n'; sleep 60"
             rc.write_text(remote_rc(f'cd {directory} && sr && si', command))
             pid, fd = pty.fork()
             if pid == 0:
                 os.environ.update(HOME=directory, RESKU_REMOTE_RC=str(rc), TERM='xterm')
-                os.execv('/bin/bash', ['bash', '--noprofile', '--rcfile', str(rc), '-i'])
+                os.environ.update(
+                    TMUX='test', TMUX_PANE='%42', TEST_COLOUR_LOG=str(colours),
+                    PATH=directory + ':' + os.environ['PATH'],
+                )
+                # Use the actual local PTY observer, replacing SSH only with Bash.
+                status = run_ssh(['/bin/bash', '--noprofile', '--rcfile', str(rc), '-i'])
+                os._exit(status)
 
             def wait_for(expected):
                 output = b''
@@ -55,10 +66,29 @@ class RemoteShellTest(unittest.TestCase):
                 os.write(fd, b'printf "ENV=%s/%s CWD=%s\\n" "$TEST_ROS" "$TEST_WS" "$PWD"\r')
                 wait_for(f'ENV=loaded/loaded CWD={directory}\r\n'.encode())
                 self.assertIn(command, (root / '.bash_history').read_text())
+                changes = colours.read_text()
+                self.assertIn('window-style bg=colour52', changes)
+                self.assertIn('window-active-style bg=colour52', changes)
+                self.assertIn('window-style bg=colour28', changes)
+                self.assertGreaterEqual(changes.count('window-style bg=colour52'), 2)
             finally:
                 os.kill(pid, signal.SIGKILL)
                 os.waitpid(pid, 0)
                 os.close(fd)
+
+
+class ColourForwarderTest(unittest.TestCase):
+    def test_escape_split_between_reads_and_repeated_status(self):
+        forwarder = PaneColourForwarder('%7')
+        with mock.patch('remote_shell.subprocess.run') as run:
+            forwarder.feed(b'log\x1b]11;#5f')
+            run.assert_not_called()
+            forwarder.feed(b'0000\x07prompt')
+            forwarder.feed(b'\x1b]11;#5f0000\x07')
+            self.assertEqual(run.call_count, 2)
+            forwarder.feed(b'\x1b]11;#008700\x07')
+            self.assertEqual(run.call_count, 4)
+            self.assertEqual(run.call_args.args[0][-1], 'bg=colour28')
 
 
 if __name__ == '__main__':
