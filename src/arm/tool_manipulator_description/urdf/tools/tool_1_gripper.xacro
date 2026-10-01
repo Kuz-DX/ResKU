@@ -4,10 +4,11 @@
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
   <xacro:macro name="tool_1_gripper" params="prefix parent use_mesh:=false">
     <xacro:property name="tool_1_tcp_offset" value="0.090"/>
-    <!-- MX-106 raw reference: raw 0 = 0 rad; raw increment = CCW/closing; 4096 tick/rev. -->
-    <xacro:property name="tool_1_gripper_limit_lower" value="-1.279339977097"/> <!-- raw 459; raw 1293 = 0 -->
-    <xacro:property name="tool_1_gripper_open" value="0.0"/> <!-- raw 1293: open reference -->
-    <xacro:property name="tool_1_gripper_limit_upper" value="3.911651009108"/> <!-- raw 3843 -->
+    <!-- MX-106 raw reference: raw 1992 = 0 rad; raw increment = CCW/closing; 4096 tick/rev. -->
+    <xacro:property name="tool_1_gripper_limit_lower" value="-2.351592547829"/> <!-- raw 459 -->
+    <xacro:property name="tool_1_gripper_open" value="-0.076699"/> <!-- measured raw 1941..1942 -->
+    <xacro:property name="tool_1_gripper_close" value="1.251728"/> <!-- measured raw 2808 -->
+    <xacro:property name="tool_1_gripper_limit_upper" value="2.839398438376"/> <!-- raw 3843 -->
     <xacro:property name="tool_1_rack_offset" value="0.018"/>
     <xacro:property name="tool_1_pitch_radius" value="0.017"/>
 
@@ -81,7 +82,8 @@
            서로 반대(rack_left=-Z, rack_right=+Z)이므로, mimic multiplier
            부호까지 반대로 주면 world 기준으로는 오히려 같은 방향으로 움직여
            버린다(실기에서 "한 몸으로 움직인다"고 확인된 원인). -->
-      <mimic joint="ee_joint" multiplier="${pinion_pitch_radius}" offset="0"/>
+      <mimic joint="ee_joint" multiplier="${pinion_pitch_radius}"
+             offset="${-tool_1_gripper_open * pinion_pitch_radius}"/>
     </joint>
 
     <link name="${prefix}rack_left">
@@ -126,7 +128,8 @@
       <origin xyz="-0.016 -0.018 -0.062" rpy="0 0 0"/>
       <axis xyz="0 0 1"/>
       <limit lower="0" upper="0.030" effort="8.4" velocity="0.1"/>
-      <mimic joint="ee_joint" multiplier="${pinion_pitch_radius}" offset="0"/>
+      <mimic joint="ee_joint" multiplier="${pinion_pitch_radius}"
+             offset="${-tool_1_gripper_open * pinion_pitch_radius}"/>
     </joint>
 
     <link name="${prefix}rack_right">

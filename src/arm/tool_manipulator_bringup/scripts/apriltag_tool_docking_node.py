@@ -31,6 +31,8 @@ class DockState(Enum):
     LOCK_ROTATING = auto()
     RETREAT = auto()
     ATTACHING_SCENE = auto()
+    DETACHING_SCENE = auto()
+    DETACH_RETREAT = auto()
     RETREATING = auto()
     RETURNING_TO_WAIT = auto()
     MISSION_WAIT = auto()
@@ -51,6 +53,7 @@ class AprilTagToolDocking(Node):
         self._validate_motion_params()
         self.state = DockState.IDLE
         self.target_tag_id = None
+        self.operation = None
         self.phase_started = self._now_sec()
         self.last_detection_time = None
         self.joint_positions = {}
@@ -74,6 +77,7 @@ class AprilTagToolDocking(Node):
         self.status_pub = self.create_publisher(String, self.get_parameter('status_topic').value, status_qos)
         # These are one-shot physical-motion events, never latched state.
         self.complete_pub = self.create_publisher(Bool, '/docking_complete', 10)
+        self.undocking_complete_pub = self.create_publisher(Bool, '/undocking_complete', 10)
         self.yaw_complete_pub = self.create_publisher(Bool, '/wrist_yaw_rotation_complete', 10)
         detection_topic = self.get_parameter('detection_topic').value
         if self.get_parameter('detection_message_type').value == 'vision_json':
@@ -89,12 +93,9 @@ class AprilTagToolDocking(Node):
         self.create_subscription(
             String, self.get_parameter('hardware_fault_topic').value, self._hardware_fault_cb, 10)
         self.create_subscription(Bool, self.get_parameter('servo_aligned_topic').value, self._servo_aligned_cb, 10)
-        tool_topic = self.get_parameter('tool_id_topic').value
-        # UI default is Int32. Set tool_id_message_type:=string when the UI emits String.
-        if self.get_parameter('tool_id_message_type').value.lower() == 'string':
-            self.create_subscription(String, tool_topic, self._tool_string_cb, 10)
-        else:
-            self.create_subscription(Int32, tool_topic, self._tool_int_cb, 10)
+        self.create_subscription(
+            String, self.get_parameter('motion_command_topic').value,
+            self._motion_command_cb, 10, callback_group=self.cb_group)
         rate = float(self.get_parameter('servo_rate_hz').value)
         self.create_timer(1.0 / rate, self._control_tick, callback_group=self.cb_group)
         self.create_service(Trigger, '~/operator_reset', self._operator_reset)
@@ -104,6 +105,7 @@ class AprilTagToolDocking(Node):
         p = self.declare_parameter
         p('tool_id_topic', '/selected_tool_id')
         p('tool_id_message_type', 'int32')
+        p('motion_command_topic', '/docking_command')
         p('active_tool_id_topic', '/active_tool_id')
         p('cancel_topic', '/tool_change/cancel')
         p('hardware_fault_topic', '/control/hardware_fault')
@@ -202,26 +204,33 @@ class AprilTagToolDocking(Node):
             raise RuntimeError('every tool joint goal must have one value per joint_names entry')
         return goals
 
-    def _tool_int_cb(self, msg):
-        self._start_request(msg.data)
-
-    def _tool_string_cb(self, msg):
+    def _motion_command_cb(self, msg):
         try:
-            self._start_request(int(msg.data))
-        except ValueError:
-            self.get_logger().warning('Ignoring non-integer tool String: %r' % msg.data)
+            operation, raw_tool_id = msg.data.split(':', 1)
+            tool_id = int(raw_tool_id)
+        except (AttributeError, TypeError, ValueError):
+            self.get_logger().warning('Ignoring malformed docking command: %r' % msg.data)
+            return
+        if operation not in ('attach', 'detach'):
+            self.get_logger().warning('Ignoring unsupported docking operation: %r' % operation)
+            return
+        self._start_request(tool_id, operation)
 
-    def _start_request(self, tag_id):
+    def _start_request(self, tag_id, operation):
         if tag_id == self.NONE:
             if self.state == DockState.IDLE:
                 self._publish_status('idle:no_tool_selected')
             return
 
-        if self.state != DockState.IDLE:
+        allowed_states = (DockState.IDLE,) if operation == 'attach' else (DockState.IDLE, DockState.DOCKED)
+        if self.state not in allowed_states:
             self.get_logger().warning('Docking request ignored: controller is busy, docked, or awaiting operator recovery')
             return
-        if self.active_tool_id != self.NONE:
+        if operation == 'attach' and self.active_tool_id != self.NONE:
             self._publish_status(f'failed:active_tool_{self.active_tool_id}_requires_release')
+            return
+        if operation == 'detach' and self.active_tool_id != tag_id:
+            self._publish_status(f'failed:active_tool_{self.active_tool_id}_does_not_match_{tag_id}')
             return
         if tag_id not in self.goals:
             self.get_logger().error(f'No taught joint goal for requested tag {tag_id}')
@@ -229,6 +238,7 @@ class AprilTagToolDocking(Node):
             return
         self._stop_servo()
         self.target_tag_id = tag_id
+        self.operation = operation
         self._enter(DockState.COARSE_MOVING)
         # Planning/execution waits must not block perception or Servo publishing.
         threading.Thread(target=self._coarse_worker, args=(tag_id,), daemon=True).start()
@@ -370,6 +380,15 @@ class AprilTagToolDocking(Node):
         if self.state == DockState.RETREAT:
             self._retreat_tick(now)
             return
+        if self.state == DockState.DETACHING_SCENE:
+            if self.active_tool_id == self.NONE:
+                self._enter(DockState.DETACH_RETREAT)
+            elif now - self.phase_started > self.get_parameter('attachment_timeout_sec').value:
+                self._fail('planning_scene_detach_timeout')
+            return
+        if self.state == DockState.DETACH_RETREAT:
+            self._retreat_tick(now)
+            return
         if self.state == DockState.ATTACHING_SCENE:
             if self.active_tool_id == self.target_tag_id:
                 self._enter(DockState.RETREATING)
@@ -443,9 +462,12 @@ class AprilTagToolDocking(Node):
                        for value in goal) for _, goal in goals):
                 self._terminal_failure('lock_joint_path_invalid')
                 return
+            if self.operation == 'detach':
+                goals.reverse()
         elif isinstance(yaw_delta, (int, float)) and math.isfinite(yaw_delta):
             goal = [self.joint_positions[name] for name in joints]
-            goal[joints.index(lock_joint)] += float(yaw_delta)
+            signed_delta = float(yaw_delta) if self.operation == 'attach' else -float(yaw_delta)
+            goal[joints.index(lock_joint)] += signed_delta
             goals = [('yaw_delta', goal)]
         else:
             self._terminal_failure('attach_yaw_delta_unconfigured')
@@ -455,7 +477,8 @@ class AprilTagToolDocking(Node):
             for step_name, goal in goals:
                 if self.state != DockState.LOCK_ROTATING:
                     return
-                self._publish_status(f'lock_rotating:{step_name}')
+                prefix = 'lock_rotating' if self.operation == 'attach' else 'unlock_rotating'
+                self._publish_status(f'{prefix}:{step_name}')
                 self.moveit2.move_to_configuration(goal)
                 if self.moveit2.wait_until_executed() is False:
                     success = False
@@ -471,8 +494,16 @@ class AprilTagToolDocking(Node):
         # This means only that the configured yaw trajectory succeeded.  It is
         # not a sensor-confirmed mechanical engagement or a Planning Scene update.
         self.yaw_complete_pub.publish(Bool(data=True))
-        self._publish_status('wrist_yaw_rotation_complete')
-        self._enter(DockState.RETREAT)
+        if self.operation == 'attach':
+            self._publish_status('wrist_yaw_rotation_complete')
+            self._enter(DockState.RETREAT)
+        else:
+            # The reverse taught path is the configured physical release
+            # procedure. Remove the attached collision before retreating with
+            # an empty flange, and wait for the scene acknowledgement.
+            self._publish_status('wrist_yaw_unlock_complete:awaiting_scene_detach')
+            self._enter(DockState.DETACHING_SCENE)
+            self.undocking_complete_pub.publish(Bool(data=True))
 
     def _retreat_tick(self, now):
         distance = self._tool_motion_value('retreat_distance_m')
@@ -488,6 +519,13 @@ class AprilTagToolDocking(Node):
             self._terminal_failure('retreat_timeout')
         elif now - self.phase_started >= duration:
             self._stop_servo()
+            if self.state == DockState.DETACH_RETREAT:
+                self._enter(DockState.RETREATING)
+                self._publish_status('detach_retreat_complete')
+                threading.Thread(
+                    target=self._post_lock_worker,
+                    args=(self.target_tag_id, 'detach'), daemon=True).start()
+                return
             # Only this successful post-yaw retreat is allowed to trigger attach.
             self._enter(DockState.ATTACHING_SCENE)
             self._publish_status('retreat_complete:awaiting_scene_attach')
@@ -496,7 +534,7 @@ class AprilTagToolDocking(Node):
             unit = self._unit(direction)
             self._publish_twist([speed * value for value in unit], [0.0, 0.0, 0.0], frame=frame)
 
-    def _post_lock_worker(self, tag_id):
+    def _post_lock_worker(self, tag_id, operation='attach'):
         try:
             # Planning begins only after the newly attached collision object is live.
             self.moveit2.move_to_configuration(self.goals[tag_id])
@@ -512,19 +550,26 @@ class AprilTagToolDocking(Node):
                 return
             mission_goal = self._mission_wait_goal()
             if not mission_goal:
-                self._enter(DockState.DOCKED)
-                self._publish_status('ready:mission_wait_pose_unconfigured')
+                self._finish_post_motion(operation, 'mission_wait_pose_unconfigured')
                 return
             self._enter(DockState.MISSION_WAIT)
             self.moveit2.move_to_configuration(mission_goal)
             if self.moveit2.wait_until_executed() is False:
                 raise RuntimeError('mission_wait execution failed')
             if self.state == DockState.MISSION_WAIT:
-                self._enter(DockState.DOCKED)
-                self._publish_status('ready:mission_wait')
+                self._finish_post_motion(operation, 'mission_wait')
         except Exception as exc:
             self.get_logger().error(f'Post-attach motion failed: {exc}')
             self._fail('post_attach_motion')
+
+    def _finish_post_motion(self, operation, detail):
+        if operation == 'detach':
+            self.operation, self.target_tag_id = None, None
+            self._enter(DockState.IDLE)
+            self._publish_status(f'undocked:{detail}')
+        else:
+            self._enter(DockState.DOCKED)
+            self._publish_status(f'ready:{detail}')
 
     def _publish_twist(self, linear, angular, frame=None):
         msg = TwistStamped()
@@ -548,7 +593,7 @@ class AprilTagToolDocking(Node):
         self._stop_servo()
         self.get_logger().error(f'Docking aborted: {reason}')
         self._publish_status(f'failed:{reason}')
-        self.state, self.target_tag_id = DockState.CANCELLED_HOLD, None
+        self.state, self.target_tag_id, self.operation = DockState.CANCELLED_HOLD, None, None
 
     def _fail(self, reason):
         # There is deliberately no automatic recovery retreat after failure:
@@ -563,6 +608,7 @@ class AprilTagToolDocking(Node):
             response.success, response.message = False, 'active tool must be confirmed empty before reset'
             return response
         self.target_tag_id = None
+        self.operation = None
         self._enter(DockState.IDLE)
         self._publish_status('idle:operator_reset')
         response.success, response.message = True, 'operator reset accepted'

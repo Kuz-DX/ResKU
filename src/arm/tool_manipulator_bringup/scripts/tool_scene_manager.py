@@ -30,6 +30,7 @@ class ToolSceneManager(Node):
         for name, default in (
             ('tools_config_file', ''), ('tool_id_topic', '/selected_tool_id'),
             ('docking_complete_topic', '/docking_complete'),
+            ('undocking_complete_topic', '/undocking_complete'),
             ('motion_status_topic', '/docking_motion_status'),
             ('attach_link', 'ee_output_link'),
             ('apply_planning_scene_service', '/apply_planning_scene'),
@@ -37,6 +38,8 @@ class ToolSceneManager(Node):
             self.declare_parameter(name, default)
         self.tools = self._load_tools(self.get_parameter('tools_config_file').value)
         self.fixtures = self._load_fixtures(self.get_parameter('tools_config_file').value)
+        self.physical_detach_supported = self._load_detach_enabled(
+            self.get_parameter('tools_config_file').value)
         self.pending_tool_id = self.NONE
         # A process restart cannot infer whether a tool is mechanically retained.
         self.active_tool_id = self.UNKNOWN
@@ -52,6 +55,9 @@ class ToolSceneManager(Node):
         self._register_fixtures()
         self.create_subscription(Int32, self.get_parameter('tool_id_topic').value, self._selected_cb, 10)
         self.create_subscription(Bool, self.get_parameter('docking_complete_topic').value, self._docked_cb, 10)
+        self.create_subscription(
+            Bool, self.get_parameter('undocking_complete_topic').value,
+            self._undocked_cb, 10)
         self.create_subscription(String, self.get_parameter('motion_status_topic').value, self._motion_cb, 10)
         self.create_service(Trigger, '~/attach_pending', self._attach_service)
         self.create_service(Trigger, '~/detach_active', self._detach_service)
@@ -77,6 +83,15 @@ class ToolSceneManager(Node):
             return {str(key): value for key, value in fixtures.items() if isinstance(value, dict)}
         except (OSError, TypeError, ValueError, yaml.YAMLError) as exc:
             raise RuntimeError(f'cannot read fixture collision registry: {exc}') from exc
+
+    @staticmethod
+    def _load_detach_enabled(filename: str) -> bool:
+        try:
+            with Path(filename).open(encoding='utf-8') as stream:
+                real = (yaml.safe_load(stream) or {}).get('real_docking', {})
+            return real.get('physical_detach_supported') is True
+        except (OSError, TypeError, yaml.YAMLError) as exc:
+            raise RuntimeError(f'cannot read physical detach setting: {exc}') from exc
 
     def _selected_cb(self, msg: Int32) -> None:
         tool_id = int(msg.data)
@@ -104,13 +119,31 @@ class ToolSceneManager(Node):
         if msg.data:
             self._attach_pending()
 
+    def _undocked_cb(self, msg: Bool) -> None:
+        # Emitted only after the executor completes the configured reverse lock
+        # trajectory while seated in the rack. Scene detach is therefore gated
+        # by physical motion completion, never by UI intent alone.
+        if not msg.data:
+            return
+        tool_id = self.active_tool_id
+        spec = self.tools.get(tool_id, {})
+        rack_collision = spec.get('rack_collision', {}) if isinstance(spec, dict) else {}
+        if not self.physical_detach_supported:
+            self._publish('rejected:physical_detach_disabled')
+        elif tool_id in (self.NONE, self.UNKNOWN):
+            self._publish('rejected:no_known_attached_tool')
+        elif not isinstance(rack_collision, dict) or not rack_collision.get('frame') or not rack_collision.get('primitives'):
+            self._publish(f'rejected:tool_{tool_id}_rack_collision_unconfigured')
+        else:
+            self._apply(self._detach_scene(tool_id, rack_collision), tool_id, 'detach')
+
     def _attach_service(self, _request, response):
         response.success, response.message = self._attach_pending()
         return response
 
     def _detach_service(self, _request, response):
-        response.success, response.message = False, 'physical detach is not implemented; scene detach is blocked'
-        self._publish('rejected:physical_detach_not_implemented')
+        response.success, response.message = False, 'use the /dock action; direct scene detach is blocked'
+        self._publish('rejected:direct_scene_detach_blocked')
         return response
 
     def _confirm_empty_service(self, _request, response):
@@ -199,13 +232,25 @@ class ToolSceneManager(Node):
         obj.header.frame_id = self.get_parameter('attach_link').value
         self._append_primitives(obj, spec['collision']['primitives'])
         attached = AttachedCollisionObject(link_name=self.get_parameter('attach_link').value, object=obj)
-        # Remove any stale slot representation atomically with attach. Physical
-        # detach is not implemented; this only recovers an old scene artifact.
+        # Remove the rack representation atomically when the physical tool is
+        # attached to the flange.
         remove_slot = CollisionObject(id=self._slot_id(tool_id), operation=CollisionObject.REMOVE)
         scene = PlanningScene(is_diff=True)
         scene.robot_state.is_diff = True
         scene.robot_state.attached_collision_objects.append(attached)
         scene.world.collision_objects.append(remove_slot)
+        return scene
+
+    def _detach_scene(self, tool_id: int, rack_collision: dict) -> PlanningScene:
+        attached = AttachedCollisionObject(link_name=self.get_parameter('attach_link').value)
+        attached.object.id, attached.object.operation = self._attached_id(tool_id), CollisionObject.REMOVE
+        rack_tool = CollisionObject(id=self._slot_id(tool_id), operation=CollisionObject.ADD)
+        rack_tool.header.frame_id = rack_collision['frame']
+        self._append_primitives(rack_tool, rack_collision['primitives'])
+        scene = PlanningScene(is_diff=True)
+        scene.robot_state.is_diff = True
+        scene.robot_state.attached_collision_objects.append(attached)
+        scene.world.collision_objects.append(rack_tool)
         return scene
 
     def _clear_all_tool_scene(self) -> PlanningScene:
@@ -234,7 +279,7 @@ class ToolSceneManager(Node):
             self.get_logger().error(f'planning-scene update failed: {exc}')
             success = False
         if not success:
-            if operation == 'attach':
+            if operation in ('attach', 'detach'):
                 self._mark_unknown(f'unknown:planning_scene_{operation}_failed')
             else:
                 self._publish(f'{operation}:failed:{tool_id}')
@@ -243,6 +288,10 @@ class ToolSceneManager(Node):
             self.active_tool_id, self.pending_tool_id = tool_id, self.NONE
             self.physical_engagement_started = False
             self._publish(f'attached:{tool_id}:after_retreat')
+        elif operation == 'detach':
+            self.active_tool_id, self.pending_tool_id = self.NONE, self.NONE
+            self.physical_engagement_started = False
+            self._publish(f'detached:{tool_id}:after_unlock')
         elif operation == 'recover_empty':
             self.active_tool_id, self.pending_tool_id = self.NONE, self.NONE
             self._publish('recovered:operator_confirmed_empty')

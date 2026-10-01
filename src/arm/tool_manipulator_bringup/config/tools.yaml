@@ -2,9 +2,13 @@
 # collision, taught approach, and attachment motion. null means "measure it";
 # real_tool_change.launch.py will refuse to start until the selected IDs below
 # are enabled and every required value is valid.
+# Autonomous IDs are fixed: tool/tag 0=gripper and tool/tag 1=drill. No tool or
+# tag ID >= 2 may be added. model_id is an independent legacy CAD model number.
 real_docking:
   enabled_tool_ids: []  # set e.g. [0] only after that tool is completely measured
-  physical_detach_supported: false  # no release motion implementation exists yet
+  # Set true only after tag 1's encoder-taught joint_path, rack collision, and
+  # insertion/retreat measurements below have been bench-verified.
+  physical_detach_supported: false
 
 # Reserved state IDs published on /active_tool_id. They are not AprilTag IDs
 # and must not appear as keys under tools.
@@ -37,8 +41,10 @@ tools:
       type: dynamixel
       joint: ee_joint
       id: 4
-      position_limits_rad: [-1.279339977097, 3.911651009108]
-      open_position_rad: 0.0
+      position_limits_rad: [-2.351592547829, 2.839398438376]
+      # 2026-10-01 live capture: rack/open ~= raw 1941..1942; close=raw 2808.
+      open_position_rad: -0.076699
+      close_position_rad: 1.251728
     lock:
       joint: wrist_yaw_joint
       attach_yaw_delta_rad: null  # measured signed rad from current yaw position
@@ -75,6 +81,11 @@ tools:
       quat_xyzw: [0.0, 0.0, 0.0, 1.0]
     collision:
       primitives: null
+    # World-frame collision occupied by the drill after autonomous release.
+    # Uses the same primitive format as collision.primitives.
+    rack_collision:
+      frame: null
+      primitives: null
     dock_fixture: null
     actuator:
       type: dynamixel
@@ -84,6 +95,10 @@ tools:
     lock:
       joint: wrist_yaw_joint
       attach_yaw_delta_rad: null
+      # Paste encoder-calibrated /joint_states snapshots in physical order:
+      # seated+unlocked -> intermediate(s) -> seated+locked. Attachment plays
+      # this list forward; detachment plays the identical list in reverse.
+      joint_path: null
     docking:
       descent_frame: null
       descent_direction: [null, null, null]

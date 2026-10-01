@@ -37,6 +37,8 @@ def generate_launch_description():
              parameters=[docking_params, {'tools_config_file': tools_config}]),
         Node(package='tool_manipulator_bringup', executable='docking_manager.py',
              name='docking_manager', output='screen', parameters=[{'tools_config_file': tools_config}]),
+        Node(package='tool_manipulator_bringup', executable='drill_tool_change_coordinator.py',
+             name='drill_tool_change_coordinator', output='screen'),
         Node(package='tool_manipulator_bringup', executable='tool_scene_manager.py',
              name='tool_scene_manager', output='screen', parameters=[{'tools_config_file': tools_config}]),
     ])

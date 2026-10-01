@@ -670,8 +670,8 @@
   <joint name="ee_joint" type="revolute">
     <parent link="tcp_link"/><child link="ee_output_link"/>
     <origin xyz="0 0 0" rpy="0 0 0"/><axis xyz="0 0 1"/>
-    <!-- raw 1293 = 0 rad; raw 459..3843 are the measured safe endpoints. -->
-    <limit lower="-1.279339977097" upper="3.911651009108" effort="8.4" velocity="5.035177"/>
+    <!-- raw 1992 = 0 rad; raw 459..3843 are the measured safe endpoints. -->
+    <limit lower="-2.351592547829" upper="2.839398438376" effort="8.4" velocity="5.035177"/>
   </joint>
 
   <!-- RealSense D435 bracket: TCP is the mechanical parent frame. -->

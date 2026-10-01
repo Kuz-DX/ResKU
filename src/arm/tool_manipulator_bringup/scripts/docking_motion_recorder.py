@@ -13,9 +13,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import rclpy
+import yaml
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
+
+ARM_JOINTS = (
+    'base_joint', 'shoulder_joint', 'elbow_joint',
+    'wrist_pitch_joint', 'wrist_roll_joint', 'wrist_yaw_joint',
+)
 
 
 class DockingMotionRecorder(Node):
@@ -76,12 +82,25 @@ class DockingMotionRecorder(Node):
 
     def snapshot(self) -> dict:
         with self._lock:
+            taught_path = []
+            for event in self._events:
+                positions = event.get('positions_rad')
+                if event.get('event') != 'mark' or not isinstance(positions, dict):
+                    continue
+                if not all(joint in positions for joint in ARM_JOINTS):
+                    continue
+                taught_path.append({
+                    'name': event['label'],
+                    'positions_rad': [float(positions[joint]) for joint in ARM_JOINTS],
+                })
             return {
                 'format': 'tool_manipulator_docking_motion/v1',
                 'recorded_at_utc': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
                 'joint_state_topic': self.topic,
                 'samples': list(self._samples),
                 'events': list(self._events),
+                'joint_names': list(ARM_JOINTS),
+                'taught_joint_path': taught_path,
             }
 
     def save(self, output: Path) -> None:
@@ -91,6 +110,10 @@ class DockingMotionRecorder(Node):
             encoding='utf-8',
         )
         print(f'Saved {output}')
+        taught_path = self.snapshot()['taught_joint_path']
+        if taught_path:
+            print('\nPaste this under tools.1.lock.joint_path in tools.yaml:')
+            print(yaml.safe_dump({'joint_path': taught_path}, sort_keys=False).rstrip())
 
     def _event(self, kind: str, label: str | None) -> dict:
         latest = self._latest_sample or {}
@@ -129,7 +152,8 @@ def main() -> int:
     executor.add_node(node)
     spin_thread = threading.Thread(target=executor.spin, daemon=True)
     spin_thread.start()
-    print('Read-only JointState recorder. Commands: start <segment> | mark <label> | stop | q')
+    print('Read-only encoder-calibrated JointState recorder.')
+    print('For drill: start drill_lock | mark unlock | mark lock_step1 | mark lock | stop | q')
     try:
         while rclpy.ok():
             try:

@@ -1,6 +1,8 @@
 ## Person Detection 비전 모델
 
-주행/좌/우 카메라의 압축 컬러 영상을 하나의 OpenVINO 모델로 순차 추론한다.
+주행/좌/우 카메라의 압축 컬러 영상을 `vision/models/person.pt` YOLO 모델
+하나로 순차 추론한다. 모델의 학습 클래스 `pedestrian`은 출력 JSON에서 기존
+인터페이스와 같은 `person`으로 발행된다.
 사람 bbox가 그려진 `sensor_msgs/msg/CompressedImage` 출력은 다음과 같다.
 
 - `/drive/person/detecion`
@@ -14,6 +16,9 @@
 source /home/shu/ResKU/install/setup.bash
 ros2 launch vision person_detection.launch.py
 ```
+
+기본 추론 크기는 640이고 CPU를 사용한다. 다른 장치를 쓰거나 속도를 우선할 때는
+예를 들어 `device:=0 infer_size:=320`을 launch 인자로 전달한다.
 
 JSON 검출 결과는 drive의 기존 `/person_detection/detections`와 side cam의
 `/left/person/detections`, `/right/person/detections`로 발행된다. bbox 이미지가
@@ -482,7 +487,7 @@ ros2 topic echo /arm/picking_command
 >
 > - `real_tool_change.launch.py`는 `hardware.yaml`, `tools.yaml`, `docking.yaml` 전체를 먼저 검사한다. 누락·`null`·음수 placeholder·형식 오류가 하나라도 있으면 controller manager와 모터 포트를 시작하지 않는다.
 > - 실기 control 실행 중에는 `rmd_joint_state_bridge`, Dynamixel Wizard처럼 `can_arm` 또는 `/dev/ttyUSB0`을 여는 프로그램을 함께 실행하지 않는다.
-> - `src/vision/vision/apriltag.py`, `src/vision/camera/launch/cameras.launch.py`는 수정하지 않는다. 이 패키지는 그 노드가 발행하는 토픽만 사용한다.
+> - 자율 tool/tag ID는 `0 = gripper`, `1 = drill`만 사용한다. ID 2 이상은 비전·도킹 대상에서 제외하며 `99`는 NO_TOOL 상태다.
 
 ## 단일 설정 원본과 실측 방법
 
@@ -581,7 +586,7 @@ ros2 launch vision cameras.launch.py
 ros2 launch tool_manipulator_bringup arm_tag_docking_vision.launch.py
 ```
 
-J4는 `/arm/camera/color/image_raw/compressed`, `/arm/camera/color/camera_info`를 구독하고 `/arm/apriltag/centers`를 발행한다. `tag_size_cm`은 J2가 검사한 `docking.yaml.vision_apriltag.ros__parameters.tag_size_cm` 하나만 사용한다. `tag_pose_filter`는 추가로 `/arm/camera/aligned_depth_to_color/image_raw`를 구독한다.
+J4는 `/arm/camera/color/image_raw/compressed`, `/arm/camera/color/camera_info`를 구독하고 `/arm/apriltag/centers`를 발행한다. `tag_size_cm`은 J2가 검사한 `docking.yaml.vision_apriltag.ros__parameters.tag_size_cm` 하나만 사용한다. `allowed_tag_ids: [0, 1]`에 따라 gripper와 drill tag만 발행하고 ID 2 이상은 무시한다. `tag_pose_filter`는 추가로 `/arm/camera/aligned_depth_to_color/image_raw`를 구독한다.
 
 ## Jetson J5 — 실제 팔과 도킹 stack
 

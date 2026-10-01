@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import math
 import sys
+import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -14,7 +16,10 @@ from builtin_interfaces.msg import Duration
 from control_msgs.action import FollowJointTrajectory
 from rclpy.action import ActionClient
 from rclpy.node import Node
+from sensor_msgs.msg import JointState
 from trajectory_msgs.msg import JointTrajectoryPoint
+
+from arm_pose_safety import load_soft_limits, validate_joint_positions
 
 ARM_JOINTS = (
     "base_joint",
@@ -36,6 +41,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--wait-for-server", type=float, default=5.0,
                         help="Seconds to wait for arm_controller (default: 5.0)")
     parser.add_argument("--srdf", type=Path, help="Optional SRDF override")
+    parser.add_argument("--hardware", type=Path, help="Optional hardware.yaml override")
+    parser.add_argument("--limit-margin", type=float, default=0.0,
+                        help="Required distance inside each soft limit in radians (default: 0.0)")
+    parser.add_argument("--joint-state-topic", default="/joint_states",
+                        help="JointState topic checked before motion (default: /joint_states)")
+    parser.add_argument("--joint-state-timeout", type=float, default=2.0,
+                        help="Seconds to wait for a complete current arm state (default: 2.0)")
+    parser.add_argument("--max-start-velocity", type=float, default=0.02,
+                        help="Maximum absolute start joint velocity in rad/s (default: 0.02)")
     parser.add_argument("--dry-run", action="store_true", help="Print the target without sending it")
     return parser.parse_args()
 
@@ -64,16 +78,73 @@ def seconds_to_duration(seconds: float) -> Duration:
 
 
 class NamedPoseRunner(Node):
-    def __init__(self) -> None:
+    def __init__(self, joint_state_topic: str) -> None:
         super().__init__("move_to_named_pose")
         self.client = ActionClient(
             self, FollowJointTrajectory, "/arm_controller/follow_joint_trajectory")
+        self.latest_positions: dict[str, float] | None = None
+        self.latest_velocities: dict[str, float] | None = None
+        self.create_subscription(JointState, joint_state_topic, self._on_joint_state, 20)
 
-    def run(self, positions: list[float], duration_s: float, wait_s: float) -> int:
+    def _on_joint_state(self, message: JointState) -> None:
+        observed = {
+            name: float(position)
+            for name, position in zip(message.name, message.position)
+        }
+        observed_velocity = {
+            name: float(velocity)
+            for name, velocity in zip(message.name, message.velocity)
+        }
+        if (all(name in observed for name in ARM_JOINTS) and
+                all(name in observed_velocity for name in ARM_JOINTS)):
+            self.latest_positions = {name: observed[name] for name in ARM_JOINTS}
+            self.latest_velocities = {
+                name: observed_velocity[name] for name in ARM_JOINTS}
+
+    def _wait_for_joint_state(
+        self, timeout_s: float
+    ) -> tuple[dict[str, float], dict[str, float]] | None:
+        deadline = time.monotonic() + timeout_s
+        while rclpy.ok() and self.latest_positions is None and time.monotonic() < deadline:
+            rclpy.spin_once(self, timeout_sec=min(0.1, max(0.0, deadline - time.monotonic())))
+        if self.latest_positions is None:
+            self.get_logger().error(
+                f"No complete current arm state received within {timeout_s:.2f}s")
+            return None
+        return dict(self.latest_positions), dict(self.latest_velocities or {})
+
+    def run(
+        self,
+        positions: list[float],
+        duration_s: float,
+        wait_s: float,
+        limits: dict[str, tuple[float, float]],
+        joint_state_timeout_s: float,
+        max_start_velocity: float,
+    ) -> int:
         if not self.client.wait_for_server(timeout_sec=wait_s):
             self.get_logger().error(
                 "arm_controller action server is unavailable. Start real_control first; "
                 "do not run this with rmd_joint_state_bridge.")
+            return 2
+        current_state = self._wait_for_joint_state(joint_state_timeout_s)
+        if current_state is None:
+            return 2
+        current, velocities = current_state
+        try:
+            validate_joint_positions(current, limits, 0.0, label="current arm state")
+        except ValueError as exc:
+            self.get_logger().error(str(exc))
+            return 2
+        moving = {
+            name: abs(value) for name, value in velocities.items()
+            if not math.isfinite(value) or abs(value) > max_start_velocity
+        }
+        if moving:
+            self.get_logger().error(
+                "Arm must be stopped before a named-pose goal: " +
+                ", ".join(f"{name}={value:.6f}rad/s" for name, value in moving.items())
+            )
             return 2
         goal = FollowJointTrajectory.Goal()
         goal.trajectory.joint_names = list(ARM_JOINTS)
@@ -103,8 +174,22 @@ class NamedPoseRunner(Node):
 
 def main() -> int:
     args = parse_args()
-    if args.duration <= 0.0 or args.wait_for_server < 0.0:
-        print("--duration must be > 0 and --wait-for-server must be >= 0", file=sys.stderr)
+    numeric_args = (
+        args.duration,
+        args.wait_for_server,
+        args.limit_margin,
+        args.joint_state_timeout,
+        args.max_start_velocity,
+    )
+    if (not all(math.isfinite(value) for value in numeric_args) or
+            args.duration <= 0.0 or args.wait_for_server < 0.0 or
+            args.limit_margin < 0.0 or args.joint_state_timeout <= 0.0 or
+            args.max_start_velocity < 0.0):
+        print(
+            "duration and joint-state timeout must be positive; wait and margin "
+            "must be nonnegative finite values",
+            file=sys.stderr,
+        )
         return 2
     srdf = args.srdf or Path(get_package_share_directory(
         "tool_manipulator_moveit_config")) / "config" / "tool_manipulator.srdf"
@@ -122,14 +207,33 @@ def main() -> int:
         print(f"Unknown arm pose '{args.pose}'. Use --list to see available poses.", file=sys.stderr)
         return 2
     positions = poses[args.pose]
+    hardware = args.hardware or Path(get_package_share_directory(
+        "tool_manipulator_bringup")) / "config" / "hardware.yaml"
+    target = dict(zip(ARM_JOINTS, positions))
+    try:
+        limits = load_soft_limits(hardware, ARM_JOINTS)
+        validate_joint_positions(
+            target, limits, args.limit_margin, label=f"target pose '{args.pose}'")
+    except (OSError, TypeError, ValueError) as error:
+        print(f"Unsafe named pose: {error}", file=sys.stderr)
+        return 2
     print(f"{args.pose}: " + ", ".join(
         f"{name}={value:.6f}" for name, value in zip(ARM_JOINTS, positions)))
+    print(f"hardware: {hardware} (soft-limit margin={args.limit_margin:.6f} rad)")
     if args.dry_run:
         return 0
+    print("WARNING: this sends a direct joint goal; it does not perform MoveIt collision planning.")
     rclpy.init()
-    node = NamedPoseRunner()
+    node = NamedPoseRunner(args.joint_state_topic)
     try:
-        return node.run(positions, args.duration, args.wait_for_server)
+        return node.run(
+            positions,
+            args.duration,
+            args.wait_for_server,
+            limits,
+            args.joint_state_timeout,
+            args.max_start_velocity,
+        )
     finally:
         node.destroy_node()
         rclpy.shutdown()

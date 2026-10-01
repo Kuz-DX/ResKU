@@ -1,4 +1,4 @@
-"""Real arm + attachment-only tool docking launch with a single fail-closed preflight."""
+"""Real arm + commissioned tool docking launch with a single fail-closed preflight."""
 from __future__ import annotations
 
 import importlib.util
@@ -22,7 +22,14 @@ def _validator(share: Path):
     script = share.parent.parent / 'lib' / 'tool_manipulator_bringup' / 'config_validator.py'
     if not script.is_file():
         raise RuntimeError(f'real tool change blocked: installed preflight missing: {script}')
-    sys.path.insert(0, str(script.parent))
+    # In a symlink-install workspace, config_validator.py resolves into the
+    # source scripts directory while helper modules may not yet be installed.
+    # Search both locations; a normal merged/copy install resolves to the same
+    # directory and remains unchanged.
+    for module_dir in (script.parent, script.resolve().parent):
+        module_dir_text = str(module_dir)
+        if module_dir_text not in sys.path:
+            sys.path.insert(0, module_dir_text)
     spec = importlib.util.spec_from_file_location('tool_manipulator_preflight', script)
     if spec is None or spec.loader is None:
         raise RuntimeError('real tool change blocked: cannot load preflight')

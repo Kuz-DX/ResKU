@@ -10,7 +10,7 @@ from pathlib import Path
 import yaml
 
 from hardware_preflight import validate as validate_hardware
-from tool_ids import NO_TOOL_ID, UNKNOWN_TOOL_ID
+from tool_ids import NO_TOOL_ID, SUPPORTED_TOOL_IDS, TOOL_TAG_IDS, UNKNOWN_TOOL_ID
 
 
 def _number(value) -> bool:
@@ -80,10 +80,18 @@ def validate_tools(config: dict) -> list[str]:
     _tool_error(errors, 'tools.yaml.tools',
                 not registered_ids.intersection((NO_TOOL_ID, UNKNOWN_TOOL_ID)),
                 'reserved NO_TOOL/UNKNOWN IDs must not be physical tools')
+    _tool_error(errors, 'tools.yaml.tools',
+                registered_ids == SUPPORTED_TOOL_IDS,
+                'must contain exactly tool IDs 0 (gripper) and 1 (drill); IDs >= 2 are unsupported')
+    for tool_id, expected_tag_id in TOOL_TAG_IDS.items():
+        spec = tools.get(tool_id, tools.get(str(tool_id)))
+        _tool_error(errors, f'tools.yaml.tools.{tool_id}.tag_id',
+                    isinstance(spec, dict) and spec.get('tag_id') == expected_tag_id,
+                    f'must be {expected_tag_id} for tool ID {tool_id}')
 
+    detach_supported = real.get('physical_detach_supported')
     _tool_error(errors, 'tools.yaml.real_docking.physical_detach_supported',
-                real.get('physical_detach_supported') is False,
-                'must remain false until a physical release procedure is implemented')
+                isinstance(detach_supported, bool), 'boolean required')
     requested = real.get('enabled_tool_ids')
     if not isinstance(requested, list) or not requested:
         errors.append('tools.yaml.real_docking.enabled_tool_ids: non-empty list of tool IDs required')
@@ -94,6 +102,8 @@ def validate_tools(config: dict) -> list[str]:
 
     if any(tool_id in (NO_TOOL_ID, UNKNOWN_TOOL_ID) for tool_id in requested):
         errors.append('tools.yaml.real_docking.enabled_tool_ids: reserved state IDs are not tools')
+    if any(tool_id not in SUPPORTED_TOOL_IDS for tool_id in requested):
+        errors.append('tools.yaml.real_docking.enabled_tool_ids: only IDs 0 (gripper) and 1 (drill) are supported')
 
     fixtures = config.get('fixtures')
     if not isinstance(fixtures, dict) or not fixtures:
@@ -141,6 +151,14 @@ def validate_tools(config: dict) -> list[str]:
                     isinstance(lock, dict) and lock.get('joint') == 'wrist_yaw_joint' and
                     (path_valid or delta_valid),
                     'measured joint_path or signed attach_yaw_delta_rad required')
+        if detach_supported:
+            _tool_error(errors, f'{path}.lock.joint_path', path_valid,
+                        'encoder-taught path with at least unlock and lock steps required for reversible detach')
+            rack_collision = spec.get('rack_collision')
+            _tool_error(errors, f'{path}.rack_collision',
+                        isinstance(rack_collision, dict) and bool(rack_collision.get('frame')) and
+                        _primitive_list(rack_collision.get('primitives')),
+                        'measured frame and primitives required for the released rack tool')
 
         docking = spec.get('docking')
         if not isinstance(docking, dict):
@@ -195,6 +213,10 @@ def validate_docking(config: dict) -> list[str]:
         require(f'vision_apriltag.ros__parameters.{key}', isinstance(vision.get(key), str) and bool(vision.get(key)), 'non-empty ROS topic required')
     require('vision_apriltag.ros__parameters.tag_size_cm', _positive(vision.get('tag_size_cm')),
             'measured printed tag side in cm required')
+    allowed_tag_ids = vision.get('allowed_tag_ids')
+    require('vision_apriltag.ros__parameters.allowed_tag_ids',
+            isinstance(allowed_tag_ids, list) and allowed_tag_ids == [0, 1],
+            'must be exactly [0, 1] (gripper, drill); tag IDs >= 2 are unsupported')
 
     for key in ('source_topic', 'depth_topic', 'selected_tool_id_topic', 'valid_pose_topic', 'status_topic', 'expected_frame_id'):
         require(f'tag_pose_filter.ros__parameters.{key}', isinstance(tag.get(key), str) and bool(tag.get(key)), 'non-empty topic/frame required')
@@ -219,7 +241,7 @@ def validate_docking(config: dict) -> list[str]:
     require('visual_servo_node.ros__parameters.stable_frame_count',
             isinstance(servo.get('stable_frame_count'), int) and servo['stable_frame_count'] > 0, 'positive frame count required')
 
-    for key in ('tool_id_topic', 'active_tool_id_topic', 'cancel_topic', 'status_topic', 'detection_topic',
+    for key in ('tool_id_topic', 'motion_command_topic', 'active_tool_id_topic', 'cancel_topic', 'status_topic', 'detection_topic',
                 'servo_enable_service', 'servo_aligned_topic', 'servo_twist_topic', 'hardware_fault_topic',
                 'planning_group', 'base_link', 'end_effector_link', 'joint_state_topic'):
         require(f'docking_motion_executor.ros__parameters.{key}', isinstance(executor.get(key), str) and bool(executor.get(key)),

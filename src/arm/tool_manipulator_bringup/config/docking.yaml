@@ -1,4 +1,4 @@
-# Shared camera/tag/servo/common-pose configuration for real attachment docking.
+# Shared camera/tag/servo/common-pose configuration for real tool docking.
 # This is the single source for the external vision.apriltag inputs too; the
 # tool package never modifies vision/camera source files.
 vision_apriltag:
@@ -7,6 +7,7 @@ vision_apriltag:
     camera_info_topic: /arm/camera/color/camera_info
     centers_topic: /arm/apriltag/centers
     tag_size_cm: 2.0             # measured physical printed side in cm
+    allowed_tag_ids: [0, 1]      # 0=gripper, 1=drill; ignore every tag ID >= 2
 
 # Every null is a required measurement or commissioning choice. The real launch
 # runs config_validator before it opens any motor port.
@@ -17,7 +18,7 @@ tag_pose_filter:
     selected_tool_id_topic: /selected_tool_id
     valid_pose_topic: /tag_pose_valid
     status_topic: /tag_status
-    expected_frame_id: null       # exact frame_id in vision/apriltag JSON
+    expected_frame_id: arm_camera_color_optical_frame  # observed in /arm/apriltag/centers
     max_age_sec: null             # maximum detector stamp age at filter receipt
     min_decision_margin: null     # lowest accepted recorded decision margin
     depth_range_m: [null, null]  # measured Euclidean PnP [min,max]
@@ -42,6 +43,7 @@ docking_motion_executor:
   ros__parameters:
     tool_id_topic: /selected_tool_id
     tool_id_message_type: int32
+    motion_command_topic: /docking_command
     active_tool_id_topic: /active_tool_id
     cancel_topic: /tool_change/cancel
     status_topic: /docking_motion_status
