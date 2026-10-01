@@ -56,8 +56,10 @@ joints:
     id: 5
     sign: -1
     q_offset_rad: 0.09669123989469558
+    # CW lower bound: operator-approved dock pose, raw_deg=86.939995.
+    # q = sign * (raw_deg*pi/180 - q_offset_rad); reconvert if zero changes.
     soft_limit_rad:
-    - -1.475675812748
+    - -1.4206979245227118
     - 1.573239770294
     velocity_limit_rad_s: 0.3
     current_limit_a: 3.0

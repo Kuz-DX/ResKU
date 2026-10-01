@@ -263,6 +263,35 @@ TCP 직선 이동만 지원하므로 wrist 회전이나 그리퍼 개폐는 별�
 ros2 service call /servo_node/stop_servo std_srvs/srv/Trigger "{}"
 ```
 
+### 관절별 조이스틱 조그
+
+`joint_joy_teleop.py`는 선택한 arm 관절 하나만 `JointJog`로 움직인다. 명령은
+`/servo_node/delta_joint_cmds`로 보내므로 MoveIt Servo의 관절 제한, 충돌 검사와
+정지 timeout을 거친다. 이 노드와 `tcp_joy_teleop.py`를 동시에 실행하지 않는다.
+또한 기존 `safety_manager`가 따로 실행 중이면 포커스 관리자가 중복되므로 이 노드에
+`manage_focus:=false`를 주고 기존 `/control/active_target`을 사용한다.
+
+로봇 PC에서 controller와 Servo를 시작한 다음 관절 조그 노드를 실행한다. 원격 PC의
+`remote_joy.launch.py`는 위와 동일하게 계속 사용한다.
+
+```bash
+# 로봇 PC
+ros2 launch tool_manipulator_bringup real_control.launch.py launch_servo:=true
+ros2 service call /servo_node/start_servo std_srvs/srv/Trigger "{}"
+ros2 launch tool_manipulator_bringup joint_joy_teleop.launch.py
+```
+
+| 조작 | 동작 |
+| --- | --- |
+| Options (`button 9`) | 조이스틱 포커스를 `drive`/`arm`으로 전환 |
+| D-pad 좌우 (`axis 6`) | 조작할 관절 선택(데드맨을 놓은 상태에서만) |
+| L1 (`button 4`) + 오른쪽 스틱 상하 (`axis 4`) | 선택 관절 조그 |
+
+대상은 `base`, `shoulder`, `elbow`, `wrist_pitch`, `wrist_roll`, `wrist_yaw`
+순서이며 기본 최대 속도는 `0.12 rad/s`이다. L1을 놓거나 `/joy`가 `0.25초` 이상
+끊기거나 포커스가 `drive`로 바뀌면 정지 명령을 보낸다. `ee_joint`(그리퍼)는 Servo의
+`arm` planning group에 포함되지 않으므로 이 노드에서 조작하지 않는다.
+
 ### 한 PC에서 mock 구동
 
 실기 없이 확인할 때만 기본 mock 모드를 사용한다. 이 모드는 실제 모터를 구동하지 않는다.

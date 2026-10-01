@@ -1,5 +1,6 @@
 # Operator-provided /joint_states captures, in original capture order.
-# ARCHIVE ONLY: no launch/executor loads this file. Not ROS node parameters.
+# Consumed by tag1_recorded_path_node.py, but BLOCKED until commissioning below.
+# Not ROS node parameters. Original measurements are retained unchanged.
 # Do not wrap yaw, clamp points, expand limits, or replay until calibration and
 # approach / docking / return boundaries have been confirmed on the real arm.
 format: tool_manipulator_recorded_path/v1
@@ -7,13 +8,60 @@ tag_id: 1
 executable: false
 units: rad
 calibration_verified: false
+# Confirm encoder continuity, matching live controller calibration, collision-free
+# interpolation, and the approach/dock/lock/retreat/return split before enabling.
+execution_reviewed: false
+# Explicit ordered references; never infer the split from the 24 captures.
+# Each entry: {stage: approach|dock|retreat|return, waypoint_index: <1-based>}
+# or {stage: ..., docking_sample_index: <1-based>}. Lock is {stage: lock} only:
+# use tools.yaml's relative yaw on the preceding dock pose, holding other axes.
+execution_sequence: []
+# New endpoint readings are evidence only, not active controller limits.
+# Confirm their calibration basis before comparing with the docking samples.
+joint_limit_samples:
+  elbow_joint:
+    units: rad
+    ccw: 1.493478
+    cw: -1.485101
+    capture_calibration_confirmed: false
+# Later raw-inclusive measurements, kept separately from earlier rad-only ends.
+# Rad/raw pairs agree with the bridge's old elbow offset, not current hardware.yaml.
+# Operator clarified CW was an intermediate reference, not a safety endpoint.
+# Only dock_similar is approved/applied as the lower limit; CCW is not applied.
+elbow_raw_measurements:
+  applied_to_hardware: true
+  applied_boundary: lower_only
+  source_sign: -1.0
+  source_q_offset_rad: 0.019373154697
+  calibration_basis: inferred_from_rad_and_raw_deg
+  cw_is_safe_limit_confirmed: false
+  cw_role: intermediate_reference
+  dock_lower_limit_operator_confirmed: true
+  applied_lower_limit:
+    sample: dock_similar
+    target_sign: -1.0
+    target_q_offset_rad: 0.09669123989469558
+    soft_limit_rad: -1.4206979245227118
+  samples:
+    - {label: ccw, rad: 1.511106, raw_deg: -85.470001, raw_encoder: 32770}
+    - {label: cw, rad: -1.477945, raw_deg: 85.790001, raw_encoder: 95130}
+    - {label: dock_similar, rad: -1.498016, raw_deg: 86.939995, raw_encoder: 95547}
 capture_source:
   setup: source ~/ResKU/install/setup.bash
   command: ros2 launch rmd_joint_state_bridge joint_state_bridge.launch.py
-  # Current installed launch resolves to the source launch; its default
-  # calibration matches hardware.yaml (rounded offsets, no yaw wrapping).
-  # This does not verify the encoder turn count or historical runtime params.
-  launch_defaults_match_hardware_calibration: true
+  # Installed launch resolves to the source launch. Its fixed defaults do NOT
+  # follow subsequent hardware.yaml zero calibration updates. Keep the source
+  # calibration with this archive; never replay these angles as current goals.
+  # Encoder turn-count continuity and historical runtime params are unverified.
+  calibration_basis: reported_command_and_installed_launch_defaults
+  calibration:
+    base_joint: {zero_offset_rad: -3.172272269348, direction: 1.0, wraparound: false}
+    shoulder_joint: {q_offset_rad: 1.588249619315, sign: -1.0}
+    elbow_joint: {q_offset_rad: 0.019373154697, sign: -1.0}
+    wrist_pitch_joint: {q_offset_rad: 4.158246942876, sign: 1.0}
+    wrist_roll_joint: {zero_offset_rad: -3.150796538317, direction: 1.0, wraparound: false}
+    wrist_yaw_joint: {zero_offset_rad: -9.277515805132, direction: -1.0, wraparound: false}
+    ee_joint: {zero_offset_rad: -0.085902924122, direction: 1.0, wraparound: false}
 docking_waypoint_index: null  # 1-based; operator confirmation required
 joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint, ee_joint]
 # ee is retained as measured evidence, NOT a commanded goal.
@@ -55,5 +103,11 @@ docking_samples:
   - label: 뒤로빠짐
     positions: [2.159845, 0.618545, 1.534493, -1.548282, 0.690291, -5.597496, -1.756408]
 # Last pre-rotation sample -> rotation sample: +1.529379 rad (~+87.63 deg).
-# Earlier operator instruction was -pi/2. Resolve before changing tools.yaml.
-lock_direction_confirmed: false
+# Operator confirmed using this measured tag 1 lock, superseding earlier -pi/2.
+# Direction confirmation does not validate absolute poses, limits, or replay.
+lock_direction_confirmed: true
+confirmed_lock:
+  joint: wrist_yaw_joint
+  before_sample_index: 2  # 1-based docking_samples index, last pre-rotation capture
+  after_sample_index: 3
+  attach_yaw_delta_rad: 1.529379

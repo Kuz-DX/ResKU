@@ -118,9 +118,11 @@ tools:
       position_limits_rad: [-1.279339977097, 3.911651009108]
     lock:
       joint: wrist_yaw_joint
-      # Relative wrist_yaw rotation: clockwise viewed from TCP +Z toward the origin.
-      attach_yaw_delta_rad: -1.5707963267948966
-      joint_path: null  # use the same 90-degree delta for every tool
+      # Operator-confirmed tag 1 capture: -7.142215 -> -5.612836 rad.
+      # Positive relative yaw (+87.63 deg) supersedes the earlier -90 deg instruction.
+      # Source poses remain archived in tag1_recorded_path.yaml, not replayable goals.
+      attach_yaw_delta_rad: 1.529379
+      joint_path: null  # yaw-only delta; preserve other arm joints
     docking:
       descent_frame: world
       descent_direction: [1.0, 0.0, 0.0]  # insertion along world +X
