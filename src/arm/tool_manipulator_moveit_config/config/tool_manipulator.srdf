@@ -23,8 +23,8 @@
     </group_state>
     <group_state name="home" group="arm">
         <joint name="base_joint" value="0.000000000000"/>
-        <joint name="elbow_joint" value="1.522974340197"/>
-        <joint name="shoulder_joint" value="1.526290430869"/>
+        <joint name="elbow_joint" value="1.570796326795"/>
+        <joint name="shoulder_joint" value="1.570796326795"/>
         <joint name="wrist_pitch_joint" value="-1.570796326795"/>
         <joint name="wrist_roll_joint" value="0.055223308364"/>
         <joint name="wrist_yaw_joint" value="0.010737865515"/>
