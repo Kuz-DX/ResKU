@@ -103,6 +103,35 @@ ros2 launch src/arm/tool_change_min/launch/joystick.launch.py \
 이미 보낸 짧은 구간이 끝까지 실행될 수 있다. 먼저 mock 제어기에서 축 방향과
 버튼 매핑을 확인한다.
 
+## stand 이동의 path tolerance 오류 확인
+
+`bash utils/move_to_pose.sh stand --duration 20.0`은 별도 스크립트
+`move_to_named_pose.py`를 실행한다. 이 명령의 `stand` 목표는 SRDF의 6축
+0 rad이며, FSM의 `poses.yaml` 이동 시간과는 별개다. 영점 설정 명령은
+현재 자세를 URDF의 0 rad로 간주해 보정을 저장하므로, 이동 실패를 없애기
+위해 임의 자세에서 `set_current_zero.py --apply`를 실행하지 않는다.
+
+`status=6, error_code=-4`는 이동 중 경로 추종 오차로 중단됐다는 뜻이다.
+현재 소스의 컨트롤러 설정은 각 관절의 이동 중 허용 오차가 0.05 rad이다.
+위치 리밋 확대와는 다른 설정이며, 전류 보호·부하·피드백 이상 등 원인을
+확인하기 전 허용 오차를 해제하지 않는다.
+
+이동 명령 없이 실행 중인 설정과 피드백을 조회한다:
+
+```bash
+ros2 param dump /arm_controller
+ros2 topic echo /arm_controller/controller_state --once
+ros2 topic echo /joint_states --once
+```
+
+`move_to_named_pose.py`는 시작 관절값과 요청 시간을 출력하며, 실패 시
+액션 피드백에서 관측한 관절별 최대 위치 오차와 당시 목표·실제 위치를
+큰 오차 순서로 출력한다. 각 관절의 최대값은 서로 다른 시각일 수 있고,
+피드백 주기 때문에 실제 중단 순간은 놓칠 수 있다. 해당 출력과 같은
+시각의 `ros2_control_node` 전류 보호/통신 오류 로그를 함께 확인한다.
+이미 중단된 실행의 원인은 이후 정지 상태 피드백만으로 확정할 수 없다.
+이 진단 변경은 소스 직접 실행 wrapper에 적용되며 빌드는 필요 없다.
+
 ## 기록한 raw 자세 검증
 
 7개 자세의 raw·출력 rad·RMD encoder 기록을

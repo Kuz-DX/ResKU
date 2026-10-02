@@ -84,7 +84,39 @@ class NamedPoseRunner(Node):
             self, FollowJointTrajectory, "/arm_controller/follow_joint_trajectory")
         self.latest_positions: dict[str, float] | None = None
         self.latest_velocities: dict[str, float] | None = None
+        self.tracking_peaks: dict[str, tuple[float, float, float, float]] = {}
         self.create_subscription(JointState, joint_state_topic, self._on_joint_state, 20)
+
+    def _on_action_feedback(self, message) -> None:
+        feedback = message.feedback
+        elapsed = (feedback.desired.time_from_start.sec +
+                   feedback.desired.time_from_start.nanosec * 1e-9)
+        for name, desired, actual, error in zip(
+                feedback.joint_names, feedback.desired.positions,
+                feedback.actual.positions, feedback.error.positions):
+            if name not in ARM_JOINTS:
+                continue
+            if not all(math.isfinite(v) for v in (desired, actual, error, elapsed)):
+                continue
+            previous = self.tracking_peaks.get(name)
+            if previous is None or abs(error) >= abs(previous[2]):
+                self.tracking_peaks[name] = (desired, actual, error, elapsed)
+
+    def _report_tracking(self) -> None:
+        if not self.tracking_peaks:
+            self.get_logger().error(
+                "No usable action feedback received; inspect ros2_control_node logs "
+                "and /arm_controller/controller_state for the failing joint.")
+            return
+        self.get_logger().error(
+            "Peak observed position errors per joint (feedback samples may miss "
+            "the abort instant; these are not final target errors):")
+        for name, (desired, actual, error, elapsed) in sorted(
+                self.tracking_peaks.items(), key=lambda item: abs(item[1][2]), reverse=True):
+            self.get_logger().error(
+                f"  {name}: desired={desired:.6f}, actual={actual:.6f}, "
+                f"error={error:+.6f} rad ({math.degrees(error):+.3f} deg), "
+                f"trajectory_time={elapsed:.3f}s")
 
     def _on_joint_state(self, message: JointState) -> None:
         observed = {
@@ -150,7 +182,11 @@ class NamedPoseRunner(Node):
         goal.trajectory.joint_names = list(ARM_JOINTS)
         goal.trajectory.points = [JointTrajectoryPoint(
             positions=positions, time_from_start=seconds_to_duration(duration_s))]
-        send_future = self.client.send_goal_async(goal)
+        self.tracking_peaks.clear()
+        self.get_logger().info(
+            f"Sending named pose over {duration_s:.3f}s; start: " +
+            ", ".join(f"{name}={current[name]:.6f}" for name in ARM_JOINTS))
+        send_future = self.client.send_goal_async(goal, feedback_callback=self._on_action_feedback)
         rclpy.spin_until_future_complete(self, send_future)
         goal_handle = send_future.result()
         if goal_handle is None or not goal_handle.accepted:
@@ -167,6 +203,7 @@ class NamedPoseRunner(Node):
             self.get_logger().error(
                 f"Named-pose trajectory failed (status={wrapped_result.status}, "
                 f"error_code={result.error_code}, message='{result.error_string}')")
+            self._report_tracking()
             return 5
         self.get_logger().info("Named-pose trajectory completed")
         return 0
