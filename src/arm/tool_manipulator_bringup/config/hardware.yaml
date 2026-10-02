@@ -1,4 +1,4 @@
-# Arm zero: operator stand capture (2026-10-02); EE calibration retained.
+# RMD zero: operator stand capture (2026-10-02); Dynamixel calibration retained.
 version: 1
 buses:
   dynamixel_u2d2:
