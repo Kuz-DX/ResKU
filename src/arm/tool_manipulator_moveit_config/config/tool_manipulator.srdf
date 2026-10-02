@@ -141,4 +141,18 @@
         <joint name="wrist_roll_joint" value="-0.4686"/>
         <joint name="wrist_yaw_joint" value="1.3017"/>
     </group_state>
+    <!-- Intentional contact between each actuator housing and its adjacent
+         mounting/output links.  Keep all non-adjacent self-collision checks. -->
+    <disable_collisions link1="base_actuator" link2="base_link" reason="Adjacent"/>
+    <disable_collisions link1="base_link" link2="shoulder_actuator" reason="Adjacent"/>
+    <disable_collisions link1="shoulder_actuator" link2="shoulder_link" reason="Adjacent"/>
+    <disable_collisions link1="shoulder_link" link2="elbow_actuator" reason="Adjacent"/>
+    <disable_collisions link1="elbow_actuator" link2="elbow_link" reason="Adjacent"/>
+    <disable_collisions link1="elbow_link" link2="wrist_actuator_pitch" reason="Adjacent"/>
+    <disable_collisions link1="wrist_actuator_pitch" link2="wrist_link_pitch" reason="Adjacent"/>
+    <disable_collisions link1="wrist_link_pitch" link2="wrist_actuator_roll" reason="Adjacent"/>
+    <disable_collisions link1="wrist_actuator_roll" link2="wrist_link_roll" reason="Adjacent"/>
+    <disable_collisions link1="wrist_link_roll" link2="wrist_actuator_yaw" reason="Adjacent"/>
+    <disable_collisions link1="wrist_actuator_yaw" link2="wrist_link_yaw" reason="Adjacent"/>
+    <disable_collisions link1="wrist_link_yaw" link2="ee_actuator" reason="Adjacent"/>
 </robot>

@@ -48,6 +48,20 @@
     </group_state>
     <!--END EFFECTOR: Purpose: Represent information about an end effector.-->
     <!--DISABLE COLLISIONS: By default it is assumed that any link of the robot could potentially come into collision with any other link in the robot. This tag disables collision checking between a specified pair of links. -->
+    <!-- Intentional contact between each actuator housing and its adjacent
+         mounting/output links.  Keep all non-adjacent self-collision checks. -->
+    <disable_collisions link1="base_actuator" link2="base_link" reason="Adjacent"/>
+    <disable_collisions link1="base_link" link2="shoulder_actuator" reason="Adjacent"/>
+    <disable_collisions link1="shoulder_actuator" link2="shoulder_link" reason="Adjacent"/>
+    <disable_collisions link1="shoulder_link" link2="elbow_actuator" reason="Adjacent"/>
+    <disable_collisions link1="elbow_actuator" link2="elbow_link" reason="Adjacent"/>
+    <disable_collisions link1="elbow_link" link2="wrist_actuator_pitch" reason="Adjacent"/>
+    <disable_collisions link1="wrist_actuator_pitch" link2="wrist_link_pitch" reason="Adjacent"/>
+    <disable_collisions link1="wrist_link_pitch" link2="wrist_actuator_roll" reason="Adjacent"/>
+    <disable_collisions link1="wrist_actuator_roll" link2="wrist_link_roll" reason="Adjacent"/>
+    <disable_collisions link1="wrist_link_roll" link2="wrist_actuator_yaw" reason="Adjacent"/>
+    <disable_collisions link1="wrist_actuator_yaw" link2="wrist_link_yaw" reason="Adjacent"/>
+    <disable_collisions link1="wrist_link_yaw" link2="ee_actuator" reason="Adjacent"/>
     <!-- [임시, 2026-08-31 재확인] mount 높이 버그 수정 / crossbar 높이(0.84m) /
          rack_right.stl 갱신을 모두 반영한 뒤에도 check_state_validity로 재확인한
          결과 HOME_ARM_JOINTS, HOLD_ARM_JOINTS(maru_ik_node.py) 자세에서 여전히
