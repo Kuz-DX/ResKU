@@ -256,13 +256,30 @@ python3 src/arm/tool_manipulator_bringup/scripts/arm_camera_extrinsics_broadcast
 
 기존 노드가 이미 `cam_link → arm_camera_link`를 발행한다면 중복 실행하지 않는다.
 
-### 터미널 4 — AprilTag
+### 터미널 4 — AprilTag 검출 토픽 발행
+
+검출 송신과 계측 수신의 기본 토픽은 `/arm/apriltag/centers`
+(`std_msgs/msg/String`, JSON의 `detections[].id`에 태그 ID)로 동일하다.
+현재 tool_change_fsm은 이 토픽을 구독하지 않으며, `/tool_change/request`를
+받아 `poses.yaml`의 목표로 IK 경로를 요청한다. 태그 기반 목표 갱신은 별도 연결이 필요하다.
 
 ```bash
 ros2 run vision apriltag --ros-args \
   -p tag_size_cm:=2.0 \
   -p centers_topic:=/arm/apriltag/centers
 ```
+
+위 노드가 실제 검출 결과를 발행한다. 별도 터미널에서 송수신 연결과
+JSON의 `detections[].id`를 확인한다:
+
+```bash
+ros2 topic info /arm/apriltag/centers --verbose
+ros2 topic echo /arm/apriltag/centers std_msgs/msg/String --once
+```
+
+태그 ID만 `Int32`로 이 토픽에 발행하지 않는다. 수신기는 검출 시각·프레임·
+검출 목록이 포함된 JSON 문자열을 읽는다. 아래 `/tool_change/request` 발행은
+태그 검출 데이터가 아니라 도구 변경 실행 요청이다.
 
 ### 터미널 5 — supply
 
@@ -321,11 +338,17 @@ UI는 `/tool_change/request`에 `std_msgs/msg/Int32`, `data: 1`을 발행해야 
 최소 FSM과 함께 실행하지 않는다. UI 요청이 확인되면 별도 수동 발행은 필요 없다.
 요청이 도착했는데 움직이지 않으면 재발행하지 말고 상태와 모션 노드 로그를 확인한다.
 
-UI를 대신해 **실제 동작을 요청할 때만** 다음 명령을 한 번 실행한다:
+별도 터미널에서 상태 감시를 먼저 실행해 둔다:
+
+```bash
+ros2 topic echo /tool_change/status
+```
+
+UI를 대신해 **실제 동작을 요청할 때만** 다른 터미널에서 다음 명령을 한 번 실행한다.
+`data: 1`은 도구 1 실행 요청이며 AprilTag 검출을 발행하는 명령이 아니다:
 
 ```bash
 ros2 topic pub --once /tool_change/request std_msgs/msg/Int32 '{data: 1}'
-ros2 topic echo /tool_change/status
 ```
 
 `PAUSED_HOME` 확인 후 다음 단계 설정으로 모션 노드를 재시작하며 순차 시험한다.
@@ -436,8 +459,13 @@ IK 노드는 현재 `/joint_states` 전체를 읽어 여러 점으로 된 Cartes
    `RETURN_DOCKING_WAIT`, `RETURN_HOME`, `DONE`
 
    ```bash
-   ros2 topic pub --once /tool_change/request std_msgs/msg/Int32 '{data: 1}'
    ros2 topic echo /tool_change/status
+   ```
+
+   위 상태 감시를 켜둔 뒤 다른 터미널에서 도구 1 실행 요청을 발행합니다:
+
+   ```bash
+   ros2 topic pub --once /tool_change/request std_msgs/msg/Int32 '{data: 1}'
    ```
 
 4. 실패 시 안전 정지 동작을 확인하려면 별도의 모의 설정 복사본에서 목표
