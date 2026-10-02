@@ -333,7 +333,7 @@
 
     <limit
         lower="-1.459444233251"
-        upper="1.64"
+        upper="1.67"
         effort="1.0"
         velocity="1.0"/>
 
@@ -462,8 +462,8 @@
     <axis xyz="0 0 -1"/>
 
     <limit
-        lower="-1.643751229155"
-        upper="1.666265854332"
+        lower="-1.69"
+        upper="1.73"
         effort="1.0"
         velocity="1.0"/>
 

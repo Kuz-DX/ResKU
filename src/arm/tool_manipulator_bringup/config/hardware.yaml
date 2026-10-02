@@ -40,10 +40,10 @@ joints:
     id: 4
     sign: -1
     q_offset_rad: 1.6467181226250391
-    # Captures d/l: max q=1.614953130239 (raw_deg=1.82), plus jog margin.
+    # Include reported q=1.646718 and raw-converted captures, with margin.
     soft_limit_rad:
     - -1.459444233251
-    - 1.64
+    - 1.67
     velocity_limit_rad_s: 0.35
     current_limit_a: 4.0
     current_release_threshold_a: 3.0
@@ -76,9 +76,10 @@ joints:
     id: 6
     sign: 1
     q_offset_rad: 4.108854093087118
+    # Include reported q=-1.671851 and raw_deg=333.389984 (q=1.709899).
     soft_limit_rad:
-    - -1.643751229155
-    - 1.666265854332
+    - -1.69
+    - 1.73
     velocity_limit_rad_s: 0.3
     current_limit_a: 2.0
     current_release_threshold_a: 1.5
