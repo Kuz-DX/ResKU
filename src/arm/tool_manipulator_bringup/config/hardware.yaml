@@ -1,3 +1,4 @@
+# Arm zero: operator stand capture (2026-10-02); EE calibration retained.
 version: 1
 buses:
   dynamixel_u2d2:
@@ -40,8 +41,8 @@ joints:
     bus: rmd_can
     id: 4
     sign: -1
-    q_offset_rad: 1.6467181226250391
-    # Include reported q=1.646718 and raw-converted captures, with margin.
+    q_offset_rad: 1.6524777357882314
+    # Existing zero-relative soft limits retained by zero calibration.
     soft_limit_rad:
     - -1.459444233251
     - 1.67
@@ -57,10 +58,8 @@ joints:
     bus: rmd_can
     id: 5
     sign: -1
-    q_offset_rad: 0.09669123989469558
-    # CW lower bound: operator-approved dock pose, raw_deg=86.939995.
-    # q = sign * (raw_deg*pi/180 - q_offset_rad); reconvert if zero changes.
-    # Upper bound includes d/l: max q=1.621061738773 (raw_deg=-87.339996).
+    q_offset_rad: 0.08866272600131195
+    # Existing zero-relative soft limits retained by zero calibration.
     soft_limit_rad:
     - -1.4206979245227118
     - 1.65
@@ -76,8 +75,8 @@ joints:
     bus: rmd_can
     id: 6
     sign: 1
-    q_offset_rad: 4.108854093087118
-    # Include reported q=-1.671851 and raw_deg=333.389984 (q=1.709899).
+    q_offset_rad: 4.135732038446131
+    # Existing zero-relative soft limits retained by zero calibration.
     soft_limit_rad:
     - -1.69
     - 1.73
