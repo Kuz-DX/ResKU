@@ -1,6 +1,6 @@
 # ROS CompressedImage → MediaMTX RTSP 브리지
 
-로봇 SSH 실행, 카메라, 조이스틱, UI 및 RTSP 브리지 13개 명령을 분할 터미널에
+로봇 SSH 실행, 카메라, 조이스틱, UI 및 RTSP 브리지 17개 명령을 분할 터미널에
 준비하려면 [ResKU 터미널 런처](terminal_launcher/README.md)를 사용한다.
 
 ```bash

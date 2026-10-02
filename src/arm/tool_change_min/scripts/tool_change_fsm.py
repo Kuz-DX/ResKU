@@ -30,7 +30,7 @@ import rclpy
 # 패키지가 설치된 공유 디렉터리의 기본 설정 경로를 찾습니다.
 from ament_index_python.packages import get_package_share_directory
 # 여러 스레드에서 ROS 콜백을 처리하는 실행기를 사용합니다.
-from rclpy.executors import MultiThreadedExecutor
+from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.callback_groups import ReentrantCallbackGroup
 # ROS 2 노드 기본 기능을 상속하기 위해 가져옵니다.
 from rclpy.node import Node
@@ -54,7 +54,7 @@ class ToolChangeFsm(Node):
         # 자세 및 동작 설정 YAML 경로를 ROS 파라미터로 선언합니다.
         self.declare_parameter("poses_yaml", f"{share}/config/poses.yaml")
         # 정지 자세를 포함한 필수 설정을 읽고 검증합니다.
-        self.config = require_for_stop_state(self.get_parameter("poses_yaml").value)
+        self.config = require_for_stop_state(self.get_parameter("poses_yaml").value, tool_id=None)
         # 설정된 개발용 정지 단계 이름을 가져옵니다.
         self.stop_after = stop_after_state(self.config)
         # 시작 상태는 어떤 요청도 처리 중이지 않은 IDLE입니다.
@@ -150,12 +150,12 @@ class ToolChangeFsm(Node):
         self._call(self.execute, execute, timeout)
 
     # 설정에서 지정한 단계에 도달했는지 확인하고 개발용 일시 정지를 수행합니다.
-    def _pause_after(self, stage: str) -> bool:
+    def _pause_after(self, stage: str, reported_stage: str | None = None) -> bool:
         # 현재 단계가 설정된 정지 지점이 아니면 계속 진행할 수 있도록 False를 돌려줍니다.
         if self.stop_after != stage:
             return False
         # 정지 지점에 도달했음을 PAUSED_ 접두 상태로 외부에 알립니다.
-        self._publish(f"PAUSED_{stage.upper()}")
+        self._publish(f"PAUSED_{(reported_stage or stage).upper()}")
         # 검토 후 다음 상태를 설정하도록 안내하는 로그를 출력합니다.
         self.get_logger().info(
             f"Development stop reached after {stage}; set "
@@ -186,13 +186,13 @@ class ToolChangeFsm(Node):
             self._call(self.align, alignment, alignment.timeout_s)
             if self._pause_after("ee_align"):
                 return
-            # tool 1 목표 pose를 풀기 전의 teach pre-pose로 이동합니다.
+            # 선택된 tag의 Cartesian 목표에 접근하기 전 티칭 자세로 이동합니다.
             self._named(pre.upper(), pre, pre)
-            if self._pause_after("tool1_pre"):
+            if self._pause_after("tool1_pre", pre):
                 return
             # 미리 정한 base_actuator Cartesian target pose를 IK로 풀어 실행합니다.
             self._cartesian_target(target.upper(), target, target)
-            if self._pause_after("tool1_target"):
+            if self._pause_after("tool1_target", target):
                 return
             # 목표 도달 후 실제 wrist-yaw 피드백을 baseline으로 CCW +90도 체결합니다.
             self._publish("LOCK")
@@ -246,7 +246,7 @@ def main():
         # 설정 오류를 로그로 남겨 실행이 중단된 이유를 알립니다.
         rclpy.logging.get_logger("tool_change_fsm").error(f"configuration invalid; exiting: {exc}")
         # 노드 생성 실패 시에도 ROS 초기화 자원을 정리합니다.
-        rclpy.shutdown()
+        rclpy.try_shutdown()
         # 유효한 노드가 없으므로 프로그램 진입점을 종료합니다.
         return
     # 동시에 여러 ROS 콜백을 처리할 4개 스레드 실행기를 만듭니다.
@@ -256,14 +256,17 @@ def main():
     # ROS 콜백이 들어오는 동안 실행기를 계속 구동합니다.
     try:
         executor.spin()
+    except (KeyboardInterrupt, ExternalShutdownException):
+        # Ctrl+C 또는 launch에 의한 컨텍스트 종료는 정상 종료로 처리합니다.
+        pass
     # 실행기가 종료될 때 노드와 ROS 자원을 순서대로 정리합니다.
     finally:
         # 실행 중인 콜백 처리를 끝내고 실행기를 종료합니다.
         executor.shutdown()
         # 노드가 생성한 퍼블리셔·구독·클라이언트 등 자원을 해제합니다.
         node.destroy_node()
-        # ROS 클라이언트 라이브러리를 종료합니다.
-        rclpy.shutdown()
+        # 시그널 처리에서 이미 종료된 컨텍스트도 안전하게 정리합니다.
+        rclpy.try_shutdown()
 
 
 # 이 파일을 모듈로 가져올 때는 자동 실행하지 않고 직접 실행할 때만 main을 호출합니다.

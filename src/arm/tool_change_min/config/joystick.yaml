@@ -1,0 +1,19 @@
+joystick_manipulator:
+  ros__parameters:
+    joy_topic: /joy
+    joint_states_topic: /joint_states
+    arm_action: /arm_controller/follow_joint_trajectory
+    focus_topic: /control/active_target
+    manage_focus: true
+    focus_button: 9
+    deadman_button: 4
+    jog_axis: 4
+    select_axis: 6
+    invert_jog_axis: true
+    joint_speed_rad_s: 0.08
+    step_duration_s: 0.2
+    joy_timeout_s: 0.25
+    feedback_timeout_s: 0.5
+    action_timeout_s: 2.0
+    deadzone: 0.12
+    limit_margin_rad: 0.01

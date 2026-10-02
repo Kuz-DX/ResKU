@@ -108,12 +108,22 @@ def validate_request_config(data: dict[str, Any], tool_id: int = 1) -> None:
         raise ValueError("unset required configuration keys: " + ", ".join(missing))
 
 
-def require_for_stop_state(path: str | Path) -> dict[str, Any]:
+def require_for_stop_state(path: str | Path, tool_id: int | None = 1) -> dict[str, Any]:
     """Load a safe partial configuration for the selected development stage.
 
     A stage may not execute until its own pose/motion/timeout values are set.
     Values for later stages are intentionally allowed to remain ``null``.
     """
     data = load_poses(path)
-    validate_request_config(data)
+    if tool_id is None:
+        # Start if either tool is configured; validate the actual ID on request.
+        errors = []
+        for candidate in (0, 1):
+            try:
+                validate_request_config(data, candidate)
+                return data
+            except ValueError as exc:
+                errors.append(f"tag{candidate}: {exc}")
+        raise ValueError("; ".join(errors))
+    validate_request_config(data, tool_id)
     return data

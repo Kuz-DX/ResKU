@@ -1,7 +1,7 @@
 # ResKU 터미널 런처
 
 `Mando2026_ws/utils/terminal_launcher`를 ResKU용으로 옮긴 유틸리티다.
-13개 명령을 tmux 분할 창에 미리 입력한다. **각 pane에서 Enter를 눌러야
+17개 명령을 tmux 분할 창에 미리 입력한다. **각 pane에서 Enter를 눌러야
 해당 명령이 실행된다.** ROS 패키지 빌드는 필요 없다.
 
 ```bash
@@ -16,7 +16,7 @@ GNOME Terminal, Tilix, Terminator, Konsole, Kitty 등을 자동 탐지한다.
 # 창을 열거나 명령을 실행하지 않고 구성 확인
 ./util/terminal_launcher/launch.py --dry-run
 
-# 한 창에 6개씩 배치 (기본값은 13개 모두 한 창)
+# 한 창에 6개씩 배치 (기본값은 17개 모두 한 창)
 ./util/terminal_launcher/launch.py --panes-per-window 6
 
 # 터미널 직접 지정
@@ -40,6 +40,10 @@ GNOME Terminal, Tilix, Terminator, Konsole, Kitty 등을 자동 탐지한다.
 | Arm_MTX | 로컬 | arm 영상 → RTSP arm |
 | Left_MTX | 로컬 | left 영상 → RTSP sub1 |
 | Right_MTX | 로컬 | right 영상 → RTSP sub2 |
+| Arm_TF | 로봇 | real_control.launch.py + hardware.yaml |
+| Camera_TF | 로봇 | arm_camera_extrinsics_broadcaster.py + arm_camera_extrinsics.yaml |
+| AprilTag | 로봇 | 태그 크기 2.0 cm, /arm/apriltag/centers |
+| Arm_Launch | 로봇 | tool1_attach.launch.py + poses.yaml + hardware.yaml |
 
 로봇 명령은 `ssh -t jecs@192.168.0.100`으로 접속한다. SSH/sudo 비밀번호는
 해당 pane에서 입력한다. `remote_shell.py`가 원격 대화형 Bash를 열고 로봇의 `.bashrc`를 읽으므로
@@ -57,6 +61,8 @@ Bash 이력에 남으며, ↑는 가장 최근 입력부터 불러온다. SSH에
 모든 ROS 명령은 `cd ~/ResKU && sr && si` 이후 실행한다.
 UI도 ResKU에서 환경을 로드한 뒤 `~/DolbotZ-Center/deploy`로 이동한다.
 사이드캠의 `readlink`와 `~` 확장은 원격 로봇에서 수행된다.
+Arm_TF의 `${HOME}`도 원격 로봇에서 확장한다. Camera_TF와 Arm_Launch의
+상대 경로는 로봇의 `~/ResKU`를 기준으로 해석된다.
 RTSP 브리지는 이 저장소의 `~/ResKU/util/ros_compressed_to_rtsp.py`를 사용하며,
 카메라별 고유 노드 이름과 15 FPS / 1500 kbps / 키프레임 간격 15를 적용한다.
 
