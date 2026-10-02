@@ -38,7 +38,7 @@ from rclpy.node import Node
 from std_msgs.msg import Int32, String
 
 # 정지 상태 설정 검증과 개발 단계별 정지 지점을 처리합니다.
-from tool_change_min.config import require_for_stop_state, stop_after_state
+from tool_change_min.config import require_for_stop_state, stop_after_state, validate_request_config
 # 이 FSM이 호출하는 자세 이동, IK, 궤적 실행 서비스 형식입니다.
 from tool_change_min.srv import AlignEe, ExecuteTrajectory, LinearMoveToPose, MoveNamedPose, RotateWristYaw
 
@@ -164,9 +164,12 @@ class ToolChangeFsm(Node):
         return True
 
     # 도구 장착 절차의 모든 단계를 정해진 순서로 실행합니다.
-    def _run(self):
+    def _run(self, tool_id=1):
         # 어느 단계에서든 실패하면 아래 공통 예외 처리로 이동합니다.
         try:
+            validate_request_config(self.config, tool_id)
+            pre = f"tool{tool_id}_pre"
+            target = f"tool{tool_id}_target"
             # 로봇을 기준 HOME 자세로 이동합니다.
             self._named("HOME", "home", "home")
             # HOME 직후 개발 정지 지점이면 이후 단계를 실행하지 않습니다.
@@ -184,11 +187,11 @@ class ToolChangeFsm(Node):
             if self._pause_after("ee_align"):
                 return
             # tool 1 목표 pose를 풀기 전의 teach pre-pose로 이동합니다.
-            self._named("TOOL1_PRE", "tool1_pre", "tool1_pre")
+            self._named(pre.upper(), pre, pre)
             if self._pause_after("tool1_pre"):
                 return
             # 미리 정한 base_actuator Cartesian target pose를 IK로 풀어 실행합니다.
-            self._cartesian_target("TOOL1_TARGET", "tool1_target", "tool1_target")
+            self._cartesian_target(target.upper(), target, target)
             if self._pause_after("tool1_target"):
                 return
             # 목표 도달 후 실제 wrist-yaw 피드백을 baseline으로 CCW +90도 체결합니다.
@@ -217,10 +220,10 @@ class ToolChangeFsm(Node):
 
     # 도구 변경 요청을 검증하고 허용된 경우 장착 절차를 시작합니다.
     def _request(self, message: Int32):
-        # 현재 구현은 도구 1 장착 요청 번호만 지원합니다.
-        if message.data != 1:
+        # 기존 UI 선택값: tag0(그리퍼), tag1.
+        if message.data not in (0, 1):
             # 지원하지 않는 번호를 로그로 남기고 요청을 무시합니다.
-            self.get_logger().warning(f"ignored request {message.data}; only tool 1 attach is supported")
+            self.get_logger().warning(f"ignored request {message.data}; only tag 0 and 1 are supported")
             return
         # 실행 중인 단계가 있으면 중복 요청으로 간주해 새 절차를 시작하지 않습니다.
         if self.state not in ("IDLE", "DONE", "HOLD"):
@@ -228,7 +231,7 @@ class ToolChangeFsm(Node):
             self.get_logger().warning(f"ignored request while busy in {self.state}")
             return
         # IDLE, DONE 또는 HOLD 상태에서는 전체 절차를 새로 실행합니다.
-        self._run()
+        self._run(message.data)
 
 
 # ROS 2를 초기화하고 FSM 노드를 실행하는 프로그램 진입점입니다.

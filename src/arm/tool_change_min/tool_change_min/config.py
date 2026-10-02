@@ -92,6 +92,22 @@ def _required_paths(stop_after: str) -> list[str]:
     return required
 
 
+def validate_request_config(data: dict[str, Any], tool_id: int = 1) -> None:
+    """Check the selected tool's required stages before issuing any motion."""
+    if tool_id not in (0, 1):
+        raise ValueError(f"unsupported tool ID: {tool_id}")
+    stop_after = stop_after_state(data)
+    missing = []
+    for path in _required_paths(stop_after):
+        dotted_path = path.replace("tool1_", f"tool{tool_id}_")
+        try:
+            missing.extend(null_paths(_at_path(data, dotted_path), dotted_path))
+        except KeyError:
+            missing.append(dotted_path)
+    if missing:
+        raise ValueError("unset required configuration keys: " + ", ".join(missing))
+
+
 def require_for_stop_state(path: str | Path) -> dict[str, Any]:
     """Load a safe partial configuration for the selected development stage.
 
@@ -99,13 +115,5 @@ def require_for_stop_state(path: str | Path) -> dict[str, Any]:
     Values for later stages are intentionally allowed to remain ``null``.
     """
     data = load_poses(path)
-    stop_after = stop_after_state(data)
-    missing = []
-    for dotted_path in _required_paths(stop_after):
-        try:
-            missing.extend(null_paths(_at_path(data, dotted_path), dotted_path))
-        except KeyError:
-            missing.append(dotted_path)
-    if missing:
-        raise ValueError("unset required configuration keys: " + ", ".join(missing))
+    validate_request_config(data)
     return data
