@@ -764,7 +764,9 @@ namespace rmd_hardware_interface {
         feedback_ = actuator_interface_->getMotorStatus2();
       }
 
-      double const position_state {feedback_.shaft_angle};
+      // Use the same multi-turn angle source as the zero-calibration bridge.
+      // Status/setpoint feedback shaft_angle is not the calibration reference.
+      double const position_state {actuator_interface_->getMultiTurnAngle()};
       double velocity_state {feedback_.shaft_speed};
       if (velocity_low_pass_filter_) {
         velocity_state = velocity_low_pass_filter_->apply(velocity_state);
