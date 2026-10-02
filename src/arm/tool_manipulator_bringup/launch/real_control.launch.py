@@ -73,8 +73,8 @@ def _start_real(context):
         .robot_description(mappings={
             'use_mock_hardware': 'false',
             'hardware_config_file': hardware_file,
-            'tool_id': '0',
-            'use_mesh': 'true',
+            'tool_id': LaunchConfiguration('tool_id').perform(context),
+            'use_mesh': LaunchConfiguration('use_mesh').perform(context),
         })
         .to_moveit_configs()
     )
@@ -168,6 +168,10 @@ def generate_launch_description():
     default_config = str(share / 'config' / 'hardware.yaml')
     return LaunchDescription([
         DeclareLaunchArgument('hardware_config', default_value=default_config),
+        DeclareLaunchArgument(
+            'tool_id', default_value='0',
+            description='Static tool model included in robot_description: 0, 1, 2, or 3.'),
+        DeclareLaunchArgument('use_mesh', default_value='true'),
         DeclareLaunchArgument('move_home_on_start', default_value='true',
                               description='Move arm to SRDF home once after controller activation.'),
         DeclareLaunchArgument('home_duration', default_value='8.0',

@@ -22,10 +22,12 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 ament_get_python_install_dir(PYTHON_INSTALL_DIR)
 install(FILES
   ${PROJECT_NAME}/config.py
+  ${PROJECT_NAME}/grasp_sequence.py
   ${PROJECT_NAME}/kinematics.py
   DESTINATION "${PYTHON_INSTALL_DIR}/${PROJECT_NAME}")
 install(PROGRAMS
   scripts/ik_node.py
+  scripts/supply_grasp_ik_node.py
   scripts/joystick_manipulator.py
   scripts/measure_apriltag_docking.py
   scripts/motion_executor.py

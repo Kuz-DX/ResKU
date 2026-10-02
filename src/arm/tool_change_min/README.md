@@ -3,6 +3,33 @@
 명령은 모두 **작업공간 루트 `ResKU/`에서 실행**한다. 파일 경로는 이 위치를
 기준으로 한 상대경로다. ROS 토픽·액션 이름의 `/`는 파일 경로가 아니다.
 
+## 현재 6축 플랫폼용 supply-box IK bringup
+
+`ik_node_bringup.launch.py`는 기존 `army_manipulator_bringup`의 one-shot
+파지 흐름을 현재 `tool_manipulator.urdf.xacro`에 맞춰 실행한다. MoveIt의
+`arm` 그룹(6축), `tcp_link`, `ee_joint`와 tool 1 충돌 형상을 사용한다.
+첫 `/arm/target_point`만 수락해 TF/고정 Z 보정, `/compute_ik`, 팔 이동,
+EE 닫기, HOLD/HOME, `/arm/picking_command` 순서로 처리한다.
+
+실기에서는 자동으로 팔과 EE가 움직인다. 작업 공간과 비상정지를 확인하고
+다른 arm/EE 명령 노드를 종료한 뒤 실행한다:
+
+```bash
+ros2 launch tool_change_min ik_node_bringup.launch.py \
+  use_mock_hardware:=false
+```
+
+기본값은 `use_mock_hardware:=true`이며, 실기 분기는
+`tool_manipulator_bringup/config/hardware.yaml`을 검증한 뒤 시작한다.
+기본 `tool_id:=1`을 다른 값으로 바꾸면 파지용 tool 1 형상이 없어지므로 이
+시퀀스에는 사용하지 않는다. 타깃 Z를 검출값 그대로 쓰려면
+`use_fixed_target_z:=false`를 전달한다.
+
+기본 저면 파지 seed는 현재 URDF/관절 제한으로 생성한 near/middle 후보이며,
+매 요청마다 MoveIt 충돌 검사를 통과한 해만 실행한다. 다만 실기 하중·케이블
+간섭 검증을 대신하지 않으므로 첫 실기 실행은 저속·비상정지 대기 상태에서
+검증해야 한다.
+
 ## 조이스틱 매니퓰레이터 수동 조작
 
 측정 자세 `d`와 `llllllllllllllllllllllllllllll`을 허용하도록 현재 raw/영점

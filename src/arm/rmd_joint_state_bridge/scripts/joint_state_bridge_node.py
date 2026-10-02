@@ -374,6 +374,8 @@ def main(args: list[str] | None = None) -> None:
     try:
         node = RmdJointStateBridge()
         rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
     except Exception as exc:
         rclpy.logging.get_logger("rmd_joint_state_bridge").fatal(
             f"Fatal error: {exc}"
@@ -382,7 +384,8 @@ def main(args: list[str] | None = None) -> None:
     finally:
         if node is not None:
             node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":
