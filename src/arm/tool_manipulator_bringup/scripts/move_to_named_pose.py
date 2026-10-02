@@ -16,6 +16,7 @@ from builtin_interfaces.msg import Duration
 from control_msgs.action import FollowJointTrajectory
 from rclpy.action import ActionClient
 from rclpy.node import Node
+from rclpy.utilities import remove_ros_args
 from sensor_msgs.msg import JointState
 from trajectory_msgs.msg import JointTrajectoryPoint
 
@@ -51,7 +52,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-start-velocity", type=float, default=0.02,
                         help="Maximum absolute start joint velocity in rad/s (default: 0.02)")
     parser.add_argument("--dry-run", action="store_true", help="Print the target without sending it")
-    return parser.parse_args()
+    return parser.parse_args(remove_ros_args(args=sys.argv)[1:])
 
 
 def load_arm_poses(srdf_path: Path) -> dict[str, list[float]]:

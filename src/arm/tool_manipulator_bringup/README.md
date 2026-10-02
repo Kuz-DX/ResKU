@@ -16,6 +16,19 @@
 - `tool_change.launch.py`: real control + AprilTag vision + filter + XY servo + dock action + planning scene stack을 기동한다.
 - `arm_tag_docking_vision.launch.py`: 수정하지 않은 `vision.apriltag`를 `docking.yaml`의 단일 입력 설정으로 실행한다.
 
+`real_control.launch.py`는 기본적으로 `arm_controller` 활성화 성공 후 SRDF의 `home`으로
+한 번 자동 이동한다. 현재 관절 상태 수신 및 정지·소프트 리밋 검사를 통과한 뒤 8초 동안
+이동한다. 기존 `move_to_named_pose.py`의 직접 trajectory 명령을 사용하므로 MoveIt 충돌
+경로 계획은 수행하지 않는다. 컨트롤러 활성화나 상태 검사가 실패하면 이동하지 않는다.
+
+```bash
+ros2 launch tool_manipulator_bringup real_control.launch.py \
+  hardware_config:=src/arm/tool_manipulator_bringup/config/hardware.yaml
+
+# 자동 home 이동 해제: 위 명령에 move_home_on_start:=false 추가
+# 이동 시간 변경: 위 명령에 home_duration:=10.0 추가
+```
+
 도킹은 `yaw trajectory 성공 → /wrist_yaw_rotation_complete → configured retreat 성공 → /docking_complete → scene attach` 순서다. yaw 성공은 물리 체결이나 scene 부착 검증이 아니다. 별도 체결 센서는 현재 사용하지 않는다.
 
 물리 detach/unlock 절차는 아직 구현되지 않았다. `Dock.mode=1`과 scene detach service는 명시적으로 거부되며 성공으로 보고하지 않는다. 재시작·도킹 실패 뒤 tool 상태가 불명확하면 scene manager는 `UNKNOWN`으로 시작/전환하며, 실물이 비어 있음을 확인한 운영자만 `~/operator_confirm_empty`로 복구할 수 있다.

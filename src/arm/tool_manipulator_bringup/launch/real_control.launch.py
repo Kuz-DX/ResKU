@@ -4,7 +4,8 @@ from pathlib import Path
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction, TimerAction
+from launch.actions import DeclareLaunchArgument, LogError, OpaqueFunction, RegisterEventHandler, TimerAction
+from launch.event_handlers import OnProcessExit
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from moveit_configs_utils import MoveItConfigsBuilder
@@ -13,6 +14,12 @@ from moveit_configs_utils.launches import generate_move_group_launch
 
 ARM_DXL = ('base_joint', 'wrist_roll_joint', 'wrist_yaw_joint', 'ee_joint')
 ARM_RMD = ('shoulder_joint', 'elbow_joint', 'wrist_pitch_joint')
+
+
+def _home_after_controller(event, context, home_node):
+    if event.returncode != 0:
+        return [LogError(msg='Startup home skipped: arm_controller failed to activate.')]
+    return [home_node]
 
 
 def _missing(value):
@@ -99,6 +106,21 @@ def _start_real(context):
         TimerAction(period=6.0, actions=[ee_controller]),
         TimerAction(period=7.0, actions=generate_move_group_launch(moveit_config).entities),
     ]
+    if LaunchConfiguration('move_home_on_start').perform(context).lower() in ('1', 'true', 'yes'):
+        home_node = Node(
+            package='tool_manipulator_bringup', executable='move_to_named_pose.py',
+            arguments=[
+                'home', '--hardware', hardware_file,
+                '--duration', LaunchConfiguration('home_duration'),
+                '--wait-for-server', '30.0', '--joint-state-timeout', '10.0',
+            ],
+            output='screen',
+        )
+        # Register before starting the spawner; only its successful exit triggers motion.
+        actions.insert(0, RegisterEventHandler(OnProcessExit(
+            target_action=arm_controller,
+            on_exit=lambda event, context: _home_after_controller(event, context, home_node),
+        )))
 
     launch_servo = LaunchConfiguration('launch_servo').perform(context).lower() in ('1', 'true', 'yes')
     launch_teleop = (
@@ -146,6 +168,10 @@ def generate_launch_description():
     default_config = str(share / 'config' / 'hardware.yaml')
     return LaunchDescription([
         DeclareLaunchArgument('hardware_config', default_value=default_config),
+        DeclareLaunchArgument('move_home_on_start', default_value='true',
+                              description='Move arm to SRDF home once after controller activation.'),
+        DeclareLaunchArgument('home_duration', default_value='8.0',
+                              description='Startup home trajectory duration in seconds.'),
         DeclareLaunchArgument('servo_config', default_value=str(share / 'config' / 'servo.yaml')),
         DeclareLaunchArgument('launch_servo', default_value='false'),
         DeclareLaunchArgument('launch_tcp_joy_teleop', default_value='false'),
