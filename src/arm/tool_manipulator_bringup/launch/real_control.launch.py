@@ -4,7 +4,7 @@ from pathlib import Path
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, LogError, OpaqueFunction, RegisterEventHandler, TimerAction
+from launch.actions import DeclareLaunchArgument, LogInfo, OpaqueFunction, RegisterEventHandler, TimerAction
 from launch.event_handlers import OnProcessExit
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -18,7 +18,7 @@ ARM_RMD = ('shoulder_joint', 'elbow_joint', 'wrist_pitch_joint')
 
 def _home_after_controller(event, context, home_node):
     if event.returncode != 0:
-        return [LogError(msg='Startup home skipped: arm_controller failed to activate.')]
+        return [LogInfo(msg='ERROR: Startup home skipped: arm_controller failed to activate.')]
     return [home_node]
 
 
