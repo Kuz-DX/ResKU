@@ -42,7 +42,7 @@ joints:
     q_offset_rad: 1.6467181226250391
     soft_limit_rad:
     - -1.459444233251
-    - 1.534842544204
+    - 1.55
     velocity_limit_rad_s: 0.35
     current_limit_a: 4.0
     current_release_threshold_a: 3.0

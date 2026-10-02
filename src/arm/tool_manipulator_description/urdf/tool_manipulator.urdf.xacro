@@ -333,7 +333,7 @@
 
     <limit
         lower="-1.459444233251"
-        upper="1.534842544204"
+        upper="1.55"
         effort="1.0"
         velocity="1.0"/>
 
