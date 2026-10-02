@@ -112,7 +112,7 @@ ros2 launch src/arm/tool_change_min/launch/joystick.launch.py \
 위해 임의 자세에서 `set_current_zero.py --apply`를 실행하지 않는다.
 
 `status=6, error_code=-4`는 이동 중 경로 추종 오차로 중단됐다는 뜻이다.
-현재 소스의 컨트롤러 설정은 각 관절의 이동 중 허용 오차가 0.05 rad이다.
+현재 소스의 컨트롤러 설정은 팔 6축과 EE 관절의 이동 중 허용 오차가 2.0 rad이다.
 위치 리밋 확대와는 다른 설정이며, 전류 보호·부하·피드백 이상 등 원인을
 확인하기 전 허용 오차를 해제하지 않는다.
 

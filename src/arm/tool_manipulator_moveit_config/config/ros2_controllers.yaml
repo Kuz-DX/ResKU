@@ -20,12 +20,12 @@ arm_controller:
     constraints:
       goal_time: 1.0
       stopped_velocity_tolerance: 0.02
-      base_joint: {trajectory: 0.05, goal: 0.03}
-      shoulder_joint: {trajectory: 0.05, goal: 0.03}
-      elbow_joint: {trajectory: 0.05, goal: 0.03}
-      wrist_pitch_joint: {trajectory: 0.05, goal: 0.03}
-      wrist_roll_joint: {trajectory: 0.05, goal: 0.03}
-      wrist_yaw_joint: {trajectory: 0.05, goal: 0.03}
+      base_joint: {trajectory: 2.0, goal: 0.03}
+      shoulder_joint: {trajectory: 2.0, goal: 0.03}
+      elbow_joint: {trajectory: 2.0, goal: 0.03}
+      wrist_pitch_joint: {trajectory: 2.0, goal: 0.03}
+      wrist_roll_joint: {trajectory: 2.0, goal: 0.03}
+      wrist_yaw_joint: {trajectory: 2.0, goal: 0.03}
 
 ee_controller:
   ros__parameters:
@@ -37,4 +37,4 @@ ee_controller:
     constraints:
       goal_time: 1.0
       stopped_velocity_tolerance: 0.02
-      ee_joint: {trajectory: 0.05, goal: 0.03}
+      ee_joint: {trajectory: 2.0, goal: 0.03}
