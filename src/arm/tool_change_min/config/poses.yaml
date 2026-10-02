@@ -13,7 +13,7 @@ feedback:
   joint_state_max_age_s: 0.5
 joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
 named_poses:
-  home: {base_joint: 0.030680, shoulder_joint: 1.555786, elbow_joint: 1.539904, wrist_pitch_joint: -1.651605, wrist_roll_joint: 0.009204, wrist_yaw_joint: 0.191748}
+  home: {base_joint: 0.030680, shoulder_joint: 1.555786, elbow_joint: 1.539904, wrist_pitch_joint: 1.570796326795, wrist_roll_joint: 0.009204, wrist_yaw_joint: 0.191748}
   docking_wait: {base_joint: 3.138525, shoulder_joint: 0.866032, elbow_joint: 1.385966, wrist_pitch_joint: -1.241802, wrist_roll_joint: 0.007670, wrist_yaw_joint: 0.205553}
   tool0_pre: {base_joint: null, shoulder_joint: null, elbow_joint: null, wrist_pitch_joint: null, wrist_roll_joint: null, wrist_yaw_joint: null}
   tool1_pre: {base_joint: 2.193593, shoulder_joint: 0.500735, elbow_joint: 1.555263, wrist_pitch_joint: -1.441991, wrist_roll_joint: 0.757787, wrist_yaw_joint: -0.518486}
