@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Jog one arm joint at a time from a shared remote joystick.
+"""Jog arm joints directly from dedicated joystick buttons and axes.
 
 Commands are sent to MoveIt Servo as ``JointJog`` messages so Servo remains
 responsible for joint limits, collision checking, smoothing, and forwarding the
@@ -40,12 +40,16 @@ class JointJoyTeleop(Node):
         p("joint_speed_rad_s", 0.12)
         p("joy_timeout_sec", 0.25)
         p("deadzone", 0.12)
-        p("deadman_button", 4)  # L1
-        p("jog_axis", 4)  # Right stick vertical
-        p("invert_jog_axis", True)
-        p("select_axis", 6)  # D-pad horizontal: left/right
-        p("select_threshold", 0.5)
-        p("invert_select_axis", False)
+        p("base_ccw_button", 4)
+        p("base_cw_button", 2)
+        p("shoulder_ccw_button", 3)
+        p("shoulder_cw_button", 1)
+        p("elbow_axis", 7)  # Positive: CCW, negative: CW
+        p("wrist_pitch_axis", 6)  # Positive: CCW, negative: CW
+        p("wrist_roll_ccw_button", 5)
+        p("wrist_roll_cw_button", 6)
+        p("wrist_yaw_ccw_button", 8)
+        p("wrist_yaw_cw_button", 7)
         p("manage_focus", True)
         p("focus_topic", "/control/active_target")
         p("focus_button", 9)  # Options
@@ -57,21 +61,37 @@ class JointJoyTeleop(Node):
         self._speed = float(self.get_parameter("joint_speed_rad_s").value)
         self._timeout = float(self.get_parameter("joy_timeout_sec").value)
         self._deadzone = float(self.get_parameter("deadzone").value)
-        self._select_threshold = float(self.get_parameter("select_threshold").value)
-        self._deadman_button = int(self.get_parameter("deadman_button").value)
-        self._jog_axis = int(self.get_parameter("jog_axis").value)
-        self._select_axis = int(self.get_parameter("select_axis").value)
+        self._button_pairs = {
+            "base_joint": (
+                int(self.get_parameter("base_ccw_button").value),
+                int(self.get_parameter("base_cw_button").value),
+            ),
+            "shoulder_joint": (
+                int(self.get_parameter("shoulder_ccw_button").value),
+                int(self.get_parameter("shoulder_cw_button").value),
+            ),
+            "wrist_roll_joint": (
+                int(self.get_parameter("wrist_roll_ccw_button").value),
+                int(self.get_parameter("wrist_roll_cw_button").value),
+            ),
+            "wrist_yaw_joint": (
+                int(self.get_parameter("wrist_yaw_ccw_button").value),
+                int(self.get_parameter("wrist_yaw_cw_button").value),
+            ),
+        }
+        self._axes = {
+            "elbow_joint": int(self.get_parameter("elbow_axis").value),
+            "wrist_pitch_joint": int(self.get_parameter("wrist_pitch_axis").value),
+        }
         self._focus_button = int(self.get_parameter("focus_button").value)
         self._manage_focus = bool(self.get_parameter("manage_focus").value)
         self._arm_focus = str(self.get_parameter("arm_focus_value").value)
         self._drive_focus = str(self.get_parameter("drive_focus_value").value)
         self._validate_parameters()
 
-        self._selected = 0
         self._joy: Joy | None = None
         self._last_joy_time = self.get_clock().now()
         self._previous_focus_button = False
-        self._selection_latched = False
         self._commanding = False
         # Fail safe: arm commands remain disabled until this node owns focus or
         # an external focus manager explicitly publishes the arm value.
@@ -112,7 +132,7 @@ class JointJoyTeleop(Node):
             )
         self.get_logger().info(
             "Joint joystick teleop ready but inactive: "
-            f"{activation_hint}; selected joint={self._joint_name()}"
+            f"{activation_hint}; dedicated joint mappings enabled"
         )
 
     def _validate_parameters(self) -> None:
@@ -129,24 +149,25 @@ class JointJoyTeleop(Node):
                 raise ValueError(f"{label} must be finite and positive")
         if not math.isfinite(self._deadzone) or not 0.0 <= self._deadzone < 1.0:
             raise ValueError("deadzone must be in [0, 1)")
-        if (not math.isfinite(self._select_threshold)
-                or not 0.0 < self._select_threshold <= 1.0):
-            raise ValueError("select_threshold must be in (0, 1]")
-        for label, value in (
-            ("deadman_button", self._deadman_button),
-            ("jog_axis", self._jog_axis),
-            ("select_axis", self._select_axis),
-            ("focus_button", self._focus_button),
-        ):
+        indexed_inputs = [("focus_button", self._focus_button)]
+        indexed_inputs.extend(
+            (f"{joint}_{direction}_button", index)
+            for joint, pair in self._button_pairs.items()
+            for direction, index in zip(("ccw", "cw"), pair)
+        )
+        indexed_inputs.extend(
+            (f"{joint}_axis", index) for joint, index in self._axes.items()
+        )
+        for label, value in indexed_inputs:
             if value < 0:
                 raise ValueError(f"{label} must be nonnegative")
+        mapped_joints = set(self._button_pairs) | set(self._axes)
+        if mapped_joints != set(self._joints):
+            raise ValueError("joint_names must match the configured button/axis mappings")
         if not self._arm_focus or not self._drive_focus:
             raise ValueError("arm_focus_value and drive_focus_value must be non-empty")
         if self._arm_focus == self._drive_focus:
             raise ValueError("arm_focus_value and drive_focus_value must differ")
-
-    def _joint_name(self) -> str:
-        return self._joints[self._selected]
 
     @staticmethod
     def _button(message: Joy, index: int) -> bool:
@@ -187,64 +208,56 @@ class JointJoyTeleop(Node):
                 self._publish_halt()
         self._previous_focus_button = focus_pressed
 
-        if self._active_target != self._arm_focus:
-            self._selection_latched = False
-            return
-
-        select_value = self._axis(message, self._select_axis)
-        if bool(self.get_parameter("invert_select_axis").value):
-            select_value = -select_value
-        selecting = abs(select_value) >= self._select_threshold
-        deadman_held = self._button(message, self._deadman_button)
-        if not deadman_held:
-            # Stop the previous joint before selection can change the joint
-            # name placed in the halt message.
-            self._publish_halt()
-        if selecting and not self._selection_latched and not deadman_held:
-            # Linux joydev reports D-pad right as -1 for the established pad.
-            step = 1 if select_value < 0.0 else -1
-            self._selected = (self._selected + step) % len(self._joints)
-            self.get_logger().info(
-                f"Selected joint {self._selected + 1}/{len(self._joints)}: "
-                f"{self._joint_name()}"
-            )
-        self._selection_latched = selecting
-
     def _fresh_joy(self) -> bool:
         if self._joy is None:
             return False
         age = (self.get_clock().now() - self._last_joy_time).nanoseconds * 1e-9
         return age <= self._timeout
 
-    def _make_command(self, velocity: float) -> JointJog:
+    def _make_command(self, velocities: list[float]) -> JointJog:
         message = JointJog()
         message.header.stamp = self.get_clock().now().to_msg()
         message.header.frame_id = str(self.get_parameter("command_frame").value)
-        message.joint_names = [self._joint_name()]
-        message.velocities = [velocity]
+        message.joint_names = self._joints
+        message.velocities = velocities
         message.duration = 1.0 / self._rate
         return message
 
+    def _button_velocity(self, message: Joy, ccw: int, cw: int) -> float:
+        return self._speed * (float(self._button(message, ccw))
+                              - float(self._button(message, cw)))
+
+    def _axis_velocity(self, message: Joy, index: int) -> float:
+        value = self._axis(message, index)
+        if abs(value) < self._deadzone:
+            return 0.0
+        return self._speed * value
+
+    def _velocities(self, message: Joy) -> list[float]:
+        velocities = []
+        for joint in self._joints:
+            if joint in self._button_pairs:
+                velocities.append(
+                    self._button_velocity(message, *self._button_pairs[joint]))
+            else:
+                velocities.append(self._axis_velocity(message, self._axes[joint]))
+        return velocities
+
     def _publish_halt(self) -> None:
         if self._commanding:
-            self._publisher.publish(self._make_command(0.0))
+            self._publisher.publish(self._make_command([0.0] * len(self._joints)))
             self._commanding = False
 
     def _publish_command(self) -> None:
         if (self._active_target != self._arm_focus
                 or not self._fresh_joy()
-                or self._joy is None
-                or not self._button(self._joy, self._deadman_button)):
+                or self._joy is None):
             self._publish_halt()
             return
 
-        value = self._axis(self._joy, self._jog_axis)
-        if abs(value) < self._deadzone:
-            value = 0.0
-        if bool(self.get_parameter("invert_jog_axis").value):
-            value = -value
-        self._publisher.publish(self._make_command(self._speed * value))
-        self._commanding = True
+        velocities = self._velocities(self._joy)
+        self._publisher.publish(self._make_command(velocities))
+        self._commanding = any(velocity != 0.0 for velocity in velocities)
 
 
 def main() -> None:
