@@ -17,8 +17,11 @@
 - `arm_tag_docking_vision.launch.py`: 수정하지 않은 `vision.apriltag`를 `docking.yaml`의 단일 입력 설정으로 실행한다.
 
 `real_control.launch.py`는 기본적으로 `arm_controller` 활성화 성공 후 SRDF의 `home`으로
-한 번 자동 이동한다. 현재 관절 상태 수신 및 정지·소프트 리밋 검사를 통과한 뒤 8초 동안
-이동한다. 기존 `move_to_named_pose.py`의 직접 trajectory 명령을 사용하므로 MoveIt 충돌
+한 번 자동 이동한다. 현재 관절 상태 수신 및 정지·소프트 리밋 검사를 통과한 뒤 최소 8초 동안
+이동한다. 현재 자세에서 시작·종료 속도와 가속도가 0인 완만한 궤적을 생성하며,
+최대 속도가 `hardware.yaml`의 관절별 속도 제한의 50%를 넘으면 이동 시간을 자동으로 늘린다.
+실제 적용 시간은 `Sending smooth named pose` 로그에 표시된다.
+기존 `move_to_named_pose.py`의 직접 trajectory 명령을 사용하므로 MoveIt 충돌
 경로 계획은 수행하지 않는다. 컨트롤러 활성화나 상태 검사가 실패하면 이동하지 않는다.
 
 ```bash
@@ -134,7 +137,7 @@ bash ~/ResKU/utils/move_to_pose.sh home \
 | --- | --- | --- |
 | `pose` | 없음 | 이동할 SRDF pose 이름. `--list`를 사용할 때는 생략 가능 |
 | `--list` | 꺼짐 | 사용 가능한 `arm` pose 목록을 출력하고 종료 |
-| `--duration <초>` | `5.0` | 현재 자세에서 목표 자세까지 이동할 trajectory 시간. 0보다 커야 함 |
+| `--duration <초>` | `5.0` | 최소 이동 시간. 0보다 커야 하며 관절 속도 제한에 따라 자동 연장됨 |
 | `--wait-for-server <초>` | `5.0` | `arm_controller` action server를 기다리는 시간. 0 이상이어야 함 |
 | `--dry-run` | 꺼짐 | 관절 목표값만 출력하고 action goal을 보내지 않음 |
 | `--srdf <경로>` | 설치된 기본 SRDF | 다른 SRDF 파일에서 named pose를 읽을 때 사용 |

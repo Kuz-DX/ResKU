@@ -10,6 +10,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import rclpy
+import yaml
 from action_msgs.msg import GoalStatus
 from ament_index_python.packages import get_package_share_directory
 from builtin_interfaces.msg import Duration
@@ -76,6 +77,40 @@ def load_arm_poses(srdf_path: Path) -> dict[str, list[float]]:
 def seconds_to_duration(seconds: float) -> Duration:
     sec = int(seconds)
     return Duration(sec=sec, nanosec=int((seconds - sec) * 1_000_000_000))
+
+
+def load_motion_speeds(hardware: Path) -> dict[str, float]:
+    with hardware.open(encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)
+    speeds = {name: float(config["joints"][name]["velocity_limit_rad_s"])
+              for name in ARM_JOINTS}
+    if any(not math.isfinite(value) or value <= 0.0 for value in speeds.values()):
+        raise ValueError("All arm velocity_limit_rad_s values must be finite and positive")
+    return speeds
+
+
+def make_smooth_points(current, target, requested_duration, speeds):
+    """Quintic rest-to-rest motion, limited to half the configured joint speeds."""
+    start = [current[name] for name in ARM_JOINTS]
+    delta = [end - begin for begin, end in zip(start, target)]
+    # max(d(10*u^3 - 15*u^4 + 6*u^5)/du) = 1.875 at u=0.5.
+    duration = max(requested_duration, max(
+        1.875 * abs(distance) / (0.5 * speeds[name])
+        for name, distance in zip(ARM_JOINTS, delta)))
+    count = max(2, math.ceil(duration / 0.05))
+    points = []
+    for index in range(count + 1):
+        u = index / count
+        blend = 10*u**3 - 15*u**4 + 6*u**5
+        velocity = 30*u**2 * (1-u)**2 / duration
+        acceleration = 60*u * (1-u) * (1-2*u) / duration**2
+        points.append(JointTrajectoryPoint(
+            positions=[begin + distance * blend for begin, distance in zip(start, delta)],
+            velocities=[distance * velocity for distance in delta],
+            accelerations=[distance * acceleration for distance in delta],
+            time_from_start=seconds_to_duration(duration * u),
+        ))
+    return points, duration
 
 
 class NamedPoseRunner(Node):
@@ -154,6 +189,7 @@ class NamedPoseRunner(Node):
         limits: dict[str, tuple[float, float]],
         joint_state_timeout_s: float,
         max_start_velocity: float,
+        speeds: dict[str, float],
     ) -> int:
         if not self.client.wait_for_server(timeout_sec=wait_s):
             self.get_logger().error(
@@ -181,11 +217,11 @@ class NamedPoseRunner(Node):
             return 2
         goal = FollowJointTrajectory.Goal()
         goal.trajectory.joint_names = list(ARM_JOINTS)
-        goal.trajectory.points = [JointTrajectoryPoint(
-            positions=positions, time_from_start=seconds_to_duration(duration_s))]
+        goal.trajectory.points, duration_s = make_smooth_points(
+            current, positions, duration_s, speeds)
         self.tracking_peaks.clear()
         self.get_logger().info(
-            f"Sending named pose over {duration_s:.3f}s; start: " +
+            f"Sending smooth named pose over {duration_s:.3f}s (50% hardware speed cap); start: " +
             ", ".join(f"{name}={current[name]:.6f}" for name in ARM_JOINTS))
         send_future = self.client.send_goal_async(goal, feedback_callback=self._on_action_feedback)
         rclpy.spin_until_future_complete(self, send_future)
@@ -250,9 +286,10 @@ def main() -> int:
     target = dict(zip(ARM_JOINTS, positions))
     try:
         limits = load_soft_limits(hardware, ARM_JOINTS)
+        speeds = load_motion_speeds(hardware)
         validate_joint_positions(
             target, limits, args.limit_margin, label=f"target pose '{args.pose}'")
-    except (OSError, TypeError, ValueError) as error:
+    except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as error:
         print(f"Unsafe named pose: {error}", file=sys.stderr)
         return 2
     print(f"{args.pose}: " + ", ".join(
@@ -271,6 +308,7 @@ def main() -> int:
             limits,
             args.joint_state_timeout,
             args.max_start_velocity,
+            speeds,
         )
     finally:
         node.destroy_node()
