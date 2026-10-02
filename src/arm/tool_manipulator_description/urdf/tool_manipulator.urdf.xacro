@@ -333,7 +333,7 @@
 
     <limit
         lower="-1.459444233251"
-        upper="1.55"
+        upper="1.64"
         effort="1.0"
         velocity="1.0"/>
 
@@ -398,7 +398,7 @@
 
     <limit
         lower="-1.4206979245227118"
-        upper="1.573239770294"
+        upper="1.65"
         effort="1.0"
         velocity="1.0"/>
 

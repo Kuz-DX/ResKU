@@ -40,9 +40,10 @@ joints:
     id: 4
     sign: -1
     q_offset_rad: 1.6467181226250391
+    # Captures d/l: max q=1.614953130239 (raw_deg=1.82), plus jog margin.
     soft_limit_rad:
     - -1.459444233251
-    - 1.55
+    - 1.64
     velocity_limit_rad_s: 0.35
     current_limit_a: 4.0
     current_release_threshold_a: 3.0
@@ -58,9 +59,10 @@ joints:
     q_offset_rad: 0.09669123989469558
     # CW lower bound: operator-approved dock pose, raw_deg=86.939995.
     # q = sign * (raw_deg*pi/180 - q_offset_rad); reconvert if zero changes.
+    # Upper bound includes d/l: max q=1.621061738773 (raw_deg=-87.339996).
     soft_limit_rad:
     - -1.4206979245227118
-    - 1.573239770294
+    - 1.65
     velocity_limit_rad_s: 0.3
     current_limit_a: 3.0
     current_release_threshold_a: 2.2
