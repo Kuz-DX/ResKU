@@ -62,18 +62,5 @@
     <disable_collisions link1="wrist_link_roll" link2="wrist_actuator_yaw" reason="Adjacent"/>
     <disable_collisions link1="wrist_actuator_yaw" link2="wrist_link_yaw" reason="Adjacent"/>
     <disable_collisions link1="wrist_link_yaw" link2="ee_actuator" reason="Adjacent"/>
-    <!-- [임시, 2026-08-31 재확인] mount 높이 버그 수정 / crossbar 높이(0.84m) /
-         rack_right.stl 갱신을 모두 반영한 뒤에도 check_state_validity로 재확인한
-         결과 HOME_ARM_JOINTS, HOLD_ARM_JOINTS(maru_ik_node.py) 자세에서 여전히
-         진짜 충돌 - compute_fk로 확인한 HOME 자세 기준 cam_link(z=0.150m),
-         gripper_actuator/pinion_gear(z=0.227m), wrist_link(z=0.211m)가 전부
-         차체 박스 x/y 풋프린트 안쪽인데 z는 차체 상판(0.30m)보다 낮아 차체
-         몸통 안으로 70~150mm 파고든 상태. 프레임(기둥 z≈0.92m, 가로대
-         z≈0.84m)은 팔이 그 위로 접혀 쉬도록 만든 구조로 보이는데 현재
-         HOME_ARM_JOINTS 각도(shoulder=1.71548, elbow=1.58825, wrist=1.51844)는
-         차체 몸통 쪽으로 접혀 들어간다 - mesh/origin 오차가 아니라 HOME 자세
-         각도 자체(또는 마운트 위치) 재설계가 필요한 문제로 판단. 근본 원인
-         해결 전까지 뎁스카메라->IK->MoveIt 파이프라인과 AUTO 스토우 자체만
-         검증하기 위해 임시로 재비활성화. 해결되면 이 4줄 지우고 실제 충돌을
-         다시 잡을 것. -->
+
 </robot>
