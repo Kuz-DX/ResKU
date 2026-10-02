@@ -36,6 +36,7 @@ install(PROGRAMS scripts/ui_tag1_docking_node.py DESTINATION lib/${PROJECT_NAME}
 install(PROGRAMS scripts/tag1_recorded_path_node.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/tag1_recorded_path.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/gripper_gox.py DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS scripts/ik_node.py DESTINATION lib/${PROJECT_NAME})
 install(FILES scripts/design_sizing.py DESTINATION lib/${PROJECT_NAME})
 install(FILES scripts/hardware_preflight.py DESTINATION lib/${PROJECT_NAME})
 install(FILES scripts/tool_ids.py DESTINATION lib/${PROJECT_NAME})
