@@ -5,6 +5,18 @@
 
 ## 조이스틱 매니퓰레이터 수동 조작
 
+측정 자세 `d`와 `llllllllllllllllllllllllllllll`을 허용하도록 현재 raw/영점
+변환 기준으로 shoulder 상한을 `1.64 rad`, elbow 상한을 `1.65 rad`로
+조정했다. `hardware.yaml`과 URDF에 동일하게 적용했으며 두 자세는
+`0.01 rad` 여유를 둔 위치 검사도 통과한다. 전체 리밋 해제가 아니며
+전류·속도 보호는 유지한다. bridge의 출력 rad는 영점이 다를 수 있으므로
+위치 검증에는 raw 값을 현재 설정으로 변환해 사용한다.
+
+실행 중인 노드에는 자동 반영되지 않는다. 팔을 지지하고 기존 제어기를
+종료한 뒤 아래 컨트롤러와 수동 노드를 다시 실행한다. 이 작업공간의 설치
+URDF는 소스에 연결되어 있지만, 별도 구동 PC에서는 설치 URDF도 같은
+리밋인지 확인해야 한다. 위치 검사 통과가 충돌·부하 검증을 의미하지는 않는다.
+
 `joystick_manipulator.py`는 이 패키지의 `ArmKinematics`로 URDF/하드웨어
 리밋과 보정 설정을 검증하고 `/arm_controller/follow_joint_trajectory`로
 6축 중 한 관절씩 조작한다. MoveIt Servo, IK 서버, `poses.yaml`의 HOME

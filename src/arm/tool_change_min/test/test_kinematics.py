@@ -2,8 +2,10 @@
 from pathlib import Path
 import sys
 import unittest
+import importlib.util
 
 import numpy as np
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tool_change_min.kinematics import ArmKinematics  # noqa: E402
@@ -15,6 +17,29 @@ class KinematicsTest(unittest.TestCase):
         self.model = ArmKinematics(
             root / "tool_manipulator_description/urdf/tool_manipulator.urdf.xacro",
             root / "tool_manipulator_bringup/config/hardware.yaml")
+
+    def test_manual_raw_captures_fit_with_jog_margin(self):
+        package = Path(__file__).resolve().parents[1]
+        spec = importlib.util.spec_from_file_location(
+            "convert_raw", package / "scripts/convert_raw_poses.py")
+        converter = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(converter)
+        hardware = yaml.safe_load((package.parent /
+            "tool_manipulator_bringup/config/hardware.yaml").read_text())
+        captures = {
+            "joint_names": [*self.model.joint_names, "ee_joint"],
+            "raw_units": ["raw_pulse", "raw_deg", "raw_deg", "raw_deg",
+                          "raw_pulse", "raw_pulse", "raw_pulse"],
+            "captures": {
+                "d": {"raw": [-27, 1.82, -87.339996, 143.020004, 14, 49, 3365]},
+                "l": {"raw": [8, 2.0, -86.580002, 143.209991, -56, 75, 3365]},
+            },
+        }
+        converted, errors = converter.convert(captures, hardware, self.model.joint_names, 0.01)
+        self.assertEqual(errors, [])
+        for sample in converted.values():
+            self.assertTrue(self.model.within_limits(
+                [sample[name] for name in self.model.joint_names], 0.01))
 
     def test_fk_then_ik_restores_known_pose(self):
         known = np.array([0.35, -0.35, 0.45, -0.40, 0.12, 0.55])
