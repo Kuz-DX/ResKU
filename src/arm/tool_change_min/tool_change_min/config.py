@@ -92,20 +92,38 @@ def _required_paths(stop_after: str) -> list[str]:
     return required
 
 
-def require_for_stop_state(path: str | Path) -> dict[str, Any]:
-    """Load a safe partial configuration for the selected development stage.
-
-    A stage may not execute until its own pose/motion/timeout values are set.
-    Values for later stages are intentionally allowed to remain ``null``.
-    """
-    data = load_poses(path)
+def validate_request_config(data: dict[str, Any], tool_id: int = 1) -> None:
+    """Check the selected tool's required stages before issuing any motion."""
+    if tool_id not in (0, 1):
+        raise ValueError(f"unsupported tool ID: {tool_id}")
     stop_after = stop_after_state(data)
     missing = []
-    for dotted_path in _required_paths(stop_after):
+    for path in _required_paths(stop_after):
+        dotted_path = path.replace("tool1_", f"tool{tool_id}_")
         try:
             missing.extend(null_paths(_at_path(data, dotted_path), dotted_path))
         except KeyError:
             missing.append(dotted_path)
     if missing:
         raise ValueError("unset required configuration keys: " + ", ".join(missing))
+
+
+def require_for_stop_state(path: str | Path, tool_id: int | None = 1) -> dict[str, Any]:
+    """Load a safe partial configuration for the selected development stage.
+
+    A stage may not execute until its own pose/motion/timeout values are set.
+    Values for later stages are intentionally allowed to remain ``null``.
+    """
+    data = load_poses(path)
+    if tool_id is None:
+        # Start if either tool is configured; validate the actual ID on request.
+        errors = []
+        for candidate in (0, 1):
+            try:
+                validate_request_config(data, candidate)
+                return data
+            except ValueError as exc:
+                errors.append(f"tag{candidate}: {exc}")
+        raise ValueError("; ".join(errors))
+    validate_request_config(data, tool_id)
     return data

@@ -26,6 +26,11 @@ named_poses:
   supply_grasp: {base_joint: -2.258020, shoulder_joint: 0.694117, elbow_joint: 1.530130, wrist_pitch_joint: -1.451765, wrist_roll_joint: -0.608990, wrist_yaw_joint: -0.424913}
   stand: {base_joint: 0, shoulder_joint: 0, elbow_joint: 0, wrist_pitch_joint: 0, wrist_roll_joint: 0, wrist_yaw_joint: 0}
 cartesian_targets:
+  # Tag 0 gripper docking target; enter measured base_actuator coordinates.
+  tool0_target:
+    frame_id: base_actuator
+    position_m: [null, null, null]
+    orientation_xyzw: [null, null, null, null]
   # Fixed tool-1 target expressed in base_actuator, not a teach joint pose.
   tool1_target:
     frame_id: base_actuator
@@ -53,6 +58,8 @@ timeouts_s:
   ee_align: null
   home: 120.0
   docking_wait: 120.0
+  tool0_pre: 120.0
+  tool0_target: 180.0
   tool1_pre: 120.0
   tool1_target: 180.0
   lock: 90.0

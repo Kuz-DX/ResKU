@@ -1,4 +1,95 @@
-# 도구 1 장착
+# 도구 0·1 장착
+
+명령은 모두 **작업공간 루트 `ResKU/`에서 실행**한다. 파일 경로는 이 위치를
+기준으로 한 상대경로다. ROS 토픽·액션 이름의 `/`는 파일 경로가 아니다.
+
+## 조이스틱 매니퓰레이터 수동 조작
+
+`joystick_manipulator.py`는 이 패키지의 `ArmKinematics`로 URDF/하드웨어
+리밋과 보정 설정을 검증하고 `/arm_controller/follow_joint_trajectory`로
+6축 중 한 관절씩 조작한다. MoveIt Servo, IK 서버, `poses.yaml`의 HOME
+티칭값은 필요 없다. EE 출력축은 제어하지 않는다.
+
+자동 FSM·motion_executor·다른 teleop·Servo를 종료한 상태에서 사용한다.
+이 노드는 컨트롤러의 명령 소유권을 강제로 잠그지 않으므로 다른 명령원과
+동시 실행하면 안 된다. 충돌 검사는 제공하지 않는다.
+
+### 공통 환경 설정
+
+각 터미널에서 먼저 환경을 설정한다. 아래 ROS 경로는 현재 작업공간
+배치(`/home/kuzdx/ResKU`) 기준이다:
+
+```bash
+source ../../../opt/ros/humble/setup.bash
+source install/setup.bash
+```
+
+### 터미널 1 — 실기 컨트롤러
+
+로봇 PC에서 실행한다. 이미 실행 중이면 생략한다.
+
+```bash
+ros2 launch src/arm/tool_manipulator_bringup/launch/real_control.launch.py \
+  hardware_config:=src/arm/tool_manipulator_bringup/config/hardware.yaml
+```
+
+### 터미널 2 — 조이스틱 발행기
+
+조이스틱이 연결된 PC에서 실행한다. 이미 `/joy`를 발행하면 생략한다.
+
+```bash
+ros2 launch src/arm/tool_manipulator_bringup/launch/remote_joy.launch.py
+```
+
+### 터미널 3 — 매니퓰레이터 수동 조작 노드
+
+ROS 환경과 기존 description/bringup 의존성이 준비된 로봇 PC에서
+소스를 직접 실행한다. 이 방식은 새 노드 설치나 생성 서비스를
+요구하지 않으며 ROS 패키지 빌드를 수행하지 않는다:
+
+```bash
+PYTHONPATH="src/arm/tool_change_min${PYTHONPATH:+:$PYTHONPATH}" \
+python3 src/arm/tool_change_min/scripts/joystick_manipulator.py --ros-args \
+  --params-file src/arm/tool_change_min/config/joystick.yaml \
+  -p hardware_yaml:=src/arm/tool_manipulator_bringup/config/hardware.yaml \
+  -p urdf_xacro:=src/arm/tool_manipulator_description/urdf/tool_manipulator.urdf.xacro
+```
+
+### 설치된 노드의 launch 실행
+
+새 노드가 설치되어 있는 환경에서는 터미널 3 명령 대신 다음을 실행한다:
+
+```bash
+ros2 launch src/arm/tool_change_min/launch/joystick.launch.py \
+  params_file:=src/arm/tool_change_min/config/joystick.yaml \
+  hardware_yaml:=src/arm/tool_manipulator_bringup/config/hardware.yaml
+```
+
+이 launch도 실행 파일은 설치 트리에서 찾는다. 터미널 3의 직접 실행과
+동시에 사용하지 않는다.
+
+### 조이스틱 조작 방법
+
+| 조작 | 기본 동작 |
+| --- | --- |
+| Options (`buttons[9]`) | `/control/active_target`의 drive ↔ arm 전환, 시작은 drive |
+| L1 해제 + D-pad 좌우 (`axes[6]`) | base → shoulder → elbow → wrist_pitch → wrist_roll → wrist_yaw 순서 선택 |
+| L1 (`buttons[4]`) + 오른쪽 스틱 상하 (`axes[4]`) | 선택 관절의 상대 이동, 기본 축 반전 적용 |
+| L1 해제 또는 스틱 중립 | 진행 중인 이동 취소 요청 |
+
+팔 포커스 진입 및 연결 복구 후에는 L1을 한 번 놓아야 이동할 수 있다.
+선택 관절은 로그로 표시한다. 패드별 축/버튼 번호, 방향, 속도는
+`config/joystick.yaml`에서 변경한다. 외부 포커스 관리자를 사용할 때는
+`manage_focus: false`로 설정하고 해당 관리자가 `arm`을 발행하도록 한다.
+
+기본 최대 명령 속도는 0.08 rad/s(하드웨어 속도 제한으로 추가 제한),
+이동 구간은 0.2초다. 측정값을 기준으로 한 짧은 위치 궤적이므로 연속 Servo보다
+움직임이 끊길 수 있다. 새 목표는 이전 결과 이후 수신한 완전한 6축 피드백에서만
+생성한다. Joy 0.25초/피드백 0.5초 초과, 잘못된 피드백, 포커스 해제 시 취소한다.
+거부·액션 실패·응답 시간 초과는 재시작 전까지 명령을 차단한다.
+취소 요청이나 프로세스 종료는 물리적 정지를 보장하지 않는다. 통신 단절 시
+이미 보낸 짧은 구간이 끝까지 실행될 수 있다. 먼저 mock 제어기에서 축 방향과
+버튼 매핑을 확인한다.
 
 ## 기록한 raw 자세 검증
 
@@ -36,11 +127,38 @@ EE_ALIGN 시간·허용오차·기준과 개발 정지 단계도 자동 변경�
 공급 자세는 저장되지만 현재 tool1 FSM에는 공급 이동 단계가 없다.
 한계/FK 검사 통과만으로 이동 경로·충돌·실기 구동이 검증되지는 않는다.
 
+
+## UI tag0·tag1 이동 요청
+
+`tool_change_fsm`은 기존 UI 토픽 `/selected_tool_id`를 구독한다.
+0과 1 모두 HOME → DOCKING_WAIT → EE_ALIGN → 선택 도구 PRE → 선택 도구 TARGET
+→ LOCK → RETURN_DOCKING_WAIT → RETURN_HOME 순서를 사용한다.
+공통 EE 정렬·잠금 설정을 사용하며 선택한 목표는 `poses.yaml`에서 읽는다.
+AprilTag 검출이 목표를 자동 갱신하지는 않는다.
+
+- tag0: `named_poses.tool0_pre`, `cartesian_targets.tool0_target`,
+  `timeouts_s.tool0_pre`, `timeouts_s.tool0_target`.
+- tag1: 기존 `tool1_pre`, `tool1_target` 설정.
+
+현재 tag0의 자세·Cartesian 목표는 미측정이라 null이다. 요청을 받으면 선택한
+개발 정지 단계까지 필요한 설정을 먼저 검사하고, 누락 시 이동 없이 HOLD한다.
+`stop_after_state: home`이면 두 요청 모두 HOME까지만 실행한다.
+기존 단계 이름 `tool1_pre`, `tool1_target`은 공통 정지 지점으로 유지하며,
+tag0 요청에서는 각각 TOOL0_PRE, TOOL0_TARGET 뒤에 멈춘다.
+실행 중이거나 PAUSED 상태에서는 새 요청을 무시한다.
+
+상태 감시를 별도 터미널에서 켜고, 실기 준비가 끝난 후 tag0 이동을 요청한다:
+
+```bash
+ros2 topic pub --once /selected_tool_id std_msgs/msg/Int32 '{data: 0}'
+```
+
 ## 도킹 전 EE_ALIGN
 
 현재 요청 ID 1 흐름은 HOME → DOCKING_WAIT → EE_ALIGN → TOOL1_PRE →
 TOOL1_TARGET → LOCK → RETURN_DOCKING_WAIT → RETURN_HOME → DONE이다.
-새 툴 ID나 그리퍼 파지 동작은 추가하지 않는다.
+tag0(그리퍼)도 같은 순서를 사용하며 TOOL0_PRE → TOOL0_TARGET으로 분기한다.
+그리퍼 열기/닫기 명령은 이 흐름에 추가하지 않는다.
 
 EE_ALIGN은 motion_executor의 align_ee 서비스를 호출한다. /joint_states의
 ee_joint만 읽고 q=sign*(pulse-zero_raw)*2*pi/4096으로 기준 위상을 변환한다.
@@ -233,7 +351,7 @@ python3 src/arm/tool_change_min/scripts/check_real_readiness.py
 
 ```bash
 ros2 launch tool_manipulator_bringup real_control.launch.py \
-  hardware_config:="${HOME}/ResKU/src/arm/tool_manipulator_bringup/config/hardware.yaml"
+  hardware_config:=src/arm/tool_manipulator_bringup/config/hardware.yaml
 ```
 
 이 단계는 실기 하드웨어를 활성화한다. 보정·리밋 확인을 끝낸 뒤 실행한다.
@@ -332,10 +450,12 @@ ros2 topic info /selected_tool_id -v
 ros2 topic echo /selected_tool_id
 ```
 
-UI는 `/selected_tool_id`에 `std_msgs/msg/Int32`, `data: 1`을 발행해야 한다.
+UI는 `/selected_tool_id`에 `std_msgs/msg/Int32`를 발행한다.
+`data: 0`은 tag0(그리퍼), `data: 1`은 tag1 이동 요청이다. 0은 정지 명령이 아니다.
 이 저장소에서는 실제 UI 발행 코드가 확인되지 않았으므로 구동 PC에서 버튼을 눌러
-검증한다. 기존 `drill_tool_change_coordinator`도 같은 요청 토픽을 사용하므로
-최소 FSM과 함께 실행하지 않는다. UI 요청이 확인되면 별도 수동 발행은 필요 없다.
+검증한다. 기존 `ui_tag1_docking`(tag1_recorded_path_node)도 `/selected_tool_id`를
+구독해 이동하므로 최소 FSM과 함께 실행하지 않는다. 기존 도킹 제어 노드도
+동시에 이동 요청을 처리하지 않도록 종료한다. UI 요청이 확인되면 별도 수동 발행은 필요 없다.
 요청이 도착했는데 움직이지 않으면 재발행하지 말고 상태와 모션 노드 로그를 확인한다.
 
 별도 터미널에서 상태 감시를 먼저 실행해 둔다:

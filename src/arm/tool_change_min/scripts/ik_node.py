@@ -25,6 +25,7 @@ import rclpy
 # 설치된 ROS 패키지의 공유 디렉터리 경로를 찾습니다.
 from ament_index_python.packages import get_package_share_directory
 # ROS 2 노드의 파라미터, 구독, 서비스를 관리하는 기본 클래스입니다.
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 # 현재 로봇 관절 위치가 담긴 토픽 메시지 형식입니다.
 from sensor_msgs.msg import JointState
@@ -86,7 +87,7 @@ class IkNode(Node):
         # 관절 하드웨어 한계 설정 파일 경로를 파라미터로 노출합니다.
         self.declare_parameter("hardware_yaml", f"{legacy}/config/hardware.yaml")
         # 정지 자세 설정을 읽고 필수 항목이 빠졌으면 초기화를 실패시킵니다.
-        self.config = require_for_stop_state(self.get_parameter("poses_yaml").value)
+        self.config = require_for_stop_state(self.get_parameter("poses_yaml").value, tool_id=None)
         # 설정에 적힌 순서를 IK 벡터와 응답 관절 이름의 기준으로 보관합니다.
         self.joint_names = tuple(self.config["joint_names"])
         # URDF 기구학과 하드웨어 관절 한계를 결합한 계산 모델을 만듭니다.
@@ -293,18 +294,21 @@ def main():
         # 로봇 이동 설정 오류를 명시하고 대체 설정 없이 안전하게 종료합니다.
         rclpy.logging.get_logger("ik_node").error(f"configuration invalid; exiting: {exc}")
         # 초기화에 실패했으므로 ROS 클라이언트 상태를 정리합니다.
-        rclpy.shutdown()
+        rclpy.try_shutdown()
         # 노드가 없는 상태에서 함수가 계속 진행하지 않도록 반환합니다.
         return
     # 노드의 구독과 서비스 콜백을 ROS 이벤트 루프에서 처리합니다.
     try:
         rclpy.spin(node)
+    except (KeyboardInterrupt, ExternalShutdownException):
+        # Ctrl+C 또는 launch에 의한 컨텍스트 종료는 정상 종료로 처리합니다.
+        pass
     # 정상 종료나 실행 중 예외가 발생해도 노드와 ROS를 정리합니다.
     finally:
         # 노드가 만든 ROS 자원을 해제합니다.
         node.destroy_node()
-        # ROS 클라이언트 라이브러리를 종료합니다.
-        rclpy.shutdown()
+        # 시그널 처리에서 이미 종료된 컨텍스트도 안전하게 정리합니다.
+        rclpy.try_shutdown()
 
 
 # 다른 모듈에서 가져다 쓸 때는 실행하지 않고 직접 실행할 때만 진입점을 호출합니다.

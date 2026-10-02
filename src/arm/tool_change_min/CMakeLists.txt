@@ -26,6 +26,7 @@ install(FILES
   DESTINATION "${PYTHON_INSTALL_DIR}/${PROJECT_NAME}")
 install(PROGRAMS
   scripts/ik_node.py
+  scripts/joystick_manipulator.py
   scripts/measure_apriltag_docking.py
   scripts/motion_executor.py
   scripts/tool_change_fsm.py

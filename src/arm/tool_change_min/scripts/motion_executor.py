@@ -35,7 +35,7 @@ from control_msgs.action import FollowJointTrajectory
 from rclpy.action import ActionClient
 from rclpy.callback_groups import ReentrantCallbackGroup
 # 여러 스레드에서 ROS 콜백을 처리하는 실행기입니다.
-from rclpy.executors import MultiThreadedExecutor
+from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 # ROS 2 노드의 파라미터, 로거, 구독 및 서비스 기능을 제공합니다.
 from rclpy.node import Node
 # 현재 관절 위치 피드백 토픽의 메시지 형식입니다.
@@ -86,7 +86,7 @@ class MotionExecutor(Node):
         self.declare_parameter("arm_action", "/arm_controller/follow_joint_trajectory")
         self.declare_parameter("ee_action", "/ee_controller/follow_joint_trajectory")
         # 필수 자세 및 정지 상태 설정을 로드하고 검증합니다.
-        self.config = require_for_stop_state(self.get_parameter("poses_yaml").value)
+        self.config = require_for_stop_state(self.get_parameter("poses_yaml").value, tool_id=None)
         # 서비스 응답 및 궤적 벡터의 기준 관절 순서를 보관합니다.
         self.joint_names = tuple(self.config["joint_names"])
         # URDF와 하드웨어 설정을 바탕으로 팔 기구학 및 제한 모델을 생성합니다.
@@ -443,7 +443,7 @@ def main():
         # 설정 오류 원인을 노드 이름이 지정된 ROS 로그에 기록합니다.
         rclpy.logging.get_logger("motion_executor").error(f"configuration invalid; exiting: {exc}")
         # 노드 생성 실패 상태에서 ROS 자원을 정리합니다.
-        rclpy.shutdown()
+        rclpy.try_shutdown()
         # 실행 가능한 노드가 없으므로 진입점을 종료합니다.
         return
     # 동시 서비스와 JointState 콜백 처리를 위한 4개 스레드 실행기를 만듭니다.
@@ -453,14 +453,17 @@ def main():
     # 서비스 요청과 피드백 콜백을 계속 처리합니다.
     try:
         executor.spin()
+    except (KeyboardInterrupt, ExternalShutdownException):
+        # Ctrl+C 또는 launch에 의한 컨텍스트 종료는 정상 종료로 처리합니다.
+        pass
     # 실행기 종료 시 콜백 처리와 노드, ROS 상태를 정리합니다.
     finally:
         # 실행기를 종료하고 진행 중인 콜백 작업을 정리합니다.
         executor.shutdown()
         # 노드가 생성한 ROS 통신 자원을 해제합니다.
         node.destroy_node()
-        # ROS 클라이언트 라이브러리를 종료합니다.
-        rclpy.shutdown()
+        # 시그널 처리에서 이미 종료된 컨텍스트도 안전하게 정리합니다.
+        rclpy.try_shutdown()
 
 
 # 이 파일을 직접 실행할 때만 main을 호출하고 모듈 import 시에는 실행하지 않습니다.
