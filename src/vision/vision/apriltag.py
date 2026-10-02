@@ -36,7 +36,7 @@ class AprilTagCompressedNode(Node):
 
         self.declare_parameter(
             'centers_topic',
-            '/apriltag/centers'
+            '/arm/apriltag/centers'
         )
 
         self.declare_parameter(

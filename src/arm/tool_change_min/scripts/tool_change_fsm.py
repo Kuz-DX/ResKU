@@ -62,7 +62,7 @@ class ToolChangeFsm(Node):
         # 외부 관찰자가 현재 절차 상태를 구독할 수 있도록 퍼블리셔를 만듭니다.
         self.status = self.create_publisher(String, "/tool_change/status", 10)
         # 도구 변경 요청 토픽을 구독하고 수신 시 _request 콜백을 호출합니다.
-        self.create_subscription(Int32, "/tool_change/request", self._request, 10)
+        self.create_subscription(Int32, "/selected_tool_id", self._request, 10)
         # 미리 지정한 관절 자세로 이동하는 서비스 클라이언트를 만듭니다.
         self.client_group = ReentrantCallbackGroup()
         self.named = self.create_client(MoveNamedPose, "move_to_named_pose",
