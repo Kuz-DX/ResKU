@@ -334,8 +334,9 @@ ros2 topic echo /selected_tool_id
 
 UI는 `/selected_tool_id`에 `std_msgs/msg/Int32`, `data: 1`을 발행해야 한다.
 이 저장소에서는 실제 UI 발행 코드가 확인되지 않았으므로 구동 PC에서 버튼을 눌러
-검증한다. 기존 `drill_tool_change_coordinator`도 같은 요청 토픽을 사용하므로
-최소 FSM과 함께 실행하지 않는다. UI 요청이 확인되면 별도 수동 발행은 필요 없다.
+검증한다. 기존 `ui_tag1_docking`(tag1_recorded_path_node)도 `/selected_tool_id`를
+구독해 이동하므로 최소 FSM과 함께 실행하지 않는다. 기존 도킹 제어 노드도
+동시에 이동 요청을 처리하지 않도록 종료한다. UI 요청이 확인되면 별도 수동 발행은 필요 없다.
 요청이 도착했는데 움직이지 않으면 재발행하지 말고 상태와 모션 노드 로그를 확인한다.
 
 별도 터미널에서 상태 감시를 먼저 실행해 둔다:
