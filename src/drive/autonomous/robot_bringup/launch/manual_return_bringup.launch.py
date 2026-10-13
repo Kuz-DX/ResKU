@@ -73,6 +73,9 @@ def generate_launch_description():
     imu_heading_sign = LaunchConfiguration('imu_heading_sign')
     reverse_return = LaunchConfiguration('reverse_return')
     return_max_w = LaunchConfiguration('return_max_angular_radps')
+    rear_image_topic = LaunchConfiguration('rear_image_topic')
+    rear_camera_info_topic = LaunchConfiguration('rear_camera_info_topic')
+    landmark_capture_mode = LaunchConfiguration('landmark_capture_mode')
     return_max_w_param = ParameterValue(return_max_w, value_type=float)
 
     reduced_odom_bringup_launch = os.path.join(
@@ -145,6 +148,15 @@ def generate_launch_description():
         # /path/record, /path/return 토픽/의미는 이 옵션과 무관하게 그대로다 --
         # UI 쪽 연동 코드는 이 값에 상관없이 손댈 필요 없다.
         DeclareLaunchArgument('reverse_return', default_value='false'),
+        # [2026-10-13] 후방 landmark 카메라 토픽 (visual_landmark_node). 카메라가
+        # 아직 없어도 노드는 무해하다 -- 버튼을 누르면 "no rear image"로 바로 실패하고
+        # mux hold를 풀어 수동 주행으로 돌아간다.
+        DeclareLaunchArgument('rear_image_topic', default_value='/rear/camera/image_raw/compressed'),
+        DeclareLaunchArgument('rear_camera_info_topic', default_value='/rear/camera/camera_info'),
+        # landmark 촬영 방식: 'moving' = 주행 중 바로 촬영(정지 안 함, 1차 시험용 기본값),
+        # 'stop' = 버튼 누르면 drive_cmd_mux가 즉시 정지 -> 정지 확인 후 촬영.
+        # moving으로 찍은 keyframe이 흐리면(meta.yaml의 odom_twist_at_capture 참고) stop으로.
+        DeclareLaunchArgument('landmark_capture_mode', default_value='moving'),
 
         # [단계 1] rmd_x8_driver_node(CAN, 유일한 소유자) + myahrs_driver_node
         # + static TF(base_link->imu_link/camera_link) + reduced_odom_node.
@@ -168,7 +180,10 @@ def generate_launch_description():
             package='drive_cmd_mux',
             executable='drive_cmd_mux_node',
             name='drive_cmd_mux_node',
-            parameters=[{'effective_track_width_m': ParameterValue(track_width, value_type=float)}],
+            parameters=[{
+                'effective_track_width_m': ParameterValue(track_width, value_type=float),
+                'landmark_capture_mode': landmark_capture_mode,
+            }],
             output='screen',
         ),
 
@@ -194,6 +209,21 @@ def generate_launch_description():
                 'reverse_drive': ParameterValue(reverse_return, value_type=bool),
                 'rotate_max_angular_speed_radps': return_max_w_param,
                 'max_angular_speed_radps': return_max_w_param,
+            }],
+            output='screen',
+        ),
+
+        # [단계 6, 2026-10-13] landmark keyframe 촬영 (UI /path/landmark 버튼).
+        # 정지는 drive_cmd_mux가 걸고, 이 노드는 정지 확인 -> 후방 프레임 저장 -> hold 해제.
+        # 주행 명령은 내지 않음 -- 죽어도 Back-to-Base 영향 없음.
+        Node(
+            package='visual_landmark',
+            executable='visual_landmark_node',
+            name='visual_landmark_node',
+            parameters=[{
+                'rear_image_topic': rear_image_topic,
+                'rear_camera_info_topic': rear_camera_info_topic,
+                'capture_mode': landmark_capture_mode,
             }],
             output='screen',
         ),

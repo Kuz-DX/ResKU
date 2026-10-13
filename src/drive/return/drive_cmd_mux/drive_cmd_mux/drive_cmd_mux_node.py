@@ -17,6 +17,10 @@ Subscribes:
                                -- manual_joy_control_node
     /cmd_vel_return            (geometry_msgs/Twist)  -- return_state_machine_node
     /mission/return/state      (std_msgs/String)      -- return_state_machine_node
+    /path/landmark             (std_msgs/Bool)        -- [2026-10-13] UI landmark 촬영 버튼
+                               (rising edge, MANUAL_RECORDING에서만) -> 즉시 manual을 0으로 hold
+    /visual_landmark/hold      (std_msgs/Bool)        -- visual_landmark_node: 촬영 중 True 갱신,
+                               끝나면 False -> hold 해제 (capture_hold.py: 응답 없음/최대시간 자동 해제)
 
 Publishes:
     /cmd_vel                   (geometry_msgs/Twist)  -- rmd_x8_driver_node
@@ -41,7 +45,9 @@ import math
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
-from std_msgs.msg import Float32MultiArray, String
+from std_msgs.msg import Bool, Float32MultiArray, String
+
+from drive_cmd_mux.capture_hold import CaptureHold, PressDetector
 
 MANUAL_STATES = {'IDLE', 'MANUAL_RECORDING', 'WAIT_RETURN_COMMAND', 'FINISHED', ''}
 RETURN_STATES = {'TURN_180', 'FOLLOW_RETURN_PATH'}
@@ -71,6 +77,19 @@ class DriveCmdMuxNode(Node):
         self.declare_parameter('wheel_radius_m', 0.1125)
         self.declare_parameter('effective_track_width_m', 0.4904)
 
+        # [2026-10-13 신규] landmark 촬영 정지 (capture_hold.py 참고). 버튼은
+        # MANUAL_RECORDING 중에만 받는다 -- 그때만 mission origin(T0)이 있어서
+        # landmark 위치를 기록할 수 있다.
+        self.declare_parameter('landmark_trigger_topic', '/path/landmark')
+        self.declare_parameter('landmark_hold_topic', '/visual_landmark/hold')
+        self.declare_parameter('landmark_hold_grace_s', 1.0)
+        self.declare_parameter('landmark_hold_lease_s', 0.5)
+        self.declare_parameter('landmark_hold_max_s', 6.0)
+        # 'stop'   = 버튼 누르면 정지 후 촬영 (이 노드가 hold)
+        # 'moving' = 주행 중 촬영 (hold 안 함, visual_landmark_node가 바로 찍음)
+        # visual_landmark_node의 capture_mode와 반드시 같은 값 -- launch가 같이 넘긴다.
+        self.declare_parameter('landmark_capture_mode', 'stop')
+
         p = self.get_parameter
         manual_topic = p('manual_topic').value
         return_topic = p('return_topic').value
@@ -93,6 +112,16 @@ class DriveCmdMuxNode(Node):
         self.create_subscription(Twist, return_topic, self._on_return, 10)
         self.create_subscription(String, state_topic, self._on_state, 10)
         self.cmd_pub = self.create_publisher(Twist, output_topic, 10)
+
+        self._capture_hold = CaptureHold(
+            grace_s=float(p('landmark_hold_grace_s').value),
+            lease_s=float(p('landmark_hold_lease_s').value),
+            max_hold_s=float(p('landmark_hold_max_s').value))
+        self._landmark_press = PressDetector()
+        self._landmark_stop = str(p('landmark_capture_mode').value) == 'stop'
+        self._was_holding = False
+        self.create_subscription(Bool, p('landmark_trigger_topic').value, self._on_landmark_trigger, 10)
+        self.create_subscription(Bool, p('landmark_hold_topic').value, self._on_landmark_hold, 10)
 
         self.create_timer(1.0 / rate_hz, self._publish_cmd)
 
@@ -129,6 +158,25 @@ class DriveCmdMuxNode(Node):
                                     throttle_duration_sec=5.0)
         self._state = msg.data
 
+    def _now_s(self) -> float:
+        return self.get_clock().now().nanoseconds * 1e-9
+
+    def _on_landmark_trigger(self, msg: Bool):
+        if not self._landmark_press.update(self._now_s(), msg.data):
+            return
+        if not self._landmark_stop:
+            return  # moving 모드: 정지하지 않음 (촬영은 visual_landmark_node가 주행 중에)
+        if self._state != 'MANUAL_RECORDING':
+            self.get_logger().warn(
+                f'/path/landmark ignored: landmarks can only be captured in MANUAL_RECORDING '
+                f'(current state "{self._state}").')
+            return
+        self._capture_hold.press(self._now_s())
+        self.get_logger().info('Landmark capture: manual driving held at zero.')
+
+    def _on_landmark_hold(self, msg: Bool):
+        self._capture_hold.lease(self._now_s(), msg.data)
+
     def _fresh(self, last_time) -> bool:
         if last_time is None:
             return False
@@ -147,7 +195,12 @@ class DriveCmdMuxNode(Node):
                     f'commanding zero.', throttle_duration_sec=1.0)
         elif self._state in ZERO_STATES:
             pass  # out stays zero
+        elif self._capture_hold.active(self._now_s()):
+            self._was_holding = True  # landmark 촬영 중 -- 조이스틱 무시, out은 zero
         else:
+            if self._was_holding:
+                self._was_holding = False
+                self.get_logger().info('Landmark capture hold released: manual driving resumed.')
             # MANUAL_STATES 또는 알 수 없는 상태 -- manual 통과가 fail-open 기본값.
             if self._fresh(self._manual_time):
                 out = self._manual_cmd

@@ -50,6 +50,9 @@
 | `/path/record` | `std_msgs/msg/Bool` | [UI 인터페이스] 녹화 시작(현재 위치를 (0,0) 원점으로) rising edge — return_state_machine_node가 구독. 더 이상 자동 시작 안 함 |
 | `/path/record` (조이스틱 10번 PS) | `std_msgs/msg/Bool` | 녹화 시작 버튼 rising edge, 드라이브 포커스일 때만 발행 |
 | `/path/return` | `std_msgs/msg/Bool` | [UI 인터페이스, 구 `/mission/return/trigger`] RETURN rising edge — return_state_machine_node가 구독. UI 쪽 값은 True 발행 후 False로 되돌리는 게 스펙이지만, 이 노드는 그 값과 무관하게 False→True 변화(edge)만 인식하므로 UI가 리셋을 빼먹어도 두 번째 트리거는 정상 동작한다 |
+| `/path/landmark` | `std_msgs/msg/Bool` | [UI 인터페이스, 2026-10-13] landmark 촬영 버튼 (`MANUAL_RECORDING`에서만 유효). 조이스틱은 D-pad ↑(drive 포커스). True 발행 후 False로 되돌리는 게 스펙 — False를 빼먹어도 0.5 s 이상 간격이면 다음 True를 새 누름으로 인식. `landmark_capture_mode:=moving`(기본): 주행 중 바로 촬영 / `stop`: drive_cmd_mux가 즉시 정지 → 정지 확인 후 촬영 → 자동 재개 |
+| `/visual_landmark/hold` | `std_msgs/msg/Bool` | visual_landmark_node → drive_cmd_mux. 촬영 중 True(10 Hz), 끝나면 False. 응답이 없으면 mux가 1 s 뒤, 어떤 경우든 6 s 뒤 자동 해제 |
+| `/visual_landmark/event` | `std_msgs/msg/String` | JSON. `{"event":"captured","id":"L000",...}` 또는 `{"event":"failed","reason":...}` — UI 표시용 |
 
 ## manual_return_sim (가상 테스트 전용 키보드 조종)
 

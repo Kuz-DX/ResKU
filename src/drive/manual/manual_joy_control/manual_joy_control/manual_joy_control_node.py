@@ -79,6 +79,15 @@ class ManualJoyControlNode(Node):
         # 켜진 MANUAL_EE에서만 동작하고, 그 동안 이 노드는 입력을 통째로 무시한다.
         # RETURN(8번)과 마찬가지로 드라이브 포커스에서만 눌림이 전달된다.
         self.declare_parameter('button_record', 10)
+        # [2026-10-13] landmark 촬영(/path/landmark) = D-pad 위(↑). DS4 버튼 0~12는
+        # 전부 사용 중(9=Options는 arm/drive 포커스 토글)이라 축을 쓴다. D-pad(축 6/7)는
+        # arm 텔레옵이 arm 포커스에서만 쓰고, 이 노드는 drive 포커스에서만 입력을
+        # 받으므로 겹치지 않는다. 누르면 True, 떼면 False를 보낸다(UI 스펙과 동일).
+        # 부호는 joy 드라이버/버전에 따라 다를 수 있으니 `ros2 topic echo /joy`로
+        # ↑를 눌렀을 때 axes[7]이 +1인지 확인하고, -1이면 landmark_axis_sign:=-1.0.
+        self.declare_parameter('landmark_axis', 7)
+        self.declare_parameter('landmark_axis_sign', 1.0)
+        self.declare_parameter('landmark_axis_threshold', 0.5)
 
         p = self.get_parameter
         self.axis_left_motor = p('axis_left_motor').value
@@ -106,6 +115,10 @@ class ManualJoyControlNode(Node):
         self.joy_timeout = p('joy_timeout').value
         self.btn_return = p('button_return').value
         self.btn_record = p('button_record').value
+        self.landmark_axis = p('landmark_axis').value
+        self.landmark_axis_sign = float(p('landmark_axis_sign').value)
+        self.landmark_axis_threshold = float(p('landmark_axis_threshold').value)
+        self._prev_landmark = False
 
         self._prev_l1 = 0
         self._prev_l2 = 0
@@ -148,6 +161,7 @@ class ManualJoyControlNode(Node):
         # 시작한다.
         self.return_trigger_pub = self.create_publisher(Bool, '/path/return', 10)
         self.record_trigger_pub = self.create_publisher(Bool, '/path/record', 10)
+        self.landmark_trigger_pub = self.create_publisher(Bool, '/path/landmark', 10)
 
         rate = p('cmd_publish_rate_hz').value
         self.timer = self.create_timer(1.0 / rate, self.publish_cmd)
@@ -164,6 +178,10 @@ class ManualJoyControlNode(Node):
         if self.active_target != 'drive':
             self._latest_left_cmd = 0.0
             self._latest_right_cmd = 0.0
+            if self._prev_landmark:
+                # ↑를 누른 채 arm 포커스로 넘어가면 False를 못 보낸 채 남지 않게.
+                self._prev_landmark = False
+                self.landmark_trigger_pub.publish(Bool(data=False))
 
     def joy_callback(self, msg: Joy):
         self.last_joy_time = self.get_clock().now()
@@ -272,6 +290,17 @@ class ManualJoyControlNode(Node):
             self.get_logger().info('[JOY] RECORD trigger pressed.')
             self.record_trigger_pub.publish(Bool(data=True))
         self._prev_record = record_held
+
+        # [2026-10-13] landmark 촬영: D-pad ↑ 누름 -> True, 뗌 -> False.
+        # 받아들일지(MANUAL_RECORDING일 때만)는 drive_cmd_mux/visual_landmark_node가 판단한다.
+        axis_val = (msg.axes[self.landmark_axis]
+                    if len(msg.axes) > self.landmark_axis else 0.0)
+        landmark_held = axis_val * self.landmark_axis_sign > self.landmark_axis_threshold
+        if landmark_held != self._prev_landmark:
+            if landmark_held:
+                self.get_logger().info('[JOY] LANDMARK trigger pressed.')
+            self.landmark_trigger_pub.publish(Bool(data=landmark_held))
+        self._prev_landmark = landmark_held
 
     def publish_cmd(self):
         elapsed = (self.get_clock().now() - self.last_joy_time).nanoseconds / 1e9
