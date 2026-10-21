@@ -257,11 +257,16 @@ TCP 직선 이동만 지원하므로 wrist 회전이나 그리퍼 개폐는 별�
 ros2 service call /servo_node/stop_servo std_srvs/srv/Trigger "{}"
 ```
 
-### 관절별 조이스틱 조그
+### 조이스틱 관절 조그: 기본 묶음 조작 / sep 개별 조작
 
-`joint_joy_teleop.py`는 선택한 arm 관절 하나만 `JointJog`로 움직인다. 명령은
+기본 `joint_joy_teleop.py`는 오른쪽 스틱 위·아래(`axes[4]`) 하나로 RMD 3종
+(`shoulder_joint`, `elbow_joint`, `wrist_pitch_joint`)을 동시에 움직인다.
+세 관절의 속도 크기는 같으며 기존 방향 부호(숄더 +, 엘보 −, 손목 피치 +)를 유지한다.
+이는 관절 속도를 묶은 조작이며 TCP 직선 이동이나 자세 유지를 계산하지 않는다.
+기존 관절별 전용 버튼과 스틱 조작은 `joint_joy_teleop_sep.py`에 보존했다.
+테스트 단계에서는 sep 전용 launch를 사용하고, 기본 실행 파일은 계속 `joint_joy_teleop.py`를 사용한다. 명령은
 `/servo_node/delta_joint_cmds`로 보내므로 MoveIt Servo의 관절 제한, 충돌 검사와
-정지 timeout을 거친다. 이 노드와 `tcp_joy_teleop.py`를 동시에 실행하지 않는다.
+정지 timeout을 거친다. 기본 / sep / `tcp_joy_teleop.py` 중 하나만 실행한다.
 또한 기존 `safety_manager`가 따로 실행 중이면 포커스 관리자가 중복되므로 이 노드에
 `manage_focus:=false`를 주고 기존 `/control/active_target`을 사용한다.
 
@@ -272,19 +277,32 @@ ros2 service call /servo_node/stop_servo std_srvs/srv/Trigger "{}"
 # 로봇 PC
 ros2 launch tool_manipulator_bringup real_control.launch.py launch_servo:=true
 ros2 service call /servo_node/start_servo std_srvs/srv/Trigger "{}"
+# 테스트: 기존 관절별 개별 조작
+ros2 launch tool_manipulator_bringup joint_joy_teleop_sep.launch.py
+
+# 기본 묶음 조작을 사용할 때는 sep를 종료한 다음 실행
 ros2 launch tool_manipulator_bringup joint_joy_teleop.launch.py
 ```
 
-| 조작 | 동작 |
-| --- | --- |
-| Options (`button 9`) | 조이스틱 포커스를 `drive`/`arm`으로 전환 |
-| D-pad 좌우 (`axis 6`) | 조작할 관절 선택(데드맨을 놓은 상태에서만) |
-| L1 (`button 4`) + 오른쪽 스틱 상하 (`axis 4`) | 선택 관절 조그 |
+| 조작 | 기본 `joint_joy_teleop.py` | 개별 `joint_joy_teleop_sep.py` |
+| --- | --- | --- |
+| Options (`button 9`) | 포커스 `drive`/`arm` 전환 | 동일 |
+| L1 / R1 (`buttons[4]` / `buttons[5]`) | 베이스 CCW(+) / CW(-) | 동일 |
+| 오른쪽 스틱 위 / 아래 (`axes[4]`) | 숄더·엘보·손목 피치 동시 조작 (+/−/+, 반대 입력은 −/+/−) | 어깨 CCW(+) / CW(-) |
+| 왼쪽 스틱 위 / 아래 (`axes[1]`) | 사용하지 않음 | 팔꿈치 CW(-) / CCW(+) |
+| D-pad 위 / 아래 (`axes[7]`) | 사용하지 않음 | 손목 피치 CCW(+) / CW(-) |
+| D-pad 왼쪽 / 오른쪽 (`axes[6]`) | 손목 롤 CCW(+) / CW(-) | 동일 |
+| 네모 / 동그라미 (`buttons[3]` / `buttons[1]`) | 손목 요 CCW(+) / CW(-) | 동일 |
 
-대상은 `base`, `shoulder`, `elbow`, `wrist_pitch`, `wrist_roll`, `wrist_yaw`
-순서이며 기본 최대 속도는 `0.12 rad/s`이다. L1을 놓거나 `/joy`가 `0.25초` 이상
-끊기거나 포커스가 `drive`로 바뀌면 정지 명령을 보낸다. `ee_joint`(그리퍼)는 Servo의
-`arm` planning group에 포함되지 않으므로 이 노드에서 조작하지 않는다.
+기본 묶음 입력 축은 `joint_joy_teleop.launch.py rmd_pitch_axis:=4`로 지정할 수 있다.
+
+시작 포커스는 `drive`이며 Options로 `arm`을 선택한 뒤 조작한다.
+별도 데드맨 없이 입력 중인 관절을 움직이며 여러 관절을 동시에 조작할 수 있다.
+팔꿈치는 축 입력 양수가 CW(-), 음수가 CCW(+)이며, 나머지 축은 양수가 CCW(+), 음수가 CW(-)이다.
+기본 최대 속도는 `0.12 rad/s`이다.
+버튼·축 번호와 물리 방향은 패드의 `/joy` 출력으로 확인한다.
+입력을 놓거나 `/joy`가 `0.25초` 이상 끊기거나 포커스가 `drive`로 바뀌면 정지한다.
+`ee_joint`(그리퍼)는 Servo의 `arm` planning group에 포함되지 않으므로 이 노드에서 조작하지 않는다.
 
 ### 한 PC에서 mock 구동
 
@@ -297,6 +315,18 @@ ros2 launch tool_manipulator_bringup tcp_joy_teleop.launch.py \
   joy_dev:=/dev/input/js0
 
 # 다른 터미널에서 실행
+ros2 service call /servo_node/start_servo std_srvs/srv/Trigger "{}"
+```
+
+mock에서 기존 개별 조작을 테스트하려면 위 launch 대신 아래를 실행한다.
+기본 묶음 조작 테스트 시에는 `joint_teleop_executable` 인자를 생략한다.
+
+```bash
+ros2 launch tool_manipulator_bringup tcp_joy_teleop.launch.py \
+  real_hardware:=false mock_joint_teleop:=true \
+  joint_teleop_executable:=joint_joy_teleop_sep.py
+
+# 다른 터미널에서 Servo 시작
 ros2 service call /servo_node/start_servo std_srvs/srv/Trigger "{}"
 ```
 

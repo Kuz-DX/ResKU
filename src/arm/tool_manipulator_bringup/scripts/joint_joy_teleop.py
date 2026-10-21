@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Jog arm joints directly from dedicated joystick buttons and axes.
+"""Jog arm joints with the three RMD pitch joints on one joystick axis.
 
 Commands are sent to MoveIt Servo as ``JointJog`` messages so Servo remains
 responsible for joint limits, collision checking, smoothing, and forwarding the
@@ -41,15 +41,11 @@ class JointJoyTeleop(Node):
         p("joy_timeout_sec", 0.25)
         p("deadzone", 0.12)
         p("base_ccw_button", 4)
-        p("base_cw_button", 2)
-        p("shoulder_ccw_button", 3)
-        p("shoulder_cw_button", 1)
-        p("elbow_axis", 7)  # Positive: CCW, negative: CW
-        p("wrist_pitch_axis", 6)  # Positive: CCW, negative: CW
-        p("wrist_roll_ccw_button", 5)
-        p("wrist_roll_cw_button", 6)
-        p("wrist_yaw_ccw_button", 8)
-        p("wrist_yaw_cw_button", 7)
+        p("base_cw_button", 5)
+        p("rmd_pitch_axis", 4)  # Right stick up/down controls all three RMDs.
+        p("wrist_roll_axis", 6)  # D-pad left/right: positive CCW.
+        p("wrist_yaw_ccw_button", 3)  # Square
+        p("wrist_yaw_cw_button", 1)  # Circle
         p("manage_focus", True)
         p("focus_topic", "/control/active_target")
         p("focus_button", 9)  # Options
@@ -66,22 +62,17 @@ class JointJoyTeleop(Node):
                 int(self.get_parameter("base_ccw_button").value),
                 int(self.get_parameter("base_cw_button").value),
             ),
-            "shoulder_joint": (
-                int(self.get_parameter("shoulder_ccw_button").value),
-                int(self.get_parameter("shoulder_cw_button").value),
-            ),
-            "wrist_roll_joint": (
-                int(self.get_parameter("wrist_roll_ccw_button").value),
-                int(self.get_parameter("wrist_roll_cw_button").value),
-            ),
             "wrist_yaw_joint": (
                 int(self.get_parameter("wrist_yaw_ccw_button").value),
                 int(self.get_parameter("wrist_yaw_cw_button").value),
             ),
         }
+        rmd_pitch_axis = int(self.get_parameter("rmd_pitch_axis").value)
         self._axes = {
-            "elbow_joint": int(self.get_parameter("elbow_axis").value),
-            "wrist_pitch_joint": int(self.get_parameter("wrist_pitch_axis").value),
+            "shoulder_joint": rmd_pitch_axis,
+            "wrist_roll_joint": int(self.get_parameter("wrist_roll_axis").value),
+            "elbow_joint": rmd_pitch_axis,
+            "wrist_pitch_joint": rmd_pitch_axis,
         }
         self._focus_button = int(self.get_parameter("focus_button").value)
         self._manage_focus = bool(self.get_parameter("manage_focus").value)
@@ -132,7 +123,7 @@ class JointJoyTeleop(Node):
             )
         self.get_logger().info(
             "Joint joystick teleop ready but inactive: "
-            f"{activation_hint}; dedicated joint mappings enabled"
+            f"{activation_hint}; grouped RMD pitch axis {rmd_pitch_axis} enabled"
         )
 
     def _validate_parameters(self) -> None:
@@ -240,7 +231,9 @@ class JointJoyTeleop(Node):
                 velocities.append(
                     self._button_velocity(message, *self._button_pairs[joint]))
             else:
-                velocities.append(self._axis_velocity(message, self._axes[joint]))
+                velocity = self._axis_velocity(message, self._axes[joint])
+                # Preserve the original per-joint directions while sharing input.
+                velocities.append(-velocity if joint == "elbow_joint" else velocity)
         return velocities
 
     def _publish_halt(self) -> None:

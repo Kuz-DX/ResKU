@@ -37,6 +37,7 @@
   <exec_depend>builtin_interfaces</exec_depend>
   <exec_depend>apriltag_msgs</exec_depend>
   <exec_depend>moveit_servo</exec_depend>
+  <exec_depend>rviz2</exec_depend>
   <exec_depend>pymoveit2</exec_depend>
   <exec_depend>moveit_msgs</exec_depend>
   <exec_depend>shape_msgs</exec_depend>

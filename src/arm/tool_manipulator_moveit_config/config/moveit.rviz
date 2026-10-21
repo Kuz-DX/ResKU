@@ -13,10 +13,27 @@ Visualization Manager:
     - Class: rviz_default_plugins/Grid
       Name: Grid
       Value: true
+    - Class: rviz_default_plugins/RobotModel
+      Name: Live URDF
+      Alpha: 1
+      Description Source: Topic
+      Description Topic:
+        Value: /robot_description
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+        History Policy: Keep Last
+        Depth: 1
+      Visual Enabled: true
+      Collision Enabled: false
+      Value: true
     - Class: moveit_rviz_plugin/MotionPlanning
       Name: MotionPlanning
+      Planning Request:
+        Query Start State: false
+        Query Goal State: false
       Planned Path:
-        Loop Animation: true
+        Loop Animation: false
+        Robot Alpha: 0
         State Display Time: 0.05 s
         Trajectory Topic: display_planned_path
       Planning Scene Topic: monitored_planning_scene
@@ -24,7 +41,7 @@ Visualization Manager:
       Scene Geometry:
         Scene Alpha: 1
       Scene Robot:
-        Robot Alpha: 0.5
+        Robot Alpha: 0
       Value: true
   Global Options:
     Fixed Frame: world

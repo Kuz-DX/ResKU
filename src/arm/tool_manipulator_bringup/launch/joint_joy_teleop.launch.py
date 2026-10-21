@@ -1,4 +1,4 @@
-"""Start single-joint joystick teleoperation on the robot PC."""
+"""Start grouped RMD joystick teleoperation on the robot PC."""
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
@@ -14,6 +14,7 @@ def generate_launch_description():
             "joint_jog_topic", default_value="/servo_node/delta_joint_cmds"),
         DeclareLaunchArgument("joint_speed_rad_s", default_value="0.12"),
         DeclareLaunchArgument("manage_focus", default_value="true"),
+        DeclareLaunchArgument("rmd_pitch_axis", default_value="4"),
         Node(
             package="tool_manipulator_bringup",
             executable="joint_joy_teleop.py",
@@ -23,6 +24,8 @@ def generate_launch_description():
                 "joint_jog_topic": LaunchConfiguration("joint_jog_topic"),
                 "joint_speed_rad_s": ParameterValue(
                     LaunchConfiguration("joint_speed_rad_s"), value_type=float),
+                "rmd_pitch_axis": ParameterValue(
+                    LaunchConfiguration("rmd_pitch_axis"), value_type=int),
                 "manage_focus": ParameterValue(
                     LaunchConfiguration("manage_focus"), value_type=bool),
             }],

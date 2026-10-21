@@ -147,6 +147,8 @@
     <disable_collisions link1="base_link" link2="shoulder_actuator" reason="Adjacent"/>
     <disable_collisions link1="shoulder_actuator" link2="shoulder_link" reason="Adjacent"/>
     <disable_collisions link1="shoulder_link" link2="elbow_actuator" reason="Adjacent"/>
+    <!-- Directly connected links: contact at the elbow joint interface. -->
+    <disable_collisions link1="shoulder_link" link2="elbow_link" reason="Adjacent"/>
     <disable_collisions link1="elbow_actuator" link2="elbow_link" reason="Adjacent"/>
     <disable_collisions link1="elbow_link" link2="wrist_actuator_pitch" reason="Adjacent"/>
     <disable_collisions link1="wrist_actuator_pitch" link2="wrist_link_pitch" reason="Adjacent"/>
@@ -155,4 +157,6 @@
     <disable_collisions link1="wrist_link_roll" link2="wrist_actuator_yaw" reason="Adjacent"/>
     <disable_collisions link1="wrist_actuator_yaw" link2="wrist_link_yaw" reason="Adjacent"/>
     <disable_collisions link1="wrist_link_yaw" link2="ee_actuator" reason="Adjacent"/>
+    <!-- Camera bracket is fixed directly to the yaw wrist link. -->
+    <disable_collisions link1="wrist_link_yaw" link2="cam_link" reason="Adjacent"/>
 </robot>

@@ -16,6 +16,7 @@ from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 from moveit_configs_utils import MoveItConfigsBuilder
 
@@ -26,7 +27,8 @@ def generate_launch_description():
     share = Path(get_package_share_directory("tool_manipulator_bringup"))
     config = (
         MoveItConfigsBuilder("tool_manipulator", package_name="tool_manipulator_moveit_config")
-        .robot_description(mappings={"use_mock_hardware": "true", "use_mesh": "false"})
+        .robot_description(mappings={
+            "use_mock_hardware": "true", "use_mesh": LaunchConfiguration("use_mesh")})
         .to_moveit_configs()
     )
     controller_config = PathJoinSubstitution([
@@ -34,6 +36,9 @@ def generate_launch_description():
     servo_path = str(share / "config" / "servo.yaml")
     with open(servo_path, encoding="utf-8") as stream:
         servo_config = {"moveit_servo": yaml.safe_load(stream) or {}}
+    # This parameter map is used only by mock_stack. Real control loads servo.yaml.
+    servo_config["moveit_servo"]["check_collisions"] = ParameterValue(
+        LaunchConfiguration("mock_check_collisions"), value_type=bool)
 
     mock_state_broadcaster = Node(
         package="controller_manager", executable="spawner",
@@ -62,6 +67,13 @@ def generate_launch_description():
                               "autorepeat_rate": 50.0}],
                  condition=IfCondition(launch_joy), output="screen"),
             Node(package="tool_manipulator_bringup", executable="tcp_joy_teleop.py",
+                 condition=UnlessCondition(LaunchConfiguration("mock_joint_teleop")),
+                 output="screen"),
+            Node(package="tool_manipulator_bringup",
+                 executable=LaunchConfiguration("joint_teleop_executable"),
+                 condition=IfCondition(LaunchConfiguration("mock_joint_teleop")),
+                 parameters=[{"joint_speed_rad_s": ParameterValue(
+                     LaunchConfiguration("mock_joint_speed_rad_s"), value_type=float)}],
                  output="screen"),
         ],
     )
@@ -81,6 +93,18 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument("real_hardware", default_value="false"),
+        DeclareLaunchArgument("use_mesh", default_value="false",
+                              description="Use meshes for the mock robot model."),
+        DeclareLaunchArgument("mock_joint_teleop", default_value="false",
+                              description="Use joint joystick control instead of TCP in mock mode."),
+        DeclareLaunchArgument(
+            "joint_teleop_executable", default_value="joint_joy_teleop.py",
+            choices=["joint_joy_teleop.py", "joint_joy_teleop_sep.py"],
+            description="Joint joystick executable for mock joint control."),
+        DeclareLaunchArgument("mock_joint_speed_rad_s", default_value="0.24",
+                              description="Requested joint jogging speed in rad/s for mock mode."),
+        DeclareLaunchArgument("mock_check_collisions", default_value="true",
+                              description="Enable mock Servo collision checks; disable only for motion diagnosis."),
         DeclareLaunchArgument("launch_joy", default_value="true"),
         DeclareLaunchArgument("joy_dev", default_value="/dev/input/js0"),
         DeclareLaunchArgument(
