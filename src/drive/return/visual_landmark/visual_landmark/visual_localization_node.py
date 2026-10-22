@@ -24,6 +24,8 @@ from tf2_ros import Buffer, TransformListener
 from visual_landmark.localization import features, match, planar, transform
 
 
+RECORDING_STATES = {'MANUAL_RECORDING', 'WAIT_RETURN_COMMAND'}
+
 def tf_matrix(t):
     p, q = t.transform.translation, t.transform.rotation
     return transform([p.x, p.y, p.z], [q.x, q.y, q.z, q.w])
@@ -75,7 +77,7 @@ class VisualLocalizationNode(Node):
     def on_state(self, msg):
         if msg.data != self.state:
             self.pending = None
-            if msg.data == 'MANUAL_RECORDING':
+            if msg.data in RECORDING_STATES and self.state not in RECORDING_STATES:
                 self.landmarks.clear()
                 self.correction = None
         self.state = msg.data
@@ -95,7 +97,7 @@ class VisualLocalizationNode(Node):
     def on_landmark(self, msg):
         try:
             event = json.loads(msg.data)
-            if event.get('event') != 'captured' or self.state != 'MANUAL_RECORDING':
+            if event.get('event') != 'captured' or self.state not in RECORDING_STATES:
                 return
             directory = Path(event['dir'])
             meta = yaml.safe_load((directory / 'meta.yaml').read_text())

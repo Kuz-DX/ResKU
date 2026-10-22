@@ -10,7 +10,7 @@ landmark에서 후방 카메라 keyframe을 저장한다. 복귀(RETURN) 때 전
 주행 명령을 절대 내지 않고, 실패해도 Back-to-Base에는 영향이 없다.
 
 촬영 흐름 (UI 버튼 한 번):
-    /path/landmark rising edge (MANUAL_RECORDING에서만)
+    /path/landmark rising edge (MANUAL_RECORDING / WAIT_RETURN_COMMAND에서)
       -> drive_cmd_mux가 즉시 manual 명령을 0으로 hold (이 노드가 죽어 있어도)
       -> 이 노드: /visual_landmark/hold=True 갱신하며
          정지 확인(odom) -> 잔진동 대기 -> 그 이후 도착한 후방 프레임 1장 저장
@@ -59,7 +59,8 @@ from return_navigation.se2 import Pose2D
 from visual_landmark.localization import transform
 from visual_landmark.capture_logic import CaptureSequencer, Odometer, PressDetector
 
-RECORDING_STATE = 'MANUAL_RECORDING'
+# WAIT_RETURN_COMMAND means return is available; manual recording continues.
+RECORDING_STATES = {'MANUAL_RECORDING', 'WAIT_RETURN_COMMAND'}
 
 
 def _quat_to_rpy(q):
@@ -150,11 +151,13 @@ class VisualLandmarkNode(Node):
         return self.get_clock().now().nanoseconds * 1e-9
 
     def _on_state(self, msg: String):
-        if msg.data == RECORDING_STATE and self._state != RECORDING_STATE:
+        if msg.data in RECORDING_STATES and self._state not in RECORDING_STATES:
             self._mission_dir = None
             self._next_order = 0
             self.odometer.reset()
         self._state = msg.data
+        if self._state not in RECORDING_STATES and self.seq.busy:
+            self._fail('recording ended during capture', hold_started=True)
 
     def _on_origin(self, msg: Pose):
         origin = Pose2D.from_ros_pose(msg)
@@ -171,7 +174,7 @@ class VisualLandmarkNode(Node):
         self._odom = msg
         self._odom_arrival = self._now()
         self.seq.on_odom(self._now(), msg.twist.twist.linear.x, msg.twist.twist.angular.z)
-        if self._origin is not None and self._state == RECORDING_STATE:
+        if self._origin is not None and self._state in RECORDING_STATES:
             m = Pose2D.from_ros_pose(msg.pose.pose).to_mission_frame(self._origin)
             self.odometer.update(m.x, m.y)
 
@@ -185,7 +188,7 @@ class VisualLandmarkNode(Node):
         if self.seq.busy:
             self.get_logger().warn('Landmark capture already in progress -- button ignored.')
             return
-        if self._state != RECORDING_STATE:
+        if self._state not in RECORDING_STATES:
             return self._fail(f'not recording (state "{self._state}")', hold_started=False)
         if self._origin is None or self._odom is None:
             return self._fail('no mission origin / odometry yet', hold_started=False)

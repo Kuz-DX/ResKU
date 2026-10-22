@@ -18,7 +18,7 @@ Subscribes:
     /cmd_vel_return            (geometry_msgs/Twist)  -- return_state_machine_node
     /mission/return/state      (std_msgs/String)      -- return_state_machine_node
     /path/landmark             (std_msgs/Bool)        -- [2026-10-13] UI landmark 촬영 버튼
-                               (rising edge, MANUAL_RECORDING에서만) -> 즉시 manual을 0으로 hold
+                               (rising edge, 수동 기록 중) -> 즉시 manual을 0으로 hold
     /visual_landmark/hold      (std_msgs/Bool)        -- visual_landmark_node: 촬영 중 True 갱신,
                                끝나면 False -> hold 해제 (capture_hold.py: 응답 없음/최대시간 자동 해제)
 
@@ -78,7 +78,7 @@ class DriveCmdMuxNode(Node):
         self.declare_parameter('effective_track_width_m', 0.4904)
 
         # [2026-10-13 신규] landmark 촬영 정지 (capture_hold.py 참고). 버튼은
-        # MANUAL_RECORDING 중에만 받는다 -- 그때만 mission origin(T0)이 있어서
+        # 수동 기록 중(MANUAL_RECORDING / WAIT_RETURN_COMMAND)에만 받는다 -- mission origin(T0)이 있어서
         # landmark 위치를 기록할 수 있다.
         self.declare_parameter('landmark_trigger_topic', '/path/landmark')
         self.declare_parameter('landmark_hold_topic', '/visual_landmark/hold')
@@ -166,9 +166,9 @@ class DriveCmdMuxNode(Node):
             return
         if not self._landmark_stop:
             return  # moving 모드: 정지하지 않음 (촬영은 visual_landmark_node가 주행 중에)
-        if self._state != 'MANUAL_RECORDING':
+        if self._state not in {'MANUAL_RECORDING', 'WAIT_RETURN_COMMAND'}:
             self.get_logger().warn(
-                f'/path/landmark ignored: landmarks can only be captured in MANUAL_RECORDING '
+                f'/path/landmark ignored: landmarks require active manual recording (MANUAL_RECORDING or WAIT_RETURN_COMMAND) '
                 f'(current state "{self._state}").')
             return
         self._capture_hold.press(self._now_s())

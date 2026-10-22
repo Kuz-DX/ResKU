@@ -48,15 +48,27 @@ Default current inputs are:
 RGB and aligned depth must share the color optical frame and calibration size;
 frame timestamps must agree within 40 ms. Standard OpenCV plumb-bob/rational
 calibration is supported. Timestamped TF must connect `odom`, `base_link` and
-both cameras. The arm-camera mounting calibration and joint TF must be valid;
-using a fixed mounting transform while the arm actually moves invalidates pose.
+both cameras. If the arm remains in its home pose throughout the mission, a measured full
+`base_link <- camera optical frame` transform for that pose is sufficient;
+individual joint measurements are not required by VPR. Publish that transform
+through the existing TF tree (avoid duplicate TF publishers). If the arm moves,
+the same transform must be updated from joint states and robot kinematics;
+a fixed home-pose transform then gives incorrect robot localization.
 The EKF currently publishes chassis roll/pitch from the IMU in odom TF. Altitude
 is not mapped: this is planar route correction with full relative camera pose,
 not a globally consistent 3D terrain map.
 
+The planned operation is outbound manual driving with rear RGB capture, then
+a 180-degree turn and forward autonomous return using the arm D435i. Mount the
+rear camera at the same height and equivalent rear-facing pitch/roll as the arm
+camera in its home pose. Measure both extrinsics: equal height/angles do not
+remove the front/rear translation or 180-degree yaw difference.
+
 Once a rear camera is available, pass its topics with `rear_image_topic` and
-`rear_camera_info_topic`. Press D-pad up in MANUAL_RECORDING to capture a
-landmark. Stop mode is preferred for initial validation. `meta.yaml` schema 2
+`rear_camera_info_topic`. Press D-pad up during manual route recording (MANUAL_RECORDING or
+WAIT_RETURN_COMMAND) to capture a landmark. WAIT_RETURN_COMMAND means enough
+route points exist to accept a return request; it does not end manual driving
+or route/landmark recording. IDLE and return states do not permit capture. Stop mode is preferred for initial validation. `meta.yaml` schema 2
 stores `mission_camera_transform` at image time. Missing TF/calibration allows
 archiving the image but excludes it from localization. Old capture-only records
 without this transform cannot provide tilt-aware localization.

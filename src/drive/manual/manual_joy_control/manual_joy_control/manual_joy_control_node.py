@@ -292,7 +292,7 @@ class ManualJoyControlNode(Node):
         self._prev_record = record_held
 
         # [2026-10-13] landmark 촬영: D-pad ↑ 누름 -> True, 뗌 -> False.
-        # 받아들일지(MANUAL_RECORDING일 때만)는 drive_cmd_mux/visual_landmark_node가 판단한다.
+        # 받아들일지(MANUAL_RECORDING / WAIT_RETURN_COMMAND일 때)는 drive_cmd_mux/visual_landmark_node가 판단한다.
         axis_val = (msg.axes[self.landmark_axis]
                     if len(msg.axes) > self.landmark_axis else 0.0)
         landmark_held = axis_val * self.landmark_axis_sign > self.landmark_axis_threshold
