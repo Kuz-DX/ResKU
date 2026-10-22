@@ -96,9 +96,9 @@ class RmdJointStateBridge(Node):
         self.declare_parameter("shoulder_sign", -1.0)
         self.declare_parameter("elbow_sign", -1.0)
         self.declare_parameter("wrist_sign", 1.0)
-        self.declare_parameter("shoulder_q_offset", 1.6524777357882314)
-        self.declare_parameter("elbow_q_offset", 0.08866272600131195)
-        self.declare_parameter("wrist_q_offset", 4.135732038446131)
+        self.declare_parameter("shoulder_q_offset", 0.0)
+        self.declare_parameter("elbow_q_offset", 0.0)
+        self.declare_parameter("wrist_q_offset", 0.0)
 
         self.declare_parameter("dxl_port_name", "/dev/ttyUSB0")
         self.declare_parameter("dxl_baud_rate", 1000000)

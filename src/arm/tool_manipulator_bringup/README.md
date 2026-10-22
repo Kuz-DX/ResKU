@@ -259,6 +259,17 @@ ros2 service call /servo_node/stop_servo std_srvs/srv/Trigger "{}"
 
 ### 조이스틱 관절 조그: 기본 묶음 조작 / sep 개별 조작
 
+`launch_arm` 단축 명령은 폐기했다. CAN 설정은 별도로 수행한다.
+아래 명령으로 직접 실행하면 실기 브링업과 Servo, 로컬 `/joy`, 기본 묶음 관절 조작을
+함께 실행하고 `/servo_node/start_servo` 서비스를 자동 호출한다.
+RViz와 시작 시 자동 홈 이동은 실행하지 않는다. 실행 후 Options로 `arm` 포커스를 선택한다.
+
+```bash
+ros2 launch tool_manipulator_bringup real_control.launch.py \
+  move_home_on_start:=false launch_servo:=true auto_start_servo:=true \
+  launch_joy:=true launch_joint_joy_teleop:=true
+```
+
 기본 `joint_joy_teleop.py`는 오른쪽 스틱 위·아래(`axes[4]`) 하나로 RMD 3종
 (`shoulder_joint`, `elbow_joint`, `wrist_pitch_joint`)을 동시에 움직인다.
 세 관절의 속도 크기는 같으며 기존 방향 부호(숄더 +, 엘보 −, 손목 피치 +)를 유지한다.
@@ -400,3 +411,14 @@ source install/setup.bash
 python3 src/arm/tool_manipulator_bringup/scripts/ui_tag1_docking_node.py \
   --ros-args \
   --params-file src/arm/tool_manipulator_bringup/config/ui_tag1_docking.yaml
+
+### 시작 자세의 RMD 리밋 복귀
+
+`real_control.launch.py`는 홈 이동 옵션과 관계없이 컨트롤러 활성화 후
+RMD 어깨·팔꿈치·손목 피치를 시작 구간 `[하한 + 2°, 상한 - 2°]` 안으로 복귀시킨다.
+이 구간 밖의 RMD 관절만 가장 가까운 구간 끝으로 이동한다. 다이나믹셀의 리밋과
+위치는 변경하지 않으며 다이나믹셀이 리밋 밖이면 시작 검증에서 중단한다.
+기존 `hardware.yaml` 리밋 자체는 유지하고 RMD 복귀 목표에만 2° 여유를 적용한다.
+복귀는 설정 속도의 50% 이하로 수행하며, 실제 피드백이 기존 리밋 안에서 정지한
+것을 확인한다. 성공 후에만 Servo/조이스틱 제어를 시작하며 실패하면 시작하지 않는다.
+`move_home_on_start:=true`이면 복귀 확인 후 홈 이동도 수행한다.

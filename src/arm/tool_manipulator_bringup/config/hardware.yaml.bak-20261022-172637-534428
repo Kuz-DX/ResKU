@@ -1,0 +1,154 @@
+# RMD zero: operator stand capture (2026-10-02); Dynamixel calibration retained.
+version: 1
+buses:
+  dynamixel_u2d2:
+    device: /dev/ttyUSB0
+    baud_rate: 1000000
+    protocol: 2.0
+    adapter: U2D2
+    mixed_ttl_rs485: true
+    feedback_mode: individual_read
+    command_mode: sync_write
+  rmd_can:
+    interface: can_arm
+    bitrate: 1000000
+joints:
+  base_joint:
+    vendor: dynamixel
+    model: XH540-W270-T
+    bus: dynamixel_u2d2
+    transport_channel: ttl
+    id: 1
+    operating_mode: 4
+    raw_increases_ccw: true
+    zero_raw: 11
+    soft_limit_raw:
+    - -2273
+    - 2367
+    soft_limit_rad:
+    - -3.503612119531
+    - 3.614058736259
+    velocity_limit_rad_s: 0.48
+    # XH540-W270: register maximum 2047, 2.69 mA/unit (not continuous rating).
+    current_limit_ma: 5506.43
+    current_limit_raw: 2047
+    velocity_limit_raw: 20
+    profile_acceleration_raw: 5
+    profile_velocity_raw: 10
+  shoulder_joint:
+    vendor: rmd
+    model: X8
+    bus: rmd_can
+    id: 4
+    sign: -1
+    q_offset_rad: 1.6524777357882314
+    # Existing zero-relative soft limits retained by zero calibration.
+    soft_limit_rad:
+    - -1.459444233251
+    - 1.67
+    velocity_limit_rad_s: 0.35
+    current_limit_a: 4.0
+    current_release_threshold_a: 3.0
+    current_retreat_velocity_rad_s: 0.1
+    current_max_retreat_distance_rad: 0.052
+    current_limit_duration_ms: 100
+  elbow_joint:
+    vendor: rmd
+    model: X6
+    bus: rmd_can
+    id: 5
+    sign: -1
+    q_offset_rad: 0.08866272600131195
+    # Existing zero-relative soft limits retained by zero calibration.
+    soft_limit_rad:
+    - -1.4206979245227118
+    - 1.65
+    velocity_limit_rad_s: 0.3
+    current_limit_a: 3.0
+    current_release_threshold_a: 2.2
+    current_retreat_velocity_rad_s: 0.1
+    current_max_retreat_distance_rad: 0.052
+    current_limit_duration_ms: 100
+  wrist_pitch_joint:
+    vendor: rmd
+    model: X4
+    bus: rmd_can
+    id: 6
+    sign: 1
+    q_offset_rad: 4.135732038446131
+    # Existing zero-relative soft limits retained by zero calibration.
+    soft_limit_rad:
+    - -1.69
+    - 1.73
+    velocity_limit_rad_s: 0.3
+    current_limit_a: 2.0
+    current_release_threshold_a: 1.5
+    current_retreat_velocity_rad_s: 0.1
+    current_max_retreat_distance_rad: 0.052
+    current_limit_duration_ms: 100
+  wrist_roll_joint:
+    vendor: dynamixel
+    model: MX-106R
+    bus: dynamixel_u2d2
+    transport_channel: rs485
+    id: 2
+    operating_mode: 4
+    raw_increases_ccw: true
+    zero_raw: 15
+    soft_limit_raw:
+    - -550
+    - 464
+    soft_limit_rad:
+    - -0.866699145155
+    - 0.688757373761
+    velocity_limit_rad_s: 0.24
+    # MX-106 Protocol 2.0: register maximum 2047, 3.36 mA/unit.
+    current_limit_ma: 6877.92
+    current_limit_raw: 2047
+    velocity_limit_raw: 20
+    profile_acceleration_raw: 5
+    profile_velocity_raw: 10
+  wrist_yaw_joint:
+    vendor: dynamixel
+    model: MX-106T
+    bus: dynamixel_u2d2
+    transport_channel: ttl
+    id: 3
+    operating_mode: 4
+    raw_increases_ccw: false
+    zero_raw: 171
+    soft_limit_raw:
+    - -1887
+    - 2201
+    soft_limit_rad:
+    - -3.113980999408
+    - 3.156932461469
+    velocity_limit_rad_s: 0.24
+    # MX-106 Protocol 2.0: register maximum 2047, 3.36 mA/unit.
+    current_limit_ma: 6877.92
+    current_limit_raw: 2047
+    velocity_limit_raw: 20
+    profile_acceleration_raw: 5
+    profile_velocity_raw: 10
+  ee_joint:
+    vendor: dynamixel
+    model: MX-106T
+    bus: dynamixel_u2d2
+    transport_channel: ttl
+    id: 4
+    operating_mode: 4
+    raw_increases_ccw: true
+    zero_raw: 1992
+    soft_limit_raw:
+    - 459
+    - 3843
+    soft_limit_rad:
+    - -2.351592547829
+    - 2.839398438376
+    velocity_limit_rad_s: 0.24
+    # MX-106 Protocol 2.0: register maximum 2047, 3.36 mA/unit.
+    current_limit_ma: 6877.92
+    current_limit_raw: 2047
+    velocity_limit_raw: 20
+    profile_acceleration_raw: 5
+    profile_velocity_raw: 10

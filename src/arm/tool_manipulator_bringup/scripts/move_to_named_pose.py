@@ -37,6 +37,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Move the arm to an arm group_state stored in tool_manipulator.srdf.")
     parser.add_argument("pose", nargs="?", help="Named arm pose, e.g. home or dock_pre_cw")
+    parser.add_argument("--recover-only", action="store_true",
+                        help="Recover outside joints just inside soft limits, then stop")
     parser.add_argument("--list", action="store_true", help="List available arm named poses and exit")
     parser.add_argument("--duration", type=float, default=5.0,
                         help="Trajectory duration in seconds (default: 5.0)")
@@ -44,6 +46,7 @@ def parse_args() -> argparse.Namespace:
                         help="Seconds to wait for arm_controller (default: 5.0)")
     parser.add_argument("--srdf", type=Path, help="Optional SRDF override")
     parser.add_argument("--hardware", type=Path, help="Optional hardware.yaml override")
+    parser.add_argument("--servo-config", type=Path, help="Servo YAML supplying startup joint_limit_margin")
     parser.add_argument("--limit-margin", type=float, default=0.0,
                         help="Required distance inside each soft limit in radians (default: 0.0)")
     parser.add_argument("--joint-state-topic", default="/joint_states",
@@ -111,6 +114,61 @@ def make_smooth_points(current, target, requested_duration, speeds):
             time_from_start=seconds_to_duration(duration * u),
         ))
     return points, duration
+
+
+def load_servo_margin(config=None):
+    config = config or Path(get_package_share_directory(
+        "tool_manipulator_bringup")) / "config" / "servo.yaml"
+    margin = float(yaml.safe_load(Path(config).read_text())["joint_limit_margin"])
+    if not math.isfinite(margin) or margin < 0.0:
+        raise ValueError("Servo joint_limit_margin must be finite and nonnegative")
+    return margin
+
+
+def recovery_target(current, limits, inset=None):
+    """Recover RMD joints using the same margin as MoveIt Servo."""
+    if inset is None:
+        inset = load_servo_margin()
+    if not math.isfinite(inset) or inset < 0.0:
+        raise ValueError("Startup margin must be finite and nonnegative")
+    target = {}
+    for name in ARM_JOINTS:
+        value = current.get(name)
+        if value is None or not math.isfinite(value):
+            raise ValueError(f"{name}: finite current position is required")
+        lower, upper = limits[name]
+        if name not in ("shoulder_joint", "elbow_joint", "wrist_pitch_joint"):
+            validate_joint_positions({name: value}, {name: (lower, upper)},
+                                     label="current Dynamixel state")
+            target[name] = value
+            continue
+        if 2.0 * inset >= upper - lower:
+            raise ValueError(f"{name}: Servo startup margin leaves no valid interval")
+        safe_lower, safe_upper = lower + inset, upper - inset
+        target[name] = min(safe_upper, max(safe_lower, value))
+    return target
+
+
+def make_startup_points(current, target, requested_duration, speeds, limits):
+    """Recover out-of-range joints to their nearest boundary before normal motion."""
+    boundary = {}
+    for name in ARM_JOINTS:
+        value = current.get(name)
+        if value is None or not math.isfinite(value):
+            raise ValueError(f"{name}: finite current position is required")
+        lower, upper = limits[name]
+        boundary[name] = min(upper, max(lower, value))
+    if boundary == current:
+        points, duration = make_smooth_points(current, target, requested_duration, speeds)
+        return points, duration, boundary
+    recovery, recovery_duration = make_smooth_points(
+        current, [boundary[name] for name in ARM_JOINTS], requested_duration, speeds)
+    motion, motion_duration = make_smooth_points(
+        boundary, target, requested_duration, speeds)
+    for point in motion[1:]:
+        elapsed = point.time_from_start.sec + point.time_from_start.nanosec * 1e-9
+        point.time_from_start = seconds_to_duration(recovery_duration + elapsed)
+    return recovery + motion[1:], recovery_duration + motion_duration, boundary
 
 
 class NamedPoseRunner(Node):
@@ -190,6 +248,8 @@ class NamedPoseRunner(Node):
         joint_state_timeout_s: float,
         max_start_velocity: float,
         speeds: dict[str, float],
+        _recovery_stage: bool = False,
+        recovery_margin: float | None = None,
     ) -> int:
         if not self.client.wait_for_server(timeout_sec=wait_s):
             self.get_logger().error(
@@ -201,7 +261,12 @@ class NamedPoseRunner(Node):
             return 2
         current, velocities = current_state
         try:
-            validate_joint_positions(current, limits, 0.0, label="current arm state")
+            boundary = recovery_target(current, limits, recovery_margin)
+            if _recovery_stage:
+                boundary = current
+            points, motion_duration = make_smooth_points(
+                current, positions if positions is not None else list(boundary.values()),
+                duration_s, speeds)
         except ValueError as exc:
             self.get_logger().error(str(exc))
             return 2
@@ -215,10 +280,44 @@ class NamedPoseRunner(Node):
                 ", ".join(f"{name}={value:.6f}rad/s" for name, value in moving.items())
             )
             return 2
+        recovered = [name for name in ARM_JOINTS if boundary[name] != current[name]]
+        if recovered and not _recovery_stage:
+            self.get_logger().warning(
+                "Startup recovery: " + ", ".join(
+                    f"{name}: {current[name]:.6f} -> {boundary[name]:.6f} rad"
+                    for name in recovered))
+            result = self.run(list(boundary.values()), duration_s, wait_s, limits,
+                              joint_state_timeout_s, max_start_velocity, speeds, True, recovery_margin)
+            if result:
+                return result
+            # Action success permits a goal tolerance; require fresh measured
+            # feedback inside every limit before handing control to Servo.
+            deadline = time.monotonic() + joint_state_timeout_s
+            while rclpy.ok() and time.monotonic() < deadline:
+                self.latest_positions = None
+                state = self._wait_for_joint_state(max(0.001, deadline - time.monotonic()))
+                if state is None:
+                    break
+                try:
+                    validate_joint_positions(state[0], limits, label="recovered arm state")
+                except ValueError:
+                    continue
+                if all(math.isfinite(v) and abs(v) <= max_start_velocity
+                       for v in state[1].values()):
+                    self.get_logger().info("Startup recovery verified from joint feedback")
+                    if positions is None:
+                        return 0
+                    return self.run(positions, duration_s, wait_s, limits,
+                                    joint_state_timeout_s, max_start_velocity, speeds, True, recovery_margin)
+            self.get_logger().error("Startup recovery failed: feedback is not stopped inside limits")
+            return 6
+        if positions is None:
+            self.get_logger().info("Startup pose already inside soft limits; no recovery required")
+            return 0
         goal = FollowJointTrajectory.Goal()
         goal.trajectory.joint_names = list(ARM_JOINTS)
-        goal.trajectory.points, duration_s = make_smooth_points(
-            current, positions, duration_s, speeds)
+        goal.trajectory.points = points
+        duration_s = motion_duration
         self.tracking_peaks.clear()
         self.get_logger().info(
             f"Sending smooth named pose over {duration_s:.3f}s (50% hardware speed cap); start: " +
@@ -272,28 +371,30 @@ def main() -> int:
     except (ET.ParseError, OSError, ValueError) as error:
         print(f"Cannot load named poses: {error}", file=sys.stderr)
         return 2
-    if args.list or args.pose is None:
+    if args.list or (args.pose is None and not args.recover_only):
         print("Available arm named poses:")
         for name in sorted(poses):
             print(f"  {name}")
         return 0 if args.list else 2
-    if args.pose not in poses:
+    if not args.recover_only and args.pose not in poses:
         print(f"Unknown arm pose '{args.pose}'. Use --list to see available poses.", file=sys.stderr)
         return 2
-    positions = poses[args.pose]
+    positions = None if args.recover_only else poses[args.pose]
     hardware = args.hardware or Path(get_package_share_directory(
         "tool_manipulator_bringup")) / "config" / "hardware.yaml"
-    target = dict(zip(ARM_JOINTS, positions))
+    target = dict(zip(ARM_JOINTS, positions or []))
     try:
         limits = load_soft_limits(hardware, ARM_JOINTS)
         speeds = load_motion_speeds(hardware)
-        validate_joint_positions(
-            target, limits, args.limit_margin, label=f"target pose '{args.pose}'")
+        recovery_margin = load_servo_margin(args.servo_config)
+        if positions is not None:
+            validate_joint_positions(
+                target, limits, args.limit_margin, label=f"target pose '{args.pose}'")
     except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as error:
         print(f"Unsafe named pose: {error}", file=sys.stderr)
         return 2
     print(f"{args.pose}: " + ", ".join(
-        f"{name}={value:.6f}" for name, value in zip(ARM_JOINTS, positions)))
+        f"{name}={value:.6f}" for name, value in zip(ARM_JOINTS, positions or [])))
     print(f"hardware: {hardware} (soft-limit margin={args.limit_margin:.6f} rad)")
     if args.dry_run:
         return 0
@@ -309,6 +410,7 @@ def main() -> int:
             args.joint_state_timeout,
             args.max_start_velocity,
             speeds,
+            recovery_margin=recovery_margin,
         )
     finally:
         node.destroy_node()

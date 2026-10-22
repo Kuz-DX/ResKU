@@ -40,6 +40,8 @@ def harness(module, **overrides):
     node.create_timer = Mock()
     with patch.object(module.Node, "__init__", return_value=None):
         module.JointJoyTeleop.__init__(node)
+    if module is grouped:
+        node._state_cb(grouped.JointState(name=node._joints, position=[0.0]*len(node._joints)))
     return node, clock
 
 
@@ -55,6 +57,40 @@ def joy(axes=None, buttons=()):
 
 
 class JointJoyTeleopTest(unittest.TestCase):
+    def test_saturated_shoulder_does_not_stop_other_joints(self):
+        names = ["shoulder_joint", "elbow_joint", "wrist_pitch_joint"]
+        limits = dict.fromkeys(names, (-1.0, 1.0))
+        positions = dict(zip(names, [0.95, 0.0, 0.0]))
+        v = grouped.coordinated_velocities(names, [0.12, -0.12, 0.12], positions, limits, 0.05)
+        self.assertEqual(v, [0.0, -0.12, 0.12])
+        reverse = grouped.coordinated_velocities(names, [-0.12, 0.12, -0.12], positions, limits, 0.05)
+        self.assertEqual(reverse, [-0.12, 0.12, -0.12])
+
+    def test_limit_transition_is_smooth_monotonic_and_bounded(self):
+        values = [grouped.coordinated_velocities(["j"], [0.12], {"j": q},
+                  {"j": (-1, 1)}, 0.05)[0] for q in (0.7, 0.8, 0.85, 0.9, 0.94, 0.95)]
+        self.assertTrue(all(0 <= v <= 0.12 for v in values))
+        self.assertTrue(all(a >= b for a, b in zip(values, values[1:])))
+        self.assertEqual(values[-1], 0.0)
+
+    def test_lower_limit_and_missing_state(self):
+        self.assertEqual(grouped.coordinated_velocities(["j"], [-0.12],
+                         {"j": -0.96}, {"j": (-1, 1)}, 0.05), [0.0])
+        self.assertEqual(grouped.coordinated_velocities(["j"], [0.12],
+                         {"j": -0.96}, {"j": (-1, 1)}, 0.05), [0.12])
+        self.assertEqual(grouped.coordinated_velocities(["j"], [0.12],
+                         {}, {"j": (-1, 1)}, 0.05), [0.0])
+
+    def test_stale_joint_state_stops_with_fresh_joystick(self):
+        node, clock = harness(grouped)
+        node._joy_cb(joy({4: 1.0}, (9,)))
+        node._publish_command()
+        self.assertTrue(any(node._publisher.publish.call_args.args[0].velocities))
+        clock.seconds = 0.3
+        node._joy_cb(joy({4: 1.0}))
+        node._publish_command()
+        self.assertEqual(list(node._publisher.publish.call_args.args[0].velocities), [0.0]*6)
+
     def test_grouped_axis_moves_all_three_rmds_in_both_directions(self):
         node, _ = harness(grouped)
         for direction in (1.0, -1.0, 0.5):

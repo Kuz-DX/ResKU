@@ -9,12 +9,16 @@ resulting trajectory to ``arm_controller``.
 from __future__ import annotations
 
 import math
+from pathlib import Path
+import yaml
+from ament_index_python.packages import get_package_share_directory
+from arm_pose_safety import load_soft_limits
 
 import rclpy
 from control_msgs.msg import JointJog
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
-from sensor_msgs.msg import Joy
+from sensor_msgs.msg import Joy, JointState
 from std_msgs.msg import String
 
 
@@ -26,6 +30,26 @@ DEFAULT_JOINTS = [
     "wrist_roll_joint",
     "wrist_yaw_joint",
 ]
+
+
+def coordinated_velocities(names, velocities, positions, limits, margin,
+                           transition=math.radians(10.0), guard=0.01):
+    """Smoothly remove each joint's contribution as its directional range runs out.
+
+    No compensation may exceed the operator's requested per-joint speed.
+    Inward travel remains available when already near/outside a soft boundary.
+    """
+    result = []
+    for name, velocity in zip(names, velocities):
+        q = positions.get(name)
+        if q is None or not math.isfinite(q):
+            return [0.0] * len(names)
+        lower, upper = limits[name]
+        remaining = upper - margin - guard - q if velocity > 0 else q - lower - margin - guard
+        u = max(0.0, min(1.0, remaining / transition))
+        weight = u * u * (3.0 - 2.0 * u)
+        result.append(velocity * weight)
+    return result
 
 
 class JointJoyTeleop(Node):
@@ -40,6 +64,11 @@ class JointJoyTeleop(Node):
         p("joint_speed_rad_s", 0.12)
         p("joy_timeout_sec", 0.25)
         p("deadzone", 0.12)
+        config = Path(get_package_share_directory("tool_manipulator_bringup")) / "config"
+        p("hardware_config", str(config / "hardware.yaml"))
+        p("servo_config", str(config / "servo.yaml"))
+        p("joint_state_topic", "/joint_states")
+        p("joint_state_timeout_sec", 0.25)
         p("base_ccw_button", 4)
         p("base_cw_button", 5)
         p("rmd_pitch_axis", 4)  # Right stick up/down controls all three RMDs.
@@ -80,6 +109,21 @@ class JointJoyTeleop(Node):
         self._drive_focus = str(self.get_parameter("drive_focus_value").value)
         self._validate_parameters()
 
+        self._limits = load_soft_limits(Path(self.get_parameter("hardware_config").value), self._joints)
+        self._limit_margin = float(yaml.safe_load(Path(
+            self.get_parameter("servo_config").value).read_text())["joint_limit_margin"])
+        if not math.isfinite(self._limit_margin) or self._limit_margin < 0:
+            raise ValueError("Servo joint_limit_margin must be finite and nonnegative")
+        if any(upper - lower <= 2 * (self._limit_margin + 0.01)
+               for lower, upper in self._limits.values()):
+            raise ValueError("Servo margin leaves no usable joint interval")
+        self._state_timeout = float(self.get_parameter("joint_state_timeout_sec").value)
+        if not math.isfinite(self._state_timeout) or self._state_timeout <= 0:
+            raise ValueError("joint_state_timeout_sec must be finite and positive")
+        self._positions = {}
+        self._last_state_time = None
+        self.create_subscription(JointState, self.get_parameter("joint_state_topic").value,
+                                 self._state_cb, 20)
         self._joy: Joy | None = None
         self._last_joy_time = self.get_clock().now()
         self._previous_focus_button = False
@@ -241,6 +285,15 @@ class JointJoyTeleop(Node):
             self._publisher.publish(self._make_command([0.0] * len(self._joints)))
             self._commanding = False
 
+    def _state_cb(self, message: JointState) -> None:
+        positions = dict(zip(message.name, message.position))
+        if not all(name in positions and math.isfinite(positions[name]) for name in self._joints):
+            self._positions = {}
+            self._last_state_time = None
+            return
+        self._positions = positions
+        self._last_state_time = self.get_clock().now()
+
     def _publish_command(self) -> None:
         if (self._active_target != self._arm_focus
                 or not self._fresh_joy()
@@ -248,7 +301,13 @@ class JointJoyTeleop(Node):
             self._publish_halt()
             return
 
-        velocities = self._velocities(self._joy)
+        if (self._last_state_time is None or
+                (self.get_clock().now() - self._last_state_time).nanoseconds * 1e-9 > self._state_timeout):
+            self._publish_halt()
+            return
+        velocities = coordinated_velocities(
+            self._joints, self._velocities(self._joy), self._positions,
+            self._limits, self._limit_margin)
         self._publisher.publish(self._make_command(velocities))
         self._commanding = any(velocity != 0.0 for velocity in velocities)
 

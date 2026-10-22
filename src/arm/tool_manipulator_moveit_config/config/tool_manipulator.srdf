@@ -21,11 +21,13 @@
         <joint name="wrist_roll_joint" value="0.0"/>
         <joint name="wrist_yaw_joint" value="0.0"/>
     </group_state>
+    <!-- Upright-zero RMD reference (2026-10-22): fold at +/-80 deg,
+         inside measured limits and the Servo 0.10 rad joint-limit margin. -->
     <group_state name="home" group="arm">
         <joint name="base_joint" value="0.000000000000"/>
-        <joint name="elbow_joint" value="1.570796326795"/>
-        <joint name="shoulder_joint" value="1.570796326795"/>
-        <joint name="wrist_pitch_joint" value="-1.570796326795"/>
+        <joint name="elbow_joint" value="1.396263401595"/>
+        <joint name="shoulder_joint" value="1.396263401595"/>
+        <joint name="wrist_pitch_joint" value="-1.396263401595"/>
         <joint name="wrist_roll_joint" value="0.055223308364"/>
         <joint name="wrist_yaw_joint" value="0.010737865515"/>
     </group_state>
@@ -145,6 +147,7 @@
          mounting/output links.  Keep all non-adjacent self-collision checks. -->
     <disable_collisions link1="base_actuator" link2="base_link" reason="Adjacent"/>
     <disable_collisions link1="base_link" link2="shoulder_actuator" reason="Adjacent"/>
+    <disable_collisions link1="base_link" link2="shoulder_link" reason="Adjacent"/>
     <disable_collisions link1="shoulder_actuator" link2="shoulder_link" reason="Adjacent"/>
     <disable_collisions link1="shoulder_link" link2="elbow_actuator" reason="Adjacent"/>
     <!-- Directly connected links: contact at the elbow joint interface. -->
@@ -159,4 +162,25 @@
     <disable_collisions link1="wrist_link_yaw" link2="ee_actuator" reason="Adjacent"/>
     <!-- Camera bracket is fixed directly to the yaw wrist link. -->
     <disable_collisions link1="wrist_link_yaw" link2="cam_link" reason="Adjacent"/>
+
+    <!-- Fixed assemblies and mating geometry across one arm joint.
+         Non-adjacent arm links and fixture collision checks remain enabled. -->
+    <disable_collisions link1="base_actuator" link2="chassis" reason="RigidAssembly"/>
+    <disable_collisions link1="base_actuator" link2="shoulder_actuator" reason="Adjacent"/>
+    <disable_collisions link1="base_link" link2="elbow_actuator" reason="Adjacent"/>
+    <disable_collisions link1="cam_link" link2="ee_actuator" reason="RigidAssembly"/>
+    <disable_collisions link1="cam_link" link2="wrist_actuator_yaw" reason="Adjacent"/>
+    <disable_collisions link1="cam_link" link2="wrist_link_roll" reason="Adjacent"/>
+    <disable_collisions link1="ee_actuator" link2="wrist_actuator_yaw" reason="Adjacent"/>
+    <disable_collisions link1="ee_actuator" link2="wrist_link_roll" reason="Adjacent"/>
+    <disable_collisions link1="elbow_actuator" link2="shoulder_actuator" reason="Adjacent"/>
+    <disable_collisions link1="elbow_actuator" link2="wrist_actuator_pitch" reason="Adjacent"/>
+    <disable_collisions link1="elbow_link" link2="wrist_actuator_roll" reason="Adjacent"/>
+    <disable_collisions link1="elbow_link" link2="wrist_link_pitch" reason="Adjacent"/>
+    <disable_collisions link1="shoulder_link" link2="wrist_actuator_pitch" reason="Adjacent"/>
+    <disable_collisions link1="wrist_actuator_pitch" link2="wrist_actuator_roll" reason="Adjacent"/>
+    <disable_collisions link1="wrist_actuator_roll" link2="wrist_actuator_yaw" reason="Adjacent"/>
+    <disable_collisions link1="wrist_actuator_yaw" link2="wrist_link_pitch" reason="Adjacent"/>
+    <disable_collisions link1="wrist_link_pitch" link2="wrist_link_roll" reason="Adjacent"/>
+    <disable_collisions link1="wrist_link_roll" link2="wrist_link_yaw" reason="Adjacent"/>
 </robot>

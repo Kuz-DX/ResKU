@@ -4,7 +4,7 @@ from pathlib import Path
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, LogInfo, OpaqueFunction, RegisterEventHandler, TimerAction
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, LogInfo, OpaqueFunction, RegisterEventHandler, TimerAction
 from launch.event_handlers import OnProcessExit
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -18,7 +18,7 @@ ARM_RMD = ('shoulder_joint', 'elbow_joint', 'wrist_pitch_joint')
 
 def _home_after_controller(event, context, home_node):
     if event.returncode != 0:
-        return [LogInfo(msg='ERROR: Startup home skipped: arm_controller failed to activate.')]
+        return [LogInfo(msg='ERROR: Startup recovery skipped: arm_controller failed to activate.')]
     return [home_node]
 
 
@@ -106,21 +106,21 @@ def _start_real(context):
         TimerAction(period=6.0, actions=[ee_controller]),
         TimerAction(period=7.0, actions=generate_move_group_launch(moveit_config).entities),
     ]
-    if LaunchConfiguration('move_home_on_start').perform(context).lower() in ('1', 'true', 'yes'):
-        home_node = Node(
-            package='tool_manipulator_bringup', executable='move_to_named_pose.py',
-            arguments=[
-                'home', '--hardware', hardware_file,
-                '--duration', LaunchConfiguration('home_duration'),
-                '--wait-for-server', '30.0', '--joint-state-timeout', '10.0',
-            ],
-            output='screen',
-        )
-        # Register before starting the spawner; only its successful exit triggers motion.
-        actions.insert(0, RegisterEventHandler(OnProcessExit(
-            target_action=arm_controller,
-            on_exit=lambda event, context: _home_after_controller(event, context, home_node),
-        )))
+    move_home = LaunchConfiguration('move_home_on_start').perform(context).lower() in ('1', 'true', 'yes')
+    startup_node = Node(
+        package='tool_manipulator_bringup', executable='move_to_named_pose.py',
+        arguments=[
+            *(['home'] if move_home else ['--recover-only']),
+            '--hardware', hardware_file,
+            '--servo-config', LaunchConfiguration('servo_config'),
+            '--duration', LaunchConfiguration('home_duration'),
+            '--wait-for-server', '30.0', '--joint-state-timeout', '10.0',
+        ], output='screen',
+    )
+    actions.insert(0, RegisterEventHandler(OnProcessExit(
+        target_action=arm_controller,
+        on_exit=lambda event, context: _home_after_controller(event, context, startup_node),
+    )))
 
     launch_servo = LaunchConfiguration('launch_servo').perform(context).lower() in ('1', 'true', 'yes')
     launch_teleop = (
@@ -128,8 +128,18 @@ def _start_real(context):
         in ('1', 'true', 'yes')
     )
     launch_joy = LaunchConfiguration('launch_joy').perform(context).lower() in ('1', 'true', 'yes')
-    if launch_teleop and not launch_servo:
-        raise RuntimeError('real control blocked: TCP joystick teleop requires launch_servo:=true')
+    launch_joint_teleop = (
+        LaunchConfiguration('launch_joint_joy_teleop').perform(context).lower()
+        in ('1', 'true', 'yes')
+    )
+    auto_start_servo = (
+        LaunchConfiguration('auto_start_servo').perform(context).lower()
+        in ('1', 'true', 'yes')
+    )
+    if (launch_teleop or launch_joint_teleop or auto_start_servo) and not launch_servo:
+        raise RuntimeError('real control blocked: joystick teleop / auto start requires launch_servo:=true')
+    if launch_teleop and launch_joint_teleop:
+        raise RuntimeError('real control blocked: select only one TCP or joint joystick teleop')
 
     delayed_actions = []
     if launch_servo:
@@ -158,8 +168,26 @@ def _start_real(context):
             package='tool_manipulator_bringup', executable='tcp_joy_teleop.py',
             output='screen',
         ))
+    if launch_joint_teleop:
+        delayed_actions.append(Node(
+            package='tool_manipulator_bringup', executable='joint_joy_teleop.py',
+            parameters=[{'hardware_config': hardware_file,
+                         'servo_config': LaunchConfiguration('servo_config')}],
+            output='screen',
+        ))
+    if auto_start_servo:
+        # The CLI waits for service discovery; do not rely on a fixed startup sleep.
+        delayed_actions.append(ExecuteProcess(
+            cmd=['ros2', 'service', 'call', '/servo_node/start_servo',
+                 'std_srvs/srv/Trigger', '{}'],
+            output='screen',
+        ))
     if delayed_actions:
-        actions.append(TimerAction(period=8.0, actions=delayed_actions))
+        actions.insert(0, RegisterEventHandler(OnProcessExit(
+            target_action=startup_node,
+            on_exit=lambda event, context: delayed_actions if event.returncode == 0 else [
+                LogInfo(msg='ERROR: Servo/teleop blocked: startup recovery/home failed.')],
+        )))
     return actions
 
 
@@ -179,6 +207,8 @@ def generate_launch_description():
         DeclareLaunchArgument('servo_config', default_value=str(share / 'config' / 'servo.yaml')),
         DeclareLaunchArgument('launch_servo', default_value='false'),
         DeclareLaunchArgument('launch_tcp_joy_teleop', default_value='false'),
+        DeclareLaunchArgument('launch_joint_joy_teleop', default_value='false'),
+        DeclareLaunchArgument('auto_start_servo', default_value='false'),
         DeclareLaunchArgument('launch_joy', default_value='false'),
         DeclareLaunchArgument('joy_dev', default_value='/dev/input/js0'),
         OpaqueFunction(function=_start_real),

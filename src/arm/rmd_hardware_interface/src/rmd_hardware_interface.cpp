@@ -607,13 +607,22 @@ namespace rmd_hardware_interface {
     rclcpp::Duration const& /*period*/) {
     if (position_interface_running_) {
       if (std::isfinite(position_command_)) {
-        if (position_command_ < position_lower_limit_ - position_limit_rejection_margin_ ||
-            position_command_ > position_upper_limit_ + position_limit_rejection_margin_) {
+        double const measured = async_position_state_.load();
+        // Allow a smooth return from an out-of-range starting pose. Never clamp
+        // these samples to the boundary: that would turn recovery into a step.
+        bool const recovering = std::isfinite(measured) &&
+          ((measured < position_lower_limit_ && position_command_ >= measured &&
+            position_command_ <= position_lower_limit_) ||
+           (measured > position_upper_limit_ && position_command_ <= measured &&
+            position_command_ >= position_upper_limit_));
+        if (!recovering &&
+            (position_command_ < position_lower_limit_ - position_limit_rejection_margin_ ||
+             position_command_ > position_upper_limit_ + position_limit_rejection_margin_)) {
           RCLCPP_ERROR(getLogger(), "Rejecting position command %.6f outside safety range [%.6f, %.6f].",
             position_command_, position_lower_limit_, position_upper_limit_);
           return hardware_interface::return_type::ERROR;
         }
-        double const safe_command = std::clamp(
+        double const safe_command = recovering ? position_command_ : std::clamp(
           position_command_, position_lower_limit_, position_upper_limit_);
         if (safe_command != position_command_) {
           RCLCPP_WARN(getLogger(), "Clamping position command %.6f to %.6f.",
