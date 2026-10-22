@@ -73,10 +73,10 @@ import math
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
-from geometry_msgs.msg import Pose, Twist
+from geometry_msgs.msg import Pose, PoseStamped, Twist
 from nav_msgs.msg import Odometry, Path
 
-from return_navigation.se2 import Pose2D, normalize_angle
+from return_navigation.se2 import Pose2D, normalize_angle, apply_correction
 
 TRACK_PATH = 'TRACK_PATH'
 ROTATE_TO_PATH = 'ROTATE_TO_PATH'
@@ -147,6 +147,8 @@ class ReturnPathFollowerNode(Node):
         self._origin = None   # Pose2D, odom frame (T0)
         self._odom_pose = None  # Pose2D, odom frame
         self._last_odom_time = None
+        self._visual_correction = None
+        self._origin_received_at = self.get_clock().now()
 
         self._corners = []    # indices of sharp-corner vertices, ascending
         self._corner_ptr = 0  # next unhandled entry of _corners
@@ -168,6 +170,7 @@ class ReturnPathFollowerNode(Node):
         self.create_subscription(Odometry, '/odometry/filtered', self._on_odom, 10)
         self.create_subscription(Pose, '/mission/origin_pose', self._on_origin, transient_qos)
 
+        self.create_subscription(PoseStamped, '/visual_landmark/correction', self._on_visual_correction, 10)
         self.create_timer(self.control_period, self._tick)
 
         self.get_logger().info('return_path_follower_node started (waiting for /return_path).')
@@ -181,6 +184,7 @@ class ReturnPathFollowerNode(Node):
         # there as the outgoing-segment heading (atan2 to the next point),
         # so corner_angle[i] below is just the difference between two
         # already-stored headings -- no new geometry needed.
+        self._visual_correction = None
         self._path = [Pose2D.from_ros_pose(ps.pose) for ps in msg.poses]
         self._corner_angle = [0.0] * len(self._path)
         for i in range(1, len(self._path) - 1):
@@ -204,7 +208,28 @@ class ReturnPathFollowerNode(Node):
         self._last_odom_time = self.get_clock().now()
 
     def _on_origin(self, msg: Pose):
-        self._origin = Pose2D.from_ros_pose(msg)
+        origin = Pose2D.from_ros_pose(msg)
+        if self._origin is None or (origin.x, origin.y, origin.yaw) != (self._origin.x, self._origin.y, self._origin.yaw):
+            self._visual_correction = None
+            self._origin_received_at = self.get_clock().now()
+        self._origin = origin
+
+    def _on_visual_correction(self, msg: PoseStamped):
+        from rclpy.time import Time
+        stamp = Time.from_msg(msg.header.stamp)
+        age = (self.get_clock().now() - stamp).nanoseconds * 1e-9
+        values = [msg.pose.position.x, msg.pose.position.y,
+                  msg.pose.orientation.z, msg.pose.orientation.w]
+        if self._origin is None or msg.header.frame_id != 'mission' or not all(math.isfinite(v) for v in values):
+            return
+        if stamp < self._origin_received_at or not 0 <= age <= 2.0:
+            return
+        # Persistent mission<-odom transform: continue propagating live odometry
+        # after a landmark goes out of view, until the next validated correction.
+        self._visual_correction = Pose2D.from_ros_pose(msg.pose)
+        self._mode = TRACK_PATH
+        self._rotate_settle_since = None
+        self._v_cmd = self._w_cmd = 0.0
 
     # ------------------------------------------------------------------ #
     def _tick(self):
@@ -221,6 +246,8 @@ class ReturnPathFollowerNode(Node):
             return
 
         current = self._odom_pose.to_mission_frame(self._origin)
+        if self._visual_correction is not None:
+            current = apply_correction(self._odom_pose, self._visual_correction)
         corner_idx = self._next_corner()
         hi = corner_idx if corner_idx is not None else len(self._path) - 1
         nearest_idx = self._nearest_index(current, self._floor, hi)

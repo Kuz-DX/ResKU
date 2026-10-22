@@ -62,3 +62,11 @@ class Pose2D:
 
     def distance_to(self, other: 'Pose2D') -> float:
         return math.hypot(self.x - other.x, self.y - other.y)
+
+
+def apply_correction(odom_pose, correction):
+    """Compose mission<-odom with odom<-base (persistent SE2 correction)."""
+    co, si = math.cos(correction.yaw), math.sin(correction.yaw)
+    return Pose2D(correction.x + co*odom_pose.x - si*odom_pose.y,
+                  correction.y + si*odom_pose.x + co*odom_pose.y,
+                  normalize_angle(correction.yaw + odom_pose.yaw))

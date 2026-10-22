@@ -52,6 +52,7 @@ from launch.actions import (
     LogInfo,
     RegisterEventHandler,
 )
+from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessExit
 from launch.events import Shutdown
 from launch.launch_description_sources import PythonLaunchDescriptionSource
@@ -157,6 +158,10 @@ def generate_launch_description():
         # 'stop' = 버튼 누르면 drive_cmd_mux가 즉시 정지 -> 정지 확인 후 촬영.
         # moving으로 찍은 keyframe이 흐리면(meta.yaml의 odom_twist_at_capture 참고) stop으로.
         DeclareLaunchArgument('landmark_capture_mode', default_value='moving'),
+        DeclareLaunchArgument('enable_visual_localization', default_value='true'),
+        DeclareLaunchArgument('vpr_color_topic', default_value='/arm/camera/color/image_raw/compressed'),
+        DeclareLaunchArgument('vpr_depth_topic', default_value='/arm/camera/aligned_depth_to_color/image_raw'),
+        DeclareLaunchArgument('vpr_camera_info_topic', default_value='/arm/camera/color/camera_info'),
 
         # [단계 1] rmd_x8_driver_node(CAN, 유일한 소유자) + myahrs_driver_node
         # + static TF(base_link->imu_link/camera_link) + reduced_odom_node.
@@ -213,6 +218,15 @@ def generate_launch_description():
             output='screen',
         ),
 
+        Node(
+            package='visual_landmark', executable='visual_localization_node',
+            condition=IfCondition(LaunchConfiguration('enable_visual_localization')),
+            parameters=[{
+                'color_topic': LaunchConfiguration('vpr_color_topic'),
+                'depth_topic': LaunchConfiguration('vpr_depth_topic'),
+                'camera_info_topic': LaunchConfiguration('vpr_camera_info_topic'),
+            }], output='screen',
+        ),
         # [단계 6, 2026-10-13] landmark keyframe 촬영 (UI /path/landmark 버튼).
         # 정지는 drive_cmd_mux가 걸고, 이 노드는 정지 확인 -> 후방 프레임 저장 -> hold 해제.
         # 주행 명령은 내지 않음 -- 죽어도 Back-to-Base 영향 없음.

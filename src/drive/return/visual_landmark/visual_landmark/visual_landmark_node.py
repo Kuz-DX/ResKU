@@ -4,9 +4,9 @@ visual_landmark_node
 [capture_mode] 'moving'(주행 중 바로 촬영, 정지 안 함) / 'stop'(아래 흐름). launch의
 landmark_capture_mode가 이 노드와 drive_cmd_mux에 같은 값을 넘긴다.
 
-[2026-10-13 신규, 1단계: OUTBOUND keyframe 촬영만] Back-to-Base 경로 중간의
+[OUTBOUND keyframe 촬영; RETURN 추정은 visual_localization_node] Back-to-Base 경로 중간의
 landmark에서 후방 카메라 keyframe을 저장한다. 복귀(RETURN) 때 전방(로봇팔)
-카메라로 비교해 mission-frame 보정을 만드는 단계는 아직 없다 -- 이 노드는
+카메라로 비교하는 처리는 visual_localization_node가 담당한다. 이 노드는
 주행 명령을 절대 내지 않고, 실패해도 Back-to-Base에는 영향이 없다.
 
 촬영 흐름 (UI 버튼 한 번):
@@ -56,6 +56,7 @@ from std_msgs.msg import Bool, String
 from tf2_ros import Buffer, TransformException, TransformListener
 
 from return_navigation.se2 import Pose2D
+from visual_landmark.localization import transform
 from visual_landmark.capture_logic import CaptureSequencer, Odometer, PressDetector
 
 RECORDING_STATE = 'MANUAL_RECORDING'
@@ -149,6 +150,10 @@ class VisualLandmarkNode(Node):
         return self.get_clock().now().nanoseconds * 1e-9
 
     def _on_state(self, msg: String):
+        if msg.data == RECORDING_STATE and self._state != RECORDING_STATE:
+            self._mission_dir = None
+            self._next_order = 0
+            self.odometer.reset()
         self._state = msg.data
 
     def _on_origin(self, msg: Pose):
@@ -282,7 +287,23 @@ class VisualLandmarkNode(Node):
             self._camera_info.header.frame_id if self._camera_info else '')
         extrinsic = self._lookup_extrinsic(camera_frame)
         ci = self._camera_info
+        # Use image-time TF, including body roll/pitch and articulated camera pose.
+        # Keep capture usable without TF, but localization must reject such records.
+        mission_camera = None
+        try:
+            t = self.tf_buffer.lookup_transform(
+                odom.header.frame_id, camera_frame, Time.from_msg(img.header.stamp))
+            tr, q = t.transform.translation, t.transform.rotation
+            import numpy as np
+            origin = transform([self._origin.x, self._origin.y, 0],
+                               [0, 0, math.sin(self._origin.yaw/2), math.cos(self._origin.yaw/2)])
+            mission_camera = (np.linalg.inv(origin) @ transform(
+                [tr.x, tr.y, tr.z], [q.x, q.y, q.z, q.w])).tolist()
+        except TransformException:
+            pass
         meta = {
+            'schema_version': 2,
+            'mission_camera_transform': mission_camera,
             'id': lid,
             'order': order,
             'image_file': image_file,
@@ -301,6 +322,7 @@ class VisualLandmarkNode(Node):
             'extrinsic_base_to_camera': extrinsic,
             # Humble의 CameraInfo 배열은 numpy라 YAML이 못 쓴다 -> 순수 float로.
             'camera_info': None if ci is None else {
+                'frame_id': ci.header.frame_id,
                 'width': int(ci.width), 'height': int(ci.height),
                 'distortion_model': ci.distortion_model,
                 'd': [float(v) for v in ci.d], 'k': [float(v) for v in ci.k],
@@ -312,7 +334,8 @@ class VisualLandmarkNode(Node):
         self._next_order += 1
         return {'id': lid, 'order': order, 'dir': ldir, 'x': mission.x, 'y': mission.y,
                 'yaw': mission.yaw, 's_along_path': self.odometer.s,
-                'extrinsic_ok': extrinsic is not None, 'camera_info_ok': ci is not None}
+                'extrinsic_ok': extrinsic is not None, 'camera_info_ok': ci is not None,
+                'localization_ready': mission_camera is not None and ci is not None}
 
 
 def main(args=None):

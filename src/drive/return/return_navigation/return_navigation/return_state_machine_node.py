@@ -86,7 +86,7 @@ from geometry_msgs.msg import Pose, PoseStamped, Twist
 from nav_msgs.msg import Odometry, Path
 from std_msgs.msg import Bool, String
 
-from return_navigation.se2 import Pose2D, normalize_angle
+from return_navigation.se2 import apply_correction, Pose2D, normalize_angle
 
 IDLE = 'IDLE'
 MANUAL_RECORDING = 'MANUAL_RECORDING'
@@ -153,6 +153,8 @@ class ReturnStateMachineNode(Node):
         self._state = IDLE
         self._state_entered_time = self.get_clock().now()
 
+        self._visual_correction = None
+        self._origin_received_at = self.get_clock().now()
         self._odom_pose = None       # Pose2D, odom frame
         self._odom_vx = 0.0
         self._odom_wz = 0.0
@@ -193,6 +195,7 @@ class ReturnStateMachineNode(Node):
         self.create_subscription(Path, '/recorded_path', self._on_recorded_path, 10)
         self.create_subscription(Twist, '/cmd_vel_return_path', self._on_follow_cmd, 10)
 
+        self.create_subscription(PoseStamped, '/visual_landmark/correction', self._on_visual_correction, 10)
         self.create_timer(self.control_period, self._tick)
 
         self.get_logger().info('return_state_machine_node started in IDLE.')
@@ -200,6 +203,20 @@ class ReturnStateMachineNode(Node):
     # ------------------------------------------------------------------ #
     # subscriptions
     # ------------------------------------------------------------------ #
+    def _on_visual_correction(self, msg: PoseStamped):
+        from rclpy.time import Time
+        stamp = Time.from_msg(msg.header.stamp)
+        age = (self.get_clock().now() - stamp).nanoseconds * 1e-9
+        values = [msg.pose.position.x, msg.pose.position.y,
+                  msg.pose.orientation.z, msg.pose.orientation.w]
+        if self._origin is None or msg.header.frame_id != 'mission' or not all(math.isfinite(v) for v in values):
+            return
+        if stamp < self._origin_received_at or not 0 <= age <= 2.0:
+            return
+        # Persistent mission<-odom transform: continue propagating live odometry
+        # after a landmark goes out of view, until the next validated correction.
+        self._visual_correction = Pose2D.from_ros_pose(msg.pose)
+
     def _on_odom(self, msg: Odometry):
         self._odom_pose = Pose2D.from_ros_pose(msg.pose.pose)
         self._odom_vx = msg.twist.twist.linear.x
@@ -227,7 +244,11 @@ class ReturnStateMachineNode(Node):
             '/emergency_stop=true 수신: 모터 0 명령 후 manual_return launch를 종료합니다.')
 
     def _on_origin(self, msg: Pose):
-        self._origin = Pose2D.from_ros_pose(msg)
+        origin = Pose2D.from_ros_pose(msg)
+        if self._origin is None or (origin.x, origin.y, origin.yaw) != (self._origin.x, self._origin.y, self._origin.yaw):
+            self._visual_correction = None
+            self._origin_received_at = self.get_clock().now()
+        self._origin = origin
 
     def _on_recorded_path(self, msg: Path):
         self._recorded_path = [Pose2D.from_ros_pose(ps.pose) for ps in msg.poses]
@@ -240,6 +261,9 @@ class ReturnStateMachineNode(Node):
     def _go_to(self, new_state: str):
         if new_state != self._state:
             self.get_logger().info(f'[return_state_machine] {self._state} -> {new_state}')
+            if new_state == MANUAL_RECORDING:
+                self._visual_correction = None
+                self._origin_received_at = self.get_clock().now()
             self._state = new_state
             self._state_entered_time = self.get_clock().now()
             if new_state == WAIT_RETURN_COMMAND:
@@ -380,6 +404,8 @@ class ReturnStateMachineNode(Node):
         if not self._return_path or self._odom_pose is None or self._origin is None:
             return
         current_mission = self._odom_pose.to_mission_frame(self._origin)
+        if self._visual_correction is not None:
+            current_mission = apply_correction(self._odom_pose, self._visual_correction)
         goal = self._return_path[-1]
         if current_mission.distance_to(goal) <= self.goal_tolerance_m:
             self.cmd_vel_return_pub.publish(Twist())
