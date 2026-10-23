@@ -101,6 +101,13 @@ def harness():
 
 
 class StopPathTest(unittest.TestCase):
+    def test_three_dxl_position_jogs_do_not_depend_on_rmd_input(self):
+        node = harness()
+        node.axis = lambda name: 1. if name in ('wrist_roll_axis', 'wrist_yaw_axis') else 0.
+        node.button = lambda name: name == 'base_ccw_button'
+        velocity = node.command_velocity(np.array(list(node.positions.values())))
+        np.testing.assert_allclose(velocity, [.12, 0., 0., 0., .12, -.12])
+
     def test_ee_velocity_requires_circle_and_uses_dpad_vertical(self):
         node = harness()
         pressed = set()
@@ -117,6 +124,7 @@ class StopPathTest(unittest.TestCase):
     def test_servo_input_gap_publishes_zero_joint_jog(self):
         node = harness()
         node.jog_publisher = SimpleNamespace(publish=Mock())
+        node._jog_active = True
         node.params['root_link'] = 'base_actuator'
         node.get_clock = Mock(return_value=SimpleNamespace(now=Mock(return_value=SimpleNamespace(to_msg=Mock(return_value=Time())))))
         node.joy_time = .5
@@ -125,6 +133,8 @@ class StopPathTest(unittest.TestCase):
         self.assertEqual(message.joint_names, list(manual.JOINTS))
         self.assertEqual(list(message.velocities), [0.] * 6)
         self.assertEqual(list(node.ee_velocity_publisher.publish.call_args.args[0].data), [0.])
+        node.on_timer()
+        self.assertEqual(node.jog_publisher.publish.call_count, 1)
 
     def test_options_logs_each_focus_change(self):
         node = harness()

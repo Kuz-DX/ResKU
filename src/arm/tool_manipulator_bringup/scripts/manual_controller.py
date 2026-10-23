@@ -164,7 +164,9 @@ class ManualController(Node):
         margin = self.params['limit_margin_rad']
         if not math.isfinite(margin) or margin < 0:
             raise ValueError('limit_margin_rad must be finite and nonnegative')
-        config = yaml.safe_load(Path(self.params['hardware_config']).read_text())['joints']
+        hardware = yaml.safe_load(Path(self.params['hardware_config']).read_text())
+        self.command_diagnostics = hardware.get('buses', {}).get('dynamixel_u2d2', {}).get('position_diagnostics', False)
+        config = hardware['joints']
         self.lower = np.array([config[n]['soft_limit_rad'][0] for n in JOINTS], dtype=float)
         self.upper = np.array([config[n]['soft_limit_rad'][1] for n in JOINTS], dtype=float)
         self.speeds = np.minimum(self.params['joint_speed_rad_s'],
@@ -175,6 +177,7 @@ class ManualController(Node):
         self.chain = None
         self.positions, self.state_times = {}, {}
         self.target, self.joy, self.joy_time = None, None, None
+        self._jog_active = False
         self.focus, self.previous_focus, self.fault = 'drive', False, False
         self.last_direction_warning = -math.inf
         self.last_time = self.now_seconds()
@@ -198,10 +201,7 @@ class ManualController(Node):
         self.create_timer(1/self.params['publish_rate_hz'], self.on_timer)
         if self.params['manage_focus']:
             self.focus_publisher.publish(String(data='drive'))
-        mode = 'RMD coordination' if self.requires_model else 'separate joints'
-        self.get_logger().info(f'Manual {mode} ready; Options selects arm; '
-                               + ('MoveIt Servo JointJog output.' if self.jog_publisher else
-                                  'Direct position control; no collision planner.'))
+        self.get_logger().info('ready to activate: press Options to switch drive -> arm')
 
     def now_seconds(self):
         return self.get_clock().now().nanoseconds * 1e-9
@@ -266,6 +266,10 @@ class ManualController(Node):
             self.publisher.publish(Float64MultiArray(data=self.target.tolist()))
 
     def publish_jog(self, velocity):
+        moving = bool(np.any(np.abs(velocity) > 1e-9))
+        if not moving and not getattr(self, '_jog_active', False):
+            return
+        self._jog_active = moving
         message = JointJog()
         message.header.stamp = self.get_clock().now().to_msg()
         message.header.frame_id = self.params['root_link']
@@ -321,6 +325,12 @@ class ManualController(Node):
                 if ((value > 0 and measured[index] >= self.upper[index]-self.params['limit_margin_rad']) or
                         (value < 0 and measured[index] <= self.lower[index]+self.params['limit_margin_rad'])):
                     velocity[index] = 0
+            if getattr(self, 'command_diagnostics', False) and np.any(np.abs(velocity) > 1e-9):
+                if now - getattr(self, '_last_command_log', -math.inf) >= 1.:
+                    self._last_command_log = now
+                    self.get_logger().info(
+                        'DIAG_JOG ' + ' '.join(f'{name}={v:.6f}' for name, v in zip(JOINTS, velocity))
+                        + ' rad/s -> /servo_node/delta_joint_cmds')
             self.publish_jog(velocity)
             self.target = measured.copy()
             return

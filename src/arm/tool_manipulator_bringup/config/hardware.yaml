@@ -8,6 +8,8 @@ buses:
     mixed_ttl_rs485: true
     feedback_mode: individual_read
     command_mode: sync_write
+    position_diagnostics: true
+    position_diagnostics_period_ms: 1000
   rmd_can:
     interface: can_arm
     bitrate: 1000000
@@ -96,8 +98,8 @@ joints:
     raw_increases_ccw: true
     zero_raw: -1
     soft_limit_raw:
-    - -566
-    - 448
+    - -489
+    - 409
     soft_limit_rad:
     - -0.75
     - 0.63
@@ -117,8 +119,8 @@ joints:
     raw_increases_ccw: false
     zero_raw: -4071
     soft_limit_raw:
-    - -6129
-    - -2041
+    - -8308
+    - -317
     soft_limit_rad:
     - -5.76
     - 6.5

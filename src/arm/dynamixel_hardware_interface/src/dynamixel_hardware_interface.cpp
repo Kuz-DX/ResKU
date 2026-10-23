@@ -82,7 +82,7 @@ double DynamixelHardware::wrapToPi(double angle)
 DxlError DynamixelHardware::readFeedback(double period_ms)
 {
   return use_individual_feedback_read_ ?
-    dxl_comm_->ReadDxlDataIndividually() : dxl_comm_->ReadMultiDxlData(period_ms);
+    dxl_comm_->ReadDxlDataByTransport() : dxl_comm_->ReadMultiDxlData(period_ms);
 }
 
 hardware_interface::CallbackReturn DynamixelHardware::on_init(
@@ -138,7 +138,7 @@ hardware_interface::CallbackReturn DynamixelHardware::on_init(
     if (feedback_mode == info_.hardware_parameters.end() ||
       feedback_mode->second != "individual_read")
     {
-      RCLCPP_ERROR(logger_, "Mixed U2D2 TTL/RS-485 requires feedback_mode=individual_read; group read is unsafe.");
+      RCLCPP_ERROR(logger_, "Mixed U2D2 TTL/RS-485 requires feedback_mode=individual_read; cross-channel group read is unsafe.");
       return hardware_interface::CallbackReturn::ERROR;
     }
     use_individual_feedback_read_ = true;
@@ -148,7 +148,7 @@ hardware_interface::CallbackReturn DynamixelHardware::on_init(
       return hardware_interface::CallbackReturn::ERROR;
     }
     mixed_channel_command_mode_ = command_mode->second;
-    RCLCPP_INFO(logger_, "U2D2 mixed TTL/RS-485: individual feedback reads and shared Sync Write enabled.");
+    RCLCPP_INFO(logger_, "U2D2: TTL Sync Read then RS-485 Read; position Sync Write IDs 1,2,3 and velocity Sync Write ID 4.");
   }
   if (info_.hardware_parameters.find("error_timeout_ms") != info_.hardware_parameters.end()) {
     try {
@@ -160,6 +160,29 @@ hardware_interface::CallbackReturn DynamixelHardware::on_init(
     }
   } else {
     RCLCPP_INFO(logger_, "error_timeout_ms parameter not found, using default value of 500ms");
+  }
+  const auto diagnostics = info_.hardware_parameters.find("position_diagnostics");
+  position_diagnostics_enabled_ = diagnostics != info_.hardware_parameters.end() &&
+    (diagnostics->second == "true" || diagnostics->second == "1");
+  const auto diagnostics_period =
+    info_.hardware_parameters.find("position_diagnostics_period_ms");
+  if (diagnostics_period != info_.hardware_parameters.end()) {
+    try {
+      const int period_ms = std::stoi(diagnostics_period->second);
+      if (period_ms < 100) {
+        throw std::invalid_argument("must be at least 100 ms");
+      }
+      position_diagnostics_period_ = std::chrono::milliseconds(period_ms);
+    } catch (const std::exception & e) {
+      RCLCPP_ERROR(logger_, "Invalid position_diagnostics_period_ms: %s", e.what());
+      return hardware_interface::CallbackReturn::ERROR;
+    }
+  }
+  if (position_diagnostics_enabled_) {
+    RCLCPP_WARN(
+      logger_,
+      "Read-only DYNAMIXEL position diagnostics enabled (period=%ld ms).",
+      static_cast<long>(position_diagnostics_period_.count()));
   }
   // TEMPORARILY DISABLED (2026-08-28): this command-rejection safety layer was
   // added in 9d1e707.  Keep the implementation for later diagnosis, but do not
@@ -336,6 +359,9 @@ hardware_interface::CallbackReturn DynamixelHardware::on_init(
           "][ID:" << static_cast<int>(id) << "] Error: InitItem");
       return hardware_interface::CallbackReturn::ERROR;
     }
+    // EEPROM mode setup and torque state changes need a short settling interval
+    // before addressing the next device on the shared U2D2 port.
+    std::this_thread::sleep_for(std::chrono::milliseconds(15));
   }
 
   if (!InitDxlReadItems()) {
@@ -348,7 +374,7 @@ hardware_interface::CallbackReturn DynamixelHardware::on_init(
     return hardware_interface::CallbackReturn::ERROR;
   }
 
-  if (num_of_transmissions_ != hdl_trans_commands_.size() &&
+  if (num_of_transmissions_ != hdl_trans_commands_.size() ||
     num_of_transmissions_ != hdl_trans_states_.size())
   {
     RCLCPP_ERROR_STREAM(
@@ -476,13 +502,34 @@ hardware_interface::CallbackReturn DynamixelHardware::on_init(
     hdl_joint_commands_.push_back(temp_cmd);
   }
 
-  if (num_of_joints_ != hdl_joint_commands_.size() &&
+  if (num_of_joints_ != hdl_joint_commands_.size() ||
     num_of_joints_ != hdl_joint_states_.size())
   {
     RCLCPP_ERROR_STREAM(
       logger_, "Error: number of joints " << num_of_joints_ << ", " <<
         hdl_joint_commands_.size() << ", " << hdl_joint_commands_.size());
     return hardware_interface::CallbackReturn::ERROR;
+  }
+
+  if (use_individual_feedback_read_) {
+    const std::vector<std::string> expected_joints = {
+      "base_joint", "wrist_roll_joint", "wrist_yaw_joint", "ee_joint"};
+    if (num_of_joints_ != 4 || num_of_transmissions_ != 4) {
+      RCLCPP_ERROR(logger_, "Mixed U2D2 requires exactly four joints and transmissions.");
+      return hardware_interface::CallbackReturn::ERROR;
+    }
+    for (size_t i = 0; i < 4; ++i) {
+      const std::string joint_iface = i == 3 ? "velocity" : "position";
+      const std::string motor_iface = i == 3 ? "Goal Velocity" : "Goal Position";
+      if (hdl_joint_commands_[i].name != expected_joints[i] ||
+        hdl_trans_commands_[i].id != i + 1 || hdl_trans_states_[i].id != i + 1 ||
+        hdl_joint_commands_[i].interface_name_vec != std::vector<std::string>{joint_iface} ||
+        hdl_trans_commands_[i].interface_name_vec != std::vector<std::string>{motor_iface})
+      {
+        RCLCPP_ERROR(logger_, "Mixed U2D2 joint/ID/interface order mismatch at index %zu.", i);
+        return hardware_interface::CallbackReturn::ERROR;
+      }
+    }
   }
 
   hdl_sensor_states_.clear();
@@ -739,6 +786,8 @@ hardware_interface::CallbackReturn DynamixelHardware::start()
 
   CalcTransmissionToJoint();
 
+  LogPositionDiagnostics("startup_before_state_to_command", false, true);
+
   for (const auto & joint : hdl_joint_states_) {
     for (size_t i = 0; i < joint.interface_name_vec.size(); ++i) {
       if (joint.interface_name_vec.at(i) == hardware_interface::HW_IF_POSITION &&
@@ -755,9 +804,12 @@ hardware_interface::CallbackReturn DynamixelHardware::start()
 
   SyncJointCommandWithStates();
 
+  LogPositionDiagnostics("startup_after_state_to_command", false, true);
+
   CalcJointToTransmission();
 
-  const DxlError initial_write_result = dxl_comm_->WriteMultiDxlData();
+  const DxlError initial_write_result = (use_individual_feedback_read_ ?
+    dxl_comm_->WriteDxlDataByTransport() : dxl_comm_->WriteMultiDxlData());
   if (initial_write_result != DxlError::OK) {
     RCLCPP_ERROR_STREAM(
       logger_, "Dynamixel start aborted: initial position hold failed: " <<
@@ -799,6 +851,7 @@ hardware_interface::CallbackReturn DynamixelHardware::start()
     }
   }
   RCLCPP_INFO(logger_, "Dynamixel initial position hold verified; enabling torque is now safe.");
+  LogPositionDiagnostics("startup_initial_write_readback", true, true);
 
   if (torque_enabled_comm_id_id_.size() > 0) {
     RCLCPP_INFO_STREAM(logger_, "Enabling torque for Dynamixels");
@@ -1027,7 +1080,8 @@ hardware_interface::return_type DynamixelHardware::write(
     CalcJointToTransmission();
 
     // Final command guard: a failed Sync Write is a controller error, never a best-effort retry.
-    const DxlError write_result = dxl_comm_->WriteMultiDxlData();
+    const DxlError write_result = (use_individual_feedback_read_ ?
+    dxl_comm_->WriteDxlDataByTransport() : dxl_comm_->WriteMultiDxlData());
     if (write_result != DxlError::OK) {
       dxl_status_ = COMM_ERROR;
       latchHardwareFault("Sync Write failed: " + Dynamixel::DxlErrorToString(write_result));
@@ -1035,6 +1089,8 @@ hardware_interface::return_type DynamixelHardware::write(
         Dynamixel::DxlErrorToString(write_result));
       return hardware_interface::return_type::ERROR;
     }
+
+    LogPositionDiagnostics("runtime_after_write", true);
 
     is_write_in_error_ = false;
     write_error_duration_ = rclcpp::Duration(0, 0);
@@ -1352,6 +1408,17 @@ bool DynamixelHardware::InitItem(const hardware_interface::ComponentInfo & gpio)
       return false;
     }
   }
+  if (position_diagnostics_enabled_ && id >= 1 && id <= 3) {
+    for (const auto & name : {"Operating Mode", "Profile Velocity", "Velocity Limit"}) {
+      uint32_t actual = 0;
+      const DxlError result = dxl_comm_->ReadItem(comm_id, id, name, actual);
+      const auto expected = gpio.parameters.find(name);
+      RCLCPP_INFO(logger_, "DIAG_INIT ID=%u item=%s configured=%s actual=%s%u",
+        static_cast<unsigned>(id), name,
+        expected == gpio.parameters.end() ? "NA" : expected->second.c_str(),
+        result == DxlError::OK ? "" : "NA/", actual);
+    }
+  }
   return true;
 }
 
@@ -1549,7 +1616,7 @@ bool DynamixelHardware::InitDxlWriteItems()
       return false;
     }
   }
-  if (dxl_comm_->SetMultiDxlWrite() != DxlError::OK) {
+  if (!use_individual_feedback_read_ && dxl_comm_->SetMultiDxlWrite() != DxlError::OK) {
     return false;
   }
 
@@ -1878,6 +1945,76 @@ void DynamixelHardware::SyncJointCommandWithStates()
   }
 }
 
+void DynamixelHardware::LogPositionDiagnostics(
+  const std::string & phase, bool read_registers, bool force)
+{
+  (void)force;
+  if (!position_diagnostics_enabled_ || !read_registers) {return;}
+  const auto now = std::chrono::steady_clock::now();
+  if (!position_diagnostic_cycle_active_) {
+    if (last_position_diagnostics_.time_since_epoch().count() != 0 &&
+      now - last_position_diagnostics_ < position_diagnostics_period_) {return;}
+    last_position_diagnostics_ = now;
+    position_diagnostic_stage_ = 0;
+    position_diagnostic_cycle_active_ = true;
+  }
+  // Spread twelve unicast reads across twelve write cycles. At most one extra
+  // Tx/Rx per cycle, no diagnostic retries, three complete lines per second.
+  const size_t index = position_diagnostic_stage_ / 4;
+  const size_t field = position_diagnostic_stage_ % 4;
+  if (index >= hdl_joint_commands_.size() || index >= hdl_trans_commands_.size()) {
+    position_diagnostic_cycle_active_ = false;
+    return;
+  }
+  const auto & joint = hdl_joint_commands_[index];
+  const auto & trans = hdl_trans_commands_[index];
+  auto & sample = position_diagnostic_sample_;
+  const auto value = [](const HandlerVarType & handler, const std::string & name) {
+      const auto it = std::find(handler.interface_name_vec.begin(), handler.interface_name_vec.end(), name);
+      return it == handler.interface_name_vec.end() ? std::numeric_limits<double>::quiet_NaN() :
+             *handler.value_ptr_vec[std::distance(handler.interface_name_vec.begin(), it)];
+    };
+  if (field == 0) {
+    sample = PositionDiagnosticSample{};
+    sample.joint_command = value(joint, hardware_interface::HW_IF_POSITION);
+    sample.transmission_command = value(trans, "Goal Position");
+    sample.sent_ok = dxl_comm_->GetLastPositionWriteRaw(trans.id, sample.sent_raw);
+  }
+  constexpr uint16_t addresses[] = {116, 64, 70, 132};
+  constexpr uint8_t sizes[] = {4, 1, 1, 4};
+  sample.valid[field] = dxl_comm_->ReadDiagnosticRegister(
+    trans.comm_id, addresses[field], sizes[field], sample.registers[field]);
+  if (field == 3) {
+    double present_rad = std::numeric_limits<double>::quiet_NaN();
+    if (sample.valid[3]) {
+      dxl_comm_->ConvertPositionRawToRadian(
+        trans.comm_id, trans.id, "Present Position", sample.registers[3], present_rad);
+    }
+    std::ostringstream signature;
+    signature << sample.sent_ok << ':' << sample.sent_raw << ':' << sample.registers[0]
+              << ':' << sample.registers[1] << ':' << sample.registers[2];
+    for (bool valid : sample.valid) {signature << ':' << valid;}
+    // Encoder noise at an unchanged goal is not a new operator event.
+    if (last_position_diagnostic_signature_[trans.id] != signature.str()) {
+      last_position_diagnostic_signature_[trans.id] = signature.str();
+    RCLCPP_INFO(logger_,
+      "DIAG_POSITION phase=%s ID=%u joint=%s ros_cmd_rad=%.9f trans_cmd_rad=%.9f "
+      "sent_raw=%s%d goal_raw=%s%d match=%s torque=%s%u hw_error=%s%u "
+      "present_raw=%s%d present_model_rad=%.9f",
+      phase.c_str(), static_cast<unsigned>(trans.id), joint.name.c_str(),
+      sample.joint_command, sample.transmission_command,
+      sample.sent_ok ? "" : "NA/", static_cast<int32_t>(sample.sent_raw),
+      sample.valid[0] ? "" : "NA/", static_cast<int32_t>(sample.registers[0]),
+      !sample.sent_ok || !sample.valid[0] ? "NA" :
+      (sample.sent_raw == sample.registers[0] ? "true" : "false"),
+      sample.valid[1] ? "" : "NA/", sample.registers[1],
+      sample.valid[2] ? "" : "NA/", sample.registers[2],
+      sample.valid[3] ? "" : "NA/", static_cast<int32_t>(sample.registers[3]), present_rad);
+    }
+  }
+  if (++position_diagnostic_stage_ == 12) {position_diagnostic_cycle_active_ = false;}
+}
+
 void DynamixelHardware::ChangeDxlTorqueState()
 {
   if (torque_enabled_comm_id_id_.size() == 0) {
@@ -1909,32 +2046,21 @@ void DynamixelHardware::get_dxl_data_srv_callback(
   const std::shared_ptr<dynamixel_interfaces::srv::GetDataFromDxl::Request> request,
   std::shared_ptr<dynamixel_interfaces::srv::GetDataFromDxl::Response> response)
 {
-  uint8_t id = static_cast<uint8_t>(request->id);
-  std::string name = request->item_name;
-
-  if (dxl_comm_->InsertReadItemBuf(id, name) != DxlError::OK) {
-    RCLCPP_ERROR_STREAM(logger_, "get_dxl_data_srv_callback InsertReadItemBuf");
-
-    response->result = false;
-    return;
+  // spin_some() invokes this callback from read() after the regular bus read.
+  // Read the register here: waiting for ReadItemBuf() blocks that same loop.
+  uint32_t raw = 0;
+  const DxlError result = dxl_comm_->ReadItem(
+    static_cast<uint8_t>(request->id), static_cast<uint8_t>(request->id),
+    request->item_name, raw);
+  response->result = result == DxlError::OK;
+  if (response->result) {
+    response->item_data = raw;
+  } else {
+    RCLCPP_ERROR(
+      logger_, "Read-only DYNAMIXEL register request failed for ID %u, item '%s': %s",
+      static_cast<unsigned int>(request->id), request->item_name.c_str(),
+      Dynamixel::DxlErrorToString(result).c_str());
   }
-  double timeout_sec = request->timeout_sec;
-  if (timeout_sec == 0.0) {
-    timeout_sec = 1.0;
-  }
-  rclcpp::Time t_start = rclcpp::Clock().now();
-  while (dxl_comm_->CheckReadItemBuf(id, name) == false) {
-    if ((rclcpp::Clock().now() - t_start).seconds() > timeout_sec) {
-      RCLCPP_ERROR_STREAM(
-        logger_,
-        "get_dxl_data_srv_callback Timeout : " << (rclcpp::Clock().now() - t_start).seconds() );
-      response->result = false;
-      return;
-    }
-  }
-
-  response->item_data = dxl_comm_->GetReadItemDataBuf(id, name);
-  response->result = true;
 }
 
 void DynamixelHardware::set_dxl_data_srv_callback(

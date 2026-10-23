@@ -16,6 +16,7 @@
 
 #include "dynamixel_hardware_interface/dynamixel/dynamixel.hpp"
 
+#include <algorithm>
 #include <queue>
 #include <vector>
 #include <string>
@@ -82,6 +83,7 @@ Dynamixel::~Dynamixel()
 
 DxlError Dynamixel::ReadDxlModelFile(uint8_t comm_id, uint8_t id, uint16_t model_num)
 {
+  const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
   try {
     dxl_info_.ReadDxlModelFile(comm_id, id, model_num);
     return DxlError::OK;
@@ -97,6 +99,7 @@ DxlError Dynamixel::ReadDxlModelFile(
   uint8_t comm_id, uint8_t id, uint16_t model_num,
   uint8_t firmware_version)
 {
+  const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
   try {
     dxl_info_.ReadDxlModelFile(comm_id, id, model_num, firmware_version);
     return DxlError::OK;
@@ -110,6 +113,7 @@ DxlError Dynamixel::ReadDxlModelFile(
 
 DxlError Dynamixel::ReadFirmwareVersion(uint8_t comm_id, uint8_t id, uint8_t & firmware_version)
 {
+  const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
   uint32_t fw_version_data;
   DxlError result = ReadItem(comm_id, id, "Firmware Version", fw_version_data);
   if (result == DxlError::OK) {
@@ -127,6 +131,7 @@ DxlError Dynamixel::InitTorqueStates(
   std::vector<std::pair<uint8_t, uint8_t>> comm_id_id_arr,
   bool disable_torque)
 {
+  const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
   for (auto it_pair : comm_id_id_arr) {
     uint8_t it_comm = it_pair.first;
     uint8_t it_id = it_pair.second;
@@ -193,6 +198,7 @@ void Dynamixel::OverrideUnitInfo(
   bool is_signed,
   double offset_value)
 {
+  const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
   // Ensure entry exists
   (void)dxl_info_.dxl_info_by_comm_[comm_id][id];
   dxl_info_.dxl_info_by_comm_[comm_id][id].unit_map[data_name] = unit_multiplier;
@@ -202,6 +208,7 @@ void Dynamixel::OverrideUnitInfo(
 
 DxlError Dynamixel::SetupPort(const std::string & port_name, const std::string & baudrate)
 {
+  const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
   port_handler_ = dynamixel::PortHandler::getPortHandler(port_name.c_str());
   packet_handler_ = dynamixel::PacketHandler::getPacketHandler();
 
@@ -249,6 +256,7 @@ DxlError Dynamixel::SetupPort(const std::string & port_name, const std::string &
 
 DxlError Dynamixel::InitDxlComm(uint8_t comm_id, uint8_t id)
 {
+  const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
   uint16_t dxl_model_number;
   uint8_t dxl_error = 0;
 
@@ -369,6 +377,7 @@ DxlError Dynamixel::InitDxlComm(uint8_t comm_id, uint8_t id)
 
 DxlError Dynamixel::Reboot(uint8_t id)
 {
+  const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
   fprintf(stderr, "[ID:%03d] Rebooting...\n", id);
   uint8_t dxl_error = 0;
 
@@ -393,6 +402,7 @@ DxlError Dynamixel::Reboot(uint8_t id)
 
 void Dynamixel::RWDataReset()
 {
+  const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
   read_data_list_.clear();
   write_data_list_.clear();
 }
@@ -403,6 +413,7 @@ DxlError Dynamixel::SetDxlReadItems(
   std::vector<std::string> item_names,
   std::vector<std::shared_ptr<double>> data_vec_ptr)
 {
+  const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
   if (item_names.size() == 0) {
     fprintf(stderr, "[comm_id:%03d][ID:%03d] No (Sync or Bulk) Read Item\n", comm_id, id);
     return DxlError::OK;
@@ -471,6 +482,7 @@ DxlError Dynamixel::SetDxlReadItems(
 
 DxlError Dynamixel::SetMultiDxlRead()
 {
+  const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
   read_type_ = checkReadType();
 
   fprintf(stderr, "Dynamixel Read Type : %s\n", read_type_ ? "bulk read" : "sync read");
@@ -513,6 +525,7 @@ DxlError Dynamixel::SetDxlWriteItems(
   std::vector<std::string> item_names,
   std::vector<std::shared_ptr<double>> data_vec_ptr)
 {
+  const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
   if (item_names.size() == 0) {
     fprintf(stderr, "[comm_id:%03d][ID:%03d] No (Sync or Bulk) Write Item\n", comm_id, id);
     return DxlError::OK;
@@ -578,6 +591,7 @@ DxlError Dynamixel::SetDxlWriteItems(
 
 DxlError Dynamixel::SetMultiDxlWrite()
 {
+  const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
   write_type_ = checkWriteType();
 
   fprintf(stderr, "Dynamixel Write Type : %s\n", write_type_ ? "bulk write" : "sync write");
@@ -616,6 +630,7 @@ DxlError Dynamixel::SetMultiDxlWrite()
 
 DxlError Dynamixel::DynamixelEnable(const std::vector<std::pair<uint8_t, uint8_t>> & comm_id_id_arr)
 {
+  const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
   for (auto p : comm_id_id_arr) {
     uint8_t comm_id = p.first;
     uint8_t id = p.second;
@@ -634,7 +649,7 @@ DxlError Dynamixel::DynamixelEnable(const std::vector<std::pair<uint8_t, uint8_t
     }
     torque_state_[{comm_id, id}] = actual_torque_state == TORQUE_ON;
     if (actual_torque_state != TORQUE_ON) {
-      if (WriteItem(comm_id, id, "Torque Enable", TORQUE_ON) < 0) {
+      if (WriteItem(comm_id, id, "Torque Enable", TORQUE_ON) != DxlError::OK) {
         fprintf(
           stderr, "[comm_id:%03d][ID:%03d] Cannot write \"Torque On\" command!\n", comm_id,
           id);
@@ -654,6 +669,8 @@ DxlError Dynamixel::DynamixelEnable(const std::vector<std::pair<uint8_t, uint8_t
       return DxlError::ITEM_READ_FAIL;
     }
     torque_state_[{comm_id, id}] = TORQUE_ON;
+    fprintf(stderr, "[Torque Enable][ID:%03d] verified ON\n", id);
+    std::this_thread::sleep_for(std::chrono::milliseconds(15));
   }
   return DxlError::OK;
 }
@@ -662,6 +679,7 @@ DxlError Dynamixel::DynamixelDisable(
   const std::vector<std::pair<uint8_t,
   uint8_t>> & comm_id_id_arr)
 {
+  const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
   DxlError result = DxlError::OK;
   for (auto p : comm_id_id_arr) {
     uint8_t comm_id = p.first;
@@ -706,6 +724,7 @@ DxlError Dynamixel::DynamixelDisable(
 
 DxlError Dynamixel::WriteItem(uint8_t comm_id, uint8_t id, std::string item_name, uint32_t data)
 {
+  const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
   uint16_t ITEM_ADDR;
   uint8_t ITEM_SIZE;
   if (dxl_info_.GetDxlControlItem(comm_id, id, item_name, ITEM_ADDR, ITEM_SIZE) == false) {
@@ -722,6 +741,7 @@ DxlError Dynamixel::WriteItem(
   uint8_t comm_id, uint8_t id, uint16_t addr, uint8_t size,
   uint32_t data)
 {
+  const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
   for (int i = 0; i < MAX_COMM_RETRIES; i++) {
     int dxl_comm_result = COMM_TX_FAIL;
     uint8_t dxl_error = 0;
@@ -762,6 +782,11 @@ DxlError Dynamixel::WriteItem(
         packet_handler_->getRxPacketError(dxl_error));
       return DxlError::ITEM_WRITE_FAIL;
     } else {
+      if (addr == 64 || addr == 11) {
+        fprintf(stderr,
+          "[Init Write][ID:%03d][addr:%u] value=%u dxl_comm_result=%d dxl_error=%u\n",
+          id, addr, data, dxl_comm_result, dxl_error);
+      }
       return DxlError::OK;
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -772,6 +797,7 @@ DxlError Dynamixel::WriteItem(
 
 DxlError Dynamixel::InsertWriteItemBuf(uint8_t id, std::string item_name, uint32_t data)
 {
+  const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
   RWItemBufInfo item;
 
   item.comm_id = id;
@@ -793,6 +819,7 @@ DxlError Dynamixel::InsertWriteItemBuf(uint8_t id, std::string item_name, uint32
 
 DxlError Dynamixel::WriteItemBuf()
 {
+  const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
   for (auto it_write_item : write_item_buf_) {
     // set torque state variable (ON or OFF)
     if (strcmp(it_write_item.control_item.item_name.c_str(), "Torque Enable") == 0) {
@@ -837,6 +864,7 @@ DxlError Dynamixel::WriteItemBuf()
 
 DxlError Dynamixel::ReadItem(uint8_t comm_id, uint8_t id, std::string item_name, uint32_t & data)
 {
+  const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
   uint16_t ITEM_ADDR;
   uint8_t ITEM_SIZE;
   if (dxl_info_.GetDxlControlItem(comm_id, id, item_name, ITEM_ADDR, ITEM_SIZE) == false) {
@@ -916,6 +944,7 @@ DxlError Dynamixel::ReadItem(uint8_t comm_id, uint8_t id, std::string item_name,
 
 DxlError Dynamixel::InsertReadItemBuf(uint8_t id, std::string item_name)
 {
+  const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
   RWItemBufInfo item;
 
   uint8_t comm_id = id;
@@ -938,6 +967,7 @@ DxlError Dynamixel::InsertReadItemBuf(uint8_t id, std::string item_name)
 
 DxlError Dynamixel::ReadItemBuf()
 {
+  const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
   for (auto it_read_item = read_item_buf_.begin(); it_read_item < read_item_buf_.end();
     it_read_item++)
   {
@@ -991,6 +1021,7 @@ DxlError Dynamixel::ReadItemBuf()
 
 bool Dynamixel::CheckReadItemBuf(uint8_t id, std::string item_name)
 {
+  const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
   for (auto it_read_item_buf : read_item_buf_) {
     if (it_read_item_buf.id == id && it_read_item_buf.control_item.item_name == item_name) {
       return it_read_item_buf.read_flag;
@@ -1000,6 +1031,7 @@ bool Dynamixel::CheckReadItemBuf(uint8_t id, std::string item_name)
 }
 uint32_t Dynamixel::GetReadItemDataBuf(uint8_t id, std::string item_name)
 {
+  const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
   for (size_t i = 0; i < read_item_buf_.size(); i++) {
     if (read_item_buf_.at(i).id == id && read_item_buf_.at(i).control_item.item_name == item_name) {
       uint32_t res = read_item_buf_.at(i).data;
@@ -1056,6 +1088,7 @@ std::string Dynamixel::DxlErrorToString(DxlError error_num)
 
 DxlError Dynamixel::ReadMultiDxlData(double period_ms)
 {
+  const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
   if (read_data_list_.empty()) {
     return DxlError::OK;
   }
@@ -1069,6 +1102,7 @@ DxlError Dynamixel::ReadMultiDxlData(double period_ms)
 
 DxlError Dynamixel::ReadDxlDataIndividually()
 {
+  const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
   for (const auto & read_list : read_data_list_) {
     for (size_t item_index = 0; item_index < read_list.item_name.size(); ++item_index) {
       const uint8_t id = read_list.id_arr.at(item_index);
@@ -1093,8 +1127,257 @@ DxlError Dynamixel::ReadDxlDataIndividually()
   return DxlError::OK;
 }
 
+DxlError Dynamixel::ReadDxlDataByTransport()
+{
+  const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
+  // One U2D2 port is shared. Only TTL IDs may respond to this Sync Read;
+  // the RS-485 motor is queried after it completes.
+  std::vector<const RWItemList *> ttl;
+  std::vector<const RWItemList *> rs485;
+  for (const auto & item : read_data_list_) {
+    if (item.comm_id == 2) {
+      rs485.push_back(&item);
+    } else if (item.comm_id == 1 || item.comm_id == 3 || item.comm_id == 4) {
+      ttl.push_back(&item);
+    } else {
+      fprintf(stderr, "Unexpected DYNAMIXEL ID %u in mixed transport read\n", item.comm_id);
+      return DxlError::SET_READ_ITEM_FAIL;
+    }
+  }
+  if (ttl.size() != 3 || rs485.size() != 1) {
+    fprintf(stderr, "Mixed transport read expects TTL IDs 1,3,4 and RS-485 ID 2\n");
+    return DxlError::SET_READ_ITEM_FAIL;
+  }
+
+  // Sync Read requires the same address range on each TTL motor. Verify the
+  // model control tables before sending any group request.
+  const auto & reference = *ttl.front();
+  if (reference.item_addr.empty()) {return DxlError::SET_READ_ITEM_FAIL;}
+  uint16_t start = *std::min_element(reference.item_addr.begin(), reference.item_addr.end());
+  uint16_t end = start;
+  for (size_t i = 0; i < reference.item_addr.size(); ++i) {
+    end = std::max<uint16_t>(end, reference.item_addr[i] + reference.item_size[i]);
+  }
+  for (const auto * item : ttl) {
+    if (item->item_addr != reference.item_addr || item->item_size != reference.item_size ||
+      item->item_name != reference.item_name || item->id_arr.size() != item->item_name.size())
+    {
+      fprintf(stderr, "TTL motor feedback register layouts differ; refusing Sync Read\n");
+      return DxlError::SET_SYNC_READ_FAIL;
+    }
+  }
+  dynamixel::GroupSyncRead ttl_read(port_handler_, packet_handler_, start, end - start);
+  for (const auto * item : ttl) {
+    if (!ttl_read.addParam(item->comm_id)) {return DxlError::SET_SYNC_READ_FAIL;}
+  }
+  int read_result = ttl_read.txRxPacket();
+  if (read_result != COMM_SUCCESS) {
+    fprintf(stderr, "[TTL Sync Read] %s; clearing port and retrying once\n",
+      packet_handler_->getTxRxResult(read_result));
+    port_handler_->clearPort();
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    read_result = ttl_read.txRxPacket();
+    if (read_result != COMM_SUCCESS) {
+      fprintf(stderr, "[TTL Sync Read] retry failed: %s\n",
+        packet_handler_->getTxRxResult(read_result));
+      return DxlError::SYNC_READ_FAIL;
+    }
+  }
+
+  for (const auto * item : ttl) {
+    for (size_t i = 0; i < item->item_name.size(); ++i) {
+      const uint8_t id = item->id_arr[i];
+      const uint16_t addr = item->item_addr[i];
+      const uint8_t size = item->item_size[i];
+      if (!ttl_read.isAvailable(id, addr, size)) {
+        fprintf(stderr, "[TTL Sync Read][ID:%u] missing %s; retry on next cycle\n",
+          id, item->item_name[i].c_str());
+        return DxlError::SYNC_READ_FAIL;
+      }
+      const uint32_t raw = ttl_read.getData(id, addr, size);
+      double unit_value = 0.0;
+      bool is_signed = false;
+      if (dxl_info_.GetDxlUnitValue(item->comm_id, id, item->item_name[i], unit_value) &&
+        dxl_info_.GetDxlSignType(item->comm_id, id, item->item_name[i], is_signed))
+      {
+        *item->item_data_ptr_vec[i] = ConvertValueWithUnitInfo(
+          item->comm_id, id, item->item_name[i], raw, size, is_signed);
+      } else if (item->item_name[i] == "Present Position") {
+        *item->item_data_ptr_vec[i] = dxl_info_.ConvertValueToRadian(
+          item->comm_id, id, static_cast<int32_t>(raw));
+      } else {
+        *item->item_data_ptr_vec[i] = static_cast<double>(raw);
+      }
+    }
+  }
+  // Successful reads have consumed their replies; preserve the RX buffer.
+  std::this_thread::sleep_for(std::chrono::microseconds(400));
+  // RS-485 ID 2 is deliberately outside the TTL Sync Read packet.
+  const auto & item = *rs485.front();
+  for (size_t i = 0; i < item.item_name.size(); ++i) {
+    const uint8_t id = item.id_arr[i];
+    uint32_t raw = 0;
+    const DxlError result = ReadItem(item.comm_id, id, item.item_name[i], raw);
+    if (result != DxlError::OK) {
+      fprintf(stderr, "[RS-485 Read][ID:2] %s; retry on next cycle\n",
+        DxlErrorToString(result).c_str());
+      return result;
+    }
+    double unit_value = 0.0;
+    bool is_signed = false;
+    if (dxl_info_.GetDxlUnitValue(item.comm_id, id, item.item_name[i], unit_value) &&
+      dxl_info_.GetDxlSignType(item.comm_id, id, item.item_name[i], is_signed))
+    {
+      *item.item_data_ptr_vec[i] = ConvertValueWithUnitInfo(
+        item.comm_id, id, item.item_name[i], raw, item.item_size[i], is_signed);
+    } else if (item.item_name[i] == "Present Position") {
+      *item.item_data_ptr_vec[i] = dxl_info_.ConvertValueToRadian(
+        item.comm_id, id, static_cast<int32_t>(raw));
+    } else {
+      *item.item_data_ptr_vec[i] = static_cast<double>(raw);
+    }
+  }
+  return DxlError::OK;
+}
+
+DxlError Dynamixel::WriteDxlDataByTransport()
+{
+  const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
+  // Sync Write has no status response. The position registers are identical
+  // for IDs 1, 2 and 3, so one packet can reach both U2D2 channels.
+  dynamixel::GroupSyncWrite position_write(port_handler_, packet_handler_, 116, 4);
+  dynamixel::GroupSyncWrite velocity_write(port_handler_, packet_handler_, 104, 4);
+  bool seen[5] = {};
+  std::map<uint8_t, uint32_t> position_raw;
+  for (const auto & item : write_data_list_) {
+    const uint8_t id = item.comm_id;
+    if (id < 1 || id > 4 || seen[id] || item.item_name.size() != 1 ||
+      item.item_addr.size() != 1 || item.item_size.size() != 1 ||
+      item.id_arr.size() != 1 || item.item_data_ptr_vec.size() != 1 ||
+      item.id_arr[0] != id || item.item_size[0] != 4 || !item.item_data_ptr_vec[0])
+    {
+      return DxlError::SET_WRITE_ITEM_FAIL;
+    }
+    const std::string & name = item.item_name[0];
+    const bool position = id != 4;
+    if (name != (position ? "Goal Position" : "Goal Velocity") ||
+      item.item_addr[0] != (position ? 116 : 104))
+    {
+      return DxlError::SET_WRITE_ITEM_FAIL;
+    }
+    seen[id] = true;
+    double unit_value = 0.0;
+    bool is_signed = false;
+    uint32_t raw = 0;
+    if (dxl_info_.GetDxlUnitValue(id, id, name, unit_value) &&
+      dxl_info_.GetDxlSignType(id, id, name, is_signed))
+    {
+      raw = ConvertUnitValueToRawValue(id, id, name, *item.item_data_ptr_vec[0], 4, is_signed);
+    } else if (position) {
+      raw = static_cast<uint32_t>(dxl_info_.ConvertRadianToValue(
+        id, id, *item.item_data_ptr_vec[0]));
+    } else {
+      return DxlError::SET_WRITE_ITEM_FAIL;
+    }
+    if (position) {position_raw[id] = raw;}
+    uint8_t bytes[4] = {
+      static_cast<uint8_t>(raw), static_cast<uint8_t>(raw >> 8),
+      static_cast<uint8_t>(raw >> 16), static_cast<uint8_t>(raw >> 24)};
+    if (!(position ? position_write.addParam(id, bytes) :
+      velocity_write.addParam(id, bytes)))
+    {
+      fprintf(stderr, "[Sync Write][ID:%u] addParam failed\n", id);
+      return DxlError::SET_SYNC_WRITE_FAIL;
+    }
+  }
+  if (!seen[1] || !seen[2] || !seen[3] || !seen[4]) {
+    return DxlError::SET_WRITE_ITEM_FAIL;
+  }
+  const int position_result = position_write.txPacket();
+  if (position_result != COMM_SUCCESS) {
+    fprintf(stderr, "[Position Sync Write][IDs:1,2,3] %s\n",
+      packet_handler_->getTxRxResult(position_result));
+    return DxlError::SYNC_WRITE_FAIL;
+  }
+  last_position_write_raw_ = position_raw;
+  std::this_thread::sleep_for(std::chrono::microseconds(350));
+  const int velocity_result = velocity_write.txPacket();
+  if (velocity_result != COMM_SUCCESS) {
+    fprintf(stderr, "[Velocity Sync Write][ID:4] %s\n",
+      packet_handler_->getTxRxResult(velocity_result));
+    return DxlError::SYNC_WRITE_FAIL;
+  }
+  return DxlError::OK;
+}
+
+bool Dynamixel::GetLastPositionWriteRaw(uint8_t id, uint32_t & raw)
+{
+  const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
+  const auto it = last_position_write_raw_.find(id);
+  if (it == last_position_write_raw_.end()) {return false;}
+  raw = it->second;
+  return true;
+}
+
+bool Dynamixel::ReadDiagnosticRegister(uint8_t id, uint16_t addr, uint8_t size, uint32_t & raw)
+{
+  const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
+  uint8_t error = 0;
+  int result = COMM_TX_FAIL;
+  raw = 0;
+  if (size == 1) {
+    uint8_t value = 0;
+    result = packet_handler_->read1ByteTxRx(port_handler_, id, addr, &value, &error);
+    raw = value;
+  } else if (size == 4) {
+    result = packet_handler_->read4ByteTxRx(port_handler_, id, addr, &raw, &error);
+  }
+  // Diagnostics never retry or sleep in the controller loop. Alert bit alone
+  // still carries valid data; Hardware Error Status is read separately.
+  if (result != COMM_SUCCESS || (error & 0x7f) != 0) {
+    fprintf(stderr, "[DIAG_READ][ID:%u][addr:%u] comm=%d error=%u\n", id, addr, result, error);
+    return false;
+  }
+  return true;
+}
+
+bool Dynamixel::ConvertPositionRawToRadian(
+  uint8_t comm_id, uint8_t id, const std::string & item_name,
+  uint32_t raw, double & radian)
+{
+  const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
+  double unit_value = 0.0;
+  bool is_signed = false;
+  if (dxl_info_.GetDxlUnitValue(comm_id, id, item_name, unit_value) &&
+    dxl_info_.GetDxlSignType(comm_id, id, item_name, is_signed))
+  {
+    radian = ConvertValueWithUnitInfo(comm_id, id, item_name, raw, 4, is_signed);
+    return true;
+  }
+  radian = dxl_info_.ConvertValueToRadian(comm_id, id, static_cast<int32_t>(raw));
+  return true;
+}
+
+bool Dynamixel::ConvertPositionRadianToRaw(
+  uint8_t comm_id, uint8_t id, const std::string & item_name,
+  double radian, uint32_t & raw)
+{
+  const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
+  double unit_value = 0.0;
+  bool is_signed = false;
+  if (dxl_info_.GetDxlUnitValue(comm_id, id, item_name, unit_value) &&
+    dxl_info_.GetDxlSignType(comm_id, id, item_name, is_signed))
+  {
+    raw = ConvertUnitValueToRawValue(comm_id, id, item_name, radian, 4, is_signed);
+    return true;
+  }
+  raw = static_cast<uint32_t>(dxl_info_.ConvertRadianToValue(comm_id, id, radian));
+  return true;
+}
+
 DxlError Dynamixel::WriteMultiDxlData()
 {
+  const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
   if (write_data_list_.empty()) {
     return DxlError::OK;
   }

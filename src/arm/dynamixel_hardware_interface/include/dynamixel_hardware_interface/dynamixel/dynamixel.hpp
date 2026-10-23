@@ -27,6 +27,7 @@
 #include <iostream>
 #include <cstdarg>
 #include <memory>
+#include <mutex>
 #include <functional>
 #include <utility>
 
@@ -189,6 +190,11 @@ typedef struct
 class Dynamixel
 {
 private:
+  // One lock for this U2D2 owner: hold across complete Tx/Rx transactions,
+  // transport transitions, retries and clearPort(). Recursive because grouped
+  // operations call ReadItem/WriteItem, which must also be safe on their own.
+  std::recursive_mutex port_mutex_;
+  std::map<uint8_t, uint32_t> last_position_write_raw_;
   // dxl communication variable
   dynamixel::PortHandler * port_handler_ = nullptr;
   dynamixel::PacketHandler * packet_handler_ = nullptr;
@@ -262,8 +268,10 @@ public:
   DxlError ReadMultiDxlData(double period_ms);
   // U2D2 mixed TTL/RS-485: unicast feedback avoids simultaneous status replies.
   DxlError ReadDxlDataIndividually();
+  DxlError ReadDxlDataByTransport();
   // Write Item (sync or bulk)
   DxlError WriteMultiDxlData();
+  DxlError WriteDxlDataByTransport();
 
   // Set Dxl Option
   // DxlError SetOperatingMode(uint8_t id, uint8_t dynamixel_mode);
@@ -278,6 +286,14 @@ public:
 
   // DXL Item Read
   DxlError ReadItem(uint8_t comm_id, uint8_t id, std::string item_name, uint32_t & data);
+  bool GetLastPositionWriteRaw(uint8_t id, uint32_t & raw);
+  bool ReadDiagnosticRegister(uint8_t id, uint16_t addr, uint8_t size, uint32_t & raw);
+  bool ConvertPositionRawToRadian(
+    uint8_t comm_id, uint8_t id, const std::string & item_name,
+    uint32_t raw, double & radian);
+  bool ConvertPositionRadianToRaw(
+    uint8_t comm_id, uint8_t id, const std::string & item_name,
+    double radian, uint32_t & raw);
   DxlError InsertReadItemBuf(uint8_t id, std::string item_name);
   DxlError ReadItemBuf();
   bool CheckReadItemBuf(uint8_t id, std::string item_name);

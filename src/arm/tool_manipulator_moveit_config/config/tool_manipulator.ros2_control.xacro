@@ -113,6 +113,9 @@
           <param name="disable_torque_at_init">true</param>
           <param name="error_timeout_ms">500</param>
           <param name="position_limit_rejection_margin">0.01745329252</param>
+          <!-- Enable only for short, supervised diagnosis: it adds register reads on U2D2. -->
+          <param name="position_diagnostics">${'true' if hw['buses']['dynamixel_u2d2'].get('position_diagnostics', False) else 'false'}</param>
+          <param name="position_diagnostics_period_ms">${hw['buses']['dynamixel_u2d2'].get('position_diagnostics_period_ms', 1000)}</param>
           <param name="transmission_to_joint_matrix">1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1</param>
           <param name="joint_to_transmission_matrix">1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1</param>
         </hardware>
