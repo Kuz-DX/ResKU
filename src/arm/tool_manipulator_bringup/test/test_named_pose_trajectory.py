@@ -66,9 +66,9 @@ class NamedPoseTrajectoryTest(unittest.TestCase):
         limits = dict.fromkeys(ARM_JOINTS, (-1.0, 1.0))
         current = dict(zip(ARM_JOINTS, [-1.0, 1.4, -1.2, 0.99, 1.0, 0.5]))
         target = recovery_target(current, limits)
-        self.assertAlmostEqual(target['shoulder_joint'], 1.0 - math.radians(3))
-        self.assertAlmostEqual(target['elbow_joint'], -1.0 + math.radians(3))
-        self.assertAlmostEqual(target['wrist_pitch_joint'], 1.0 - math.radians(3))
+        self.assertAlmostEqual(target['shoulder_joint'], 1.0 - math.radians(2))
+        self.assertAlmostEqual(target['elbow_joint'], -1.0 + math.radians(2))
+        self.assertAlmostEqual(target['wrist_pitch_joint'], 1.0 - math.radians(2))
         for name in ('base_joint', 'wrist_roll_joint', 'wrist_yaw_joint'):
             self.assertEqual(target[name], current[name])
         current['base_joint'] = -1.01

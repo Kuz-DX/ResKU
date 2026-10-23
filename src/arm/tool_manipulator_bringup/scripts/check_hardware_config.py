@@ -52,7 +52,10 @@ def inspect_config(config: dict) -> tuple[list[tuple[str, object]], list[str]]:
         ('buses.rmd_can.interface', buses.get('rmd_can', {}).get('interface')),
     ))
     joints = config.get('joints', {})
-    groups = tuple((name, DXL_FIELDS) for name in DXL_JOINTS) + tuple(
+    groups = tuple((name, tuple(field for field in DXL_FIELDS
+                                 if field not in ('soft_limit_raw', 'soft_limit_rad'))
+                    if joints.get(name, {}).get('operating_mode') == 1 else DXL_FIELDS)
+                   for name in DXL_JOINTS) + tuple(
         (name, RMD_FIELDS) for name in RMD_JOINTS
     )
     for joint, fields in groups:

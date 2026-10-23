@@ -28,7 +28,7 @@ source install/setup.bash
 # 가상 하드웨어 (기본값); RViz 포함
 ros2 launch tool_manipulator_bringup manual_control.launch.py launch_rviz:=true
 
-# 실기: hardware.yaml 검사 → 기존 3도 초기 복귀 → controller 전환 → 조작 허용
+# 실기: hardware.yaml 검사 → 2도 초기 복귀 → controller 전환 → 조작 허용
 ros2 launch tool_manipulator_bringup manual_control.launch.py real_hardware:=true
 ```
 

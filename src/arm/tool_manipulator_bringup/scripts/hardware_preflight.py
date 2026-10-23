@@ -72,9 +72,9 @@ def validate(config: dict) -> list[str]:
             ):
                 if not finite(joint.get(key)):
                     errors.append(f'joints.{name}.{key} must be measured')
-            if not bounded_pair(joint.get('soft_limit_raw')):
+            if joint.get('operating_mode') != 1 and not bounded_pair(joint.get('soft_limit_raw')):
                 errors.append(f'joints.{name}.soft_limit_raw must be [min, max]')
-            if not bounded_pair(joint.get('soft_limit_rad')):
+            if joint.get('operating_mode') != 1 and not bounded_pair(joint.get('soft_limit_rad')):
                 errors.append(f'joints.{name}.soft_limit_rad must be [min, max]')
         elif joint.get('vendor') == 'rmd':
             if joint.get('bus') != 'rmd_can':
@@ -96,12 +96,19 @@ def validate(config: dict) -> list[str]:
         'base_joint': (1, 'ttl'), 'wrist_roll_joint': (2, 'rs485'),
         'wrist_yaw_joint': (3, 'ttl'), 'ee_joint': (4, 'ttl'),
     }
+    expected_operating_modes = {
+        'base_joint': 4, 'wrist_roll_joint': 4,
+        'wrist_yaw_joint': 4, 'ee_joint': 1,
+    }
     for name, (motor_id, channel) in expected_dynamixel.items():
         joint = joints.get(name, {})
         if joint.get('id') != motor_id or joint.get('transport_channel') != channel:
             errors.append(f'joints.{name}.id/transport_channel must match the confirmed U2D2 B topology')
-        if joint.get('operating_mode') != 4:
-            errors.append(f'joints.{name}.operating_mode must be the confirmed extended-position mode 4')
+        expected_mode = expected_operating_modes[name]
+        if joint.get('operating_mode') != expected_mode:
+            control_name = 'velocity' if expected_mode == 1 else 'extended-position'
+            errors.append(
+                f'joints.{name}.operating_mode must be {control_name} mode {expected_mode}')
         if not isinstance(joint.get('raw_increases_ccw'), bool):
             errors.append(f'joints.{name}.raw_increases_ccw must be a measured boolean')
     expected_rmd = {'shoulder_joint': 4, 'elbow_joint': 5, 'wrist_pitch_joint': 6}

@@ -309,6 +309,7 @@ namespace rmd_hardware_interface {
     blocked_motion_direction_ = 0;
     overcurrent_duration_ = std::chrono::milliseconds(0);
     safe_position_command_ = std::numeric_limits<double>::quiet_NaN();
+    recovery_start_position_ = std::numeric_limits<double>::quiet_NaN();
     current_limit_start_position_ = std::numeric_limits<double>::quiet_NaN();
     next_position_diagnostic_time_ = std::chrono::steady_clock::now();
 
@@ -541,6 +542,7 @@ namespace rmd_hardware_interface {
         position_command_ = measured_position;
         async_position_command_.store(measured_position);
         safe_position_command_ = measured_position;
+        recovery_start_position_ = measured_position;
         current_limit_active_ = false;
         current_limit_latched_ = false;
         blocked_motion_direction_ = 0;
@@ -610,11 +612,26 @@ namespace rmd_hardware_interface {
         double const measured = async_position_state_.load();
         // Allow a smooth return from an out-of-range starting pose. Never clamp
         // these samples to the boundary: that would turn recovery into a step.
-        bool const recovering = std::isfinite(measured) &&
-          ((measured < position_lower_limit_ && position_command_ >= measured &&
+        // The controller initially holds its activation position. Feedback can
+        // drift slightly before the recovery trajectory arrives; keep that
+        // original hold, then accept only commands toward the valid interval.
+        bool const below = std::isfinite(measured) && measured < position_lower_limit_;
+        bool const above = std::isfinite(measured) && measured > position_upper_limit_;
+        // Anchor recovery to the activation position. Small feedback drift must
+        // not turn a trajectory that advances inward into an outward command.
+        bool const initial_hold = (below || above) &&
+          std::abs(position_command_ - recovery_start_position_) <= 1e-6;
+        bool const recovering = initial_hold ||
+          (below && position_command_ >= recovery_start_position_ &&
             position_command_ <= position_lower_limit_) ||
-           (measured > position_upper_limit_ && position_command_ <= measured &&
-            position_command_ >= position_upper_limit_));
+          (above && position_command_ <= recovery_start_position_ &&
+            position_command_ >= position_upper_limit_);
+        if ((below && position_command_ < recovery_start_position_ - 1e-6) ||
+            (above && position_command_ > recovery_start_position_ + 1e-6)) {
+          RCLCPP_ERROR(getLogger(), "Rejecting outward recovery command %.6f from %.6f.",
+            position_command_, measured);
+          return hardware_interface::return_type::ERROR;
+        }
         if (!recovering &&
             (position_command_ < position_lower_limit_ - position_limit_rejection_margin_ ||
              position_command_ > position_upper_limit_ + position_limit_rejection_margin_)) {

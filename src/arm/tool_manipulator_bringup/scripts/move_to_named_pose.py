@@ -32,6 +32,12 @@ ARM_JOINTS = (
     "wrist_yaw_joint",
 )
 
+# Keep the RMD recovery pose clear of Servo's 2-degree halt boundary.
+# The goal is 5 degrees inside; measured feedback must settle at least
+# 4 degrees inside before manual input is enabled.
+STARTUP_SERVO_BUFFER_RAD = math.radians(3.0)
+STARTUP_VERIFICATION_BUFFER_RAD = math.radians(2.0)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -261,7 +267,10 @@ class NamedPoseRunner(Node):
             return 2
         current, velocities = current_state
         try:
-            boundary = recovery_target(current, limits, recovery_margin)
+            boundary = recovery_target(
+                current, limits,
+                (recovery_margin + STARTUP_SERVO_BUFFER_RAD)
+                if recovery_margin is not None else None)
             if _recovery_stage:
                 boundary = current
             points, motion_duration = make_smooth_points(
@@ -299,7 +308,13 @@ class NamedPoseRunner(Node):
                 if state is None:
                     break
                 try:
-                    validate_joint_positions(state[0], limits, label="recovered arm state")
+                    rmd_limits = {name: limits[name] for name in
+                                  ("shoulder_joint", "elbow_joint", "wrist_pitch_joint")}
+                    validate_joint_positions(state[0], rmd_limits,
+                                             (recovery_margin or 0.0) + STARTUP_VERIFICATION_BUFFER_RAD,
+                                             label="recovered RMD state")
+                    dxl_limits = {name: limits[name] for name in ARM_JOINTS if name not in rmd_limits}
+                    validate_joint_positions(state[0], dxl_limits, label="recovered Dynamixel state")
                 except ValueError:
                     continue
                 if all(math.isfinite(v) and abs(v) <= max_start_velocity

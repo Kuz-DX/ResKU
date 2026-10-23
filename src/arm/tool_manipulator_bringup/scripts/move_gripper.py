@@ -47,6 +47,8 @@ def load_target(tools_path: Path, hardware_path: Path, command: str) -> float:
         raise ValueError(f"tools.yaml tools.0.actuator.{key} must be a finite number")
 
     joint = (hardware.get("joints") or {}).get(JOINT_NAME) if isinstance(hardware, dict) else None
+    if isinstance(joint, dict) and joint.get("operating_mode") == 1:
+        raise ValueError("ee_joint uses velocity control; position goals are unavailable")
     limits = joint.get("soft_limit_rad") if isinstance(joint, dict) else None
     if not isinstance(limits, list) or len(limits) != 2:
         raise ValueError("hardware.yaml ee_joint.soft_limit_rad must be [lower, upper]")

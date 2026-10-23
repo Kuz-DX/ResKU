@@ -335,6 +335,7 @@ namespace rmd_hardware_interface {
       int blocked_motion_direction_;
       std::chrono::milliseconds overcurrent_duration_;
       double safe_position_command_;
+      double recovery_start_position_;
       double current_limit_start_position_;
       std::chrono::steady_clock::time_point next_position_diagnostic_time_;
   };

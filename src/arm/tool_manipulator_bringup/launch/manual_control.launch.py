@@ -46,7 +46,10 @@ def _start(context):
                     arguments=[name, '-c', '/controller_manager', '--controller-manager-timeout', '60',
                                *(['--inactive'] if inactive else [])], output='screen')
     jsb = spawner('joint_state_broadcaster')
-    arm, ee = spawner('arm_controller'), spawner('ee_controller')
+    arm = spawner('arm_controller')
+    # Mock hardware retains the position trajectory controller.  Real hardware
+    # uses the dedicated velocity controller for the continuous EE output.
+    ee = spawner('ee_velocity_controller' if real else 'ee_controller')
     recovery = Node(package='tool_manipulator_bringup', executable='move_to_named_pose.py',
                     arguments=['--recover-only', '--hardware', hardware,
                                '--servo-config', str(share/'config/servo.yaml'),

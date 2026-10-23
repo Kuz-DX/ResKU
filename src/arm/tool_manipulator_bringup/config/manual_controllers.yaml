@@ -2,9 +2,16 @@ controller_manager:
   ros__parameters:
     manual_position_controller:
       type: forward_command_controller/ForwardCommandController
+    ee_velocity_controller:
+      type: forward_command_controller/ForwardCommandController
 
 manual_position_controller:
   ros__parameters:
     # Must exactly match manual_controller.py JOINTS order.
     joints: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
     interface_name: position
+
+ee_velocity_controller:
+  ros__parameters:
+    joints: [ee_joint]
+    interface_name: velocity
