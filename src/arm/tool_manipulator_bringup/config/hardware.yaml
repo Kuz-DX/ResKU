@@ -32,9 +32,12 @@ joints:
     velocity_limit_rad_s: 0.48
     current_limit_ma: 5506.43
     current_limit_raw: 2047
-    velocity_limit_raw: 20
-    profile_acceleration_raw: 5
-    profile_velocity_raw: 10
+    # Upper controller supplies bounded position samples; disable motor profiling.
+    velocity_limit_raw: 200
+    profile_acceleration_raw: 0
+    profile_velocity_raw: 0
+    # Conservative integral-gain trial for small-error stiction; raw register 82.
+    position_i_gain_raw: 20
   # RMD measurement 2026-10-22: upright is raw/joint zero.
   # joint_rad = sign * raw_deg * pi / 180; endpoint readings are motor degrees.
   shoulder_joint:
@@ -106,9 +109,12 @@ joints:
     velocity_limit_rad_s: 0.24
     current_limit_ma: 6877.92
     current_limit_raw: 2047
-    velocity_limit_raw: 20
-    profile_acceleration_raw: 5
-    profile_velocity_raw: 10
+    # Upper controller supplies bounded position samples; disable motor profiling.
+    velocity_limit_raw: 200
+    profile_acceleration_raw: 0
+    profile_velocity_raw: 0
+    # Conservative integral-gain trial for small-error stiction; raw register 82.
+    position_i_gain_raw: 20
   wrist_yaw_joint:
     vendor: dynamixel
     model: MX-106T
@@ -127,9 +133,12 @@ joints:
     velocity_limit_rad_s: 0.24
     current_limit_ma: 6877.92
     current_limit_raw: 2047
-    velocity_limit_raw: 20
-    profile_acceleration_raw: 5
-    profile_velocity_raw: 10
+    # Upper controller supplies bounded position samples; disable motor profiling.
+    velocity_limit_raw: 200
+    profile_acceleration_raw: 0
+    profile_velocity_raw: 0
+    # Conservative integral-gain trial for small-error stiction; raw register 82.
+    position_i_gain_raw: 20
   ee_joint:
     vendor: dynamixel
     model: MX-106T

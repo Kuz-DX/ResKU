@@ -1019,6 +1019,7 @@ hardware_interface::return_type DynamixelHardware::read(
 hardware_interface::return_type DynamixelHardware::write(
   [[maybe_unused]] const rclcpp::Time & time, const rclcpp::Duration & period)
 {
+  LogWriteEntryDiagnostics();  // Capture controller commands before any guard, sync or clamp.
   // TEMPORARILY DISABLED (2026-08-28, c154f66): paired with the read-side
   // latch block above.
 #if 0
@@ -1408,8 +1409,33 @@ bool DynamixelHardware::InitItem(const hardware_interface::ComponentInfo & gpio)
       return false;
     }
   }
+  if (use_individual_feedback_read_ && id >= 1 && id <= 3 &&
+    gpio.parameters.count("Operating Mode") && gpio.parameters.at("Operating Mode") == "4")
+  {
+    if (dxl_comm_->VerifyPositionProfile(comm_id, id,
+      static_cast<uint32_t>(std::stoul(gpio.parameters.at("Velocity Limit"))),
+      static_cast<uint32_t>(std::stoul(gpio.parameters.at("Profile Velocity"))),
+      static_cast<uint32_t>(std::stoul(gpio.parameters.at("Profile Acceleration")))) != DxlError::OK)
+    {
+      RCLCPP_ERROR(logger_, "Position profile readback mismatch for DXL ID %u; startup aborted.", id);
+      return false;
+    }
+  }
+  // A configured gain is only accepted after readback, before torque enable.
+  const auto integral = gpio.parameters.find("Position I Gain");
+  if (integral != gpio.parameters.end()) {
+    uint32_t actual = 0;
+    const auto configured = std::stoul(integral->second);
+    if (configured > 16383 || dxl_comm_->ReadItem(
+      comm_id, id, "Position I Gain", actual) != DxlError::OK || actual != configured)
+    {
+      RCLCPP_ERROR(logger_, "Position I Gain verification failed for ID %u.", id);
+      return false;
+    }
+    RCLCPP_INFO(logger_, "DXL_GAIN ID=%u Position_I_Gain=%u verified", id, actual);
+  }
   if (position_diagnostics_enabled_ && id >= 1 && id <= 3) {
-    for (const auto & name : {"Operating Mode", "Profile Velocity", "Velocity Limit"}) {
+    for (const auto & name : {"Operating Mode", "Drive Mode", "Profile Velocity", "Profile Acceleration", "Velocity Limit", "Position P Gain", "Position I Gain", "Position D Gain", "PWM Limit", "Current Limit"}) {
       uint32_t actual = 0;
       const DxlError result = dxl_comm_->ReadItem(comm_id, id, name, actual);
       const auto expected = gpio.parameters.find(name);
@@ -1945,6 +1971,39 @@ void DynamixelHardware::SyncJointCommandWithStates()
   }
 }
 
+void DynamixelHardware::LogWriteEntryDiagnostics()
+{
+  if (!position_diagnostics_enabled_ || hdl_joint_commands_.size() < 3) {return;}
+  std::vector<double> commands;
+  for (size_t index = 0; index < 3; ++index) {
+    const auto & joint = hdl_joint_commands_[index];
+    const auto it = std::find(joint.interface_name_vec.begin(), joint.interface_name_vec.end(),
+      hardware_interface::HW_IF_POSITION);
+    if (it == joint.interface_name_vec.end()) {return;}
+    commands.push_back(*joint.value_ptr_vec[std::distance(joint.interface_name_vec.begin(), it)]);
+  }
+  const auto now = std::chrono::steady_clock::now();
+  if (commands != last_write_entry_commands_) {
+    write_entry_tail_until_ = now + std::chrono::milliseconds(2500);
+    last_write_entry_commands_ = commands;
+  }
+  if (now > write_entry_tail_until_ ||
+    (last_write_entry_log_.time_since_epoch().count() != 0 &&
+    now - last_write_entry_log_ < std::chrono::milliseconds(500))) {return;}
+  std::ostringstream line;
+  line << std::setprecision(12) << "DIAG_WRITE_ENTRY pre_guard=true";
+  for (size_t i = 0; i < 3; ++i) {
+    line << " " << hdl_joint_commands_[i].name << "=" << commands[i] << " delta=";
+    if (last_logged_write_entry_commands_.size() == 3) {
+      line << commands[i] - last_logged_write_entry_commands_[i];
+    } else {line << "NA";}
+  }
+  line << " dxl_status=" << dxl_status_ << " torque_status=" << dxl_torque_status_;
+  RCLCPP_INFO(logger_, "%s", line.str().c_str());
+  last_logged_write_entry_commands_ = commands;
+  last_write_entry_log_ = now;
+}
+
 void DynamixelHardware::LogPositionDiagnostics(
   const std::string & phase, bool read_registers, bool force)
 {
@@ -1958,10 +2017,10 @@ void DynamixelHardware::LogPositionDiagnostics(
     position_diagnostic_stage_ = 0;
     position_diagnostic_cycle_active_ = true;
   }
-  // Spread twelve unicast reads across twelve write cycles. At most one extra
+  // Spread diagnostic reads across write cycles. At most one extra
   // Tx/Rx per cycle, no diagnostic retries, three complete lines per second.
-  const size_t index = position_diagnostic_stage_ / 4;
-  const size_t field = position_diagnostic_stage_ % 4;
+  const size_t index = position_diagnostic_stage_ / 6;
+  const size_t field = position_diagnostic_stage_ % 6;
   if (index >= hdl_joint_commands_.size() || index >= hdl_trans_commands_.size()) {
     position_diagnostic_cycle_active_ = false;
     return;
@@ -1980,11 +2039,11 @@ void DynamixelHardware::LogPositionDiagnostics(
     sample.transmission_command = value(trans, "Goal Position");
     sample.sent_ok = dxl_comm_->GetLastPositionWriteRaw(trans.id, sample.sent_raw);
   }
-  constexpr uint16_t addresses[] = {116, 64, 70, 132};
-  constexpr uint8_t sizes[] = {4, 1, 1, 4};
+  constexpr uint16_t addresses[] = {116, 64, 70, 132, 124, 126};
+  constexpr uint8_t sizes[] = {4, 1, 1, 4, 2, 2};
   sample.valid[field] = dxl_comm_->ReadDiagnosticRegister(
     trans.comm_id, addresses[field], sizes[field], sample.registers[field]);
-  if (field == 3) {
+  if (field == 5) {
     double present_rad = std::numeric_limits<double>::quiet_NaN();
     if (sample.valid[3]) {
       dxl_comm_->ConvertPositionRawToRadian(
@@ -1995,12 +2054,15 @@ void DynamixelHardware::LogPositionDiagnostics(
               << ':' << sample.registers[1] << ':' << sample.registers[2];
     for (bool valid : sample.valid) {signature << ':' << valid;}
     // Encoder noise at an unchanged goal is not a new operator event.
-    if (last_position_diagnostic_signature_[trans.id] != signature.str()) {
+    if (last_position_diagnostic_signature_[trans.id] != signature.str() ||
+      (trans.id <= 3 && sample.valid[0] && sample.valid[3] &&
+      std::abs(static_cast<int64_t>(static_cast<int32_t>(sample.registers[0])) -
+      static_cast<int32_t>(sample.registers[3])) >= 2)) {
       last_position_diagnostic_signature_[trans.id] = signature.str();
     RCLCPP_INFO(logger_,
       "DIAG_POSITION phase=%s ID=%u joint=%s ros_cmd_rad=%.9f trans_cmd_rad=%.9f "
       "sent_raw=%s%d goal_raw=%s%d match=%s torque=%s%u hw_error=%s%u "
-      "present_raw=%s%d present_model_rad=%.9f",
+      "present_raw=%s%d present_model_rad=%.9f hardware_state_rad=%.9f pwm_raw=%s%d current_raw=%s%d",
       phase.c_str(), static_cast<unsigned>(trans.id), joint.name.c_str(),
       sample.joint_command, sample.transmission_command,
       sample.sent_ok ? "" : "NA/", static_cast<int32_t>(sample.sent_raw),
@@ -2009,10 +2071,13 @@ void DynamixelHardware::LogPositionDiagnostics(
       (sample.sent_raw == sample.registers[0] ? "true" : "false"),
       sample.valid[1] ? "" : "NA/", sample.registers[1],
       sample.valid[2] ? "" : "NA/", sample.registers[2],
-      sample.valid[3] ? "" : "NA/", static_cast<int32_t>(sample.registers[3]), present_rad);
+      sample.valid[3] ? "" : "NA/", static_cast<int32_t>(sample.registers[3]), present_rad,
+      value(hdl_joint_states_[index], hardware_interface::HW_IF_POSITION),
+      sample.valid[4] ? "" : "NA/", static_cast<int16_t>(sample.registers[4]),
+      sample.valid[5] ? "" : "NA/", static_cast<int16_t>(sample.registers[5]));
     }
   }
-  if (++position_diagnostic_stage_ == 12) {position_diagnostic_cycle_active_ = false;}
+  if (++position_diagnostic_stage_ == 18) {position_diagnostic_cycle_active_ = false;}
 }
 
 void DynamixelHardware::ChangeDxlTorqueState()
@@ -2023,11 +2088,17 @@ void DynamixelHardware::ChangeDxlTorqueState()
 
   if (dxl_torque_status_ == REQUESTED_TO_ENABLE) {
     RCLCPP_WARN_STREAM(logger_, "Requested to enable torque, Enabling torque for all Dynamixels");
-    dxl_comm_->DynamixelEnable(torque_enabled_comm_id_id_);
+    if (dxl_comm_->DynamixelEnable(torque_enabled_comm_id_id_) != DxlError::OK) {
+      RCLCPP_ERROR(logger_, "Torque enable failed; preserving pending request and controller commands.");
+      return;
+    }
     SyncJointCommandWithStates();
   } else if (dxl_torque_status_ == REQUESTED_TO_DISABLE) {
     RCLCPP_WARN_STREAM(logger_, "Requested to disable torque, Disabling torque for all Dynamixels");
-    dxl_comm_->DynamixelDisable(torque_enabled_comm_id_id_);
+    if (dxl_comm_->DynamixelDisable(torque_enabled_comm_id_id_) != DxlError::OK) {
+      RCLCPP_ERROR(logger_, "Torque disable failed; preserving pending request and controller commands.");
+      return;
+    }
     SyncJointCommandWithStates();
   }
 

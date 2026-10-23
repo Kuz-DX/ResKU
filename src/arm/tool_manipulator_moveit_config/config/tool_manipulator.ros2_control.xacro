@@ -80,6 +80,9 @@
       <param name="Velocity Limit">${spec['velocity_limit_raw']}</param>
       <param name="Profile Acceleration">${spec['profile_acceleration_raw']}</param>
       <param name="Profile Velocity">${spec['profile_velocity_raw']}</param>
+      <xacro:if value="${spec['operating_mode'] == 4 and 'position_i_gain_raw' in spec}">
+        <param name="Position I Gain">${spec['position_i_gain_raw']}</param>
+      </xacro:if>
     </gpio>
   </xacro:macro>
 

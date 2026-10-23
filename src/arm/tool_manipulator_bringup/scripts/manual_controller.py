@@ -201,6 +201,11 @@ class ManualController(Node):
         self.create_timer(1/self.params['publish_rate_hz'], self.on_timer)
         if self.params['manage_focus']:
             self.focus_publisher.publish(String(data='drive'))
+        self.trajectory_diagnostics = None
+        if self.command_diagnostics and self.jog_publisher is not None:
+            from trajectory_diagnostics import TrajectoryDiagnostics
+            self.trajectory_diagnostics = TrajectoryDiagnostics(
+                self, self.params['joint_jog_topic'], self.params['joint_state_topic'])
         self.get_logger().info('ready to activate: press Options to switch drive -> arm')
 
     def now_seconds(self):

@@ -286,6 +286,9 @@ public:
 
   // DXL Item Read
   DxlError ReadItem(uint8_t comm_id, uint8_t id, std::string item_name, uint32_t & data);
+  DxlError VerifyPositionProfile(
+    uint8_t comm_id, uint8_t id, uint32_t velocity_limit,
+    uint32_t profile_velocity, uint32_t profile_acceleration);
   bool GetLastPositionWriteRaw(uint8_t id, uint32_t & raw);
   bool ReadDiagnosticRegister(uint8_t id, uint16_t addr, uint8_t size, uint32_t & raw);
   bool ConvertPositionRawToRadian(

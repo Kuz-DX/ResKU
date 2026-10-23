@@ -1310,6 +1310,26 @@ DxlError Dynamixel::WriteDxlDataByTransport()
   return DxlError::OK;
 }
 
+DxlError Dynamixel::VerifyPositionProfile(
+  uint8_t comm_id, uint8_t id, uint32_t velocity_limit,
+  uint32_t profile_velocity, uint32_t profile_acceleration)
+{
+  const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
+  // Called with torque still OFF, after Operating Mode and profile writes.
+  const std::vector<std::pair<std::string, uint32_t>> expected = {
+    {"Operating Mode", 4}, {"Velocity Limit", velocity_limit},
+    {"Profile Velocity", profile_velocity}, {"Profile Acceleration", profile_acceleration}};
+  for (const auto & item : expected) {
+    uint32_t actual = 0;
+    const DxlError result = ReadItem(comm_id, id, item.first, actual);
+    fprintf(stderr, "[DXL_PROFILE][ID:%u] %s expected=%u actual=%u result=%s\n",
+      id, item.first.c_str(), item.second, actual, DxlErrorToString(result).c_str());
+    if (result != DxlError::OK) {return result;}
+    if (actual != item.second) {return DxlError::ITEM_WRITE_FAIL;}
+  }
+  return DxlError::OK;
+}
+
 bool Dynamixel::GetLastPositionWriteRaw(uint8_t id, uint32_t & raw)
 {
   const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
@@ -1328,6 +1348,10 @@ bool Dynamixel::ReadDiagnosticRegister(uint8_t id, uint16_t addr, uint8_t size, 
   if (size == 1) {
     uint8_t value = 0;
     result = packet_handler_->read1ByteTxRx(port_handler_, id, addr, &value, &error);
+    raw = value;
+  } else if (size == 2) {
+    uint16_t value = 0;
+    result = packet_handler_->read2ByteTxRx(port_handler_, id, addr, &value, &error);
     raw = value;
   } else if (size == 4) {
     result = packet_handler_->read4ByteTxRx(port_handler_, id, addr, &raw, &error);

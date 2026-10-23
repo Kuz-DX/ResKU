@@ -214,13 +214,17 @@ private:
     double transmission_command{0.0};
     uint32_t sent_raw{0};
     bool sent_ok{false};
-    uint32_t registers[4]{};  // Goal Position, Torque, Hardware Error, Present Position
-    bool valid[4]{};
+    uint32_t registers[6]{};  // Goal Position, Torque, Hardware Error, Present Position
+    bool valid[6]{};
   };
   PositionDiagnosticSample position_diagnostic_sample_;
   std::map<uint8_t, std::string> last_position_diagnostic_signature_;
   size_t position_diagnostic_stage_{0};
   bool position_diagnostic_cycle_active_{false};
+  std::vector<double> last_write_entry_commands_;
+  std::vector<double> last_logged_write_entry_commands_;
+  std::chrono::steady_clock::time_point last_write_entry_log_{};
+  std::chrono::steady_clock::time_point write_entry_tail_until_{};
   bool position_diagnostics_enabled_{false};
   std::chrono::milliseconds position_diagnostics_period_{1000};
   std::chrono::steady_clock::time_point last_position_diagnostics_{};
@@ -346,6 +350,7 @@ private:
    */
   void SyncJointCommandWithStates();
 
+  void LogWriteEntryDiagnostics();
   void LogPositionDiagnostics(const std::string & phase, bool read_registers, bool force = false);
 
   /**

@@ -11,6 +11,9 @@ build/
 install/
 log/
 
+# Local robot-arm diagnosis: reports, scripts, and captured runtime evidence.
+debug_report/
+
 # 루트에 보관한 이전 ROS2 / colcon 산출물
 /build.stale-*/
 /install.stale-*/
