@@ -99,7 +99,7 @@ def generate_launch_description():
                               description="Use joint joystick control instead of TCP in mock mode."),
         DeclareLaunchArgument(
             "joint_teleop_executable", default_value="joint_joy_teleop.py",
-            choices=["joint_joy_teleop.py", "joint_joy_teleop_sep.py"],
+            choices=["joint_joy_teleop.py"],
             description="Joint joystick executable for mock joint control."),
         DeclareLaunchArgument("mock_joint_speed_rad_s", default_value="0.24",
                               description="Requested joint jogging speed in rad/s for mock mode."),

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Jog arm joints with the three RMD pitch joints on one joystick axis.
+"""Jog arm joints directly from dedicated joystick buttons and axes.
 
 Commands are sent to MoveIt Servo as ``JointJog`` messages so Servo remains
 responsible for joint limits, collision checking, smoothing, and forwarding the
@@ -9,16 +9,12 @@ resulting trajectory to ``arm_controller``.
 from __future__ import annotations
 
 import math
-from pathlib import Path
-import yaml
-from ament_index_python.packages import get_package_share_directory
-from arm_pose_safety import load_soft_limits
 
 import rclpy
 from control_msgs.msg import JointJog
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
-from sensor_msgs.msg import Joy, JointState
+from sensor_msgs.msg import Joy
 from std_msgs.msg import String
 
 
@@ -30,26 +26,6 @@ DEFAULT_JOINTS = [
     "wrist_roll_joint",
     "wrist_yaw_joint",
 ]
-
-
-def coordinated_velocities(names, velocities, positions, limits, margin,
-                           transition=math.radians(10.0), guard=0.01):
-    """Smoothly remove each joint's contribution as its directional range runs out.
-
-    No compensation may exceed the operator's requested per-joint speed.
-    Inward travel remains available when already near/outside a soft boundary.
-    """
-    result = []
-    for name, velocity in zip(names, velocities):
-        q = positions.get(name)
-        if q is None or not math.isfinite(q):
-            return [0.0] * len(names)
-        lower, upper = limits[name]
-        remaining = upper - margin - guard - q if velocity > 0 else q - lower - margin - guard
-        u = max(0.0, min(1.0, remaining / transition))
-        weight = u * u * (3.0 - 2.0 * u)
-        result.append(velocity * weight)
-    return result
 
 
 class JointJoyTeleop(Node):
@@ -64,17 +40,16 @@ class JointJoyTeleop(Node):
         p("joint_speed_rad_s", 0.12)
         p("joy_timeout_sec", 0.25)
         p("deadzone", 0.12)
-        config = Path(get_package_share_directory("tool_manipulator_bringup")) / "config"
-        p("hardware_config", str(config / "hardware.yaml"))
-        p("servo_config", str(config / "servo.yaml"))
-        p("joint_state_topic", "/joint_states")
-        p("joint_state_timeout_sec", 0.25)
         p("base_ccw_button", 4)
-        p("base_cw_button", 5)
-        p("rmd_pitch_axis", 4)  # Right stick up/down controls all three RMDs.
-        p("wrist_roll_axis", 6)  # D-pad left/right: positive CCW.
-        p("wrist_yaw_ccw_button", 3)  # Square
-        p("wrist_yaw_cw_button", 1)  # Circle
+        p("base_cw_button", 2)
+        p("shoulder_ccw_button", 3)
+        p("shoulder_cw_button", 1)
+        p("elbow_axis", 7)  # Positive: CCW, negative: CW
+        p("wrist_pitch_axis", 6)  # Positive: CCW, negative: CW
+        p("wrist_roll_ccw_button", 5)
+        p("wrist_roll_cw_button", 6)
+        p("wrist_yaw_ccw_button", 8)
+        p("wrist_yaw_cw_button", 7)
         p("manage_focus", True)
         p("focus_topic", "/control/active_target")
         p("focus_button", 9)  # Options
@@ -91,17 +66,22 @@ class JointJoyTeleop(Node):
                 int(self.get_parameter("base_ccw_button").value),
                 int(self.get_parameter("base_cw_button").value),
             ),
+            "shoulder_joint": (
+                int(self.get_parameter("shoulder_ccw_button").value),
+                int(self.get_parameter("shoulder_cw_button").value),
+            ),
+            "wrist_roll_joint": (
+                int(self.get_parameter("wrist_roll_ccw_button").value),
+                int(self.get_parameter("wrist_roll_cw_button").value),
+            ),
             "wrist_yaw_joint": (
                 int(self.get_parameter("wrist_yaw_ccw_button").value),
                 int(self.get_parameter("wrist_yaw_cw_button").value),
             ),
         }
-        rmd_pitch_axis = int(self.get_parameter("rmd_pitch_axis").value)
         self._axes = {
-            "shoulder_joint": rmd_pitch_axis,
-            "wrist_roll_joint": int(self.get_parameter("wrist_roll_axis").value),
-            "elbow_joint": rmd_pitch_axis,
-            "wrist_pitch_joint": rmd_pitch_axis,
+            "elbow_joint": int(self.get_parameter("elbow_axis").value),
+            "wrist_pitch_joint": int(self.get_parameter("wrist_pitch_axis").value),
         }
         self._focus_button = int(self.get_parameter("focus_button").value)
         self._manage_focus = bool(self.get_parameter("manage_focus").value)
@@ -109,21 +89,6 @@ class JointJoyTeleop(Node):
         self._drive_focus = str(self.get_parameter("drive_focus_value").value)
         self._validate_parameters()
 
-        self._limits = load_soft_limits(Path(self.get_parameter("hardware_config").value), self._joints)
-        self._limit_margin = float(yaml.safe_load(Path(
-            self.get_parameter("servo_config").value).read_text())["joint_limit_margin"])
-        if not math.isfinite(self._limit_margin) or self._limit_margin < 0:
-            raise ValueError("Servo joint_limit_margin must be finite and nonnegative")
-        if any(upper - lower <= 2 * (self._limit_margin + 0.01)
-               for lower, upper in self._limits.values()):
-            raise ValueError("Servo margin leaves no usable joint interval")
-        self._state_timeout = float(self.get_parameter("joint_state_timeout_sec").value)
-        if not math.isfinite(self._state_timeout) or self._state_timeout <= 0:
-            raise ValueError("joint_state_timeout_sec must be finite and positive")
-        self._positions = {}
-        self._last_state_time = None
-        self.create_subscription(JointState, self.get_parameter("joint_state_topic").value,
-                                 self._state_cb, 20)
         self._joy: Joy | None = None
         self._last_joy_time = self.get_clock().now()
         self._previous_focus_button = False
@@ -167,7 +132,7 @@ class JointJoyTeleop(Node):
             )
         self.get_logger().info(
             "Joint joystick teleop ready but inactive: "
-            f"{activation_hint}; grouped RMD pitch axis {rmd_pitch_axis} enabled"
+            f"{activation_hint}; dedicated joint mappings enabled"
         )
 
     def _validate_parameters(self) -> None:
@@ -275,24 +240,13 @@ class JointJoyTeleop(Node):
                 velocities.append(
                     self._button_velocity(message, *self._button_pairs[joint]))
             else:
-                velocity = self._axis_velocity(message, self._axes[joint])
-                # Preserve the original per-joint directions while sharing input.
-                velocities.append(-velocity if joint == "elbow_joint" else velocity)
+                velocities.append(self._axis_velocity(message, self._axes[joint]))
         return velocities
 
     def _publish_halt(self) -> None:
         if self._commanding:
             self._publisher.publish(self._make_command([0.0] * len(self._joints)))
             self._commanding = False
-
-    def _state_cb(self, message: JointState) -> None:
-        positions = dict(zip(message.name, message.position))
-        if not all(name in positions and math.isfinite(positions[name]) for name in self._joints):
-            self._positions = {}
-            self._last_state_time = None
-            return
-        self._positions = positions
-        self._last_state_time = self.get_clock().now()
 
     def _publish_command(self) -> None:
         if (self._active_target != self._arm_focus
@@ -301,13 +255,7 @@ class JointJoyTeleop(Node):
             self._publish_halt()
             return
 
-        if (self._last_state_time is None or
-                (self.get_clock().now() - self._last_state_time).nanoseconds * 1e-9 > self._state_timeout):
-            self._publish_halt()
-            return
-        velocities = coordinated_velocities(
-            self._joints, self._velocities(self._joy), self._positions,
-            self._limits, self._limit_margin)
+        velocities = self._velocities(self._joy)
         self._publisher.publish(self._make_command(velocities))
         self._commanding = any(velocity != 0.0 for velocity in velocities)
 
