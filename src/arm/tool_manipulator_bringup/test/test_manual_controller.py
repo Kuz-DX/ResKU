@@ -79,7 +79,8 @@ def harness():
     node.params = {'joint_state_timeout_sec': .5, 'joy_timeout_sec': .25,
                    'publish_rate_hz': 50., 'max_target_lead_rad': .1,
                    'invert_forward': False, 'invert_wrist_yaw': True,
-                   'invert_wrist_roll': False,
+                   'invert_wrist_roll': False, 'invert_ee_velocity': False,
+                   'ee_velocity_rad_s': .12,
                    'linear_speed_mps': .03, 'damping': .05, 'limit_margin_rad': .02}
     node.now_seconds = lambda: 1.
     node.last_time = .98
@@ -92,6 +93,7 @@ def harness():
     node.focus, node.fault, node.joy_time = 'arm', False, 1.
     node.publisher = SimpleNamespace(publish=Mock())
     node.jog_publisher = None
+    node.ee_velocity_publisher = SimpleNamespace(publish=Mock())
     node.get_logger = Mock()
     node.axis = lambda name: 1. if name == 'forward_axis' else 0.
     node.button = lambda name: False
@@ -99,6 +101,19 @@ def harness():
 
 
 class StopPathTest(unittest.TestCase):
+    def test_ee_velocity_requires_circle_and_uses_dpad_vertical(self):
+        node = harness()
+        pressed = set()
+        node.button = lambda name: name in pressed
+        node.axis = lambda name: 1. if name == 'ee_velocity_axis' else 0.
+        self.assertEqual(node.ee_velocity(), 0.)
+        pressed.add('ee_enable_button')
+        self.assertAlmostEqual(node.ee_velocity(), .12)
+        node.axis = lambda name: -1. if name == 'ee_velocity_axis' else 0.
+        self.assertAlmostEqual(node.ee_velocity(), -.12)
+        pressed.clear()
+        self.assertEqual(node.ee_velocity(), 0.)
+
     def test_servo_input_gap_publishes_zero_joint_jog(self):
         node = harness()
         node.jog_publisher = SimpleNamespace(publish=Mock())
@@ -109,6 +124,7 @@ class StopPathTest(unittest.TestCase):
         message = node.jog_publisher.publish.call_args.args[0]
         self.assertEqual(message.joint_names, list(manual.JOINTS))
         self.assertEqual(list(message.velocities), [0.] * 6)
+        self.assertEqual(list(node.ee_velocity_publisher.publish.call_args.args[0].data), [0.])
 
     def test_options_logs_each_focus_change(self):
         node = harness()
