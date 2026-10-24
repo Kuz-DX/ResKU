@@ -45,6 +45,30 @@ def test_actual_urdf_fk_matches_manual_chain(model):
         np.testing.assert_allclose(model.jacobian(q)[:3, 1:4], jac, atol=1e-7)
 
 
+def test_geometric_jacobian_matches_independent_central_differences(model):
+    from tool_change_min.kinematics import _rotvec
+    rng = np.random.default_rng(42)
+    for _ in range(30):
+        q = np.array([rng.uniform(lo+.03, hi-.03)
+                      for lo, hi in model.limits.values()])
+        columns = []
+        for i in range(6):
+            delta = np.zeros(6)
+            delta[i] = 1e-5
+            plus, minus = model.fk(q+delta), model.fk(q-delta)
+            columns.append(np.r_[(plus[:3, 3]-minus[:3, 3])/2e-5,
+                                 _rotvec(plus[:3, :3] @ minus[:3, :3].T)/2e-5])
+        np.testing.assert_allclose(model.jacobian(q), np.column_stack(columns), atol=1e-7)
+
+
+def test_completed_solver_result_after_deadline_is_not_accepted():
+    s = fake_stepper()
+    with patch('time.monotonic', side_effect=[10., 10.001, 10.1]):
+        with pytest.raises(ValueError, match='time budget'):
+            s.candidate(np.zeros(6), np.array([1., 0, 0, 0, 0, 0]), .02)
+    np.testing.assert_array_equal(s.q, np.zeros(6))
+
+
 def fake_stepper():
     model = Mock()
     model.within_limits.return_value = True
@@ -95,6 +119,26 @@ def test_ik_time_and_iteration_budgets(model):
         model.solve(target, q, max_time_s=1e-12)
     with pytest.raises(ValueError, match='converge'):
         model.solve(target, q, max_iterations=0)
+
+
+def test_repeated_increments_with_lagging_feedback(model):
+    measured = np.array([-.00767, 1.4830934, 1.5070934, -1.5570934,
+                         .0567573, .0582913])
+    step = TcpStepper(model, [.12]*6)
+    step.reset(measured)
+    # Deterministic convergence test; deadline exhaustion is tested separately.
+    with patch('time.monotonic', return_value=10.):
+        for _ in range(100):
+            before = step.q.copy()
+            q, pose = step.candidate(measured, np.array([0., 1, 0, 0, 0, 0]), .02)
+            assert np.max(np.abs(q-before)) <= .12*.02+1e-9
+            assert np.max(np.abs(q-measured)) <= step.lead
+            assert model.within_limits(q, step.margin)
+            error = model.pose_error(q, pose)
+            assert np.linalg.norm(error[:3]) < 1e-5
+            assert np.linalg.norm(error[3:]) < 1e-4
+            step.commit(q, pose)
+            measured += .3*(q-measured)
 
 
 def test_deadman_release_discards_pending_checks():
@@ -174,7 +218,7 @@ def test_tcp_mock_initial_pose_is_inside_margin_and_nonsingular(model):
 
 def test_candidate_total_deadline_preserves_previous_goal():
     step = fake_stepper()
-    with patch('time.monotonic', side_effect=[10., 10.02]):
+    with patch('time.monotonic', side_effect=[10., 10.04]):
         with pytest.raises(ValueError, match='time budget'):
             step.candidate(np.zeros(6), np.array([1., 0, 0, 0, 0, 0]), .02)
     step.model.solve.assert_not_called()

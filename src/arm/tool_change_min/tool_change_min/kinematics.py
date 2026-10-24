@@ -188,16 +188,26 @@ class ArmKinematics:
                                _rotvec(target[:3, :3] @ current[:3, :3].T)))
 
     def jacobian(self, q: np.ndarray, epsilon: float = 1.0e-5) -> np.ndarray:
-        columns = []
-        for index in range(len(q)):
-            plus, minus = q.copy(), q.copy()
-            plus[index] += epsilon
-            minus[index] -= epsilon
-            p_plus, p_minus = self.fk(plus), self.fk(minus)
-            linear = (p_plus[:3, 3] - p_minus[:3, 3]) / (2.0 * epsilon)
-            angular = _rotvec(p_plus[:3, :3] @ p_minus[:3, :3].T) / (2.0 * epsilon)
-            columns.append(np.concatenate((linear, angular)))
-        return np.column_stack(columns)
+        # Geometric Jacobian in the root frame. Include every fixed URDF
+        # transform; each revolute axis is expressed before its own rotation.
+        # epsilon remains accepted for compatibility with existing callers.
+        q = np.asarray(q, dtype=float)
+        if q.shape != (len(self.joint_names),):
+            raise ValueError(f"expected {len(self.joint_names)} joint positions")
+        transform = np.eye(4)
+        origins, axes = [], []
+        for joint in self.chain:
+            transform = transform @ joint.origin
+            if joint.joint_type in ("revolute", "continuous"):
+                origins.append(transform[:3, 3].copy())
+                axes.append(transform[:3, :3] @ joint.axis)
+                rotate = np.eye(4)
+                rotate[:3, :3] = _rotation(joint.axis, q[len(axes)-1])
+                transform = transform @ rotate
+        tip = transform[:3, 3]
+        return np.column_stack([
+            np.concatenate((np.cross(axis, tip-origin), axis))
+            for origin, axis in zip(origins, axes)])
 
     def within_limits(self, q: np.ndarray, margin_rad: float = 0.0) -> bool:
         return (np.asarray(q).shape == (len(self.joint_names),) and np.all(np.isfinite(q)) and

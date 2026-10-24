@@ -128,7 +128,12 @@ class TcpJoy(Node):
             count = max(1, math.ceil(float(np.max(np.abs(q-start)))/.005))
             samples.extend(start+(q-start)*i/count for i in range(count+1))
         futures = []
+        seen = set()
         for sample in samples:
+            key = tuple(map(float, sample))
+            if key in seen:
+                continue
+            seen.add(key)
             req = GetStateValidity.Request()
             # Empty group checks the entire robot, including tool and environment.
             values = dict(self.full_state)
@@ -137,7 +142,7 @@ class TcpJoy(Node):
             req.robot_state.joint_state.position = list(values.values())
             req.robot_state.is_diff = True
             futures.append(self.check.call_async(req))
-        self.pending = dict(q=q, pose=pose, futures=futures, started=now,
+        self.pending = dict(q=q, pose=pose, futures=futures, started=time.monotonic(),
                             measured=self.measured.copy(), epoch=self.epoch)
 
     def tick(self):
@@ -173,6 +178,8 @@ class TcpJoy(Node):
                         self.blocked = True
                         self.discard()
                         self.reason = 'HOLD requested: feedback lead exceeded'
+                        self.last_failure_reason = 'feedback lead exceeded'
+                        self.last_failure_time = now
                         if self.cancel.service_is_ready():
                             self.cancel.call_async(Trigger.Request())
                     elif not self.check.service_is_ready():

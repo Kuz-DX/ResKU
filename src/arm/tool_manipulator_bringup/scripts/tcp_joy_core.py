@@ -23,7 +23,7 @@ def joy_twist(axes, buttons, deadzone=.12):
 
 class TcpStepper:
     def __init__(self, model, speeds, linear=.02, angular=.15, margin=.02,
-                 lead=.08, iterations=30, budget=.015):
+                 lead=.08, iterations=30, budget=.030):
         self.model = model
         self.speeds = np.minimum(np.asarray(speeds), .12)
         self.linear, self.angular, self.margin = linear, angular, margin
@@ -93,6 +93,8 @@ class TcpStepper:
                 error = str(exc)
                 self.velocity_scale *= .5
                 continue
+            if time.monotonic() >= deadline:
+                raise ValueError('IK time budget exceeded')
             if not np.all(np.isfinite(solved)) or not self.model.within_limits(solved, self.margin):
                 raise ValueError('invalid IK solution')
             ratio = float(np.max(np.abs(solved-self.q)/(self.speeds*dt)))
