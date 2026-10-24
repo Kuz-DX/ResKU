@@ -41,7 +41,6 @@ GNOME Terminal, Tilix, Terminator, Konsole, Kitty 등을 자동 탐지한다.
 | Left_MTX | 로컬 | left 영상 → RTSP sub1 |
 | Right_MTX | 로컬 | right 영상 → RTSP sub2 |
 | Arm_TF | 로봇 | real_control.launch.py + hardware.yaml |
-| Camera_TF | 로봇 | arm_camera_extrinsics_broadcaster.py + arm_camera_extrinsics.yaml |
 | AprilTag | 로봇 | 태그 크기 2.0 cm, /arm/apriltag/centers |
 | Arm_Launch | 로봇 | tool1_attach.launch.py + poses.yaml + hardware.yaml |
 

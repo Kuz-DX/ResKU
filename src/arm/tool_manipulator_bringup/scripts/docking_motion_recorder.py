@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only recorder for taught docking motion from /joint_states.
+"""Read-only recorder for a taught arm motion from /joint_states.
 
 Commands: start <segment>, mark <label>, stop, q.
 This node subscribes only; it never publishes motion commands or opens hardware.
@@ -94,7 +94,7 @@ class DockingMotionRecorder(Node):
                     'positions_rad': [float(positions[joint]) for joint in ARM_JOINTS],
                 })
             return {
-                'format': 'tool_manipulator_docking_motion/v1',
+                'format': 'tool_manipulator_joint_motion/v1',
                 'recorded_at_utc': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
                 'joint_state_topic': self.topic,
                 'samples': list(self._samples),
@@ -112,7 +112,7 @@ class DockingMotionRecorder(Node):
         print(f'Saved {output}')
         taught_path = self.snapshot()['taught_joint_path']
         if taught_path:
-            print('\nPaste this under tools.1.lock.joint_path in tools.yaml:')
+            print('\nMarked joint path:')
             print(yaml.safe_dump({'joint_path': taught_path}, sort_keys=False).rstrip())
 
     def _event(self, kind: str, label: str | None) -> dict:
@@ -126,16 +126,8 @@ class DockingMotionRecorder(Node):
         }
 
 
-class DockingLogicV2:
-    """Reserved for the second docking-logic proposal; not wired to hardware."""
-
-    def on_recorded_motion(self, recording: dict) -> None:
-        # TODO(v2): define how recorded encoder samples become a docking plan.
-        raise NotImplementedError('Docking logic v2 has not been specified.')
-
-
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description='Record taught docking motion from JointState.')
+    parser = argparse.ArgumentParser(description='Record a taught arm motion from JointState.')
     parser.add_argument('--topic', default='/joint_states')
     parser.add_argument('--output', type=Path)
     return parser.parse_args()
@@ -144,7 +136,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     output = args.output or Path.cwd() / (
-        'docking_motion_' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '.json'
+        'joint_motion_' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '.json'
     )
     rclpy.init()
     node = DockingMotionRecorder(args.topic)
@@ -153,7 +145,7 @@ def main() -> int:
     spin_thread = threading.Thread(target=executor.spin, daemon=True)
     spin_thread.start()
     print('Read-only encoder-calibrated JointState recorder.')
-    print('For drill: start drill_lock | mark unlock | mark lock_step1 | mark lock | stop | q')
+    print('Commands: start <segment> | mark <label> | stop | q')
     try:
         while rclpy.ok():
             try:

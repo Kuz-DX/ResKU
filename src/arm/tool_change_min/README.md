@@ -269,10 +269,9 @@ Wizard로 설정한 Dynamixel 값은 유지한다. 다만 Wizard의 표시각과
 서로 다른 기준이므로 기존 `zero_raw`와 실제 장착 방향의 일치는 확인해야 한다.
 파일 검증 통과는 실제 모터 레지스터까지 읽어 확인했다는 뜻은 아니다.
 
-남은 실측값은 이 패키지의 `config/poses.yaml`에 있는 HOME/대기/접근 자세,
-`tool1_target` XYZ·방향과 카메라 장착 TF다. 카메라 외부 보정 파일
-`tool_manipulator_bringup/config/arm_camera_extrinsics.yaml`은 현재
-`enabled: false`이며 0 값은 임시값이다. 실제 보정을 입력한 뒤 활성화한다.
+남은 실측값은 이 패키지의 `config/poses.yaml`에 있는 HOME/대기/접근 자세와
+`tool1_target` XYZ·방향이다. 카메라 장착 위치는 현재 manipulator URDF의
+`cam_link` fixed joint가 소유하며 별도의 bringup extrinsics 파일은 사용하지 않는다.
 
 ### RMD 영점 맞추기 (운영 실행 전에 별도로 수행)
 
@@ -432,14 +431,10 @@ ros2 launch vision cameras.launch.py
 이 launch는 팔 D435i뿐 아니라 주행 D435i와 좌우 C920도 시작한다.
 장치 시리얼·포트는 `vision/camera/launch/cameras.launch.py`의 인자를 따른다.
 
-### 터미널 3 — 카메라 장착 TF (보정 파일 활성화 후)
+### 카메라 장착 TF
 
-```bash
-python3 src/arm/tool_manipulator_bringup/scripts/arm_camera_extrinsics_broadcaster.py \
-  --ros-args --params-file src/arm/tool_manipulator_bringup/config/arm_camera_extrinsics.yaml
-```
-
-기존 노드가 이미 `cam_link → arm_camera_link`를 발행한다면 중복 실행하지 않는다.
+장착 좌표는 manipulator URDF의 `cam_link` fixed joint에서 발행한다. 별도 static TF
+broadcaster를 동시에 실행하지 않는다.
 
 ### 터미널 4 — AprilTag 검출 토픽 발행
 
@@ -520,9 +515,8 @@ ros2 topic echo /selected_tool_id
 UI는 `/selected_tool_id`에 `std_msgs/msg/Int32`를 발행한다.
 `data: 0`은 tag0(그리퍼), `data: 1`은 tag1 이동 요청이다. 0은 정지 명령이 아니다.
 이 저장소에서는 실제 UI 발행 코드가 확인되지 않았으므로 구동 PC에서 버튼을 눌러
-검증한다. 기존 `ui_tag1_docking`(tag1_recorded_path_node)도 `/selected_tool_id`를
-구독해 이동하므로 최소 FSM과 함께 실행하지 않는다. 기존 도킹 제어 노드도
-동시에 이동 요청을 처리하지 않도록 종료한다. UI 요청이 확인되면 별도 수동 발행은 필요 없다.
+검증한다. `/selected_tool_id`를 구독하는 다른 팔 제어 노드가 있다면 최소 FSM과
+함께 실행하지 않는다. UI 요청이 확인되면 별도 수동 발행은 필요 없다.
 요청이 도착했는데 움직이지 않으면 재발행하지 말고 상태와 모션 노드 로그를 확인한다.
 
 별도 터미널에서 상태 감시를 먼저 실행해 둔다:

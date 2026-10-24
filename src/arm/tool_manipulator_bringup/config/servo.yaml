@@ -1,4 +1,5 @@
-# MoveIt Servo parameters. apriltag_tool_docking.launch.py wraps this map
+# MoveIt Servo-compatible safety parameters. move_to_named_pose.py reads the
+# joint_limit_margin value during startup recovery; no Servo node is launched.
 # under the moveit_servo parameter namespace required by ServoParameters.
 command_in_type: speed_units
 command_out_type: trajectory_msgs/JointTrajectory

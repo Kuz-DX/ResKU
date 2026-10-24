@@ -8,9 +8,8 @@
 ### 실행과 키 매핑
 
 ```bash
-cd /home/sw/ResKU
+cd ~/ResKU
 source /opt/ros/humble/setup.bash
-colcon build --symlink-install --packages-select tool_manipulator_bringup
 source install/setup.bash
 source util/resku_arm_aliases.bash
 
@@ -18,8 +17,8 @@ vr_arm       # 가상 하드웨어
 Resku_arm    # 실기; 별도 CAN/모터 준비 및 감독 필요
 ```
 
-`/home/sw/.bashrc`에 `util/resku_arm_aliases.bash`를 source하도록 등록해 새 터미널에도 적용된다.
-이미 열려 있던 터미널은 `source /home/sw/ResKU/util/resku_arm_aliases.bash`로 적용한다.
+`~/.bashrc`에 `source ~/ResKU/util/resku_arm_aliases.bash`를 등록하면 새 터미널에도 적용된다.
+alias 파일은 자신의 위치에서 workspace 경로를 계산하므로 사용자 홈 이름을 고정하지 않는다.
 alias는 각각 `manual.launch.py`의 `real_hardware:=false`/`true`를 실행한다.
 초기 적재 자세에서 RMD 3축을 가장 가까운 `[하한+2°, 상한-2°]`로 저속 복귀시킨다.
 이는 2026-10-24 사용자 실기 로그 확인 후 추가한 처리다. 자동 home·자동 집기는 수행하지 않는다.
@@ -87,7 +86,7 @@ ros2 bag record -o /tmp/resku_manual_bag /joy /joint_states \
 
 ```bash
 source /opt/ros/humble/setup.bash
-source /home/sw/ResKU/install/setup.bash
+source ~/ResKU/install/setup.bash
 python3 -m pytest src/arm/tool_manipulator_bringup/test/test_manual_control_common.py \
   src/arm/tool_manipulator_bringup/test/test_manual.py \
   src/arm/tool_manipulator_bringup/test/test_manual_joy_log.py -q

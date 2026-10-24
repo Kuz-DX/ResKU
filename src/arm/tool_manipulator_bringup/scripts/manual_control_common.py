@@ -38,9 +38,10 @@ class ArmChain:
     """FK uses every movable joint; the Jacobian contains only the RMDs."""
     def __init__(self, description, root='base_actuator', tip='tcp_link'):
         by_child = {}
+        mimic_joints = set()
         for element in ET.fromstring(description).findall('joint'):
             if element.find('mimic') is not None:
-                raise ValueError('mimic joints are not supported by this arm model')
+                mimic_joints.add(element.get('name'))
             origin = element.find('origin')
             attrs = {} if origin is None else origin.attrib
             xyz = np.array([float(v) for v in attrs.get('xyz', '0 0 0').split()])
@@ -69,6 +70,8 @@ class ArmChain:
             chain.append(joint)
             tip = joint[2]
         self.chain = list(reversed(chain))
+        if any(joint[0] in mimic_joints for joint in self.chain):
+            raise ValueError('mimic joints are not supported in the controlled arm chain')
         if tuple(j[0] for j in self.chain if j[0] in RMD) != RMD:
             raise ValueError('controlled link must be downstream of all three RMD joints')
         self.required = tuple(j[0] for j in self.chain if j[1] != 'fixed')

@@ -18,8 +18,6 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--poses', type=Path, default=package / 'config/poses.yaml')
     parser.add_argument('--hardware', type=Path, default=bringup / 'config/hardware.yaml')
-    parser.add_argument('--extrinsics', type=Path,
-                        default=bringup / 'config/arm_camera_extrinsics.yaml')
     args = parser.parse_args()
     errors = []
 
@@ -58,15 +56,9 @@ def main():
         if missing:
             raise ValueError('missing device/interface: ' + ', '.join(missing))
 
-    def extrinsics():
-        params = yaml.safe_load(args.extrinsics.read_text())['arm_camera_extrinsics']['ros__parameters']
-        if params.get('enabled') is not True:
-            raise ValueError('camera mounting TF disabled; calibrate file or verify an external TF owner')
-
     check('installed task nodes and generated services', installed)
     check('selected-stage measured poses', lambda: require_for_stop_state(args.poses))
     check('configured serial/CAN paths exist', devices)
-    check('camera mounting TF configuration enabled', extrinsics)
     print('Offline checks only: motor registers, live TF, controllers, UI routing and '
           'physical motion are NOT verified. Do not send a motion request based on this check alone.')
     return 2 if errors else 0

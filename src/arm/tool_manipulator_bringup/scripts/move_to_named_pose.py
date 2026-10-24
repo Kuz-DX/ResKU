@@ -123,8 +123,10 @@ def make_smooth_points(current, target, requested_duration, speeds):
 
 
 def load_servo_margin(config=None):
-    config = config or Path(get_package_share_directory(
-        "tool_manipulator_bringup")) / "config" / "servo.yaml"
+    if config is None:
+        source_config = Path(__file__).resolve().parents[1] / "config" / "servo.yaml"
+        config = source_config if source_config.is_file() else Path(
+            get_package_share_directory("tool_manipulator_bringup")) / "config" / "servo.yaml"
     margin = float(yaml.safe_load(Path(config).read_text())["joint_limit_margin"])
     if not math.isfinite(margin) or margin < 0.0:
         raise ValueError("Servo joint_limit_margin must be finite and nonnegative")

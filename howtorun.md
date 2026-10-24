@@ -213,22 +213,19 @@ sudo ip link set up can_arm
 ip -details link show can_arm
 ### 매니퓰레이터 원격 조이스틱 수동 구동
 
-# 두 PC에서 동일한 ROS_DOMAIN_ID와 ROS_LOCALHOST_ONLY=0을 설정한다.
+두 PC에서 동일한 `ROS_DOMAIN_ID`와 `ROS_LOCALHOST_ONLY=0`을 설정한다.
+
+```bash
 # 원격 PC: 물리 조이스틱의 /joy 발행
 ros2 launch tool_manipulator_bringup remote_joy.launch.py joy_dev:=/dev/input/js0
 
-# 로봇 PC: real_control + MoveIt Servo + TCP teleop
-# real_control.launch.py를 별도로 동시에 실행하지 않는다.
-ros2 launch tool_manipulator_bringup tcp_joy_teleop.launch.py \
-  real_hardware:=true \
-  launch_joy:=false
+# 로봇 PC: 오늘 pull 받은 Servo 없는 manual 제어
+ros2 launch tool_manipulator_bringup manual.launch.py \
+  real_hardware:=true launch_joy:=false
+```
 
-# 로봇 PC의 다른 터미널: controller active 확인 후 Servo 시작
-ros2 control list_controllers
-ros2 service call /servo_node/start_servo std_srvs/srv/Trigger "{}"
-
-# L1(button 4)을 누르는 동안만 이동한다. 상세 축 매핑과 종료 절차는
-# src/arm/tool_manipulator_bringup/README.md의 조이스틱 TCP 수동 구동 절을 따른다.
+버튼 매핑과 안전 조건은 `src/arm/tool_manipulator_bringup/docs/manual_controller.md`,
+전체 실행 명령은 해당 패키지 `README.md`를 따른다.
 
 ### 실기 팔 RViz 미러링 (실측 각도/엔코더, 읽기 전용 - tool_manipulator_description)
 # ~/arm_config/rmd_joint_state_bridge.py(외부 스크립트)와 동일한 역할을 하는
@@ -489,224 +486,13 @@ ros2 topic echo /arm/picking_command
 # Tool Manipulator — 실기 제어·툴 교체 실행 절차
 
 이 절은 팔과 툴 교체만 다룬다. `can_drive`와 `can_arm`은 다른 CAN 인터페이스다. Jetson은 모터·카메라를, 로컬 PC는 RViz·상태 감시를 담당한다. 두 PC는 같은 `ROS_DOMAIN_ID`와 `ROS_LOCALHOST_ONLY=0`을 사용한다.
+# Tool Manipulator — 현재 실행 절차
 
-> 안전 조건
->
-> - `tool_change.launch.py`는 `hardware.yaml`, `tools.yaml`, `docking.yaml` 전체를 먼저 검사한다. 누락·`null`·음수 placeholder·형식 오류가 하나라도 있으면 controller manager와 모터 포트를 시작하지 않는다.
-> - 실기 control 실행 중에는 `rmd_joint_state_bridge`, Dynamixel Wizard처럼 `can_arm` 또는 `/dev/ttyUSB0`을 여는 프로그램을 함께 실행하지 않는다.
-> - 자율 tool/tag ID는 `0 = gripper`, `1 = drill`만 사용한다. ID 2 이상은 비전·도킹 대상에서 제외하며 `99`는 NO_TOOL 상태다.
+`tool_manipulator_bringup`은 수동·기본 실기/모의 구동과 점검 도구만 유지한다.
+이전에 이 문서에 있던 미완성 AprilTag/tool-change stack 실행 절차는 소스와 함께 제거했다.
 
-## 단일 설정 원본과 실측 방법
+- 오늘 pull 받은 수동 구동: `src/arm/tool_manipulator_bringup/docs/manual_controller.md`
+- 실기·mock·MoveIt·tool별 실행과 시각화 구분: `src/arm/tool_manipulator_bringup/README.md`
+- RMD 캡처, 현재 영점 저장, world 좌표 출력도 위 README의 `출력·확인 도구` 절을 따른다.
 
-값은 아래 세 파일에만 입력한다. 같은 값을 launch 명령에 중복 입력하지 않는다.
-
-| 설정 경로 | 단위·좌표계 | 실측 방법 |
-| --- | --- | --- |
-| `hardware.yaml:joints.<joint>.zero_raw`, `sign`, `q_offset_rad` | raw, 부호, rad | 읽기 전용 bridge/Wizard에서 기계 영점 자세를 기록하고 ROS 관절 0 rad와 맞춘다. |
-| `hardware.yaml:joints.<joint>.soft_limit_*`, 속도·전류·profile | raw 또는 rad, rad/s, mA/A | 저속 단일축 bench에서 기계 간섭 전 여유 위치와 허용 register 값을 기록한다. |
-| `tools.yaml:tools.<id>.tag_id`, `coarse_joint_goal` | 정수, 6개 rad | 랙 태그를 읽고 `joint_names` 순서로 접근 자세를 티칭한다. |
-| `tools.yaml:fixtures`, `collision.primitives`, `dock_fixture` | m, 해당 `frame` | 랙·tool 외곽을 측정해 box/cylinder와 실제 TF frame으로 등록한다. |
-| `tools.yaml:tools.<id>.lock.attach_yaw_delta_rad` | 현재 yaw에서의 signed rad | 저속 체결 bench에서 시작/끝 joint state 차이를 기록한다. |
-| `tools.yaml:tools.<id>.docking.{descent,retreat}_*` | `frame` 기준 단위 벡터, m, m/s, s | fixture 축을 기준으로 직선 하강·후퇴 거리와 속도·timeout을 티칭한다. |
-
-tool case 1과 case 2(+Y)·case 3(-Y)는 모두 `arm_world`에서 world Y축 기준 `+55°` 기울어진다. 도킹 면은 case의 local YZ 면(outer local X=`±18.4 mm`)이며 TCP의 local XY 면과 일치해야 한다. 따라서 도킹 target에서 TCP `+Z`를 선택한 case face의 local `±X` 법선에 맞추고, case 1·2·3 모두 EE-facing local `+X` 면이 entry로 확정됐다. TCP XY는 해당 local +X YZ 면에 맞추며, 접근/후퇴 부호는 `tools.yaml`에 입력한다.
-| `docking.yaml:vision_apriltag.*` | ROS topic, cm | 카메라의 실제 토픽과 인쇄한 tag 한 변 길이를 기록한다. |
-| `docking.yaml:tag_pose_filter.*` | camera `frame_id`, m, s, px | 정상 검출 로그에서 frame, 지연, margin, PnP/depth 오차·범위를 정한다. |
-| `docking.yaml:visual_servo_node.*` | expected tag frame의 m, m/s | docking 목표 tag 위치와 수렴 이득·허용오차를 저속 bench에서 정한다. |
-| `docking.yaml:docking_motion_executor.*_joint_goal` | `joint_names` 순서의 6개 rad | `docking_wait`와 mission wait을 실제 팔로 티칭한다. ROS YAML 배열은 `0`과 `0.1`을 섞지 말고 모두 `0.0`처럼 float로 쓴다. |
-
-`tools.yaml.real_docking.enabled_tool_ids`에는 모든 항목을 채운 tool만 넣고 그 tool의 `enabled: true`로 바꾼다. `physical_detach_supported`는 현재 반드시 `false`다. 물리 해제 절차는 구현되지 않았으므로 `Dock.mode=1`은 거부되며 scene detach를 성공으로 처리하지 않는다.
-
-## 현재 attach 알고리즘
-
-```text
-/dock (mode=0, tool_id)
- -> DOCKING_WAIT -> tool별 COARSE 접근 자세
- -> tag_pose_filter: tag ID / timestamp / margin / aligned-depth 통과
- -> visual_servo_node: XY 수렴
- -> tool별 frame·direction·distance로 직선 DESCEND
- -> MoveIt wrist_yaw_joint의 attach_yaw_delta_rad 궤적
- -> /wrist_yaw_rotation_complete = true  (회전 action 성공 한 번만)
- -> tool별 frame·direction·distance로 직선 RETREAT
- -> /docking_complete = true             (후퇴 action 성공 뒤 한 번만)
- -> tool_scene_manager: attached collision + TCP/active_tool 갱신
- -> 설정된 wait / mission pose
-```
-
-`/wrist_yaw_rotation_complete`는 **yaw 궤적 성공만** 뜻한다. 체결 센서 검증이나 Planning Scene 부착 완료가 아니다. 이 설계는 별도 `/engagement_ok` 센서 판단을 사용하지 않으므로 실제 물리 체결을 독립적으로 보증하지 않는다.
-
-회전 실패·timeout, tag/depth/filter 실패, 하강/후퇴 값 미설정, 후퇴 실패, cancel, hardware fault에서는 이후 이동과 두 완료 토픽을 모두 발행하지 않고 hold한다. 실패 중 fixture 안에 들어간 뒤에는 자동 후퇴 fallback도 하지 않는다. 통신/stale/limit fault는 모션 금지 hold이며, scene 갱신 실패 또는 물리 상태 불명은 `active_tool_id=-2 (UNKNOWN)`으로 격리한다. 실물이 비어 있음이 확인된 경우만 다음 service로 `99 (NO_TOOL)`로 복구한다.
-
-```bash
-ros2 service call /tool_scene_manager/operator_confirm_empty std_srvs/srv/Trigger "{}"
-```
-
-## Jetson J1 — 인터페이스 준비
-
-```bash
-cd ~/ResKU
-source /opt/ros/humble/setup.bash
-source install/setup.bash
-export ROS_DOMAIN_ID=99       # 팀의 실제 공통 값
-export ROS_LOCALHOST_ONLY=0
-sudo ip link set can_arm type can bitrate 1000000
-sudo ip link set up can_arm
-ip -details link show can_arm
-ls -l /dev/ttyUSB0
-```
-
-## 선택: 차량·회로박스·tool case RViz 확인
-
-실기 control 또는 다른 `robot_state_publisher`와 동시에 실행하지 않는다. `world` fixed frame에서 차량 IMU 중심, `arm_world`, 대칭 tool case 두 개를 확인한다.
-
-```bash
-cd ~/ResKU
-source /opt/ros/humble/setup.bash
-source install/setup.bash
-ros2 launch tool_manipulator_description display.launch.py use_mesh:=true tool_id:=0
-```
-
-## Jetson J2 — 포트를 열지 않는 사전검사
-
-```bash
-cd ~/ResKU
-source /opt/ros/humble/setup.bash
-source install/setup.bash
-ros2 run tool_manipulator_bringup config_validator.py \
-  --hardware src/arm/tool_manipulator_bringup/config/hardware.yaml \
-  --tools src/arm/tool_manipulator_bringup/config/tools.yaml \
-  --docking src/arm/tool_manipulator_bringup/config/docking.yaml
-```
-
-`CONFIG READY`가 아니면 출력된 YAML 경로를 모두 채운 뒤 다시 검사한다. 이 명령은 하드웨어 포트·토크를 열지 않는다.
-
-## Jetson J3/J4 — 카메라와 기존 AprilTag 노드
-
-```bash
-# J3: 기존 camera launch
-cd ~/ResKU
-source /opt/ros/humble/setup.bash
-source install/setup.bash
-ros2 launch vision cameras.launch.py
-
-# J4는 J5의 tool_change.launch.py에 포함된다. 카메라만 별도로 기동한다.
-```
-
-J4는 `/arm/camera/color/image_raw/compressed`, `/arm/camera/color/camera_info`를 구독하고 `/arm/apriltag/centers`를 발행한다. `tag_size_cm`은 J2가 검사한 `docking.yaml.vision_apriltag.ros__parameters.tag_size_cm` 하나만 사용한다. `allowed_tag_ids: [0, 1]`에 따라 gripper와 drill tag만 발행하고 ID 2 이상은 무시한다. `tag_pose_filter`는 추가로 `/arm/camera/aligned_depth_to_color/image_raw`를 구독한다.
-
-## Jetson J5 — 실제 팔과 도킹 stack
-
-```bash
-cd ~/ResKU
-source /opt/ros/humble/setup.bash
-source install/setup.bash
-ros2 launch tool_manipulator_bringup tool_change.launch.py
-```
-
-실기 launch는 preflight 성공 후에만 real `ros2_control`, joint state broadcaster, 6축 `arm_controller`, `ee_controller`, MoveIt, Servo, filter, docking manager, scene manager를 기동한다. 시작 상태는 UNKNOWN이다. 실제로 tool이 비어 있을 때만 앞의 `operator_confirm_empty` recovery를 실행한다.
-
-## Local L1/L2 — RViz와 상태 감시
-
-```bash
-cd ~/ResKU
-source /opt/ros/humble/setup.bash
-source install/setup.bash
-rviz2
-ros2 topic echo /joint_states
-ros2 run tf2_ros tf2_echo base_actuator tcp_link
-ros2 control list_controllers
-ros2 topic echo /tag_status
-ros2 topic echo /servo_status
-ros2 topic echo /docking_motion_status
-ros2 topic echo /docking_status
-ros2 topic echo /wrist_yaw_rotation_complete
-ros2 topic echo /docking_complete
-ros2 topic echo /tool_attachment_status
-ros2 topic echo /active_tool_id
-ros2 topic echo /control/hardware_fault
-```
-
-## Local L3 — UI 또는 수동 attach 요청
-
-```bash
-# tool 1 attach. mode=1 detach는 현재 명시적으로 거부된다.
-ros2 action send_goal /dock tool_manipulator_bringup/action/Dock \
-  "{tool_id: 1, mode: 0}" --feedback
-
-# 취소: 현재 단계에서 hold, 이후 완료 토픽 없음
-ros2 topic pub --once /tool_change/cancel std_msgs/msg/Bool "{data: true}"
-```
-
-## 인터페이스 계약
-
-| 인터페이스 | 제공 | 사용 | 의미 |
-| --- | --- | --- | --- |
-| `/arm/apriltag/centers` | 기존 `vision.apriltag` | `tag_pose_filter` | 원본 tag JSON |
-| `/tag_pose_valid` | `tag_pose_filter` | visual servo, executor | tag/depth gate를 통과한 JSON |
-| `/servo_node/delta_twist_cmds` | `visual_servo_node` | MoveIt Servo | XY/직선 이동 Twist |
-| `/arm_controller/follow_joint_trajectory` | MoveIt | `arm_controller` | 6축 approach·yaw·wait trajectory |
-| `/wrist_yaw_rotation_complete` | motion executor | UI/로그 | yaw trajectory 성공 이벤트, scene 미반영 |
-| `/docking_complete` | motion executor | `tool_scene_manager` | retreat 성공 이벤트; 이것만 scene attach trigger |
-| `/tool_attachment_status`, `/active_tool_id` | scene manager | UI, manager | scene 갱신 결과와 attached tool |
-| `/control/hardware_fault` | hardware interface | executor/UI | fault 시 hold; 이후 도킹 단계 금지 |
-
-`apriltag_tool_docking.launch.py`는 `tool_change.launch.py`가 내부적으로 포함하는
-실기 docking stack이다. hardware/controller ownership은 `real_control.launch.py` 한 곳에만 있다.
-
-
-## RMD 3축 영점·리밋 측정 (읽기 전용)
-
-먼저 `rmd_joint_state_bridge`만 실행한다. 이 조합은 CAN getter만 사용하며
-위치·속도·토크 명령을 보내지 않는다.
-
-```bash
-# 터미널 A: CAN 및 read-only bridge
-source /opt/ros/humble/setup.bash
-source ~/ResKU/install/setup.bash
-ros2 launch rmd_joint_state_bridge joint_state_bridge.launch.py
-
-# 터미널 B: 캘리브레이션 캡처
-source /opt/ros/humble/setup.bash
-source ~/ResKU/install/setup.bash
-ros2 run tool_manipulator_bringup capture_rmd_calibration.py
-```
-
-캡처 터미널에서 축 하나씩 다음 순서로 입력한다.
-
-```text
-snap
-# 해당 축을 URDF 0 자세로 수동 배치
-zero shoulder +              # 실제 raw 증가가 ROS 양의 방향이면 +, 반대면 -
-# 안전 최소 위치로 수동 배치
-limit shoulder min
-# 안전 최대 위치로 수동 배치
-limit shoulder max
-show
-```
-
-`show`가 출력한 `sign`, `q_offset_rad`, `soft_limit_rad`만
-`hardware.yaml`에 복사한다. RMD 속도·전류·후퇴 보호값은 이 읽기 전용
-스크립트가 추정하지 않으며 별도 안전 시험 결과로 입력해야 한다.
-
-### 현재 자세로 6축 영점만 다시 맞추기
-
-기존 영점 기준 소프트 리밋 범위는 유지하고 현재 정지 자세를 새 0 rad로 설정할 때는
-같은 읽기 전용 bridge를 실행한 상태에서 다음 노드를 사용한다. 실기 controller와
-bridge를 동시에 실행하지 않는다.
-
-```bash
-# 먼저 변경 예정값만 확인
-ros2 run tool_manipulator_bringup set_current_zero.py \
-  --config ~/ResKU/src/arm/tool_manipulator_bringup/config/hardware.yaml
-
-# 팔을 영점 자세에 계속 고정하고 확인한 값을 저장
-ros2 run tool_manipulator_bringup set_current_zero.py \
-  --config ~/ResKU/src/arm/tool_manipulator_bringup/config/hardware.yaml \
-  --apply
-```
-
-기본적으로 `ee_joint`를 제외한 6축을 갱신한다. `--joints <joint ...>`로 일부 축만
-선택할 수도 있다. 노드는 10개 raw 샘플이 정지 허용범위 안인지 확인한다. Dynamixel의
-절대 pulse 리밋인 `soft_limit_raw`는 `zero_raw` 변화량과 똑같이 이동하고,
-영점 기준 rad 리밋인 `soft_limit_rad`는 그대로 둔다. RMD는 `q_offset_rad`만 바꾼다.
-`--apply` 전에는 파일을 쓰지 않으며, 적용 시 원본 `hardware.yaml.bak-*`를 남긴다.
+실기 controller와 `rmd_joint_state_bridge`는 같은 하드웨어 포트를 사용하므로 동시에 실행하지 않는다.

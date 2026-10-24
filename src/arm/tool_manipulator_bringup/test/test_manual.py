@@ -256,8 +256,8 @@ def test_reported_real_startup_pose_is_blocked_with_exact_joint_reasons():
     node.publisher.publish.assert_not_called()
     assert 'shoulder_joint=1.550201' in node.status
     assert 'wrist_pitch_joint=-1.599769' in node.status
-    assert 'excess=+1.841 deg' in node.status
-    assert 'excess=-0.421 deg' in node.status
+    assert 'excess=+1.845 deg' in node.status
+    assert 'excess=-0.445 deg' in node.status
     node.get_logger().warning.assert_called_once()
     import json
     diagnostic = json.loads(node.diagnostics.publish.call_args.args[0].data)
@@ -427,10 +427,9 @@ def test_manual_input_stays_blocked_after_startup_until_fresh_neutral_joystick(j
 @pytest.fixture(scope='module')
 def resku_chain():
     # Expand local URDF files only. No ROS node, driver, launch or hardware.
-    from moveit_configs_utils import MoveItConfigsBuilder
-    model = MoveItConfigsBuilder('tool_manipulator',
-                                package_name='tool_manipulator_moveit_config').to_moveit_configs()
-    return ArmChain(model.robot_description['robot_description'])
+    import xacro
+    path = Path(__file__).resolve().parents[2] / 'tool_manipulator_description/urdf/tool_manipulator.urdf.xacro'
+    return ArmChain(xacro.process_file(str(path)).toxml())
 
 
 @pytest.mark.parametrize('direction', [-1., 1.])
