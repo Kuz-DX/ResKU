@@ -1,7 +1,8 @@
 # Arm Control Mode Manager
 
-`managed_control.launch.py` starts a separate mode-managed stack, initially in
-HOLD, using mock hardware by default. It does not modify the legacy manual launch.
+`managed_control.launch.py` starts a separate mode-managed TCP stack, initially in
+HOLD, using real hardware and an externally published `/joy` topic by default.
+It does not modify the legacy manual launch.
 Do not run both stacks together. The preflight refuses an existing arm controller
 manager. This check is not a distributed lock against simultaneous launches.
 
@@ -14,8 +15,8 @@ ros2 launch ~/ResKU/src/arm/tool_manipulator_bringup/launch/managed_control.laun
 ```
 
 The source launch invokes Python scripts directly. Existing installed dependencies
-and controller plugins are required. `real_hardware:=true` selects real hardware;
-startup has been verified with isolated mock hardware, not on the physical arm.
+and controller plugins are required. For offline testing, explicitly set
+`real_hardware:=false`; startup has been verified with isolated mock hardware.
 Startup uses the legacy manual RMD recovery policy: shoulder, elbow and wrist
 pitch may start at most 5 degrees outside their soft limits. Their measured
 positions are captured before controller activation and ramped inward to a
@@ -89,20 +90,25 @@ the new epoch. Manual additionally requires neutral controls.
 Start the managed stack with its TCP producer and MoveIt planning-scene service:
 
 ```bash
-ros2 launch ~/ResKU/src/arm/tool_manipulator_bringup/launch/managed_control.launch.py \
-  launch_tcp_joy:=true launch_joy:=false
-ros2 topic pub --once --qos-durability transient_local /control/active_target std_msgs/msg/String '{data: arm}'
-ros2 service call /arm/set_mode/tcp_ik std_srvs/srv/Trigger '{}'
+ros2 launch ~/ResKU/src/arm/tool_manipulator_bringup/launch/managed_control.launch.py
+# Press Options once: drive -> arm automatically requests TCP_IK.
+ros2 topic echo /arm/control_status --once --full-length
 ros2 topic echo /arm/tcp_joy/status
 ```
 
-The example uses mock hardware and a remote joystick publisher. Set
-`real_hardware:=true` for hardware, or `launch_joy:=true` for a locally connected
-joystick. Stop the old managed/manual stack first. Do not start another move_group
+The default uses real hardware, enables the TCP producer, and consumes `/joy` from
+the separately launched remote joystick path. The three launch arguments remain
+only as explicit test overrides: `real_hardware:=false`, `launch_tcp_joy:=false`,
+or `launch_joy:=true`. Stop the old managed/manual stack first. Do not start another
+move_group
 with this launch. Startup recovery must finish before requesting TCP_IK.
 TCP mock startup defaults to `config/tcp_mock_initial_positions.yaml`, a
 nonsingular pose near manual home. An explicit `mock_initial_positions_file`
 overrides it. Real hardware continues to start from measured feedback.
+With `launch_tcp_joy:=true`, an Options drive-to-arm edge automatically requests
+TCP_IK after recovery and controller readiness. Options back to drive requests
+HOLD. Cancel, command timeout, and fault do not automatically restart while focus
+stays on arm; toggle to drive and back to arm, or call the mode service explicitly.
 
 Sony joystick mapping (axes 1, 0, 4; buttons 4, 5):
 

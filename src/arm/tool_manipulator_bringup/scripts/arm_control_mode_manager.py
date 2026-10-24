@@ -28,6 +28,10 @@ class ControlModeManager(Node):
         super().__init__('arm_control_mode_manager')
         default = Path(get_package_share_directory('tool_manipulator_bringup'))/'config/hardware.yaml'
         path = Path(self.declare_parameter('hardware_config', str(default)).value)
+        self.focus_arm_mode = str(self.declare_parameter('focus_arm_mode', '').value)
+        if self.focus_arm_mode not in ('', 'manual', 'tcp_ik'):
+            raise ValueError('focus_arm_mode must be empty, manual, or tcp_ik')
+        self.focus_activation_pending = False
         limits = load_soft_limits(path, JOINTS)
         config = yaml.safe_load(path.read_text())
         speeds = [min(.12, float(config['joints'][j]['velocity_limit_rad_s'])/2) for j in JOINTS]
@@ -71,9 +75,27 @@ class ControlModeManager(Node):
             self.core.feedback([p[j] for j in JOINTS], [v[j] for j in JOINTS], time.monotonic())
 
     def on_focus(self, msg):
+        previous = self.core.focus
         self.core.focus = msg.data
+        if msg.data == 'arm':
+            if previous != 'arm' and self.focus_arm_mode:
+                self.focus_activation_pending = True
+        else:
+            self.focus_activation_pending = False
         if msg.data != 'arm' and self.core.mode != 'fault' and self.core.startup_complete:
             self.core.request('hold', time.monotonic())
+
+    def activate_pending_focus(self, now):
+        c = self.core
+        if not self.focus_activation_pending:
+            return
+        if c.mode == 'fault':
+            self.focus_activation_pending = False
+            return
+        if (c.focus == 'arm' and c.mode == 'hold' and not c.transitioning and
+                c.ready and c.startup_complete and c.fresh(now)):
+            c.request(self.focus_arm_mode, now)
+            self.focus_activation_pending = False
 
     def on_fault(self, msg):
         if msg.data.strip() and msg.data.lower() not in ('ok', 'false', '0', 'none'):
@@ -81,6 +103,7 @@ class ControlModeManager(Node):
             self.core.fault('hardware fault: '+msg.data)
 
     def set_mode(self, mode, res):
+        self.focus_activation_pending = False
         try:
             self.core.request(mode, time.monotonic())
             res.success, res.message = True, 'accepted; wait for control_status.transitioning=false'
@@ -205,7 +228,13 @@ class ControlModeManager(Node):
         elif c.transitioning:
             blocker = c.reason
         elif c.mode == 'hold':
-            blocker = 'HOLD: request /arm/set_mode/manual to enable joystick control'
+            if self.focus_activation_pending and self.focus_arm_mode:
+                blocker = 'HOLD: activating '+self.focus_arm_mode
+            elif self.focus_arm_mode:
+                blocker = ('HOLD: toggle drive -> arm or request /arm/set_mode/' +
+                           self.focus_arm_mode)
+            else:
+                blocker = 'HOLD: request an arm control mode'
         else:
             blocker = ''
         report = (c.mode, c.ready, c.startup_complete, blocker)
@@ -222,6 +251,8 @@ class ControlModeManager(Node):
             epoch=c.epoch, ready=c.ready, reason=c.reason, controllers=self.controllers,
             startup_recovering=c.startup_recovering, startup_complete=c.startup_complete,
             startup_goal_rad=c.startup_goal,
+            focus_arm_mode=self.focus_arm_mode,
+            focus_activation_pending=self.focus_activation_pending,
             activation_blockers=self.activation_blockers,
             controller_age_sec=now-self.controller_time if self.controllers else None,
             command_subscribers=self.position.get_subscription_count(),
@@ -231,6 +262,7 @@ class ControlModeManager(Node):
         now = time.monotonic()
         dt, self.last_tick = now-self.last_tick, now
         self.poll(now)
+        self.activate_pending_focus(now)
         # Seed both sides of activation; ForwardCommandController clears its buffer on activation.
         if (not self.activated and self.activation_started is not None and
                 self.core.fresh(now) and self.core.mode != 'fault'):

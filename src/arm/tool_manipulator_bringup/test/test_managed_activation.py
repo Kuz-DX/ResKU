@@ -3,6 +3,7 @@ from pathlib import Path
 import sys
 from types import SimpleNamespace
 from unittest.mock import Mock
+from std_msgs.msg import String
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts'))
 from arm_control_mode_manager import ControlModeManager
@@ -43,3 +44,38 @@ def test_measured_seed_is_published_before_strict_switch():
     assert events[0][1] == node.core.position
     assert node.core.startup_recovering
     assert not node.core.ready
+
+
+def test_drive_to_arm_edge_requests_configured_tcp_mode_once():
+    node = SimpleNamespace()
+    node.core = ModeCore([(-2., 2.)]*6, [.12]*6)
+    node.core.feedback([0.]*6, [0.]*6, 1.)
+    node.core.ready = True
+    node.focus_arm_mode = 'tcp_ik'
+    node.focus_activation_pending = False
+    ControlModeManager.on_focus(node, String(data='arm'))
+    assert node.focus_activation_pending
+    ControlModeManager.activate_pending_focus(node, 1.)
+    assert not node.focus_activation_pending
+    assert node.core.requested == 'tcp_ik' and node.core.transitioning
+
+    # HOLD/cancel while focus remains arm must not silently restart motion.
+    node.core.mode = node.core.requested = 'hold'
+    node.core.transitioning = False
+    ControlModeManager.on_focus(node, String(data='arm'))
+    assert not node.focus_activation_pending
+
+
+def test_focus_activation_waits_for_controller_readiness():
+    node = SimpleNamespace()
+    node.core = ModeCore([(-2., 2.)]*6, [.12]*6)
+    node.core.feedback([0.]*6, [0.]*6, 1.)
+    node.core.focus = 'arm'
+    node.core.ready = False
+    node.focus_arm_mode = 'tcp_ik'
+    node.focus_activation_pending = True
+    ControlModeManager.activate_pending_focus(node, 1.)
+    assert node.focus_activation_pending and node.core.mode == 'hold'
+    node.core.ready = True
+    ControlModeManager.activate_pending_focus(node, 1.)
+    assert not node.focus_activation_pending and node.core.requested == 'tcp_ik'

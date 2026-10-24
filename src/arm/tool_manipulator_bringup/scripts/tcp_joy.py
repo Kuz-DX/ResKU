@@ -58,6 +58,7 @@ class TcpJoy(Node):
         self.failures = 0
         self.blocked = False
         self.reason = 'waiting for TCP_IK mode'
+        self.last_logged_state = None
         self.last_time = time.monotonic()
         qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
                          durability=DurabilityPolicy.TRANSIENT_LOCAL)
@@ -204,6 +205,13 @@ class TcpJoy(Node):
             deadman=self.deadman, rearmed=self.rearmed, pending=self.pending is not None,
             condition=self.stepper.condition if math.isfinite(self.stepper.condition) else None,
             singularity_scale=self.stepper.scale, velocity_scale=self.stepper.velocity_scale))))
+        logged = (self.reason, self.failures, self.deadman, self.rearmed)
+        if logged != self.last_logged_state:
+            self.get_logger().info(
+                'reason=%s failures=%d deadman=%s rearmed=%s mode=%s focus=%s' %
+                (self.reason, self.failures, self.deadman, self.rearmed,
+                 s.get('mode', 'missing'), s.get('focus', 'missing')))
+            self.last_logged_state = logged
 
 
 def main():

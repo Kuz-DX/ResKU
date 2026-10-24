@@ -1,4 +1,4 @@
-"""Mode-managed arm stack. Defaults to mock hardware and HOLD."""
+"""Mode-managed TCP arm stack. Defaults to real hardware and external Joy."""
 import importlib.util
 from pathlib import Path
 import sys
@@ -33,7 +33,9 @@ def bringup(context):
     if not scripts.is_dir():
         scripts = Path(get_package_prefix('tool_manipulator_bringup'))/'lib/tool_manipulator_bringup'
     manager = Node(executable=sys.executable, arguments=[str(scripts/'arm_control_mode_manager.py')],
-                   parameters=[{'hardware_config': base.hardware_file}], output='screen')
+                   parameters=[{'hardware_config': base.hardware_file,
+                                'focus_arm_mode': 'tcp_ik' if tcp_enabled else ''}],
+                   output='screen')
     manual = Node(executable=sys.executable, arguments=[str(scripts/'managed_manual.py')],
                   parameters=[base.description, {'hardware_config': base.hardware_file,
                                                  'startup_recovery_enabled': False}], output='screen')
@@ -70,10 +72,10 @@ def bringup(context):
 def generate_launch_description():
     share = Path(get_package_share_directory('tool_manipulator_bringup'))
     return LaunchDescription([
-        DeclareLaunchArgument('real_hardware', default_value='false', choices=['true', 'false']),
+        DeclareLaunchArgument('real_hardware', default_value='true', choices=['true', 'false']),
         DeclareLaunchArgument('hardware_config', default_value=str(share/'config/hardware.yaml')),
-        DeclareLaunchArgument('launch_joy', default_value='true', choices=['true', 'false']),
+        DeclareLaunchArgument('launch_joy', default_value='false', choices=['true', 'false']),
         DeclareLaunchArgument('mock_initial_positions_file', default_value=''),
-        DeclareLaunchArgument('launch_tcp_joy', default_value='false', choices=['true', 'false']),
+        DeclareLaunchArgument('launch_tcp_joy', default_value='true', choices=['true', 'false']),
         OpaqueFunction(function=bringup),
     ])
