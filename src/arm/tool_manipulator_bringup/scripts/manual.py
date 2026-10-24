@@ -101,9 +101,12 @@ class Manual(ManualController):
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE,
                          durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.create_subscription(String, '/control/hardware_fault', self.on_hardware_fault, qos)
-        self.get_logger().warning('No collision checking. Automatic startup RMD recovery to 2-degree inset; '
-                                  'manual input stays disabled until recovery completes. '
-                                  'No automatic home or grasp.')
+        if self.params['startup_recovery_enabled']:
+            self.get_logger().warning('No collision checking. Automatic startup RMD recovery to 2-degree inset; '
+                                      'manual input stays disabled until recovery completes. '
+                                      'No automatic home or grasp.')
+        else:
+            self.get_logger().warning('No collision checking. Automatic startup recovery is disabled.')
 
     def now_seconds(self):
         # Watchdogs must continue to expire if ROS /clock stalls or jumps.

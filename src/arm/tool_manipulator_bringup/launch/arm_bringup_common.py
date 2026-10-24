@@ -50,6 +50,7 @@ def build_arm_base(
     use_mesh: str = "true",
     mock_initial_positions_file: str = "",
     mock_ee_velocity: bool = False,
+    manual_controller_file: str = '',
     error_prefix: str = "real control blocked",
 ):
     """Build common description and process actions for one selected mode."""
@@ -86,7 +87,7 @@ def build_arm_base(
 
     controller_files = [
         str(moveit_share / "config/ros2_controllers.yaml"),
-        str(bringup_share / "config/manual_controllers.yaml"),
+        manual_controller_file or str(bringup_share / "config/manual_controllers.yaml"),
     ]
     control_node = Node(
         package="controller_manager",
