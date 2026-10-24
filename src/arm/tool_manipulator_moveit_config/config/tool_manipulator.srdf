@@ -187,4 +187,7 @@
     <disable_collisions link1="rack_left" link2="ee_actuator" reason="ToolMating"/>
     <disable_collisions link1="tool_spurgear" link2="ee_actuator" reason="ToolMating"/>
     <disable_collisions link1="rack_right" link2="wrist_link_yaw" reason="ToolMating"/>
+    <disable_collisions link1="rack_left" link2="tool_spurgear" reason="ToolMating"/>
+    <disable_collisions link1="rack_right" link2="tool_spurgear" reason="ToolMating"/>
+    <disable_collisions link1="rack_left" link2="wrist_link_yaw" reason="ToolMating"/>
 </robot>

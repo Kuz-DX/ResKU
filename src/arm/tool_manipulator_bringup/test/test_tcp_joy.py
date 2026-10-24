@@ -171,3 +171,19 @@ def test_candidate_total_deadline_preserves_previous_goal():
             step.candidate(np.zeros(6), np.array([1., 0, 0, 0, 0, 0]), .02)
     step.model.solve.assert_not_called()
     np.testing.assert_array_equal(step.q, np.zeros(6))
+
+
+def test_gripper_zero_and_internal_allowed_collisions_stay_consistent():
+    hardware = yaml.safe_load((ARM/'tool_manipulator_bringup/config/hardware.yaml').read_text())
+    assert hardware['joints']['ee_joint']['zero_raw'] == 1992
+    text = (ARM/'tool_manipulator_moveit_config/config/tool_manipulator.srdf').read_text()
+    expected = {
+        ('rack_left', 'ee_actuator'), ('tool_spurgear', 'ee_actuator'),
+        ('rack_right', 'wrist_link_yaw'), ('rack_left', 'tool_spurgear'),
+        ('rack_right', 'tool_spurgear'), ('rack_left', 'wrist_link_yaw'),
+    }
+    import xml.etree.ElementTree as ET
+    root = ET.fromstring(text)
+    allowed = {tuple(sorted((x.get('link1'), x.get('link2'))))
+               for x in root.findall('disable_collisions')}
+    assert {tuple(sorted(pair)) for pair in expected} <= allowed
