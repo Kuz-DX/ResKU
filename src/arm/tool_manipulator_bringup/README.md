@@ -147,21 +147,10 @@ ros2 run tool_manipulator_bringup set_current_zero.py \
   --config ~/ResKU/src/arm/tool_manipulator_bringup/config/hardware.yaml --apply
 ```
 
-### 수동 경로·trajectory 진단
-
-`docking_motion_recorder.py`는 이름만 기존 호환성을 유지하며, 실제로는 `/joint_states`를
-구독해 JSON으로 저장하는 읽기 전용 관절 경로 기록기다.
-
-```bash
-ros2 run tool_manipulator_bringup docking_motion_recorder.py \
-  --output /tmp/arm_motion.json
-```
-
-`trajectory_diagnostics.py`는 과거 Servo/JTC 로그를 해석할 때 재사용하는 수동 진단
-모듈이며 독립 실행 노드는 아니다. 기존 로그 필드의 의미는
-[dxl_trajectory_diagnostics.md](docs/dxl_trajectory_diagnostics.md)에 정리돼 있다.
-
 ## 유지 파일 기준
+
+`trajectory_diagnostics.py`와 관련 문서·테스트는 오늘 pull의 DXL 수동 구동 진단
+기록이므로 실행 진입점은 아니어도 분석 자료로 유지한다.
 
 - `launch/`: `manual`, `real_control`, `mock`, `remote_joy`, `arm_drive_guard`
 - `scripts/`: 실제 구동에 필요한 모듈과 읽기/검사/캘리브레이션 도구

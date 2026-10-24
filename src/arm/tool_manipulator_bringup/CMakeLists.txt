@@ -8,7 +8,6 @@ install(DIRECTORY launch DESTINATION share/${PROJECT_NAME}
 install(PROGRAMS scripts/capture_arm_pose.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/capture_arm_raw.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/capture_rmd_calibration.py DESTINATION lib/${PROJECT_NAME})
-install(PROGRAMS scripts/docking_motion_recorder.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/set_current_zero.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/check_hardware_config.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/read_hardware_safety_params.py DESTINATION lib/${PROJECT_NAME})
