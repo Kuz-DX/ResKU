@@ -105,6 +105,10 @@ tool_manipulator_moveit_config/config/moveit.rviz
 
 ### named pose
 
+팔 내부 MANUAL/TCP_IK/TOOL_AUTO 모드 중재는 별도
+[Control Mode Manager](docs/control_mode_manager.md)를 참고한다.
+기존 아래 named-pose 직접 실행 명령은 managed stack과 동시에 사용하지 않는다.
+
 ```bash
 # pose 목록과 dry-run
 bash ~/ResKU/utils/move_to_pose.sh --list

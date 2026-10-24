@@ -59,7 +59,7 @@
   <!-- STL 단위 mm -> URDF m -->
   <!-- ========================================================= -->
 
-  <xacro:macro name="mesh_visual" params="mesh material">
+  <xacro:macro name="mesh_visual" params="mesh material mesh_rpy:='0 0 0'">
 
     <xacro:if value="$(arg use_mesh)">
       <visual>
@@ -69,10 +69,12 @@
         STL export origin = 해당 hinge
         STL export axes   = 해당 local frame
 
-        따라서 여기서 추가 회전/이동 금지.
+        기본적으로 추가 이동은 없으며, CAD 정렬이 필요한 링크만
+        mesh_rpy로 시각/충돌 형상을 보정한다. 관절 운동학 프레임은
+        메쉬 정렬을 위해 변경하지 않는다.
       -->
       <origin xyz="0 0 0"
-              rpy="0 0 0"/>
+              rpy="${mesh_rpy}"/>
 
       <geometry>
         <mesh
@@ -84,7 +86,7 @@
 
     </visual>
       <collision>
-        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <origin xyz="0 0 0" rpy="${mesh_rpy}"/>
         <geometry>
           <mesh filename="${collision_mesh_path}/${mesh}.stl" scale="0.001 0.001 0.001"/>
         </geometry>
@@ -381,7 +383,8 @@
 
     <xacro:mesh_visual
         mesh="elbow_link"
-        material="petg_charcoal"/>
+        material="petg_charcoal"
+        mesh_rpy="0 ${pi} 0"/>
 
   </link>
 
@@ -394,7 +397,7 @@
 
     <origin
         xyz="0 0.180000 -0.052578"
-        rpy="0 0 ${pi}"/>
+        rpy="${pi} 0 0"/>
 
     <axis xyz="0 0 -1"/>
 
@@ -589,7 +592,7 @@
 
     <origin
         xyz="-0.075000 0 0"
-        rpy="${-pi/2} 0 ${pi/2}"/>
+        rpy="${pi/2} 0 ${-pi/2}"/>
 
     <axis xyz="0 0 1"/>
 
@@ -605,7 +608,7 @@
   <!-- ========================================================= -->
   <!-- EE ACTUATOR DRIVE GEAR -->
   <!-- wrist yaw -> EE drive gear centre:
-       wrist-yaw local (0, +34, +78.36) mm
+       wrist-yaw local (0, -34, +78.36) mm
        measured world (-34, 0, +78.36) mm -->
   <!-- wrist_yaw frame -->
   <!-- Xe = +Yworld -->
@@ -630,7 +633,7 @@
     <child link="ee_actuator"/>
 
     <origin
-        xyz="0 0.034000 0.078360"
+        xyz="0 -0.034000 0.078360"
         rpy="0 0 0"/>
 
   </joint>
