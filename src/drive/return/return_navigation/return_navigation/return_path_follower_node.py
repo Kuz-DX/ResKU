@@ -68,12 +68,16 @@ No goal-stop logic here (return_state_machine_node owns FOLLOW_RETURN_PATH
 smoothly as it nears the final point.
 """
 
+import json
 import math
 
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from geometry_msgs.msg import Pose, PoseStamped, Twist
+from std_msgs.msg import String
+from return_navigation.recovery import LandmarkWatch
+from return_navigation.rejoin import distance_to_remaining_segment
 from nav_msgs.msg import Odometry, Path
 
 from return_navigation.se2 import Pose2D, normalize_angle, apply_correction
@@ -87,6 +91,12 @@ class ReturnPathFollowerNode(Node):
         super().__init__('return_path_follower_node')
 
         self.declare_parameter('control_rate_hz', 20.0)
+        self.declare_parameter('resume_max_path_distance_m', 3.0)
+        self._mission_state = ''
+        self._landmark_watch = LandmarkWatch()
+        self._landmark_hold = None
+        self.declare_parameter('landmark_miss_window_m', 1.0)
+        self.declare_parameter('landmark_miss_wait_s', 4.0)
         self.declare_parameter('lookahead_distance_m', 0.6)
         self.declare_parameter('linear_speed_mps', 0.5)
         self.declare_parameter('min_linear_speed_mps', 0.05)
@@ -152,6 +162,7 @@ class ReturnPathFollowerNode(Node):
 
         self._corners = []    # indices of sharp-corner vertices, ascending
         self._corner_ptr = 0  # next unhandled entry of _corners
+        self._progress_index = 0
         self._floor = 0       # path index of the last handled corner
 
         self._mode = TRACK_PATH
@@ -171,6 +182,11 @@ class ReturnPathFollowerNode(Node):
         self.create_subscription(Pose, '/mission/origin_pose', self._on_origin, transient_qos)
 
         self.create_subscription(PoseStamped, '/visual_landmark/correction', self._on_visual_correction, 10)
+        self.create_subscription(String, '/mission/return/state', self._on_mission_state, 10)
+        self.create_subscription(String, '/mission/return/resume_request', self._on_resume_request, 10)
+        self.create_subscription(String, '/visual_landmark/localization_event', self._on_localization_event, 10)
+        self.missed_pub = self.create_publisher(String, '/visual_landmark/missed', 10)
+        self.resume_pub = self.create_publisher(String, '/mission/return/resume_result', 10)
         self.create_timer(self.control_period, self._tick)
 
         self.get_logger().info('return_path_follower_node started (waiting for /return_path).')
@@ -192,6 +208,7 @@ class ReturnPathFollowerNode(Node):
         self._corners = [i for i in range(1, len(self._path) - 1)
                          if abs(self._corner_angle[i]) >= self.corner_detection_angle]
         self._corner_ptr = 0
+        self._progress_index = 0
         self._floor = 0
         self._mode = TRACK_PATH
         self._rotating_corner = None
@@ -231,8 +248,58 @@ class ReturnPathFollowerNode(Node):
         self._rotate_settle_since = None
         self._v_cmd = self._w_cmd = 0.0
 
+    def _on_localization_event(self, msg):
+        try:
+            data = json.loads(msg.data)
+            if data.get('event') == 'reference_loaded' and self._mission_state in {'MANUAL_RECORDING', 'WAIT_RETURN_COMMAND'}:
+                self._landmark_watch.references[data['id']] = Pose2D(float(data['x']), float(data['y']))
+            elif data.get('event') == 'localized' and self._mission_state not in {'IDLE', 'MANUAL_RECORDING', 'WAIT_RETURN_COMMAND'}:
+                self._landmark_watch.seen.add(data['id'])
+        except (ValueError, KeyError, TypeError):
+            return
+
+    def _on_mission_state(self, msg):
+        if msg.data in {'MANUAL_RECORDING', 'WAIT_RETURN_COMMAND'} and self._mission_state not in {'MANUAL_RECORDING', 'WAIT_RETURN_COMMAND'}:
+            self._landmark_watch = LandmarkWatch()
+        if msg.data != 'FOLLOW_RETURN_PATH':
+            self._landmark_hold = None
+            self._landmark_watch.near_since.clear()
+        if msg.data != self._mission_state:
+            self._v_cmd = self._w_cmd = 0.0
+            self._rotate_settle_since = None
+        self._mission_state = msg.data
+
+    def _on_resume_request(self, msg):
+        result = {'request': msg.data, 'ready': False, 'reason': 'path or odometry unavailable'}
+        if self._mission_state != 'RETURN_RESUME_STOP':
+            return
+        if len(self._path) >= 2 and self._origin is not None and self._odom_pose is not None:
+            age = (self.get_clock().now()-self._last_odom_time).nanoseconds*1e-9 if self._last_odom_time is not None else float('inf')
+            current = self._odom_pose.to_mission_frame(self._origin)
+            if self._visual_correction is not None:
+                current = apply_correction(self._odom_pose, self._visual_correction)
+            corner = self._next_corner()
+            hi = corner if corner is not None else len(self._path)-1
+            distance = distance_to_remaining_segment(self._path, current, max(self._floor, self._progress_index-1), hi)
+            limit = float(self.get_parameter('resume_max_path_distance_m').value)
+            ready = 0 <= age <= self.odom_timeout_s and math.isfinite(distance) and distance <= limit
+            result.update(ready=ready, distance_m=distance if math.isfinite(distance) else None,
+                          reason='ready' if ready else 'stale odometry or too far from remaining route')
+            if ready:
+                # Preserve path, corner pointer/floor and correction; only reset motion.
+                self._mode = TRACK_PATH
+                self._rotating_corner = None
+                self._rotate_target_yaw = None
+                self._rotate_settle_since = None
+                self._v_cmd = self._w_cmd = 0.0
+        self.resume_pub.publish(String(data=json.dumps(result)))
+
     # ------------------------------------------------------------------ #
     def _tick(self):
+        if self._mission_state != 'FOLLOW_RETURN_PATH':
+            self._v_cmd = self._w_cmd = 0.0
+            self._publish(0.0, 0.0)
+            return
         if len(self._path) < 2 or self._odom_pose is None or self._origin is None:
             self._publish(0.0, 0.0)
             return
@@ -250,7 +317,23 @@ class ReturnPathFollowerNode(Node):
             current = apply_correction(self._odom_pose, self._visual_correction)
         corner_idx = self._next_corner()
         hi = corner_idx if corner_idx is not None else len(self._path) - 1
-        nearest_idx = self._nearest_index(current, self._floor, hi)
+        nearest_idx = self._nearest_index(current, max(self._floor, self._progress_index-1), hi)
+        self._progress_index = max(self._progress_index, nearest_idx)
+
+        lid = self._landmark_hold
+        if lid is None:
+            lid = self._landmark_watch.missed(
+                self._path, current, self.get_clock().now().nanoseconds*1e-9,
+                max(self._floor, self._progress_index-1), hi,
+                window=float(self.get_parameter('landmark_miss_window_m').value),
+                wait_s=float(self.get_parameter('landmark_miss_wait_s').value))
+        if lid is not None:
+            self._landmark_hold = lid
+            self._v_cmd = self._w_cmd = 0.0
+            self._publish(0.0, 0.0)
+            self.missed_pub.publish(String(data=json.dumps({
+                'id': lid, 'stamp_ns': self.get_clock().now().nanoseconds})))
+            return
 
         if self._mode == TRACK_PATH:
             # heading_error is measured against the INCOMING segment while a

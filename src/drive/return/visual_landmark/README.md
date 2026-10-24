@@ -121,3 +121,145 @@ robot before evaluating moving return. Synthetic tests validate geometry and
 outlier handling but do not establish real-world recognition accuracy.
 
 PnP convention: https://docs.opencv.org/4.x/d5/d1f/calib3d_solvePnP.html
+
+## 복귀 중 Manual / Auto 전환
+
+복귀 임무의 경로·Base·랜드마크·시각 보정은 유지하면서 운전 권한을
+전환한다. Manual에서는 원래 기록 경로를 덮어쓰지 않고 자유롭게 이동할 수
+있으며, 자동 추종기의 진행 지점·코너 진행도는 정지한다. 완료 전에는
+경로를 CLEAR하지 않는다. 프로세스 재시작 후 임무 복원은 지원하지 않는다.
+
+Control UI는 `/mission/return/control_mode` (`std_msgs/String`)에 `MANUAL`
+또는 `AUTO`를 발행한다. 화면 소스는 이 저장소에 없으므로 실제 선택 버튼은
+UI 프로젝트에서 이 토픽에 연결해야 한다. 터미널 확인 방법:
+
+```bash
+# 자동 복귀 중 수동 전환
+ros2 topic pub --once /mission/return/control_mode std_msgs/msg/String "{data: MANUAL}"
+# 수동 작업 후 같은 복귀 임무 재개
+ros2 topic pub --once /mission/return/control_mode std_msgs/msg/String "{data: AUTO}"
+# UI 표시용 JSON 상태 (TRANSIENT_LOCAL)
+ros2 topic echo /mission/return/control_status --qos-durability transient_local
+```
+
+- `RETURN_MANUAL`: 조이스틱 명령을 사용한다. 자동 명령은 차단한다.
+- `RETURN_RESUME_STOP`: 두 입력을 모두 차단하고 신선한 odometry로 정지·잔진동
+  대기 시간을 확인한다. 이전 전환의 명령은 재사용하지 않는다.
+- Auto 재개 전에 추종기가 현재 위치와 남은 경로의 거리를 검사한다. 이미
+  진행한 지점 바로 뒤부터 다음 미처리 코너 사이만 검사하므로 근처의 다른
+  경로 분기로 바로 건너뛰지 않는다. 경로점/원점/보정·코너 진행도는 보존한다.
+- 추종기의 `resume_max_path_distance_m` 기본값은 3 m이다. 허용 범위 안에서
+  재개하면 기존 heading 정렬 및 경로 추종으로 합류한다. 장애물 우회 계획은
+  없으므로 이 거리는 통행 가능한 시험 환경에 맞춰 설정해야 한다.
+- odometry가 오래됐거나 허용 거리 밖이면 `RETURN_INTERVENTION`에서 정지를
+  유지하고 JSON `status=manual_intervention_required`와 사유를 발행한다.
+  운전자는 `MANUAL`을 선택해 이동한 뒤 `AUTO`로 재검사를 요청할 수 있다.
+- 재개 정지/응답 제한은 상태 머신 `resume_timeout_s` 기본 5 s이다. 응답은
+  요청 ID로 구분하여 취소된 이전 Auto 요청이 나중에 재개시키지 못한다.
+- `FOLLOW_RETURN_PATH`에서만 자동 추종기가 진행도를 갱신한다. Auto 재개 시
+  새로운 `/return_path`를 발행하거나 처음부터 180도 회전을 반복하지 않는다.
+  최초 정지/회전 중 Manual로 바꿨다면 경로를 준비해 보존하고, Auto 재개 시
+  경로 방향으로 정렬한다.
+- 수동 작업 중에도 유효한 랜드마크가 보이면 시각 보정할 수 있다. 이는 경로
+  기록이나 자동 운전 권한을 활성화하지 않는다.
+- 정지·회전·추종 중 긴급정지는 기존 `/emergency_stop` 동작을 우선한다.
+
+UI는 `manual`, `resume_check`, `auto`, `manual_intervention_required`를
+JSON `status`에서 표시하고 실제 중재 상태는 `/mission/return/state`로
+확인한다. `AUTO` 발행 자체를 자동 복귀 성공으로 표시하지 않는다.
+
+### 랜드마크 누락 감지와 좌우 30도 탐색
+
+유효한 `reference_loaded` 랜드마크를 기록 경로에 투영하고, 복귀 경로의
+진행 거리를 기준으로 예상 구간을 판정한다. 기본은 랜드마크 1 m 전부터
+검색 구간으로 보고, 1 m를 지나도록 인식하지 못하거나 해당 구간 진입 후 4 s
+동안 인식하지 못하면 전진을 멈춘다. Base 근처 랜드마크는 도착 판정 전에
+검사한다. 경로는 다음 미처리 코너까지의 진행 구간으로 제한하여 주변 다른
+경로 분기로 갑자기 진행도가 건너뛰는 것을 줄인다. 거리와 시간은 추정값이며
+반복되는 장소/자기 교차 경로에서는 추가 현장 검증이 필요하다.
+
+`RETURN_LANDMARK_SEARCH`에서 최초 정지 방향을 기준으로
+`0° → +30° → -30° → 0°` 한 차례 탐색한다. 각도는 odometry yaw 피드백으로
+판정하며 기본 회전 속도는 0.15 rad/s, 각도 도달 허용오차는 2°이다. 각 위치에서
+3 s 관찰하고 초기 정지/안정화(기본 0.5 s) 이후의 영상만 보정 확정에 사용한다.
++30°에서 -30°까지의 이동은 60°이고, 전체 회전 이동량은 약 120°이다.
+제한은 시작 방향에 대한 편차 ±30°이며, 총 이동량 60°라는 의미가 아니다.
+
+탐색 중에는 거리 제한 없이 저장된 대상 랜드마크를 검색한다. 후보 발견 시
+회전을 멈추고 새 정지 영상 두 장의 매칭을 검증한다. 이때 일반 VPR의 inlier,
+재투영 오차 및 보정량 검사는 그대로 유지한다. 성공하면 제어기가 해당
+보정을 수신한 것을 확인하고 기존 Auto 재합류 검사(기본 3 m) 후 복귀한다.
+보정이 너무 커서 검증을 통과하지 못하면 자동 재개하지 않는다.
+
+실패, 60 s 시간 초과, 허용 각도 초과, odometry 단절 또는 RGB-D/카메라 TF
+단절 시 `RETURN_INTERVENTION`에서 정지를 유지하고
+`/mission/return/control_status`에 `manual_intervention_required`와 사유를
+발행한다. 일반 탐색 진행은 `landmark_search`로 표시한다. 수동 전환은 탐색을
+즉시 중단하고 경로/진행도를 보존한다. 이후 Manual로 장면을 찾거나 경로
+가까이 이동한 뒤 Auto를 요청할 수 있다. 동일 랜드마크의 자동 탐색은 임무당
+한 번으로 제한해 수동 개입 후 같은 지점에서 무한 탐색하지 않는다.
+
+캡처되지 않았거나 TF/보정값/특징이 없어 참조로 로딩되지 않은 이미지는
+누락 감지 대상이 아니다. 시작 시 유효 랜드마크가 없으면 기존 odometry 복귀를
+유지한다. 노드 재시작 시 참조/누락 감지 상태의 자동 복원은 지원하지 않는다.
+제자리 회전은 장애물 회피 기능을 추가하는 것이 아니므로 회전 공간을 확보해야
+한다. 3 m 재합류 제한도 주변 지형의 통행 가능성을 판단하지 않는다.
+
+기본값은 launch 인자로 조정할 수 있다:
+
+```bash
+ros2 launch robot_bringup manual_return_bringup.launch.py \
+  resume_max_path_distance_m:=3.0 \
+  landmark_miss_window_m:=1.0 landmark_miss_wait_s:=4.0 \
+  landmark_search_angle_deg:=30.0 landmark_search_speed_radps:=0.15 \
+  landmark_search_dwell_s:=3.0 landmark_search_timeout_s:=60.0
+```
+
+내부 인터페이스:
+
+- `/visual_landmark/missed`: 추종기가 누락한 랜드마크 ID와 시각을 발행한다.
+- `/visual_landmark/search_request`: 검색 대상, 요청 ID와 보정 허용 시각.
+- `/visual_landmark/localization_event`: `frame`, `candidate`, `localized` 및
+  참조 로딩/실패 이벤트. 검색 결과는 요청 ID·랜드마크 ID·영상 시각으로 검증한다.
+- `/mission/return/state`: 탐색 중에는 `RETURN_LANDMARK_SEARCH`이며, 일반
+  경로 추종은 정지하고 상태 머신의 회전 명령만 mux를 통과한다.
+
+
+### 현재 조이스틱 버튼맵 (기본 파라미터)
+
+주행 포커스(`/control/active_target=drive`)에서 다음 입력을 사용한다.
+`manual_control.launch.py`는 아래 기본 버튼 번호를 덮어쓰지 않는다.
+
+| 입력 | 기능 | ROS Joy 인덱스 |
+|---|---|---|
+| 왼쪽 스틱 상하 | 왼쪽 바퀴 속도 | axes[1] |
+| 오른쪽 스틱 상하 | 오른쪽 바퀴 속도 | axes[4] |
+| △ / × | 누르는 동안 전진 / 후진 | buttons[2] / [0] |
+| □ / ○ | 누르는 동안 제자리 좌회전 / 우회전 | buttons[3] / [1] |
+| L1 / L2 | 왼쪽 기본속도 증가 / 감소 | buttons[4] / [6] |
+| R1 / R2 | 오른쪽 기본속도 증가 / 감소 | buttons[5] / [7] |
+| L3 / R3 | 차동주행 시험: 왼쪽 / 오른쪽 바퀴가 빠름 | buttons[11] / [12] |
+| PS | 기록 시작 `/path/record` | buttons[10] |
+| Share | 최초 복귀 요청 `/path/return` | buttons[8] |
+| D-pad ↑ | 랜드마크 촬영 `/path/landmark` | axes[7] > 0.5 |
+| D-pad ↓ | Manual 전환 요청 | axes[7] < -0.5 |
+| D-pad → | Auto 재개 요청 | axes[6] < -0.5 |
+| D-pad ← | 예비 (주행 포커스) | axes[6] > 0.5 |
+| Options | 팔 / 주행 포커스 전환 (팔 텔레옵이 관리할 때) | buttons[9] |
+
+PS는 IDLE에서 기록을 시작한다. 다시 눌러 기록을 끝내는 토글이 아니다.
+Share는 복귀 가능한 수동 기록 상태에서 복귀를 시작한다. 복귀 중 Manual/Auto
+전환 버튼으로는 사용하지 않는다. Options는 조이스틱을 팔/주행 중 어디에
+전달할지 선택하는 것이며 자동/수동 운전 권한 전환과는 별개이다.
+
+D-pad ↓/→는 주행 포커스에서 `/mission/return/control_mode`에 `MANUAL`/`AUTO`를
+한 번 누를 때 한 번 발행한다. Control UI와 터미널도 같은 토픽을 사용할 수 있다.
+팔 포커스에서는 발행하지 않으며, 팔 조작 중 D-pad를 누른 채 주행으로
+전환했으면 중립으로 놓았다가 다시 눌러야 모드 전환 요청이 발생한다.
+↓와 →를 동시에 누르면 Manual을 우선하고, 계속 누르고 있어도 재발행하지 않는다.
+Auto는 즉시 주행이 아니라 정지·경로 재합류 검사 요청이며, 최초 복귀는 Share를
+사용한다. 축이 반대인 장치는 `manual_mode_axis_sign` / `auto_mode_axis_sign`
+(기본 각각 -1.0)을 조정한다.
+현재 주행 노드의 PS 버튼은 비상정지로 사용하지 않으며, 비상정지는 별도
+`/emergency_stop` 인터페이스이다. 장치/드라이버가 달라지면 실제 `/joy`의
+인덱스와 D-pad 부호를 확인해야 한다.

@@ -72,9 +72,9 @@ def test_capture_cancelled_when_return_starts():
 
 
 def test_localization_loads_reference_in_ready_state(tmp_path):
-    image = np.zeros((480, 640), np.uint8)
+    image = np.random.default_rng(42).integers(0, 256, (480, 640), dtype=np.uint8)
     assert cv2.imwrite(str(tmp_path/'rear.jpg'), image)
-    meta = dict(id='L001', image_file='rear.jpg', camera_frame='rear_optical',
+    meta = dict(mission_pose={'x': 1., 'y': 0.}, id='L001', image_file='rear.jpg', camera_frame='rear_optical',
                 mission_camera_transform=np.eye(4).tolist(), camera_info=dict(
                     frame_id='rear_optical', width=640, height=480,
                     distortion_model='plumb_bob',

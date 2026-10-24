@@ -49,9 +49,9 @@ from std_msgs.msg import Bool, Float32MultiArray, String
 
 from drive_cmd_mux.capture_hold import CaptureHold, PressDetector
 
-MANUAL_STATES = {'IDLE', 'MANUAL_RECORDING', 'WAIT_RETURN_COMMAND', 'FINISHED', ''}
-RETURN_STATES = {'TURN_180', 'FOLLOW_RETURN_PATH'}
-ZERO_STATES = {'STOP_BEFORE_TURN'}
+MANUAL_STATES = {'IDLE', 'MANUAL_RECORDING', 'WAIT_RETURN_COMMAND', 'FINISHED', 'RETURN_MANUAL', ''}
+RETURN_STATES = {'TURN_180', 'FOLLOW_RETURN_PATH', 'RETURN_LANDMARK_SEARCH'}
+ZERO_STATES = {'STOP_BEFORE_TURN', 'RETURN_RESUME_STOP', 'RETURN_INTERVENTION'}
 
 
 class DriveCmdMuxNode(Node):
@@ -156,6 +156,11 @@ class DriveCmdMuxNode(Node):
         if msg.data not in MANUAL_STATES and msg.data not in RETURN_STATES and msg.data not in ZERO_STATES:
             self.get_logger().warn(f'Unknown /mission/return/state "{msg.data}" -- treating as MANUAL.',
                                     throttle_duration_sec=5.0)
+        if msg.data != self._state:
+            # A new control source needs a post-switch command; no cached motion.
+            self._manual_time = None
+            self._return_time = None
+            self.cmd_pub.publish(Twist())
         self._state = msg.data
 
     def _now_s(self) -> float:
