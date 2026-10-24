@@ -16,8 +16,25 @@ ros2 launch ~/ResKU/src/arm/tool_manipulator_bringup/launch/managed_control.laun
 The source launch invokes Python scripts directly. Existing installed dependencies
 and controller plugins are required. `real_hardware:=true` selects real hardware;
 startup has been verified with isolated mock hardware, not on the physical arm.
-Initial joint positions must be inside hardware soft limits. Managed startup does
-not automatically recover out-of-limit joints or move to home.
+Startup uses the legacy manual RMD recovery policy: shoulder, elbow and wrist
+pitch may start at most 5 degrees outside their soft limits. Their measured
+positions are captured before controller activation and ramped inward to a
+2-degree inset, at at most 0.03 rad/s. Base, wrist roll and wrist yaw must already
+be inside their limits and retain their measured targets. This is not a home move.
+
+Recovery is owned by the manager and runs once per startup, even with drive focus
+or no joystick. All producer commands and active-mode requests are blocked during
+recovery. Status exposes `startup_recovering`, `startup_complete` and
+`startup_goal_rad`; mode remains HOLD with `transitioning=true` until completion.
+Completion requires measured RMD positions within 0.005 rad of the recovery goal,
+all joints inside limits, and measured velocity at most 0.02 rad/s. The manager
+then enters HOLD; MANUAL still requires an explicit request and neutral controls.
+
+Stale feedback pauses recovery increments; 15 seconds without completion faults.
+Target lead is limited to 0.10 rad. Invalid feedback, excess excursion, controller
+loss, or hardware faults block recovery. `/arm/cancel` during recovery latches
+FAULT and discards recovery; inspection and restart are required to retry.
+The 5-degree startup allowance is removed permanently after successful recovery.
 
 ## Ownership
 

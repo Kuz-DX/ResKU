@@ -7,7 +7,7 @@ MODES = ('manual', 'tcp_ik', 'tool_auto', 'hold', 'fault')
 
 
 class ModeCore:
-    def __init__(self, limits, speeds):
+    def __init__(self, limits, speeds, startup_recovery_enabled=False):
         self.limits, self.speeds = limits, speeds
         self.mode = 'hold'
         self.requested = 'hold'
@@ -27,6 +27,75 @@ class ModeCore:
         self.execution_id = None
         self.started = 0.
         self.settled = 0
+        self.startup_enabled = startup_recovery_enabled
+        self.startup_complete = not startup_recovery_enabled
+        self.startup_recovering = False
+        self.startup_goal = None
+        self.startup_started = None
+        self.startup_margin = math.radians(2.)
+        self.startup_allowance = math.radians(5.)
+        self.startup_speed = .03
+        self.startup_timeout = 15.
+
+    def feedback_allowed(self, position):
+        if self.startup_enabled and not self.startup_complete:
+            return (len(position) == len(self.limits) and all(
+                math.isfinite(v) and lo-(self.startup_allowance if 1 <= i <= 3 else 0.) <= v
+                <= hi+(self.startup_allowance if 1 <= i <= 3 else 0.)
+                for i, (v, (lo, hi)) in enumerate(zip(position, self.limits))))
+        return self.valid(position)
+
+    def begin_startup(self, now):
+        """Capture measured seed once, immediately before controller activation."""
+        if self.mode == 'fault' or not self.fresh(now) or not self.feedback_allowed(self.position):
+            raise ValueError('startup requires valid fresh feedback')
+        self.target = list(self.position)
+        if not self.startup_enabled:
+            return
+        self.invalidate()
+        self.mode = self.requested = 'hold'
+        self.startup_goal = list(self.target)
+        for i in (1, 2, 3):
+            lo, hi = self.limits[i]
+            self.startup_goal[i] = min(hi-self.startup_margin, max(lo+self.startup_margin, self.target[i]))
+        self.startup_recovering = any(abs(a-b) > 1e-9 for a,b in zip(self.target, self.startup_goal))
+        self.startup_complete = not self.startup_recovering
+        self.transitioning = self.startup_recovering
+        self.goal = list(self.startup_goal)
+        self.reason = 'startup RMD recovery: inward to 2-degree inset' if self.startup_recovering else ''
+
+    def run_startup(self, now, dt):
+        self.ee = 0.
+        if self.startup_started is not None and now-self.startup_started > self.startup_timeout:
+            self.fault('startup recovery timeout; inspect hardware before restart')
+            return None
+        if not self.fresh(now) or dt <= 0 or dt > .5:
+            self.reason = 'startup recovery paused: stale feedback or timer discontinuity'
+            return list(self.target)
+        if not self.feedback_allowed(self.position):
+            self.fault('startup feedback outside 5-degree recovery envelope')
+            return None
+        if max(abs(a-b) for a,b in zip(self.target, self.position)) > .10:
+            self.fault('startup recovery following error')
+            return None
+        if self.startup_started is None:
+            self.startup_started = now
+        candidate = list(self.target)
+        for i in (1, 2, 3):
+            step = min(self.speeds[i], self.startup_speed)*min(dt, .02)
+            candidate[i] += max(-step, min(step, self.startup_goal[i]-candidate[i]))
+        if max(abs(candidate[i]-self.position[i]) for i in (1, 2, 3)) <= .10:
+            self.target = candidate
+        self.reason = 'startup RMD recovery: inward to 2-degree inset'
+        if (max(abs(self.target[i]-self.startup_goal[i]) for i in (1, 2, 3)) < 1e-9
+                and self.valid(self.position)
+                and max(abs(self.position[i]-self.startup_goal[i]) for i in (1, 2, 3)) <= .005
+                and max(map(abs, self.velocity)) <= .02):
+            self.startup_recovering = False
+            self.startup_complete = True
+            self.transitioning = False
+            self.reason = 'startup recovery verified; HOLD'
+        return list(self.target)
 
     def valid(self, values):
         return (len(values) == len(self.limits) and all(
@@ -34,7 +103,7 @@ class ModeCore:
             for v, (lo, hi) in zip(values, self.limits)))
 
     def feedback(self, position, velocity, now):
-        if not self.valid(position) or len(velocity) != len(position) or not all(map(math.isfinite, velocity)):
+        if not self.feedback_allowed(position) or len(velocity) != len(position) or not all(map(math.isfinite, velocity)):
             self.fault('invalid joint feedback')
             return
         self.position, self.velocity, self.state_time = list(position), list(velocity), now
@@ -52,6 +121,7 @@ class ModeCore:
 
     def fault(self, reason):
         self.invalidate()
+        self.startup_recovering = False
         self.mode = self.requested = 'fault'
         self.transitioning = False
         self.reason = reason
@@ -61,6 +131,11 @@ class ModeCore:
             raise ValueError('invalid requested mode')
         if self.mode == 'fault':
             raise ValueError('fault is latched; reset required')
+        if self.startup_enabled and not self.startup_complete:
+            if mode == 'hold' and self.startup_recovering:
+                self.fault('startup recovery cancelled; restart required')
+                return
+            raise ValueError('startup recovery must complete before mode requests')
         if mode != 'hold' and (self.focus != 'arm' or not self.ready or not self.fresh(now)):
             raise ValueError('arm focus, active controller and fresh feedback required')
         self.invalidate()
@@ -71,6 +146,8 @@ class ModeCore:
         self.goal = list(self.position) if self.fresh(now) else None
 
     def reset(self, now):
+        if self.startup_enabled and not self.startup_complete:
+            raise ValueError('incomplete startup recovery requires inspection and restart')
         if not self.ready or not self.fresh(now) or max(map(abs, self.velocity)) > .02:
             raise ValueError('healthy controllers and stopped fresh feedback required')
         self.mode = 'hold'
@@ -106,6 +183,12 @@ class ModeCore:
 
     def tick(self, now, dt):
         if self.target is None:
+            return None
+        if self.startup_enabled and not self.startup_complete:
+            if self.mode == 'fault' or not self.ready:
+                return None
+            if self.startup_recovering:
+                return self.run_startup(now, dt)
             return None
         if not self.fresh(now):
             self.fault('joint feedback timeout')

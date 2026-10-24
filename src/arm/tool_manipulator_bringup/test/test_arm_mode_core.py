@@ -100,3 +100,86 @@ def test_focus_and_controller_gates():
     assert not c.command('manual', c.epoch, [0.]*6, 0., .1)
     with pytest.raises(ValueError):
         c.request('tool_auto', .1)
+
+
+def recovery_core():
+    c = ModeCore([(-3.503, 3.614), (-1.592, 1.518), (-1.497, 1.542),
+                  (-1.592, 1.470), (-.75, .63), (-5.76, 6.5)], [.12]*6,
+                 startup_recovery_enabled=True)
+    measured = [ -.00766990394, 1.5666074407163109, 1.5433946628649078,
+                -1.597848850305976, -.0889708857, -.0674951547]
+    c.feedback(measured, [0.]*6, 0.)
+    assert c.mode == 'hold'
+    c.begin_startup(0.)
+    c.ready = True
+    return c, measured
+
+
+def test_reported_hardware_pose_recovers_inward_without_joystick():
+    c, initial = recovery_core()
+    assert c.focus == 'drive' and c.startup_recovering and c.transitioning
+    for n in range(1, 751):
+        now = n*.02
+        before = c.target[:]
+        c.feedback(before, [0.]*6, now)
+        target = c.tick(now, .02)
+        assert target is not None
+        for i in (0, 4, 5):
+            assert target[i] == initial[i]
+        for i in (1, 2, 3):
+            assert abs(target[i]-before[i]) <= .03*.02+1e-12
+            assert (target[i]-before[i])*(c.startup_goal[i]-before[i]) >= -1e-12
+        if c.startup_complete:
+            break
+    assert c.startup_complete and not c.startup_recovering
+    assert c.mode == 'hold' and not c.transitioning and c.ee == 0.
+    import math
+    assert c.target[1:4] == pytest.approx([
+        1.518-math.radians(2), 1.542-math.radians(2), -1.592+math.radians(2)])
+    # Startup allowance must not apply again during normal operation.
+    c.feedback(initial, [0.]*6, now+.02)
+    assert c.mode == 'fault'
+
+
+@pytest.mark.parametrize('index,value', [(0, 3.7), (4, .7), (5, 6.6),
+                                       (1, 1.7), (2, float('nan'))])
+def test_recovery_rejects_dxl_excursions_large_rmd_errors_and_nan(index, value):
+    c, initial = recovery_core()
+    initial[index] = value
+    c.feedback(initial, [0.]*6, .02)
+    assert c.mode == 'fault' and c.tick(.02, .02) is None
+
+
+def test_startup_blocks_producers_and_cancel_never_resumes():
+    c, _ = recovery_core()
+    c.focus = 'arm'
+    with pytest.raises(ValueError, match='startup'):
+        c.request('manual', 0.)
+    assert not c.command('manual', c.epoch, [0.]*6, .1, 0.)
+    assert not c.path(c.epoch, 'run', [[0.]*6], 0.)
+    c.request('hold', 0.)
+    assert c.mode == 'fault'
+    assert c.tick(.02, .02) is None
+    with pytest.raises(ValueError, match='restart'):
+        c.reset(.02)
+
+
+def test_startup_pauses_for_stale_feedback_and_times_out():
+    c, initial = recovery_core()
+    c.tick(.02, .02)
+    frozen = c.target[:]
+    assert c.tick(.6, .02) == frozen
+    assert c.tick(15.1, .02) is None
+    assert c.mode == 'fault' and 'timeout' in c.reason
+
+
+def test_startup_stalls_at_feedback_lead_and_requires_measured_completion():
+    c, initial = recovery_core()
+    for i in range(1, 701):
+        now = i*.02
+        c.feedback(initial, [0.]*6, now)
+        c.tick(now, .02)
+    assert not c.startup_complete
+    c.feedback(initial, [0.]*6, 15.1)
+    c.tick(15.1, .02)
+    assert c.mode == 'fault'

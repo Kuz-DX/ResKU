@@ -31,7 +31,7 @@ class ControlModeManager(Node):
         limits = load_soft_limits(path, JOINTS)
         config = yaml.safe_load(path.read_text())
         speeds = [min(.12, float(config['joints'][j]['velocity_limit_rad_s'])/2) for j in JOINTS]
-        self.core = ModeCore([limits[j] for j in JOINTS], speeds)
+        self.core = ModeCore([limits[j] for j in JOINTS], speeds, startup_recovery_enabled=True)
         self.ee = self.create_publisher(Float64MultiArray, '/ee_velocity_controller/commands', 1)
         self.position = self.create_publisher(Float64MultiArray, '/manual_position_controller/commands', 1)
         qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
@@ -70,7 +70,7 @@ class ControlModeManager(Node):
 
     def on_focus(self, msg):
         self.core.focus = msg.data
-        if msg.data != 'arm' and self.core.mode != 'fault':
+        if msg.data != 'arm' and self.core.mode != 'fault' and self.core.startup_complete:
             self.core.request('hold', time.monotonic())
 
     def on_fault(self, msg):
@@ -157,7 +157,7 @@ class ControlModeManager(Node):
                 and self.controllers.get('ee_velocity_controller') == 'active'
                 and self.core.fresh(now) and max(map(abs, self.core.velocity)) <= .02
                 and self.switch_client.service_is_ready()):
-            self.core.target = list(self.core.position)
+            self.core.begin_startup(now)
             self.activation_started = now
             self.switch_future = self.switch_client.call_async(SwitchController.Request(
                 activate_controllers=['manual_position_controller'],
@@ -174,6 +174,8 @@ class ControlModeManager(Node):
         self.status_pub.publish(String(data=json.dumps(dict(
             mode=c.mode, requested=c.requested, transitioning=c.transitioning,
             epoch=c.epoch, ready=c.ready, reason=c.reason, controllers=self.controllers,
+            startup_recovering=c.startup_recovering, startup_complete=c.startup_complete,
+            startup_goal_rad=c.startup_goal,
             execution_id=c.execution_id, remaining_waypoints=len(c.queue), last_error=self.last_error))))
 
     def tick(self):
