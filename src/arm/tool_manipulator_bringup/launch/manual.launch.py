@@ -1,19 +1,27 @@
 """Main Servo-free manual control; mock hardware is the default."""
 import fcntl
+import importlib.util
 import os
 from pathlib import Path
-import runpy
-import xml.etree.ElementTree as ET
 
-import yaml
-from ament_index_python.packages import get_package_prefix, get_package_share_directory
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, EmitEvent, LogInfo, OpaqueFunction, RegisterEventHandler
 from launch.event_handlers import OnProcessExit, OnProcessIO
 from launch.events import Shutdown
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-from moveit_configs_utils import MoveItConfigsBuilder
+
+
+def _load_common():
+    path = Path(__file__).with_name('arm_bringup_common.py')
+    spec = importlib.util.spec_from_file_location('tool_manipulator_arm_bringup_common', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+common = _load_common()
 
 _launch_lock = None
 
@@ -49,46 +57,23 @@ def _shutdown_on_exit(process):
 
 
 def _bringup(context):
-    share = Path(get_package_share_directory('tool_manipulator_bringup'))
     real = LaunchConfiguration('real_hardware').perform(context) == 'true'
-    hardware = str(Path(LaunchConfiguration('hardware_config').perform(context)).expanduser().resolve(strict=True))
-    mock_initial = LaunchConfiguration('mock_initial_positions_file').perform(context)
-    mappings = {'use_mock_hardware': 'false' if real else 'true',
-                'hardware_config_file': hardware, 'use_mesh': 'true'}
-    if mock_initial:
-        if real:
-            raise RuntimeError('mock_initial_positions_file is only supported with mock hardware')
-        mappings['initial_positions_file'] = str(Path(mock_initial).expanduser().resolve(strict=True))
-    if real:
-        helper = Path(get_package_prefix('tool_manipulator_bringup'))/'lib/tool_manipulator_bringup/hardware_preflight.py'
-        errors = runpy.run_path(str(helper))['validate'](yaml.safe_load(Path(hardware).read_text()))
-        if errors:
-            raise RuntimeError('Servo-free real control blocked: ' + '; '.join(errors))
-    model = (MoveItConfigsBuilder('tool_manipulator', package_name='tool_manipulator_moveit_config')
-             .robot_description(mappings=mappings)
-             .to_moveit_configs())
-    description = dict(model.robot_description)
-    if not real:
-        # This launch alone gives the mock EE the real velocity-only interface.
-        root = ET.fromstring(description['robot_description'])
-        ee = root.find("ros2_control/joint[@name='ee_joint']/command_interface")
-        if ee is None:
-            raise RuntimeError('Mock EE command interface missing')
-        ee.set('name', 'velocity')
-        description['robot_description'] = ET.tostring(root, encoding='unicode')
-    original = Path(get_package_share_directory('tool_manipulator_moveit_config'))/'config/ros2_controllers.yaml'
-    control = Node(package='controller_manager', executable='ros2_control_node',
-                   parameters=[description, str(original), str(share/'config/manual_controllers.yaml')],
-                   output='screen')
-    state = Node(package='robot_state_publisher', executable='robot_state_publisher',
-                 parameters=[description], output='screen')
-    def spawner(name, inactive=False):
-        return Node(package='controller_manager', executable='spawner',
-                    arguments=[name, '-c', '/controller_manager', '--controller-manager-timeout', '30',
-                               *(['--inactive'] if inactive else [])], output='screen')
-    jsb = spawner('joint_state_broadcaster')
-    ee = spawner('ee_velocity_controller')
-    manual_spawner = spawner('manual_position_controller', inactive=True)
+    base = common.build_arm_base(
+        real_hardware=real,
+        hardware_file=LaunchConfiguration('hardware_config').perform(context),
+        mock_initial_positions_file=(
+            LaunchConfiguration('mock_initial_positions_file').perform(context)),
+        mock_ee_velocity=True,
+        error_prefix='Servo-free real control blocked',
+    )
+    share = base.bringup_share
+    hardware = base.hardware_file
+    description = base.description
+    control = base.control_node
+    state = base.state_publisher
+    jsb = base.spawner('joint_state_broadcaster')
+    ee = base.spawner('ee_velocity_controller')
+    manual_spawner = base.spawner('manual_position_controller', inactive=True)
     manual = Node(package='tool_manipulator_bringup', executable='manual.py',
                   parameters=[description, {'hardware_config': hardware, 'servo_mode': False}],
                   output='screen', sigterm_timeout='3', sigkill_timeout='3')

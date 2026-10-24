@@ -17,6 +17,27 @@
 `manual`은 오늘 pull 받은 Servo 없는 수동 제어 구현이다. 세부 버튼 매핑, 시작 복귀,
 안전 조건과 rosbag 진단 방법은 [manual_controller.md](docs/manual_controller.md)를 따른다.
 
+## 제어 모드 기반 구조
+
+`arm_bringup_common.py`는 독립 실행 launch가 아니라 모든 팔 제어 모드가 공유하는
+내부 구성 모듈이다. 다음 항목을 한 경로에서 생성한다.
+
+- 동일한 URDF/xacro mapping과 `robot_description`
+- 실기 `hardware.yaml` preflight
+- 단일 `ros2_control_node`와 `robot_state_publisher`
+- 공통 controller 설정과 controller spawner
+
+현재 선택 가능한 모드는 다음처럼 실행한다.
+
+| 모드 | 실행 명령 | 활성 팔 controller |
+| --- | --- | --- |
+| Manual | `manual.launch.py` | `manual_position_controller` |
+| trajectory/MoveIt | `real_control.launch.py` | `arm_controller` |
+
+두 launch는 같은 공통 base를 사용하지만 아직 실행 중 동적 모드 전환은 지원하지 않는다.
+반드시 기존 팔 launch를 완전히 종료한 뒤 다른 모드를 실행한다. 이후 TCP/IK와 Tool Auto
+모드도 이 공통 base 위에 추가하고, controller 전환은 별도 mode manager가 담당한다.
+
 ## 수동 구동
 
 ### mock, 시각화 없음
