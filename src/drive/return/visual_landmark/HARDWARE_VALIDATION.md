@@ -1,5 +1,7 @@
 # APC850 rear RGB + locked arm D435i: deployment and validation
 
+2026-10-24 hardware pause and next steps: [CAMERA_VPR_TODO.md](CAMERA_VPR_TODO.md).
+
 ## Existing design audit (local main a925e18)
 
 The existing design is preserved: wheel vx + myAHRS gyro wz -> reduced_odom ->
@@ -52,7 +54,8 @@ validates resolution for package URLs or calibration loaded later by the driver.
 
 ## Intrinsic calibration: measure, do not fill placeholders
 
-1. Mount the camera rigidly, choose final runtime resolution, and keep the same
+1. Secure the camera on a stable support (vehicle installation is not required
+   for intrinsics), choose final runtime resolution, and keep the same
    focus/zoom/runtime image processing thereafter. Use the above launch.
 2. Use a 9x6 **inner-corner** checkerboard. Measure square edge length in metres;
    the 0.030 example below is only valid for an actually measured 30 mm board.
@@ -176,7 +179,14 @@ Confirmed partial measurements (vehicle `base_link` origin, metres):
 | Camera | x | y | z | optical roll/pitch/yaw |
 | --- | --- | --- | --- | --- |
 | Rear APC850 | unmeasured | 0.0 | 0.650674 | unmeasured |
-| Front arm D435i at intended LOCK pose | unmeasured | 0.0 | 0.650674 | unmeasured |
+| Front arm D435i at intended LOCK pose | 0.152853 | 0.0 | 0.650674 | unmeasured |
+
+These partial measurements are also recorded in
+`src/vision/camera/config/vpr_mount_measurements.yaml` (installed under
+`share/vision/config/camera`). This is a measurement record, not an input to the
+TF broadcaster or `visual_expected_lock_pose_file`: unknown rotation prevents
+forming a complete LOCK matrix. The arm's existing articulated TF remains the
+runtime source of its extrinsics.
 
 The rear launch defaults now include measured y/z. x is deliberately empty,
 not a provisional zero. TF publication still requires x and optical rotation;
@@ -203,11 +213,12 @@ translation difference or substitute for mounting measurement.
 
 ### D435i LOCK pose
 
-Use the measured y=0.0 m and z=0.650674 m above to check the final
+Use the measured x=0.152853 m, y=0.0 m and z=0.650674 m above to check the final
 vehicle<-D435i optical TF at the intended LOCK pose. They are validation
 targets, not a replacement for the articulated TF chain or a complete
 `base_from_camera` matrix. Do not change the TCP-to-camera mounting transform
-to these vehicle-relative values. x and orientation still need verification.
+to these vehicle-relative values. Orientation still needs measurement; verify
+that the measured point is the optical origin when finalizing this transform.
 
 Physically lock/command a repeatable arm pose for the entire VPR return. The
 optional guard compares image-time vehicle<-D435i TF with expected LOCK TF,

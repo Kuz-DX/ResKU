@@ -1,0 +1,11 @@
+# Measurement record only, NOT ROS node parameters or a complete TF.
+# Translation: vehicle base_link <- camera optical origin, metres.
+# null means unmeasured; never substitute zero for null.
+# Front measurements apply only at the intended arm LOCK pose.
+parent_frame: base_link
+rear_apc850:
+  translation_m: {x: null, y: 0.0, z: 0.650674}
+  rotation_rpy_rad: {roll: null, pitch: null, yaw: null}
+front_d435i_lock:
+  translation_m: {x: 0.152853, y: 0.0, z: 0.650674}
+  rotation_rpy_rad: {roll: null, pitch: null, yaw: null}
