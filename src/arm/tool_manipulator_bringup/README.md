@@ -270,12 +270,15 @@ ros2 launch tool_manipulator_bringup real_control.launch.py \
   launch_joy:=true launch_joint_joy_teleop:=true
 ```
 
-Servo를 사용하지 않는 수동 조작은 [수동 제어 설명서](docs/manual_controller.md)의 두 모드를 쓴다.
+각 수동 조작 경로와 키 매핑은 [수동 제어 설명서](docs/manual_controller.md)를 참고한다.
+Servo 비사용 RMD 협조 비교 시험은 `Resku_arm_servox`로 실행한다(가상: `vr_arm_servox`).
+이 경로는 충돌 검사 없는 감독 시험용이며 `manual_servo_out.launch.py`를 사용한다.
 
 | 실행 파일 | 역할 | MoveIt Servo |
 |---|---|---|
 | `manual_controller.py` | RMD 3축 미분 IK 협조 조작 | `manual_control.launch.py`에서 사용 |
 | `manual_controller.sep.py` | 관절별 직접 위치 조작 | 사용 안 함 |
+| `manual_servo_out.py` | RMD 3축 IK + Dynamixel 3축 독립 위치 비교 시험 | 사용 안 함 |
 | `joint_joy_teleop.py` | 6축 관절별 속도 조그 | 사용 |
 
 `joint_joy_teleop.py`는 각 입력을 해당 관절의 속도로 변환해

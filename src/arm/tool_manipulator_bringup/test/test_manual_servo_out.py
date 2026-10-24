@@ -1,0 +1,423 @@
+"""Control isolation and fault/activation checks; no hardware access."""
+from concurrent.futures import Future
+from pathlib import Path
+import sys
+from types import SimpleNamespace
+from unittest.mock import Mock
+
+import numpy as np
+import pytest
+from sensor_msgs.msg import JointState, Joy
+from std_msgs.msg import String
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts'))
+from manual_servo_out import ManualServoOut, position_limit_violations
+from manual_controller import JOINTS
+from test_manual_controller import harness as base_harness
+
+
+def harness():
+    node = ManualServoOut.__new__(ManualServoOut)
+    node.__dict__.update(base_harness().__dict__)
+    node.phase, node.status = 'ready', 'operator control'
+    node.controller_ready, node.hardware_fault = True, False
+    node.stop_target, node.neutral_required = None, False
+    node.last_dt = .02
+    node.diagnostics = Mock()
+    node.joy = Joy(axes=[0.]*8, buttons=[0]*11)
+    node.params.update(forward_axis=4, wrist_yaw_axis=0, wrist_roll_axis=6,
+                       ee_velocity_axis=7, base_ccw_button=4, base_cw_button=5,
+                       ee_enable_button=1, focus_button=9, deadzone=.12, manage_focus=True)
+    node.poll_controller = Mock()
+    node.axis = lambda name: 0.
+    node.list_client = Mock()
+    node.switch_client = Mock()
+    node.parameter_client = Mock()
+    node.list_future = node.switch_future = node.parameter_future = None
+    node.controller_stamp = 1.
+    node.last_poll = 1.
+    node.switch_started = None
+    node.controllers = {'manual_position_controller': 'active', 'ee_velocity_controller': 'active'}
+    node.parameters_verified = True
+    node.publisher.get_subscription_count = Mock(return_value=1)
+    return node
+
+
+def tick(node):
+    node.last_time = .98
+    node.on_timer()
+
+
+@pytest.mark.parametrize('name,index', [('base', 0), ('wrist_roll_axis', 4), ('wrist_yaw_axis', 5)])
+@pytest.mark.parametrize('sign', [-1., 1.])
+def test_dxl_bidirectional_accumulation_independence_no_fk(name, index, sign):
+    node = harness()
+    node.chain.pose_and_jacobian = Mock(side_effect=AssertionError('DXL must not use FK'))
+    node.axis = lambda key: sign if key == name else 0.
+    node.button = lambda key: (name == 'base' and key == ('base_ccw_button' if sign > 0 else 'base_cw_button'))
+    before = node.target.copy()
+    for _ in range(10):
+        tick(node)
+    delta = node.target-before
+    expected = np.zeros(6)
+    expected[index] = sign*.024*(-1 if index == 5 else 1)
+    np.testing.assert_allclose(delta, expected, atol=1e-12)
+    node.axis, node.button = lambda _: 0., lambda _: False
+    before = node.target.copy()
+    tick(node)
+    np.testing.assert_array_equal(node.target, before)
+
+
+def test_rmd_forward_reverse_neutral_and_simultaneous_dxl():
+    velocities = []
+    for sign in (-1., 1.):
+        node = harness()
+        node.axis = lambda key: sign if key == 'forward_axis' else 0.
+        velocities.append(node.command_velocity(node.measured()))
+    np.testing.assert_allclose(velocities[0], -velocities[1])
+    np.testing.assert_array_equal(velocities[1][[0, 4, 5]], [0.]*3)
+    node = harness()
+    node.axis = lambda key: 1. if key in ('forward_axis', 'wrist_roll_axis', 'wrist_yaw_axis') else 0.
+    node.button = lambda key: key == 'base_ccw_button'
+    combined = node.command_velocity(node.measured())
+    np.testing.assert_allclose(combined[1:4], velocities[1][1:4])
+    before = node.target.copy()
+    tick(node)
+    assert np.all(np.abs(node.target-before) <= node.speeds*.02+1e-12)
+    assert np.all(np.abs(node.target-before) > 0)
+    node.axis, node.button = lambda _: 0., lambda _: False
+    node.chain.pose_and_jacobian = Mock(side_effect=AssertionError('neutral IK'))
+    before = node.target.copy()
+    tick(node)
+    np.testing.assert_array_equal(node.target, before)
+
+
+@pytest.mark.parametrize('index', [0, 4, 5])
+def test_dxl_limit_blocks_only_that_joint(index):
+    node = harness()
+    node.target[index] = node.upper[index]-.02
+    node.positions[JOINTS[index]] = node.target[index]
+    node.axis = lambda key: -1. if key == 'wrist_yaw_axis' else (1. if key == 'wrist_roll_axis' else 0.)
+    node.button = lambda key: key == 'base_ccw_button'
+    before = node.target.copy()
+    tick(node)
+    assert node.target[index] == before[index]
+    for other in {0, 4, 5}-{index}:
+        assert node.target[other] > before[other]
+
+
+@pytest.mark.parametrize('reason', ['joy', 'state', 'fault', 'focus', 'following', 'timer'])
+def test_stop_blocks_input_and_zeros_ee(reason):
+    node = harness()
+    node.axis = lambda _: 1.
+    node.button = lambda _: True
+    if reason == 'joy':
+        node.joy_time = .1
+    elif reason == 'state':
+        node.state_times['elbow_joint'] = .1
+    elif reason == 'fault':
+        node.on_hardware_fault(String(data='CAN disconnected'))
+    elif reason == 'focus':
+        node.focus = 'drive'
+    elif reason == 'following':
+        node.target[1] += .15
+    else:
+        node.last_time = .1
+    before = node.target.copy()
+    node.on_timer()
+    assert node.neutral_required
+    assert list(node.ee_velocity_publisher.publish.call_args.args[0].data) == [0.]
+    assert np.all(np.abs(node.target-before) <= node.speeds*.02+1e-12)
+    if reason in ('fault', 'following'):
+        assert node.fault
+
+
+def test_timeout_hold_removes_lead_gradually_and_needs_neutral_rearm():
+    node = harness()
+    node.target[0] += .05
+    node.joy_time = .1
+    previous = node.target.copy()
+    tick(node)
+    assert node.target[0] < previous[0]
+    assert abs(node.target[0]-previous[0]) <= .0024+1e-12
+    node.joy_time = 1.
+    node.axis = lambda _: 1.
+    for _ in range(25):
+        tick(node)
+    np.testing.assert_allclose(node.target, node.measured())
+    assert node.neutral_required
+    node.axis = lambda _: 0.
+    tick(node)
+    assert not node.neutral_required
+
+
+def test_malformed_joy_feedback_and_hardware_fault_cannot_be_cleared_by_focus():
+    node = harness()
+    node.on_joy(Joy(axes=[float('nan')]*8, buttons=[0]*11))
+    assert node.joy_time is None
+    node.on_state(JointState(name=['base_joint'], position=[]))
+    assert node.state_times == {}
+    node.on_hardware_fault(String(data='fault'))
+    node.on_focus(String(data='drive'))
+    assert node.fault and node.hardware_fault
+
+
+def finished(value):
+    future = Future()
+    future.set_result(value)
+    return future
+
+
+def test_controller_failure_and_lost_state_block_all_arm_publication():
+    for kind in ('switch', 'watchdog', 'arm_conflict', 'inactive', 'ee_inactive'):
+        node = harness()
+        node.poll_controller = ManualServoOut.poll_controller.__get__(node)
+        if kind == 'switch':
+            node.phase = 'switching'
+            node.switch_future = finished(SimpleNamespace(ok=False))
+        elif kind == 'watchdog':
+            node.controller_stamp = 0.
+        elif kind == 'ee_inactive':
+            node.list_future = finished(SimpleNamespace(controller=[SimpleNamespace(
+                name='manual_position_controller', state='active',
+                type='forward_command_controller/ForwardCommandController'), SimpleNamespace(
+                name='ee_velocity_controller', state='inactive',
+                type='forward_command_controller/ForwardCommandController')]))
+        else:
+            node.list_future = finished(SimpleNamespace(controller=[SimpleNamespace(
+                name='arm_controller' if kind == 'arm_conflict' else 'manual_position_controller',
+                state='active' if kind == 'arm_conflict' else 'inactive',
+                type='forward_command_controller/ForwardCommandController')]))
+        tick(node)
+        assert node.phase == 'failed'
+        assert not node.controller_ready
+        node.publisher.publish.assert_not_called()
+
+
+def test_activation_seeds_nonzero_measured_before_switch_and_requires_confirmation():
+    node = harness()
+    node.poll_controller = ManualServoOut.poll_controller.__get__(node)
+    node.phase, node.controller_ready = 'waiting', False
+    node.controllers['manual_position_controller'] = 'inactive'
+    node.target = None
+    node.axis = lambda key: 1. if key == 'forward_axis' else 0.
+    future = Future()
+    def activate(request):
+        np.testing.assert_array_equal(node.publisher.publish.call_args.args[0].data, node.measured())
+        assert request.activate_controllers == ['manual_position_controller']
+        assert request.strictness == request.STRICT
+        return future
+    node.switch_client.call_async = Mock(side_effect=activate)
+    tick(node)
+    assert node.phase == 'switching' and not node.controller_ready
+    np.testing.assert_array_equal(node.target, node.measured())
+    future.set_result(SimpleNamespace(ok=True))
+    tick(node)
+    assert node.phase == 'confirming' and not node.controller_ready
+    node.list_future = finished(SimpleNamespace(controller=[SimpleNamespace(
+        name='manual_position_controller', state='active',
+        type='forward_command_controller/ForwardCommandController'), SimpleNamespace(
+            name='ee_velocity_controller', state='active',
+            type='forward_command_controller/ForwardCommandController')]))
+    tick(node)
+    assert node.controller_ready and node.neutral_required
+
+
+def test_wrong_joint_order_prevents_activation():
+    node = harness()
+    node.poll_controller = ManualServoOut.poll_controller.__get__(node)
+    node.phase, node.controller_ready = 'waiting', False
+    node.parameters_verified = False
+    node.parameter_future = finished(SimpleNamespace(values=[
+        SimpleNamespace(string_array_value=list(reversed(JOINTS))), SimpleNamespace(string_value='position')]))
+    tick(node)
+    assert node.phase == 'failed'
+    node.switch_client.call_async.assert_not_called()
+
+
+def test_reported_real_startup_pose_is_blocked_with_exact_joint_reasons():
+    # Read-only snapshot from the user's stalled real launch. No mock motion
+    # or replacement of calibrated hardware limits is needed to reproduce it.
+    import yaml
+    hardware = yaml.safe_load((Path(__file__).resolve().parents[1]/'config/hardware.yaml').read_text())
+    node = harness()
+    node.lower = np.array([hardware['joints'][n]['soft_limit_rad'][0] for n in JOINTS])
+    node.upper = np.array([hardware['joints'][n]['soft_limit_rad'][1] for n in JOINTS])
+    node.positions = dict(zip(JOINTS, [-.016873788666949, 1.5502014362950414,
+        1.5362387490158649, -1.5997687231358142, .0322135965453918, -.027611654181734835]))
+    node.phase, node.controller_ready, node.target = 'waiting', False, None
+    node.controllers['manual_position_controller'] = 'inactive'
+    node.poll_controller = ManualServoOut.poll_controller.__get__(node)
+    tick(node)
+    assert not node.controller_ready and node.phase == 'waiting'
+    assert node.target is None
+    node.switch_client.call_async.assert_not_called()
+    node.publisher.publish.assert_not_called()
+    assert 'shoulder_joint=1.550201' in node.status
+    assert 'wrist_pitch_joint=-1.599769' in node.status
+    assert 'excess=+1.841 deg' in node.status
+    assert 'excess=-0.421 deg' in node.status
+    node.get_logger().warning.assert_called_once()
+    import json
+    diagnostic = json.loads(node.diagnostics.publish.call_args.args[0].data)
+    assert len(diagnostic['position_limit_violations']) == 2
+    assert diagnostic['activation_blockers']
+
+
+def test_healthy_pose_has_no_measured_limit_violation():
+    node = harness()
+    assert position_limit_violations(node.positions, node.lower, node.upper) == []
+
+
+def storage_pose_harness():
+    import math
+    import yaml
+    node = harness()
+    config = yaml.safe_load((Path(__file__).resolve().parents[1]/'config/hardware.yaml').read_text())['joints']
+    node.lower = np.array([config[n]['soft_limit_rad'][0] for n in JOINTS])
+    node.upper = np.array([config[n]['soft_limit_rad'][1] for n in JOINTS])
+    node.positions = dict(zip(JOINTS, [-.016873788666949, 1.5502014362950414,
+        1.5362387490158649, -1.5997687231358142, .0322135965453918, -.027611654181734835]))
+    node.target = node.measured()
+    node.params.update(startup_recovery_enabled=True, startup_recovery_margin_rad=math.radians(2.),
+                       startup_recovery_speed_rad_s=.03, startup_recovery_max_excursion_rad=math.radians(5.),
+                       startup_recovery_timeout_sec=15.)
+    node.startup_goal = node.make_startup_goal(node.target)
+    node.startup_recovering = True
+    node.startup_complete = False
+    node.startup_recovery_started = None
+    return node
+
+
+def test_storage_pose_recovery_reaches_two_degree_inset_without_dxl_or_ik():
+    node = storage_pose_harness()
+    original = node.target.copy()
+    node.chain.pose_and_jacobian = Mock(side_effect=AssertionError('startup must not use IK'))
+    node.focus = 'drive'
+    now = 1.
+    for _ in range(250):
+        now += .02
+        node.now_seconds = lambda: now
+        node.joy_time = None  # startup must finish even before joystick connection
+        node.state_times = dict.fromkeys(JOINTS, now)
+        node.last_time = now-.02
+        before = node.target.copy()
+        node.on_timer()
+        delta = node.target-before
+        assert np.all(np.abs(delta[1:4]) <= .03*.02+1e-12)
+        assert np.all(delta[1:4]*(node.startup_goal[1:4]-before[1:4]) >= -1e-12)
+        np.testing.assert_array_equal(node.target[[0, 4, 5]], original[[0, 4, 5]])
+        node.positions = dict(zip(JOINTS, node.target))  # ideal hardware feedback
+        if node.startup_complete:
+            break
+    assert node.startup_complete and not node.startup_recovering
+    expected = np.clip(original[1:4], node.lower[1:4]+np.deg2rad(2.), node.upper[1:4]-np.deg2rad(2.))
+    np.testing.assert_allclose(node.target[1:4], expected, atol=1e-12)
+    assert node.valid_measured(now)
+    assert node.neutral_required
+
+
+@pytest.mark.parametrize('blocked', ['dxl_outside', 'rmd_far_outside'])
+def test_storage_pose_recovery_startup_gates(blocked):
+    node = storage_pose_harness()
+    node.poll_controller = ManualServoOut.poll_controller.__get__(node)
+    node.phase, node.controller_ready, node.target = 'waiting', False, None
+    node.controllers['manual_position_controller'] = 'inactive'
+    if blocked == 'dxl_outside':
+        node.positions['base_joint'] = node.upper[0]+.001
+    else:
+        node.positions['shoulder_joint'] = node.upper[1]+.2
+    tick(node)
+    node.switch_client.call_async.assert_not_called()
+    node.publisher.publish.assert_not_called()
+    assert node.phase == 'waiting' and node.activation_blockers
+
+
+def test_storage_pose_activation_seeds_real_measurement_without_boundary_jump():
+    node = storage_pose_harness()
+    node.poll_controller = ManualServoOut.poll_controller.__get__(node)
+    node.phase, node.controller_ready, node.target = 'waiting', False, None
+    node.controllers['manual_position_controller'] = 'inactive'
+    node.switch_client.call_async = Mock(return_value=Future())
+    tick(node)
+    assert node.phase == 'switching' and node.startup_recovering
+    np.testing.assert_array_equal(node.publisher.publish.call_args.args[0].data, node.measured())
+    assert not node.valid_measured(1.) and node.startup_feedback_allowed(1.)
+    assert node.target[1] > node.upper[1]  # never snap to boundary on activation
+
+
+def test_recovery_timeout_blocks_and_does_not_return_to_automatic_recovery_after_success():
+    node = storage_pose_harness()
+    node.startup_recovery_started = -20.
+    tick(node)
+    assert node.phase == 'failed'
+    assert not node.controller_ready
+    node = storage_pose_harness()
+    node.startup_recovering, node.startup_complete = False, True
+    tick(node)
+    assert node.fault
+    assert not node.startup_recovering
+
+
+@pytest.mark.parametrize('reason', ['feedback_timeout', 'hardware_fault'])
+def test_running_startup_recovery_pauses_without_new_position_increments(reason):
+    node = storage_pose_harness()
+    if reason == 'feedback_timeout':
+        node.state_times['shoulder_joint'] = .1
+    else:
+        node.on_hardware_fault(String(data='test fault'))
+    before = node.target.copy()
+    tick(node)
+    np.testing.assert_array_equal(node.target, before)
+    assert list(node.ee_velocity_publisher.publish.call_args.args[0].data) == [0.]
+    assert not node.startup_complete
+
+
+@pytest.mark.parametrize('joy_state', ['absent', 'stale', 'deflected'])
+def test_startup_activation_and_recovery_do_not_wait_for_or_follow_joystick(joy_state):
+    node = storage_pose_harness()
+    if joy_state == 'absent':
+        node.joy_time = None
+    elif joy_state == 'stale':
+        node.joy_time = .1
+    else:
+        node.axis = lambda _: 1.
+        node.button = lambda _: True
+    node.poll_controller = ManualServoOut.poll_controller.__get__(node)
+    node.phase, node.controller_ready, node.target = 'waiting', False, None
+    node.controllers['manual_position_controller'] = 'inactive'
+    node.switch_client.call_async = Mock(return_value=Future())
+    tick(node)
+    assert node.phase == 'switching' and node.startup_recovering
+    assert not node.activation_blockers
+    node.phase, node.controller_ready = 'ready', True
+    node.poll_controller = Mock()
+    node.command_velocity = Mock(side_effect=AssertionError('joystick mapping during startup'))
+    before = node.target.copy()
+    tick(node)
+    assert np.any(np.abs(node.target[1:4]-before[1:4]) > 0)
+    np.testing.assert_array_equal(node.target[[0, 4, 5]], before[[0, 4, 5]])
+    assert list(node.ee_velocity_publisher.publish.call_args.args[0].data) == [0.]
+
+
+@pytest.mark.parametrize('joy_state', ['absent', 'stale', 'deflected'])
+def test_manual_input_stays_blocked_after_startup_until_fresh_neutral_joystick(joy_state):
+    node = storage_pose_harness()
+    node.target = node.startup_goal.copy()
+    node.positions = dict(zip(JOINTS, node.target))
+    node.startup_recovering, node.startup_complete = False, True
+    node.neutral_required = True
+    node.focus = 'arm'
+    if joy_state == 'absent':
+        node.joy_time = None
+    elif joy_state == 'stale':
+        node.joy_time = .1
+    else:
+        node.axis = lambda _: 1.
+        node.button = lambda _: True
+    before = node.target.copy()
+    node.command_velocity = Mock(side_effect=AssertionError('manual motion before neutral rearm'))
+    tick(node)
+    np.testing.assert_array_equal(node.target, before)
+    assert node.neutral_required
+    assert list(node.ee_velocity_publisher.publish.call_args.args[0].data) == [0.]

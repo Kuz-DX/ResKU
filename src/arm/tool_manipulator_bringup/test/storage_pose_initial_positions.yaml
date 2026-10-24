@@ -1,0 +1,8 @@
+# Read-only real feedback snapshot, reproduced exclusively by GenericSystem.
+initial_positions:
+  base_joint: -0.016873788666949
+  shoulder_joint: 1.5502014362950414
+  elbow_joint: 1.5362387490158649
+  wrist_pitch_joint: -1.5997687231358142
+  wrist_roll_joint: 0.0322135965453918
+  wrist_yaw_joint: -0.027611654181734835
