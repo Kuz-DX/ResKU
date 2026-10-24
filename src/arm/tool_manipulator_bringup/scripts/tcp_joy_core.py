@@ -4,6 +4,10 @@ import time
 import numpy as np
 
 
+class LimitBlocked(ValueError):
+    """All bounded attempts hit a joint limit; keep the last accepted target."""
+
+
 def joy_twist(axes, buttons, deadzone=.12):
     """PS layout: L1 deadman, R1 rotation modifier, left XY, right vertical Z."""
     if len(axes) < 5 or len(buttons) < 6 or not np.all(np.isfinite(axes)):
@@ -72,6 +76,7 @@ class TcpStepper:
         self.velocity_scale = min(1., .9/max(ratio, 1e-12))
         attempts = min(4, self.iterations)
         error = 'joint velocity limit'
+        limit_rejections = 0
         for _ in range(attempts):
             remaining = deadline-time.monotonic()
             if remaining <= 0:
@@ -91,6 +96,8 @@ class TcpStepper:
                     max_iterations=self.iterations//attempts, max_time_s=remaining)
             except ValueError as exc:
                 error = str(exc)
+                if error == 'IK iteration would violate soft limits':
+                    limit_rejections += 1
                 self.velocity_scale *= .5
                 continue
             if time.monotonic() >= deadline:
@@ -105,6 +112,8 @@ class TcpStepper:
             if np.max(np.abs(solved-measured)) > self.lead:
                 raise ValueError('joint feedback lead limit')
             return solved, target
+        if limit_rejections == attempts:
+            raise LimitBlocked('soft limit: increment blocked; reverse stick direction')
         raise ValueError(error)
 
     def commit(self, q, pose):
