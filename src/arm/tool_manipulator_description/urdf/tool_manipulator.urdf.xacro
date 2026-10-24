@@ -269,8 +269,8 @@
 
     <!-- 임시 limit -->
     <limit
-        lower="-3.503612119531"
-        upper="3.614058736259"
+        lower="-3.503"
+        upper="3.614"
         effort="1.0"
         velocity="1.0"/>
 
@@ -334,8 +334,8 @@
     <axis xyz="0 0 -1"/>
 
     <limit
-        lower="-1.592612942445"
-        upper="1.518069930092"
+        lower="-1.592"
+        upper="1.518"
         effort="1.0"
         velocity="1.0"/>
 
@@ -399,8 +399,8 @@
     <axis xyz="0 0 -1"/>
 
     <limit
-        lower="-1.497824110769"
-        upper="1.542679072545"
+        lower="-1.497"
+        upper="1.542"
         effort="1.0"
         velocity="1.0"/>
 
@@ -464,8 +464,8 @@
     <axis xyz="0 0 -1"/>
 
     <limit
-        lower="-1.592420956227"
-        upper="1.470596974438"
+        lower="-1.592"
+        upper="1.470"
         effort="1.0"
         velocity="1.0"/>
 
@@ -603,11 +603,13 @@
 
 
   <!-- ========================================================= -->
-  <!-- EE ACTUATOR -->
-  <!-- wrist yaw -> EE hinge/TCP = +62 mm world Z -->
+  <!-- EE ACTUATOR DRIVE GEAR -->
+  <!-- wrist yaw -> EE drive gear centre:
+       wrist-yaw local (-34, 0, +78.36) mm
+       measured world (0, -34, +78.36) mm -->
   <!-- wrist_yaw frame -->
-  <!-- Xe = -Yworld -->
-  <!-- Ye = +Xworld -->
+  <!-- Xe = +Yworld -->
+  <!-- Ye = -Xworld -->
   <!-- Ze = +Zworld -->
   <!-- 따라서 local displacement = (0,0,+62 mm) -->
   <!-- ========================================================= -->
@@ -615,7 +617,7 @@
   <link name="ee_actuator">
 
     <xacro:mesh_visual
-        mesh="ee_actuator"
+        mesh="ee_gear"
         material="motor_grey"/>
 
   </link>
@@ -628,16 +630,16 @@
     <child link="ee_actuator"/>
 
     <origin
-        xyz="0 0 0.062000"
-        rpy="0 0 ${pi/2}"/>
+        xyz="-0.034000 0 0.078360"
+        rpy="0 0 0"/>
 
   </joint>
 
 
   <!-- ========================================================= -->
   <!-- TCP -->
-  <!-- EE actuator hinge center 자체가 TCP -->
-  <!-- 따라서 추가 62 mm를 절대 넣지 않음 -->
+  <!-- Driven tool spur-gear centre is the common TCP.  It is a sibling of
+       ee_actuator because the drive-gear centre is offset by 34 mm. -->
   <!-- ========================================================= -->
 
   <link name="tcp_link"/>
@@ -646,11 +648,11 @@
   <joint name="tcp_joint"
          type="fixed">
 
-    <parent link="ee_actuator"/>
+    <parent link="wrist_link_yaw"/>
     <child link="tcp_link"/>
 
     <origin
-        xyz="0 0 0"
+        xyz="0 0 0.078360"
         rpy="0 0 0"/>
 
   </joint>
@@ -666,7 +668,9 @@
     <limit effort="8.4" velocity="5.035177"/>
   </joint>
 
-  <!-- RealSense D435 bracket: TCP is the mechanical parent frame. -->
+  <!-- RealSense D435 bracket, measured from TCP in world axes at zero pose:
+       world X=-86.394 mm, Z=-18.9 mm.  In the wrist-yaw/TCP frame,
+       local +Y is world -X and local +Z is world +Z. -->
 
   <link name="cam_link">
 
@@ -680,22 +684,22 @@
   <joint name="cam_link_mount"
          type="fixed">
 
-    <parent link="wrist_link_yaw"/>
+    <parent link="tcp_link"/>
     <child link="cam_link"/>
 
     <origin
-        xyz="0 0.0607680 0.074000"
+        xyz="0 0.086394 -0.018900"
         rpy="${-pi/2} ${-pi/2} 0"/>
   </joint>
 
   <!-- The common arm ends at tcp_link; the selected tool is downstream. -->
-  <xacro:if value="${selected_tool_id == 1}">
+  <xacro:if value="${selected_tool_id == 0}">
     <xacro:tool_1_gripper prefix="" parent="ee_output_link" use_mesh="$(arg use_mesh)"/>
   </xacro:if>
-  <xacro:if value="${selected_tool_id == 2}">
+  <xacro:if value="${selected_tool_id == 1}">
     <xacro:tool_2 prefix="" parent="ee_output_link" use_mesh="$(arg use_mesh)"/>
   </xacro:if>
-  <xacro:if value="${selected_tool_id == 3}">
+  <xacro:if value="${selected_tool_id == 2}">
     <xacro:tool_3 prefix="" parent="ee_output_link" use_mesh="$(arg use_mesh)"/>
   </xacro:if>
 

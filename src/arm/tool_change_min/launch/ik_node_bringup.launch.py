@@ -80,8 +80,8 @@ def generate_launch_description():
                 FindPackageShare("tool_manipulator_bringup"), "config", "hardware.yaml",
             ])),
         DeclareLaunchArgument(
-            "tool_id", default_value="1",
-            description="Tool 1 is the ee_joint-driven rack gripper used by this sequence."),
+            "tool_id", default_value="0",
+            description="Tool 0 is the ee_joint-driven rack gripper used by this sequence."),
         DeclareLaunchArgument("use_mesh", default_value="true"),
         DeclareLaunchArgument("target_topic", default_value="/arm/target_point"),
         DeclareLaunchArgument("planning_frame", default_value="base_actuator"),

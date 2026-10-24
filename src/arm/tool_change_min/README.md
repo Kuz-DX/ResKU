@@ -7,7 +7,7 @@
 
 `ik_node_bringup.launch.py`는 기존 `army_manipulator_bringup`의 one-shot
 파지 흐름을 현재 `tool_manipulator.urdf.xacro`에 맞춰 실행한다. MoveIt의
-`arm` 그룹(6축), `tcp_link`, `ee_joint`와 tool 1 충돌 형상을 사용한다.
+`arm` 그룹(6축), `tcp_link`, `ee_joint`와 tool 0 그리퍼 충돌 형상을 사용한다.
 첫 `/arm/target_point`만 수락해 TF/고정 Z 보정, `/compute_ik`, 팔 이동,
 EE 닫기, HOLD/HOME, `/arm/picking_command` 순서로 처리한다.
 
@@ -21,7 +21,7 @@ ros2 launch tool_change_min ik_node_bringup.launch.py \
 
 기본값은 `use_mock_hardware:=true`이며, 실기 분기는
 `tool_manipulator_bringup/config/hardware.yaml`을 검증한 뒤 시작한다.
-기본 `tool_id:=1`을 다른 값으로 바꾸면 파지용 tool 1 형상이 없어지므로 이
+기본 `tool_id:=0`을 다른 값으로 바꾸면 파지용 tool 0 그리퍼 형상이 없어지므로 이
 시퀀스에는 사용하지 않는다. 타깃 Z를 검출값 그대로 쓰려면
 `use_fixed_target_z:=false`를 전달한다.
 
@@ -412,8 +412,7 @@ python3 src/arm/tool_change_min/scripts/check_real_readiness.py
 아래는 노드를 개별 실행하는 방식이다. 각 터미널에서 위 공통 환경을 먼저 설정한다.
 보정 bridge는 종료한다. 설치된 ROS 패키지·생성 서비스가 필요하며, 여기서는
 빌드하지 않는다. `ros2 run`에 실행 파일이 없으면 설치가 준비되지 않은 상태다.
-`changer_manipulator_bringup`에는 현재 실행 가능한 실기 launch가 없으므로
-기존 `tool_manipulator_bringup`의 실기 컨트롤러를 사용한다.
+팔 실기 제어에는 `tool_manipulator_bringup`의 실기 컨트롤러를 사용한다.
 
 ### 터미널 1 — 팔 컨트롤러와 로봇 TF
 
@@ -590,8 +589,8 @@ IK·실행기·FSM의 개별 실행과 통합 실행을 동시에 사용하지 �
 
 `base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint`
 
-컨트롤러 설정은 `changer_manipulator_moveit_config`에 기록되어 있고,
-외부 컨트롤러의 역할은 `changer_manipulator_bringup`에 문서화되어 있습니다.
+컨트롤러 설정은 `tool_manipulator_moveit_config/config/ros2_controllers.yaml`에
+기록되어 있고, 실기 bringup은 `tool_manipulator_bringup`에서 담당합니다.
 
 ## 안전한 설정
 

@@ -36,7 +36,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             "tool_id", default_value="0",
-            description="Recognized tool tag ID: 0=no tool, 1=gripper, 2/3=other tools.",
+            description="Static tool model: 0=gripper, 1=drill, 2=Phillips bit, 99=no tool.",
         ),
         DeclareLaunchArgument(
             "publish_joint_states", default_value="true",

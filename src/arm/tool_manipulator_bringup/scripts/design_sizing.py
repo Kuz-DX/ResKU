@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Horizontal serial-arm gravity screening, SI units, no ROS dependencies.
+"""3D serial-arm static gravity screening, SI units, no ROS dependencies.
 
 Not inverse dynamics, CAD mass extraction, or a motor certification tool.
-Each segment starts at a pitch joint; actuator mass sits at that joint.
+Each segment starts at a joint; actuator mass sits at that joint.
 
 워크스페이스 루트의 설계 보조 도구: ROS 노드나 description 설치 리소스가 아니다.
-모든 링크가 같은 수평 방향으로 펼쳐진 피치 체인을 가정한다.
-길이 m, 질량 kg, 토크 Nm를 사용하며 동역학·강성·roll/yaw 계산은 포함하지 않는다.
+설계 자세의 링크 방향, 관절축, 중력 벡터로 축방향 중력 토크와
+축에 수직인 구조 굽힘모멘트를 분리한다. 동역학·강성·충격은 포함하지 않는다.
 """
 # 명령행 입력, 후보 설정 복제, JSON 입출력, 유한수 검사와 파일 경로 처리.
 import argparse
@@ -29,7 +29,54 @@ def positive(value, label, zero=True):
     return value
 
 
-def calculate(config):
+def vector3(value, label):
+    """Validate and return a finite three-element vector."""
+    if not isinstance(value, list) or len(value) != 3:
+        raise ValueError(f'{label}: three finite numbers required')
+    result = []
+    for component in value:
+        if isinstance(component, bool) or not isinstance(component, (int, float)):
+            raise ValueError(f'{label}: three finite numbers required')
+        if not math.isfinite(component):
+            raise ValueError(f'{label}: three finite numbers required')
+        result.append(float(component))
+    return result
+
+
+def add3(a, b):
+    return [a[i] + b[i] for i in range(3)]
+
+
+def sub3(a, b):
+    return [a[i] - b[i] for i in range(3)]
+
+
+def scale3(vector, scalar):
+    return [component * scalar for component in vector]
+
+
+def dot3(a, b):
+    return sum(a[i] * b[i] for i in range(3))
+
+
+def cross3(a, b):
+    return [a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0]]
+
+
+def norm3(vector):
+    return math.sqrt(dot3(vector, vector))
+
+
+def unit3(vector, label):
+    length = norm3(vector)
+    if length == 0:
+        raise ValueError(f'{label}: non-zero vector required')
+    return scale3(vector, 1.0 / length)
+
+
+def _calculate_legacy_planar(config):
     """JSON 설정 딕셔너리를 받아 관절별 정적 토크와 판정 결과를 반환한다."""
     # 1. 입력 검증: segments는 어깨에서 말단 방향으로 정렬된 피치 관절/링크 목록.
     segments = config['segments']  # 각 원소는 관절 시작점과 그 뒤 링크의 사양.
@@ -45,6 +92,7 @@ def calculate(config):
     points = []  # (첫 관절 기준 x 좌표 [m], 집중 질량 [kg]) 목록.
     origins = []  # 각 피치 관절의 x 좌표 [m].
     fixed_components = []  # EE 등 자세축은 아니지만 상류 하중에 포함되는 조립체.
+    additional_components = []  # 동축 모터/브래킷 등 별도 집중하중의 출력용 메타데이터.
     position = 0.0  # 현재 링크 시작점; 반복 종료 후 전체 링크 길이 [m].
     names = set()  # 중복 관절 이름을 검출하기 위한 집합.
     for s in segments:  # s: 현재 관절/링크의 입력 딕셔너리.
@@ -76,12 +124,62 @@ def calculate(config):
         if fraction > 1:
             raise ValueError('position_fraction must be <= 1')
         load_mass = positive(load['mass_kg'], 'additional load mass')  # 브래킷 포함 질량 [kg].
-        points.append((origins[index] + segments[index]['length_m'] * fraction, load_mass))
+        load_position = origins[index] + segments[index]['length_m'] * fraction
+        points.append((load_position, load_mass))
+        additional_components.append(dict(
+            component=load.get('name', f'additional_load_{len(additional_components) + 1}'),
+            motor=load.get('motor'), role=load.get('role', 'additional_load'),
+            mass_kg=load_mass, segment=segments[index]['name'],
+            position_fraction=fraction, position_from_first_joint_m=load_position,
+            status='ADDITIONAL_LOAD_INCLUDED'))
     # 툴 COM을 따로 계산하지 않고 툴과 물체 질량 모두 TCP에 집중시키는 근사.
     points.append((position + offset, tool + payload))
     # 3. 관절별 하류 중력 모멘트를 합산하고 입력 정격과 비교한다.
     rows = []  # 관절 이름/모터/토크/정격/여유/판정을 담는 결과 목록.
-    for s, origin in zip(segments, origins):  # origin: 계산 대상 관절의 x 위치 [m].
+    bearing_rows = []  # 모터측 지지점과 반대편 추가 베어링의 방사 반력 검토.
+    for segment_index, (s, origin) in enumerate(zip(segments, origins)):
+        # 양단지지 베어링은 pitch 구동토크가 아니라 회전체 하류 중량의 방사력을 분담한다.
+        support = s.get('bearing_support')
+        if support is not None:
+            spans = support['support_span_m']
+            if (not isinstance(spans, list) or len(spans) != 2
+                    or positive(spans[0], 'support span minimum', False) >
+                    positive(spans[1], 'support span maximum', False)):
+                raise ValueError('bearing_support: support_span_m must be [positive min, max]')
+            fraction = positive(support['load_plane_fraction'], 'load_plane_fraction')
+            if fraction > 1:
+                raise ValueError('bearing_support: load_plane_fraction must be <= 1')
+            bearing = support['opposite_bearing']
+            static_rating = positive(
+                bearing['basic_static_load_rating_n'], 'basic_static_load_rating_n', False)
+            # 현재 관절 모터 하우징 질량은 출력측 회전체에서 제외한다. 현재 링크와
+            # 이후의 모터/링크, 추가 하중, tool+payload는 반대편 구조가 지지한다.
+            supported_mass = positive(s['link_mass_kg'], 'link_mass_kg')
+            supported_mass += sum(
+                positive(downstream['actuator_mass_kg'], 'actuator_mass_kg')
+                + positive(downstream['link_mass_kg'], 'link_mass_kg')
+                for downstream in segments[segment_index + 1:])
+            supported_mass += sum(
+                positive(load['mass_kg'], 'additional load mass')
+                for load in config.get('additional_loads', [])
+                if load['segment_index'] >= segment_index)
+            supported_mass += tool + payload
+            factored_radial = sf * 9.80665 * supported_mass
+            opposite_reaction = factored_radial * fraction
+            motor_reaction = factored_radial * (1.0 - fraction)
+            bearing_rows.append(dict(
+                joint=s['name'], support_type=support['type'],
+                support_span_m=spans, load_plane_fraction=fraction,
+                supported_mass_kg=supported_mass,
+                factored_total_radial_n=factored_radial,
+                motor_side_reaction_n=motor_reaction,
+                opposite_reaction_n=opposite_reaction,
+                bearing=bearing['designation'], bore_m=bearing['bore_m'],
+                outer_diameter_m=bearing['outer_diameter_m'], width_m=bearing['width_m'],
+                basic_static_load_rating_n=static_rating,
+                static_rating_ratio=static_rating / opposite_reaction,
+                status=('STATIC_RADIAL_OK' if static_rating >= opposite_reaction
+                        else 'STATIC_RADIAL_OVERLOAD')))
         if s.get('joint_type', 'pitch') == 'fixed':
             fixed_components.append(dict(component=s['name'], motor=s['motor'],
                                          link_length_m=s['length_m'],
@@ -103,7 +201,250 @@ def calculate(config):
                          ('STATIC_ONLY_OK' if rating >= required else 'STATIC_OVERLOAD')))
     # reach_proxy는 길이 합일 뿐 관절 제한/오프셋을 고려한 실제 작업영역이 아니다.
     return dict(note='Illustrative masses; static horizontal screening only. No dynamic approval.',
-                reach_proxy_m=position+offset, joints=rows, fixed_components=fixed_components)
+                reach_proxy_m=position+offset, joints=rows, fixed_components=fixed_components,
+                additional_components=additional_components, bearing_supports=bearing_rows)
+
+
+def calculate(config):
+    """Return 3D design-pose gravity torque and bearing support screening."""
+    segments = config['segments']
+    if not segments:
+        raise ValueError('segments must not be empty')
+    sf = positive(config['safety_factor'], 'safety_factor', False)
+    if sf < 1:
+        raise ValueError('safety_factor must be >= 1')
+    payload = positive(config['payload_kg'], 'payload_kg')
+    offset = positive(config['tool_offset_m'], 'tool_offset_m')
+    tool = positive(config['tool_mass_kg'], 'tool_mass_kg')
+    model = config.get('static_3d_model', {})
+    gravity = vector3(model.get('gravity_xyz_m_s2', [0.0, 0.0, -9.80665]),
+                      'gravity_xyz_m_s2')
+    gravity_magnitude = norm3(gravity)
+    if gravity_magnitude == 0:
+        raise ValueError('gravity_xyz_m_s2: non-zero vector required')
+    chain_direction = unit3(
+        vector3(model.get('chain_direction_xyz', [1.0, 0.0, 0.0]),
+                'chain_direction_xyz'), 'chain_direction_xyz')
+
+    points = []
+    origins = []
+    fixed_components = []
+    additional_components = []
+    position = [0.0, 0.0, 0.0]
+    reach_length = 0.0
+    names = set()
+    for segment_index, segment in enumerate(segments):
+        joint_type = segment.get('joint_type', 'pitch')
+        if joint_type not in ('pitch', 'roll', 'yaw', 'tool', 'fixed'):
+            raise ValueError('joint_type must be pitch, roll, yaw, tool, or fixed')
+        if segment['name'] in names:
+            raise ValueError('duplicate segment name')
+        names.add(segment['name'])
+        length = positive(segment['length_m'], 'length_m', False)
+        link_mass = positive(segment['link_mass_kg'], 'link_mass_kg')
+        actuator_mass = positive(segment['actuator_mass_kg'], 'actuator_mass_kg')
+        com = positive(segment['com_fraction'], 'com_fraction')
+        if com > 1:
+            raise ValueError('com_fraction must be <= 1')
+        rating = segment.get('continuous_output_nm')
+        if rating is not None:
+            positive(rating, 'continuous_output_nm', False)
+        assumed_limit = segment.get('assumed_design_limit_nm')
+        if assumed_limit is not None:
+            positive(assumed_limit, 'assumed_design_limit_nm', False)
+        direction = unit3(
+            vector3(segment.get('link_direction_xyz', chain_direction),
+                    f"{segment['name']} link_direction_xyz"),
+            f"{segment['name']} link_direction_xyz")
+        origins.append(list(position))
+        points.extend([
+            dict(position_xyz=list(position), mass_kg=actuator_mass,
+                 segment_index=segment_index, component=f"{segment['name']}_actuator"),
+            dict(position_xyz=add3(position, scale3(direction, length * com)),
+                 mass_kg=link_mass, segment_index=segment_index,
+                 component=f"{segment['name']}_link"),
+        ])
+        position = add3(position, scale3(direction, length))
+        reach_length += length
+
+    for load in config.get('additional_loads', []):
+        index = load['segment_index']
+        if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < len(segments):
+            raise ValueError('additional_loads: invalid segment_index')
+        fraction = positive(load['position_fraction'], 'position_fraction')
+        if fraction > 1:
+            raise ValueError('position_fraction must be <= 1')
+        load_mass = positive(load['mass_kg'], 'additional load mass')
+        direction = unit3(
+            vector3(segments[index].get('link_direction_xyz', chain_direction),
+                    'additional load link_direction_xyz'),
+            'additional load link_direction_xyz')
+        load_position = add3(
+            origins[index], scale3(direction, segments[index]['length_m'] * fraction))
+        points.append(dict(position_xyz=load_position, mass_kg=load_mass,
+                           segment_index=index, component=load.get('name', 'additional_load')))
+        additional_components.append(dict(
+            component=load.get('name', f'additional_load_{len(additional_components) + 1}'),
+            motor=load.get('motor'), role=load.get('role', 'additional_load'),
+            mass_kg=load_mass, segment=segments[index]['name'],
+            position_fraction=fraction, position_xyz_m=load_position,
+            status='ADDITIONAL_LOAD_INCLUDED'))
+
+    tcp_position = add3(position, scale3(chain_direction, offset))
+    points.append(dict(position_xyz=tcp_position, mass_kg=tool + payload,
+                       segment_index=len(segments), component='tool_and_payload'))
+
+    def torque_summary(origin, axis, first_segment_index):
+        torque = [0.0, 0.0, 0.0]
+        downstream_mass = 0.0
+        for point in points:
+            if point['segment_index'] < first_segment_index:
+                continue
+            downstream_mass += point['mass_kg']
+            arm = sub3(point['position_xyz'], origin)
+            torque = add3(torque, cross3(arm, scale3(gravity, point['mass_kg'])))
+        signed_axis_torque = dot3(torque, axis)
+        bending_vector = sub3(torque, scale3(axis, signed_axis_torque))
+        return torque, abs(signed_axis_torque), norm3(bending_vector), downstream_mass
+
+    def result_row(name, joint_type, motor, length, axis, origin, first_index,
+                   continuous_limit, assumed_limit, support_type, sweep_axis=None):
+        torque_vector, pose_axis_torque, bending, downstream_mass = torque_summary(
+            origin, axis, first_index)
+        axis_torque = pose_axis_torque
+        torque_mode = 'design_pose'
+        if sweep_axis is not None:
+            sweep = unit3(vector3(sweep_axis, f'{name} axis_sweep_about_xyz'),
+                          f'{name} axis_sweep_about_xyz')
+            axis_parallel = scale3(sweep, dot3(axis, sweep))
+            axis_perpendicular = sub3(axis, axis_parallel)
+            torque_parallel = scale3(sweep, dot3(torque_vector, sweep))
+            torque_perpendicular = sub3(torque_vector, torque_parallel)
+            axis_torque = (abs(dot3(torque_vector, axis_parallel))
+                           + norm3(axis_perpendicular) * norm3(torque_perpendicular))
+            torque_mode = 'maximum_over_axis_sweep'
+        comparison_limit = continuous_limit
+        limit_basis = 'continuous'
+        if comparison_limit is None:
+            comparison_limit = assumed_limit
+            limit_basis = 'assumed_design_limit' if comparison_limit is not None else 'unknown'
+        required = sf * axis_torque
+        return dict(
+            joint=name, joint_type=joint_type, motor=motor, link_length_m=length,
+            axis_xyz=axis, gravity_torque_vector_nm=torque_vector,
+            pose_gravity_nm=pose_axis_torque, gravity_nm=axis_torque,
+            gravity_torque_mode=torque_mode, structural_bending_nm=bending,
+            downstream_mass_kg=downstream_mass, factored_static_nm=required,
+            continuous_output_nm=continuous_limit, comparison_limit_nm=comparison_limit,
+            limit_basis=limit_basis,
+            static_margin_nm=None if comparison_limit is None else comparison_limit-required,
+            status='LIMIT_UNKNOWN' if comparison_limit is None else
+            ('STATIC_ONLY_OK' if comparison_limit >= required else 'STATIC_OVERLOAD'),
+            support_type=support_type)
+
+    rows = []
+    bearing_rows = []
+    base = config.get('base_joint')
+    if base:
+        base_axis = unit3(vector3(base['axis_xyz'], 'base axis_xyz'), 'base axis_xyz')
+        rows.append(result_row(
+            base['name'], 'yaw', base['motor'], 0.0, base_axis,
+            [0.0, 0.0, 0.0], 0, base.get('continuous_output_nm'),
+            base.get('assumed_design_limit_nm'), base.get('support_type', 'single_sided'),
+            base.get('axis_sweep_about_xyz')))
+        rows[-1].update(actuator_mass_kg=None, link_mass_kg=None, assembly_mass_kg=None)
+
+    for segment_index, (segment, origin) in enumerate(zip(segments, origins)):
+        joint_type = segment.get('joint_type', 'pitch')
+        support = segment.get('bearing_support')
+        bending_moment = 0.0
+        if joint_type != 'fixed':
+            default_axes = {'pitch': [0.0, 1.0, 0.0], 'roll': [1.0, 0.0, 0.0],
+                            'yaw': [0.0, 0.0, 1.0], 'tool': [1.0, 0.0, 0.0]}
+            axis = unit3(vector3(segment.get('axis_xyz', default_axes[joint_type]),
+                                 f"{segment['name']} axis_xyz"),
+                         f"{segment['name']} axis_xyz")
+            row = result_row(
+                segment['name'], joint_type, segment['motor'], segment['length_m'], axis,
+                origin, segment_index, segment.get('continuous_output_nm'),
+                segment.get('assumed_design_limit_nm'),
+                segment.get('support_type', support['type'] if support else 'single_sided'),
+                segment.get('axis_sweep_about_xyz'))
+            row.update(actuator_mass_kg=segment['actuator_mass_kg'],
+                       link_mass_kg=segment['link_mass_kg'],
+                       assembly_mass_kg=segment['actuator_mass_kg'] + segment['link_mass_kg'])
+            rows.append(row)
+            bending_moment = row['structural_bending_nm']
+        else:
+            fixed_components.append(dict(
+                component=segment['name'], motor=segment['motor'],
+                link_length_m=segment['length_m'],
+                assembly_mass_kg=segment['actuator_mass_kg'] + segment['link_mass_kg'],
+                role=segment.get('role', 'fixed'), status='FIXED_LOAD_INCLUDED'))
+
+        if support is None:
+            continue
+        spans = support['support_span_m']
+        if (not isinstance(spans, list) or len(spans) != 2
+                or positive(spans[0], 'support span minimum', False) >
+                positive(spans[1], 'support span maximum', False)):
+            raise ValueError('bearing_support: support_span_m must be [positive min, max]')
+        bearing = support['opposite_bearing']
+        static_rating = positive(
+            bearing['basic_static_load_rating_n'], 'basic_static_load_rating_n', False)
+        supported_mass = positive(segment['link_mass_kg'], 'link_mass_kg')
+        supported_mass += sum(
+            positive(downstream['actuator_mass_kg'], 'actuator_mass_kg')
+            + positive(downstream['link_mass_kg'], 'link_mass_kg')
+            for downstream in segments[segment_index + 1:])
+        supported_mass += sum(
+            positive(load['mass_kg'], 'additional load mass')
+            for load in config.get('additional_loads', [])
+            if load['segment_index'] >= segment_index)
+        supported_mass += tool + payload
+        factored_radial = sf * gravity_magnitude * supported_mass
+        reaction_model = support.get('reaction_model', 'centered_radial_split')
+        if reaction_model == 'centered_radial_split':
+            fraction = positive(support.get('load_plane_fraction', 0.5),
+                                'load_plane_fraction')
+            if fraction > 1:
+                raise ValueError('bearing_support: load_plane_fraction must be <= 1')
+            opposite_reaction = factored_radial * fraction
+            motor_reaction = factored_radial * (1.0 - fraction)
+            minimum_span = 0.0
+        elif reaction_model == 'bending_couple_about_support_midpoint':
+            fraction = 0.5
+            factored_bending = sf * bending_moment
+            opposite_reaction = factored_radial / 2.0 + factored_bending / spans[0]
+            motor_reaction = abs(factored_bending / spans[0] - factored_radial / 2.0)
+            denominator = static_rating - factored_radial / 2.0
+            minimum_span = math.inf if denominator <= 0 else factored_bending / denominator
+        else:
+            raise ValueError('bearing_support: invalid reaction_model')
+        bearing_rows.append(dict(
+            joint=segment['name'], support_type=support['type'],
+            reaction_model=reaction_model, support_span_m=spans,
+            load_plane_fraction=fraction, supported_mass_kg=supported_mass,
+            factored_total_radial_n=factored_radial,
+            motor_side_reaction_n=motor_reaction,
+            opposite_reaction_n=opposite_reaction,
+            bearing=bearing['designation'], bore_m=bearing['bore_m'],
+            outer_diameter_m=bearing['outer_diameter_m'], width_m=bearing['width_m'],
+            basic_static_load_rating_n=static_rating,
+            minimum_span_for_static_rating_m=minimum_span,
+            fastener=support.get('fastener'),
+            race_arrangement=support.get('race_arrangement'),
+            static_rating_ratio=static_rating / opposite_reaction,
+            status=('STATIC_RADIAL_OK' if static_rating >= opposite_reaction
+                    else 'STATIC_RADIAL_OVERLOAD')))
+
+    return dict(
+        note='3D static design-pose screening only. No dynamic, stiffness, or impact approval.',
+        pose=model.get('pose_name', 'fully_extended_horizontal'),
+        gravity_xyz_m_s2=gravity, tcp_position_xyz_m=tcp_position,
+        reach_proxy_m=reach_length + offset, joints=rows,
+        fixed_components=fixed_components, additional_components=additional_components,
+        bearing_supports=bearing_rows)
 
 
 def resize_link(config, name, length, mass_mode='fixed'):
@@ -190,11 +531,13 @@ def configure_extra_pitch(config, length):
 
 
 def configure_extra_roll(config, length):
-    """Insert a TCP-axis roll module after yaw and before the fixed EE."""
+    """Insert or resize a wrist-roll module before wrist yaw."""
     positive(length, "extra_roll_m")
     changed = copy.deepcopy(config)
     segments = changed["segments"]
-    existing = next((i for i, link in enumerate(segments) if link["name"] == "extra_roll"), None)
+    existing = next((i for i, link in enumerate(segments)
+                     if link["name"] in ("extra_roll", "wrist_roll")
+                     or link.get("role") == "distal_roll"), None)
     loads = changed.get("additional_loads", [])
     if length == 0:
         if existing is not None:
@@ -208,12 +551,16 @@ def configure_extra_roll(config, length):
         segments[existing]["length_m"] = length
     else:
         index = next((i for i, link in enumerate(segments)
-                      if link.get("role") == "end_effector_power"), len(segments))
-        segments.insert(index, dict(name="extra_roll", motor="MX-106T", joint_type="fixed",
+                      if link.get("role") == "distal_yaw"),
+                     next((i for i, link in enumerate(segments)
+                           if link.get("role") == "end_effector_power"), len(segments)))
+        segments.insert(index, dict(name="wrist_roll", motor="MX-106R", joint_type="roll",
+                                    axis_xyz=[1.0, 0.0, 0.0],
                                     length_m=length, link_mass_kg=.05, com_fraction=.5,
                                     actuator_mass_kg=.153, continuous_output_nm=None,
+                                    assumed_design_limit_nm=4.2,
                                     role="distal_roll",
-                                    motor_spec_note="TCP-axis roll. Static gravity is included in upstream pitch axes; roll-axis torque requires a 3D external-wrench/dynamics check."))
+                                    motor_spec_note="Wrist roll before yaw. Static gravity is included in upstream pitch axes; roll-axis torque requires a 3D external-wrench/dynamics check."))
         for load in loads:
             if load["segment_index"] >= index:
                 load["segment_index"] += 1
@@ -242,7 +589,8 @@ def configure_ee_assembly_mass(config, mass):
     positive(mass, 'ee assembly mass')
     changed = copy.deepcopy(config)
     matches = [segment for segment in changed['segments']
-               if segment['name'] == 'ee' and segment.get('joint_type') == 'fixed']
+               if segment['name'] == 'ee'
+               and segment.get('joint_type') in ('fixed', 'tool')]
     if len(matches) != 1:
         raise ValueError('ee assembly mass requires exactly one fixed segment named ee')
     ee = matches[0]
@@ -324,6 +672,16 @@ def main():
         if args.extra_pitch_continuous_nm is not None:
             changed = configure_extra_pitch_rating(changed, args.extra_pitch_continuous_nm)
         result = dict(baseline=base)  # 모든 후보를 원래 기준안과 비교한다.
+        candidate_requested = any((
+            args.candidate_config is not None,
+            args.length_scale != 1.0,
+            args.payload_kg is not None,
+            args.extra_pitch_m is not None,
+            args.extra_roll_m is not None,
+            bool(args.link_length),
+            args.extra_pitch_continuous_nm is not None,
+            args.ee_assembly_mass_kg is not None,
+        ))
         if args.sweep_link:
             for index, length in enumerate(args.lengths_m):  # index: 중복 길이도 구분하는 후보 번호.
                 candidate = resize_link(changed, args.sweep_link, length, args.link_mass_mode)
@@ -335,7 +693,7 @@ def main():
                 report['sweep'] = dict(link=args.sweep_link, length_m=length,
                                        link_mass_mode=args.link_mass_mode)
                 result[f'candidate_{index + 1}_{args.sweep_link}_{length:g}m'] = report
-        else:
+        elif candidate_requested:
             if args.ee_assembly_mass_kg is not None:
                 changed = configure_ee_assembly_mass(changed, args.ee_assembly_mass_kg)
             result['candidate'] = add_deltas(calculate(changed), base)
@@ -349,27 +707,61 @@ def main():
     if args.json:
         print(json.dumps(result, indent=2, allow_nan=False))
     else:
-        print('ILLUSTRATIVE STATIC SCREENING — replace assumed masses before design decisions')
+        print('3D STATIC DESIGN-POSE SCREENING — replace assumed masses before design decisions')
         for label, report in result.items():  # label: baseline/candidate, report: 해당 계산 결과.
-            print(f"\n{label}: straight-line reach proxy {report['reach_proxy_m']:.3f} m")
+            print(f"\n{label}: pose={report.get('pose', 'legacy')}; "
+                  f"TCP={report.get('tcp_position_xyz_m', ['N/A'] * 3)}; "
+                  f"straight-line reach={report['reach_proxy_m']:.3f} m")
             if 'sweep' in report:
                 print(f"  mass mode: {report['sweep']['link_mass_mode']}")
             if "floor_target" in report:
                 floor = report["floor_target"]
                 print(f"  floor target: {floor['target_distance_m']:.3f} m; reach-proxy margin {floor['reach_proxy_margin_m']:.3f} m ({floor['status']})")
-            print(f"{'joint':12} {'motor':16} {'link(m)':>8} {'gravity':>10} {'SF load':>10} {'limit':>10} {'margin':>10} status")
+            print(f"{'joint':14} {'type':7} {'motor':16} {'L(mm)':>7} {'mass':>8} "
+                  f"{'axis T*':>10} {'SF T':>10} {'bend@pose':>10} "
+                  f"{'limit':>10} {'margin':>10} {'support':28} status")
             for j in report['joints']:  # j: 현재 출력할 관절별 결과 딕셔너리.
                 reduction = j.get('gravity_reduction_percent')  # 양수면 감소, 음수면 증가 [%].
                 suffix = '' if reduction is None else f" reduction={reduction:.2f}%"
-                limit = 'UNKNOWN' if j['continuous_output_nm'] is None else f"{j['continuous_output_nm']:.3f}"
+                comparison_limit = j.get('comparison_limit_nm', j.get('continuous_output_nm'))
+                limit = 'UNKNOWN' if comparison_limit is None else f"{comparison_limit:.3f}"
                 margin = 'UNKNOWN' if j['static_margin_nm'] is None else f"{j['static_margin_nm']:.3f}"
-                print(f"{j['joint']:12} {j['motor']:16} {j['link_length_m']:8.3f} "
+                mass = j.get('assembly_mass_kg')
+                mass_text = 'N/A' if mass is None else f"{mass:.3f}kg"
+                print(f"{j['joint']:14} {j.get('joint_type', 'pitch'):7} {j['motor']:16} "
+                      f"{j['link_length_m'] * 1000:7.0f} {mass_text:>8} "
                       f"{j['gravity_nm']:8.3f} Nm {j['factored_static_nm']:8.3f} Nm "
-                      f"{limit:>8} Nm {margin:>8} Nm {j['status']}{suffix}")
+                      f"{j.get('structural_bending_nm', 0.0):8.3f} Nm "
+                      f"{limit:>8} Nm {margin:>8} Nm "
+                      f"{j.get('support_type', 'N/A'):28} {j['status']}{suffix}")
             for fixed in report['fixed_components']:
-                print(f"{fixed['component']:12} {fixed['motor']:16} {fixed['link_length_m']:8.3f} "
+                print(f"{fixed['component']:20} {fixed['motor']:16} {fixed['link_length_m']:8.3f} "
                       f"{'N/A':>10} {'N/A':>10} {'N/A':>10} {'N/A':>10} "
                       f"{fixed['status']} mass={fixed['assembly_mass_kg']:.3f} kg")
+            for load in report.get('additional_components', []):
+                motor = load['motor'] or 'N/A'
+                print(f"{load['component']:20} {motor:16} {'N/A':>8} "
+                      f"{'N/A':>10} {'N/A':>10} {'N/A':>10} {'N/A':>10} "
+                      f"{load['status']} mass={load['mass_kg']:.3f} kg "
+                      f"at={load['segment']}:{load['position_fraction']:.3f}")
+            for bearing in report.get('bearing_supports', []):
+                span_min, span_max = bearing['support_span_m']
+                minimum_span = bearing.get('minimum_span_for_static_rating_m', 0.0)
+                minimum_span_text = ('N/A' if not math.isfinite(minimum_span) else
+                                     f"{minimum_span * 1000:.1f} mm")
+                print(f"  bearing: {bearing['joint']} {bearing['bearing']} "
+                      f"({bearing['bore_m'] * 1000:.0f}x"
+                      f"{bearing['outer_diameter_m'] * 1000:.0f}x"
+                      f"{bearing['width_m'] * 1000:.0f} mm), "
+                      f"span={span_min * 1000:.0f}-{span_max * 1000:.0f} mm, "
+                      f"supported_mass={bearing['supported_mass_kg']:.3f} kg, "
+                      f"SF radial={bearing['factored_total_radial_n']:.2f} N, "
+                      f"opposite reaction={bearing['opposite_reaction_n']:.2f} N, "
+                      f"C0/reaction={bearing['static_rating_ratio']:.1f} "
+                      f"min span={minimum_span_text}, {bearing['status']}")
+                if bearing.get('fastener'):
+                    print(f"    fastener: {bearing['fastener']}; "
+                          f"races: {bearing.get('race_arrangement', 'N/A')}")
 
 
 # 직접 실행할 때만 CLI를 시작한다. 테스트에서 import하면 계산 함수만 사용한다.

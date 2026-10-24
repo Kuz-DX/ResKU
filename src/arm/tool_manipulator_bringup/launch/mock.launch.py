@@ -22,7 +22,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             "tool_id", default_value="0",
-            description="Static tool model included in robot_description: 0, 1, 2, or 3."),
+            description="Static tool model: 0=gripper, 1=drill, 2=Phillips bit, 99=no tool."),
         DeclareLaunchArgument("use_mesh", default_value="false"),
         *generate_demo_launch(config).entities,
     ])

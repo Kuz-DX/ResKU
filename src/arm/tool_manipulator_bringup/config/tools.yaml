@@ -48,8 +48,10 @@ tools:
     tcp:
       frame: tool_1_tcp
       parent: ee_output_link
-      xyz: [-0.090, 0.0, 0.0]       # m, CAD attachment->TCP; bench verify before enabling
-      quat_xyzw: [0.0, -0.70710678, 0.0, 0.70710678]
+      # Driven spur-gear centre is tcp_link/ee_output_link; the gripper working
+      # TCP is measured 25.6 mm farther along its +Z axis.
+      xyz: [0.0, 0.0, 0.0256]
+      quat_xyzw: [0.0, 0.0, 0.0, 1.0]
     collision:
       # Attached tool: diameter 30 mm, length 50 mm, bottom at tcp_link +Z 12 mm.
       # ee_output_link shares TCP origin/+Z; its Z rotation leaves this cylinder unchanged.

@@ -27,8 +27,8 @@ joints:
     - -2264
     - 2376
     soft_limit_rad:
-    - -3.503612119531
-    - 3.614058736259
+    - -3.503
+    - 3.614
     velocity_limit_rad_s: 0.48
     current_limit_ma: 5506.43
     current_limit_raw: 2047
@@ -49,8 +49,8 @@ joints:
     q_offset_rad: 0.0
     # Raw endpoints: bent 91.25 deg, extended -86.979 deg; sign=-1.
     soft_limit_rad:
-    - -1.592612942445
-    - 1.518069930092
+    - -1.592
+    - 1.518
     velocity_limit_rad_s: 0.35
     current_limit_a: 4.0
     current_release_threshold_a: 3.0
@@ -66,8 +66,8 @@ joints:
     q_offset_rad: 0.0
     # Raw endpoints: bent -88.389 deg, extended 85.819 deg; sign=-1.
     soft_limit_rad:
-    - -1.497824110769
-    - 1.542679072545
+    - -1.497
+    - 1.542
     velocity_limit_rad_s: 0.3
     current_limit_a: 3.0
     current_release_threshold_a: 2.2
@@ -83,8 +83,8 @@ joints:
     q_offset_rad: 0.0
     # Raw endpoints: bent 84.259 deg, extended -91.239 deg; sign=+1.
     soft_limit_rad:
-    - -1.592420956227
-    - 1.470596974438
+    - -1.592
+    - 1.470
     velocity_limit_rad_s: 0.3
     current_limit_a: 2.0
     current_release_threshold_a: 1.5

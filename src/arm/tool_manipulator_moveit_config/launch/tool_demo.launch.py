@@ -20,6 +20,6 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             'tool_id', default_value='0',
-            description='Static model for offline MoveIt inspection: 0, 1, 2, or 3.'),
+            description='Static model: 0=gripper, 1=drill, 2=Phillips bit, 99=no tool.'),
         *generate_demo_launch(moveit_config).entities,
     ])
