@@ -8,7 +8,7 @@ setup(
     packages=find_packages(exclude=['test']),
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
-        ('share/' + package_name, ['package.xml', 'README.md']),
+        ('share/' + package_name, ['package.xml', 'README.md', 'HARDWARE_VALIDATION.md']),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -19,6 +19,8 @@ setup(
     extras_require={'test': ['pytest']},
     entry_points={
         'console_scripts': [
+            'validate_camera_calibration = visual_landmark.calibration_tool:main',
+            'evaluate_landmark_matching = visual_landmark.evaluate_matching:main',
             'visual_localization_node = visual_landmark.visual_localization_node:main',
             'visual_landmark_node = visual_landmark.visual_landmark_node:main',
         ],

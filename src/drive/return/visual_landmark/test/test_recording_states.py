@@ -81,7 +81,7 @@ def test_localization_loads_reference_in_ready_state(tmp_path):
                     k=[500., 0., 320., 0., 500., 240., 0., 0., 1.], d=[0.]*5))
     (tmp_path/'meta.yaml').write_text(yaml.safe_dump(meta))
     events = []
-    node = SimpleNamespace(state='WAIT_RETURN_COMMAND', landmarks={},
+    node = SimpleNamespace(state='WAIT_RETURN_COMMAND', landmarks={}, reference_meta={},
                            event=lambda kind, **kwargs: events.append(kind))
     msg = String(data=json.dumps(dict(event='captured', dir=str(tmp_path))))
     VisualLocalizationNode.on_landmark(node, msg)
