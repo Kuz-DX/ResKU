@@ -1,0 +1,132 @@
+{
+  "status": "trial_incomplete_coverage",
+  "resolution": [
+    1280,
+    720
+  ],
+  "fps": 15,
+  "board_inner_corners": [
+    9,
+    6
+  ],
+  "square_m": 0.015,
+  "raw_dataset_local": "debug_report/camera_calibration/20261024_preview_take5",
+  "selection": {
+    "method": "uniform temporal subsampling: flat take3 every third frame; preview take5 every second frame; validation excluded",
+    "fit_sources": [
+      "debug_report/camera_calibration/20261024_flat_take3/fit/frame_001.png",
+      "debug_report/camera_calibration/20261024_flat_take3/fit/frame_004.png",
+      "debug_report/camera_calibration/20261024_flat_take3/fit/frame_007.png",
+      "debug_report/camera_calibration/20261024_flat_take3/fit/frame_010.png",
+      "debug_report/camera_calibration/20261024_flat_take3/fit/frame_013.png",
+      "debug_report/camera_calibration/20261024_flat_take3/fit/frame_016.png",
+      "debug_report/camera_calibration/20261024_flat_take3/fit/frame_019.png",
+      "debug_report/camera_calibration/20261024_flat_take3/fit/frame_022.png",
+      "debug_report/camera_calibration/20261024_flat_take3/fit/frame_025.png",
+      "debug_report/camera_calibration/20261024_flat_take3/fit/frame_028.png",
+      "debug_report/camera_calibration/20261024_flat_take3/fit/frame_031.png",
+      "debug_report/camera_calibration/20261024_flat_take3/fit/frame_034.png",
+      "debug_report/camera_calibration/20261024_flat_take3/fit/frame_037.png",
+      "debug_report/camera_calibration/20261024_flat_take3/fit/frame_040.png",
+      "debug_report/camera_calibration/20261024_flat_take3/fit/frame_043.png",
+      "debug_report/camera_calibration/20261024_flat_take3/fit/frame_046.png",
+      "debug_report/camera_calibration/20261024_flat_take3/fit/frame_049.png",
+      "debug_report/camera_calibration/20261024_flat_take3/fit/frame_052.png",
+      "debug_report/camera_calibration/20261024_flat_take3/fit/frame_055.png",
+      "debug_report/camera_calibration/20261024_flat_take3/fit/frame_058.png",
+      "/tmp/resku_intrinsic_preview_take5/fit/frame_001.png",
+      "/tmp/resku_intrinsic_preview_take5/fit/frame_003.png",
+      "/tmp/resku_intrinsic_preview_take5/fit/frame_005.png",
+      "/tmp/resku_intrinsic_preview_take5/fit/frame_007.png",
+      "/tmp/resku_intrinsic_preview_take5/fit/frame_009.png",
+      "/tmp/resku_intrinsic_preview_take5/fit/frame_011.png",
+      "/tmp/resku_intrinsic_preview_take5/fit/frame_013.png",
+      "/tmp/resku_intrinsic_preview_take5/fit/frame_015.png",
+      "/tmp/resku_intrinsic_preview_take5/fit/frame_017.png",
+      "/tmp/resku_intrinsic_preview_take5/fit/frame_019.png",
+      "/tmp/resku_intrinsic_preview_take5/fit/frame_021.png",
+      "/tmp/resku_intrinsic_preview_take5/fit/frame_023.png",
+      "/tmp/resku_intrinsic_preview_take5/fit/frame_025.png",
+      "/tmp/resku_intrinsic_preview_take5/fit/frame_027.png",
+      "/tmp/resku_intrinsic_preview_take5/fit/frame_029.png",
+      "/tmp/resku_intrinsic_preview_take5/fit/frame_031.png",
+      "/tmp/resku_intrinsic_preview_take5/fit/frame_033.png",
+      "/tmp/resku_intrinsic_preview_take5/fit/frame_035.png",
+      "/tmp/resku_intrinsic_preview_take5/fit/frame_037.png",
+      "/tmp/resku_intrinsic_preview_take5/fit/frame_039.png",
+      "/tmp/resku_intrinsic_preview_take5/fit/frame_041.png",
+      "/tmp/resku_intrinsic_preview_take5/fit/frame_043.png",
+      "/tmp/resku_intrinsic_preview_take5/fit/frame_045.png",
+      "/tmp/resku_intrinsic_preview_take5/fit/frame_047.png",
+      "/tmp/resku_intrinsic_preview_take5/fit/frame_049.png",
+      "/tmp/resku_intrinsic_preview_take5/fit/frame_051.png",
+      "/tmp/resku_intrinsic_preview_take5/fit/frame_053.png",
+      "/tmp/resku_intrinsic_preview_take5/fit/frame_055.png",
+      "/tmp/resku_intrinsic_preview_take5/fit/frame_057.png",
+      "/tmp/resku_intrinsic_preview_take5/fit/frame_059.png"
+    ]
+  },
+  "automatically_activated": false,
+  "fit": {
+    "resolution": [
+      1280,
+      720
+    ],
+    "fx": 1018.8400863332417,
+    "fy": 1013.7954680219906,
+    "cx": 633.2815432322368,
+    "cy": 418.33073327926877,
+    "reprojection_rms_px": 0.5521312159694524,
+    "max_reprojection_px": 2.535438060760498,
+    "coverage_hull_fraction": 0.3692407056033835,
+    "coverage_bins_4x3": 9,
+    "detected_images": 47,
+    "quality": "trial",
+    "warnings": [],
+    "distortion_model": "plumb_bob",
+    "input_images": 50,
+    "dataset_role": "training"
+  },
+  "validation": {
+    "resolution": [
+      1280,
+      720
+    ],
+    "fx": 1018.8400863332417,
+    "fy": 1013.7954680219906,
+    "cx": 633.2815432322368,
+    "cy": 418.33073327926877,
+    "reprojection_rms_px": 0.7833438747476514,
+    "max_reprojection_px": 4.979547023773193,
+    "coverage_hull_fraction": 0.39875142326010315,
+    "coverage_bins_4x3": 10,
+    "detected_images": 29,
+    "quality": "trial",
+    "warnings": [],
+    "distortion_model": "plumb_bob",
+    "input_images": 30,
+    "dataset_role": "held_out_validation"
+  },
+  "previous_take4_on_same_validation": {
+    "resolution": [
+      1280,
+      720
+    ],
+    "fx": 1047.8157591338284,
+    "fy": 1040.9309913410614,
+    "cx": 672.5066363508039,
+    "cy": 395.70422803206725,
+    "reprojection_rms_px": 1.2294644809944668,
+    "max_reprojection_px": 15.780868530273438,
+    "coverage_hull_fraction": 0.39875142326010315,
+    "coverage_bins_4x3": 10,
+    "detected_images": 29,
+    "quality": "review",
+    "warnings": [
+      "RMS >=1 px: recalibration recommended"
+    ],
+    "distortion_model": "plumb_bob",
+    "input_images": 30,
+    "dataset_role": "held_out_validation"
+  }
+}

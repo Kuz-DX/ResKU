@@ -1,0 +1,58 @@
+{
+  "status": "trial_edge_coverage_incomplete",
+  "device": "/dev/v4l/by-id/usb-Alcorlink_Corp._USB_2.0_Camera-video-index0",
+  "resolution": [
+    1280,
+    720
+  ],
+  "fps": 15,
+  "pixel_format": "MJPEG",
+  "board_inner_corners": [
+    9,
+    6
+  ],
+  "square_m": 0.015,
+  "raw_dataset_local": "debug_report/camera_calibration/20261024_flat_take3",
+  "extrinsics_calibrated": false,
+  "automatically_activated": false,
+  "fit": {
+    "resolution": [
+      1280,
+      720
+    ],
+    "fx": 1073.5621813889693,
+    "fy": 1067.8441214324278,
+    "cx": 664.1611080465316,
+    "cy": 393.28257042232354,
+    "reprojection_rms_px": 0.4394911206614403,
+    "max_reprojection_px": 3.03060245513916,
+    "coverage_hull_fraction": 0.26873818807363176,
+    "coverage_bins_4x3": 8,
+    "detected_images": 52,
+    "quality": "recommended",
+    "warnings": [],
+    "distortion_model": "plumb_bob",
+    "input_images": 60,
+    "dataset_role": "training"
+  },
+  "validation": {
+    "resolution": [
+      1280,
+      720
+    ],
+    "fx": 1073.5621813889693,
+    "fy": 1067.8441214324278,
+    "cx": 664.1611080465316,
+    "cy": 393.28257042232354,
+    "reprojection_rms_px": 0.4400436896418207,
+    "max_reprojection_px": 1.8317822217941284,
+    "coverage_hull_fraction": 0.18899419122096964,
+    "coverage_bins_4x3": 6,
+    "detected_images": 30,
+    "quality": "recommended",
+    "warnings": [],
+    "distortion_model": "plumb_bob",
+    "input_images": 30,
+    "dataset_role": "held_out_validation"
+  }
+}
