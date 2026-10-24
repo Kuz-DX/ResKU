@@ -59,6 +59,7 @@ class ControlModeManager(Node):
         self.activation_started = None
         self.activated = False
         self.last_error = ''
+        self.last_report = None
         self.create_timer(.02, self.tick)
         self.publish_status()
 
@@ -170,9 +171,34 @@ class ControlModeManager(Node):
 
     def publish_status(self):
         c = self.core
+        now = time.monotonic()
+        if c.mode == 'fault':
+            blocker = c.reason
+        elif not c.fresh(now):
+            blocker = 'waiting for complete fresh joint feedback'
+        elif not c.ready:
+            blocker = 'waiting for controller activation'
+        elif not c.startup_complete:
+            blocker = c.reason or 'startup recovery pending'
+        elif c.focus != 'arm':
+            blocker = 'select arm with Options'
+        elif c.transitioning:
+            blocker = c.reason
+        elif c.mode == 'hold':
+            blocker = 'HOLD: request /arm/set_mode/manual to enable joystick control'
+        else:
+            blocker = ''
+        report = (c.mode, c.ready, c.startup_complete, blocker)
+        if report != self.last_report:
+            self.get_logger().info('mode=%s ready=%s startup_complete=%s: %s' %
+                                   (*report[:3], blocker or 'input enabled'))
+            self.last_report = report
         self.mode_pub.publish(String(data=c.mode))
         self.status_pub.publish(String(data=json.dumps(dict(
             mode=c.mode, requested=c.requested, transitioning=c.transitioning,
+            focus=c.focus, blocker=blocker,
+            feedback_age_sec=now-c.state_time if c.position is not None else None,
+            positions_rad=c.position, velocities_rad_s=c.velocity,
             epoch=c.epoch, ready=c.ready, reason=c.reason, controllers=self.controllers,
             startup_recovering=c.startup_recovering, startup_complete=c.startup_complete,
             startup_goal_rad=c.startup_goal,
