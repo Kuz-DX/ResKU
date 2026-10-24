@@ -77,6 +77,7 @@ True for its own "boolean resets to default" semantics to be true on ITS
 side, but this node's correctness does not depend on it doing so.
 """
 
+import json
 import math
 
 import rclpy
@@ -95,6 +96,10 @@ STOP_BEFORE_TURN = 'STOP_BEFORE_TURN'
 TURN_180 = 'TURN_180'
 FOLLOW_RETURN_PATH = 'FOLLOW_RETURN_PATH'
 FINISHED = 'FINISHED'
+RETURN_MANUAL = 'RETURN_MANUAL'
+RETURN_RESUME_STOP = 'RETURN_RESUME_STOP'
+RETURN_INTERVENTION = 'RETURN_INTERVENTION'
+RETURN_ACTIVE_STATES = {STOP_BEFORE_TURN, TURN_180, FOLLOW_RETURN_PATH, RETURN_MANUAL, RETURN_RESUME_STOP, RETURN_INTERVENTION}
 
 
 class ReturnStateMachineNode(Node):
@@ -102,6 +107,8 @@ class ReturnStateMachineNode(Node):
         super().__init__('return_state_machine_node')
 
         self.declare_parameter('control_rate_hz', 20.0)
+        self.declare_parameter('resume_timeout_s', 5.0)
+        self.declare_parameter('odom_timeout_s', 0.5)
         self.declare_parameter('min_waypoints_for_return', 2)
 
         self.declare_parameter('stop_vx_threshold_mps', 0.03)
@@ -176,6 +183,10 @@ class ReturnStateMachineNode(Node):
         self._follow_cmd_time = None
         self._emergency_stop_active = False
         self._emergency_stop_started = None
+        self._last_odom_time = None
+        self._resume_request = None
+        self._resume_sent_at = None
+        self._auto_follow_after = None
 
         transient_qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
                                     durability=DurabilityPolicy.TRANSIENT_LOCAL)
@@ -196,6 +207,10 @@ class ReturnStateMachineNode(Node):
         self.create_subscription(Twist, '/cmd_vel_return_path', self._on_follow_cmd, 10)
 
         self.create_subscription(PoseStamped, '/visual_landmark/correction', self._on_visual_correction, 10)
+        self.mode_status_pub = self.create_publisher(String, '/mission/return/control_status', transient_qos)
+        self.resume_request_pub = self.create_publisher(String, '/mission/return/resume_request', 10)
+        self.create_subscription(String, '/mission/return/control_mode', self._on_control_mode, 10)
+        self.create_subscription(String, '/mission/return/resume_result', self._on_resume_result, 10)
         self.create_timer(self.control_period, self._tick)
 
         self.get_logger().info('return_state_machine_node started in IDLE.')
@@ -218,9 +233,103 @@ class ReturnStateMachineNode(Node):
         self._visual_correction = Pose2D.from_ros_pose(msg.pose)
 
     def _on_odom(self, msg: Odometry):
+        self._last_odom_time = self.get_clock().now()
         self._odom_pose = Pose2D.from_ros_pose(msg.pose.pose)
         self._odom_vx = msg.twist.twist.linear.x
         self._odom_wz = msg.twist.twist.angular.z
+
+    def _control_status(self, status, reason=''):
+        self.mode_status_pub.publish(String(data=json.dumps({
+            'status': status, 'state': self._state, 'reason': reason,
+            'path_preserved': bool(self._return_path)})))
+
+    def _on_control_mode(self, msg):
+        mode = msg.data.strip().upper()
+        if self._emergency_stop_active or mode not in {'AUTO', 'MANUAL'}:
+            return
+        if self._state not in RETURN_ACTIVE_STATES:
+            self._control_status('ignored', 'no active return mission')
+            return
+        if mode == 'MANUAL':
+            if self._state == RETURN_MANUAL:
+                return
+            # Pausing before the initial turn also preserves a complete return route.
+            # On resume the follower aligns to its route heading, not another 180 turn.
+            if not self._return_path:
+                self._build_and_publish_return_path()
+            self.cmd_vel_return_pub.publish(Twist())
+            self._resume_request = None
+            self._auto_follow_after = None
+            self._go_to(RETURN_MANUAL)
+            self.state_pub.publish(String(data=self._state))
+            self._control_status('manual', 'recorded route retained; operator controls motion')
+        elif self._state in {RETURN_MANUAL, RETURN_INTERVENTION}:
+            self.cmd_vel_return_pub.publish(Twist())
+            self._stop_settle_since = None
+            self._resume_request = None
+            self._resume_sent_at = None
+            self._go_to(RETURN_RESUME_STOP)
+            self.state_pub.publish(String(data=self._state))
+            self._control_status('resume_check', 'stopping before route rejoin validation')
+
+    def _on_resume_result(self, msg):
+        if self._state != RETURN_RESUME_STOP or self._resume_request is None:
+            return
+        try:
+            result = json.loads(msg.data)
+            if result.get('request') != self._resume_request:
+                return
+        except (ValueError, TypeError):
+            return
+        # Movement or stale odometry after the request invalidates the response.
+        if not self._resume_still():
+            self._resume_request = None
+            self._stop_settle_since = None
+            return
+        self._resume_request = None
+        if result.get('ready') is True:
+            self._follow_cmd_time = None
+            self._auto_follow_after = self.get_clock().now()
+            self._go_to(FOLLOW_RETURN_PATH)
+            self.state_pub.publish(String(data=self._state))
+            self._control_status('auto', 'resuming preserved route')
+        else:
+            self._go_to(RETURN_INTERVENTION)
+            self.state_pub.publish(String(data=self._state))
+            self._control_status('manual_intervention_required', result.get('reason', 'rejoin rejected'))
+
+    def _resume_still(self):
+        if self._last_odom_time is None:
+            return False
+        age = (self.get_clock().now()-self._last_odom_time).nanoseconds*1e-9
+        return (0 <= age <= float(self.get_parameter('odom_timeout_s').value)
+                and abs(self._odom_vx) <= self.stop_vx_threshold
+                and abs(self._odom_wz) <= self.stop_wz_threshold)
+
+    def _tick_resume_stop(self):
+        self.cmd_vel_return_pub.publish(Twist())
+        if self._elapsed_in_state() > float(self.get_parameter('resume_timeout_s').value):
+            self._resume_request = None
+            self._go_to(RETURN_INTERVENTION)
+            self._control_status('manual_intervention_required', 'stop or route check timed out')
+            return
+        if not self._resume_still():
+            self._stop_settle_since = None
+            self._resume_request = None
+            return
+        now = self.get_clock().now()
+        if self._stop_settle_since is None:
+            self._stop_settle_since = now
+            return
+        if (now-self._stop_settle_since).nanoseconds*1e-9 < self.stop_settle_duration:
+            return
+        if self._resume_request is None:
+            self._resume_request = str(now.nanoseconds)
+            self._resume_sent_at = None
+        # Repeat for state/request delivery ordering or a restarted follower.
+        if self._resume_sent_at is None or (now-self._resume_sent_at).nanoseconds*1e-9 >= 0.5:
+            self.resume_request_pub.publish(String(data=self._resume_request))
+            self._resume_sent_at = now
 
     def _on_record_trigger(self, msg: Bool):
         if msg.data and not self._prev_record_trigger:
@@ -305,6 +414,10 @@ class ReturnStateMachineNode(Node):
             self._tick_turn_180()
         elif self._state == FOLLOW_RETURN_PATH:
             self._tick_follow_return_path()
+        elif self._state == RETURN_RESUME_STOP:
+            self._tick_resume_stop()
+        elif self._state in {RETURN_MANUAL, RETURN_INTERVENTION}:
+            self.cmd_vel_return_pub.publish(Twist())
         elif self._state == FINISHED:
             self._tick_finished()
 
@@ -391,6 +504,11 @@ class ReturnStateMachineNode(Node):
             self._go_to(FOLLOW_RETURN_PATH)
 
     def _tick_follow_return_path(self):
+        # Wait for post-resume follower output, never replay a cached manual-era command.
+        if self._auto_follow_after is not None and (
+                self._follow_cmd_time is None or self._follow_cmd_time <= self._auto_follow_after):
+            self.cmd_vel_return_pub.publish(Twist())
+            return
         fresh = (self._follow_cmd_time is not None and
                   (self.get_clock().now() - self._follow_cmd_time).nanoseconds * 1e-9
                   <= self.follow_relay_timeout)

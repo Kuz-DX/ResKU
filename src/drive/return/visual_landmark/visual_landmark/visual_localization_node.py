@@ -123,7 +123,7 @@ class VisualLocalizationNode(Node):
 
     def on_pair(self, color, depth):
         now = self.get_clock().now()
-        if self.state != 'FOLLOW_RETURN_PATH' or self.origin is None or not self.landmarks or self.info is None:
+        if self.state not in {'FOLLOW_RETURN_PATH', 'RETURN_MANUAL', 'RETURN_RESUME_STOP', 'RETURN_INTERVENTION'} or self.origin is None or not self.landmarks or self.info is None:
             return
         if now.nanoseconds*1e-9 - self.last < self.p('processing_period_s'):
             return

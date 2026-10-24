@@ -14,7 +14,7 @@ from return_navigation.return_state_machine_node import ReturnStateMachineNode
 def fake_node():
     now = Time(seconds=100, clock_type=ClockType.ROS_TIME)
     return SimpleNamespace(
-        _origin=Pose2D(), _visual_correction=None,
+        _origin=Pose2D(), _visual_correction=None, _auto_follow_after=None,
         _origin_received_at=Time(seconds=90, clock_type=ClockType.ROS_TIME),
         get_clock=lambda: SimpleNamespace(now=lambda: now))
 
