@@ -15,7 +15,11 @@ from rcl_interfaces.srv import GetParameters
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import Float64MultiArray, String
 
-from manual_control_common import JOINTS, ManualController, bounded_step
+from manual_control_common import JOINTS, ManualController, bounded_step, vertical_pitch_velocity
+
+
+# Joint-space radians: DXL base/roll/yaw = 0; RMD shoulder/elbow/pitch = +85/+87/-89 deg.
+STOP_POSE_RAD = (0., math.radians(85.), math.radians(87.), math.radians(-89.), 0., 0.)
 
 
 def position_limit_violations(positions, lower, upper):
@@ -40,6 +44,10 @@ class Manual(ManualController):
     # because one position target reaches its boundary or lead budget.
     limit_groups = tuple(slice(i, i+1) for i in range(6))
     extra_parameters = {
+        'ee_velocity_axis': 6,
+        'wrist_pitch_axis': 7,
+        'vertical_axis': 1,
+        'stop_pose_button': 3,  # Linux PlayStation square
         'startup_recovery_enabled': True,
         'startup_recovery_margin_rad': math.radians(2.),
         'startup_recovery_speed_rad_s': .03,
@@ -53,6 +61,8 @@ class Manual(ManualController):
         self.phase = 'waiting'
         self.status = 'waiting for controller and feedback'
         self.stop_target = None
+        self.stop_pose_active = False
+        self.previous_stop_pose = False
         self.hardware_fault = False
         self.neutral_required = True
         self.controller_stamp = -math.inf
@@ -147,6 +157,7 @@ class Manual(ManualController):
     def on_focus(self, message):
         if message.data != self.focus:
             self.publish_ee_velocity(0.)
+            self.stop_pose_active = False
             self.stop_target = None
             self.neutral_required = True
             # Hardware/controller failures require a reviewed full restart.
@@ -155,8 +166,8 @@ class Manual(ManualController):
         self.focus = message.data
 
     def on_joy(self, message):
-        axes = ('forward_axis', 'wrist_yaw_axis', 'wrist_roll_axis', 'ee_velocity_axis')
-        buttons = ('base_ccw_button', 'base_cw_button', 'ee_enable_button', 'focus_button')
+        axes = ('forward_axis', 'wrist_yaw_axis', 'wrist_roll_axis', 'ee_velocity_axis', 'wrist_pitch_axis', 'vertical_axis')
+        buttons = ('base_ccw_button', 'base_cw_button', 'ee_enable_button', 'focus_button', 'stop_pose_button')
         if (len(message.axes) <= max(self.params[n] for n in axes) or
                 len(message.buttons) <= max(self.params[n] for n in buttons) or
                 not all(math.isfinite(v) for v in message.axes)):
@@ -164,13 +175,58 @@ class Manual(ManualController):
             self.neutral_required = True
             return
         super().on_joy(message)
+        pressed = self.button('stop_pose_button')
+        if (pressed and not self.previous_stop_pose and self.controller_ready and
+                self.focus == 'arm' and not self.neutral_required and
+                not self.hardware_fault and not self.fault and
+                not getattr(self, 'startup_recovering', False)):
+            goal = np.array(STOP_POSE_RAD)
+            margin = self.params['limit_margin_rad']
+            if np.any(goal < self.lower+margin) or np.any(goal > self.upper-margin):
+                self.get_logger().error('Stop_pose rejected: requested joint angles outside manual limits')
+            else:
+                self.stop_pose_active = True
+        self.previous_stop_pose = pressed
+
+    def run_stop_pose(self, dt):
+        """Ramp to the exact pose with existing speed and feedback lead limits."""
+        goal = np.array(STOP_POSE_RAD)
+        candidate = self.target + np.clip(goal-self.target, -self.speeds*dt, self.speeds*dt)
+        allowed = np.abs(candidate-self.measured()) <= self.params['max_target_lead_rad']
+        self.target = np.where(allowed, candidate, self.target)
+        self.status = 'aligning Stop_pose'
+        self.publish_ee_velocity(0.)
+        self.hold()
+        if (np.allclose(self.target, goal, atol=1e-9, rtol=0.) and
+                np.max(np.abs(self.measured()-goal)) <= .005):
+            self.stop_pose_active = False
+            self.neutral_required = True
+            self.status = 'Stop_pose reached'
 
     def neutral(self):
         return (all(self.axis(n) == 0. for n in
-                    ('forward_axis', 'wrist_roll_axis', 'wrist_yaw_axis', 'ee_velocity_axis')) and
-                not any(self.button(n) for n in ('base_ccw_button', 'base_cw_button', 'ee_enable_button')))
+                    ('forward_axis', 'wrist_roll_axis', 'wrist_yaw_axis', 'ee_velocity_axis',
+                     'wrist_pitch_axis', 'vertical_axis')) and
+                not any(self.button(n) for n in ('base_ccw_button', 'base_cw_button', 'ee_enable_button', 'stop_pose_button')))
 
     def command_velocity(self, measured):
+        self.pitch_vertical_active = False
+        if self.button('ee_enable_button'):
+            # O is an exclusive tool/pitch layer. Simultaneous pitch requests
+            # favor explicit wrist adjustment; release D-pad to translate.
+            velocity = np.zeros(6)
+            pitch = self.axis('wrist_pitch_axis')
+            vertical = self.axis('vertical_axis')
+            if pitch:
+                velocity[3] = self.speeds[3]*pitch
+            elif vertical:
+                self.pitch_vertical_active = True
+                positions = dict(zip(JOINTS, self.target if self.target is not None else measured))
+                velocity[1:4] = vertical_pitch_velocity(
+                    self.chain, positions, vertical*self.params['linear_speed_mps'],
+                    self.params['damping'], self.speeds[1:4])
+            self.rmd_requested_velocity = velocity[1:4].copy()
+            return velocity
         # Reuse the existing ResKU FK/DLS, direction and mapping only when the
         # bend input is nonzero. No FK/Jacobian/IK for a Dynamixel-only input.
         if self.axis('forward_axis') != 0.:
@@ -388,6 +444,7 @@ class Manual(ManualController):
             self.publisher.publish(Float64MultiArray(data=self.target.tolist()))
 
     def stop(self, reason, dt):
+        self.stop_pose_active = False
         self.publish_ee_velocity(0.)
         self.neutral_required = True
         if self.status != reason:
@@ -428,6 +485,7 @@ class Manual(ManualController):
         self.last_time = now
         dt = min(max(elapsed, 0.), 1/self.params['publish_rate_hz'])
         self.last_dt = dt
+        self.pitch_vertical_active = False
         self.rmd_requested_velocity = np.zeros(3)
         self.rmd_applied_velocity = np.zeros(3)
         self.rmd_limit_blocked_joints = []
@@ -471,26 +529,30 @@ class Manual(ManualController):
             if self.neutral() and (self.stop_target is None or np.allclose(self.target, self.stop_target, atol=1e-9)):
                 self.neutral_required = False
                 self.stop_target = None
+        elif getattr(self, 'stop_pose_active', False):
+            self.run_stop_pose(dt)
         else:
             self.status = 'operator control'
             self.stop_target = None
             measured = self.measured()
             velocity = self.command_velocity(measured)
             candidate = self.target.copy()
-            for indexes in self.limit_groups:
+            groups = ((slice(1, 4), slice(0, 1), slice(4, 5), slice(5, 6))
+                      if self.pitch_vertical_active else self.limit_groups)
+            for indexes in groups:
                 step = bounded_step(self.target[indexes], velocity[indexes], self.lower[indexes],
                                     self.upper[indexes], dt, self.params['limit_margin_rad'])
                 index = indexes.start
                 if index in (1, 2, 3) and not np.allclose(
                         step-self.target[indexes], velocity[indexes]*dt, atol=1e-12, rtol=0.):
                     if JOINTS[index] not in self.rmd_limit_blocked_joints:
-                        self.rmd_limit_blocked_joints.append(JOINTS[index])
-                # Each joint retains its own lead budget; one bounded RMD
-                # must not suppress the other two, or any Dynamixel command.
+                        self.rmd_limit_blocked_joints.extend(JOINTS[indexes] if self.pitch_vertical_active else [JOINTS[index]])
+                # Vertical motion shares limits and lead budget across all RMDs
+                # to preserve pitch. Legacy bending retains per-joint gates.
                 if np.max(np.abs(step-measured[indexes])) <= self.params['max_target_lead_rad']:
                     candidate[indexes] = step
                 elif index in (1, 2, 3) and abs(velocity[index]) > 1e-12:
-                    self.rmd_lead_blocked_joints.append(JOINTS[index])
+                    self.rmd_lead_blocked_joints.extend(JOINTS[indexes] if self.pitch_vertical_active else [JOINTS[index]])
             if dt > 0:
                 self.rmd_applied_velocity = (candidate[1:4]-self.target[1:4])/dt
             self.target = candidate

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Operator-guided RMD coordination inspired by dolbotZ MANUAL_EE.
 
-Only shoulder/elbow/wrist pitch participate in translation-only differential
-IK. This is not six-dimensional TCP pose control or collision path planning.
+Shoulder/elbow/wrist pitch support translation differential IK and
+orientation-constrained vertical motion. No collision path planning.
 Position targets go directly to a dedicated ForwardCommandController.
 """
 from __future__ import annotations
@@ -75,7 +75,7 @@ class ArmChain:
         if set(self.required) - set(JOINTS):
             raise ValueError('chain contains unsupported movable joints')
 
-    def pose_and_jacobian(self, positions):
+    def pose_and_jacobian(self, positions, include_angular=False):
         transform, frames = np.eye(4), []
         for name, kind, _, origin, axis in self.chain:
             transform = transform @ origin
@@ -88,7 +88,10 @@ class ArmChain:
             elif kind != 'fixed':
                 raise ValueError(f'unsupported joint type: {kind}')
         point = transform[:3, 3]
-        return transform, np.column_stack([np.cross(axis, point-origin) for origin, axis in frames])
+        linear = np.column_stack([np.cross(axis, point-origin) for origin, axis in frames])
+        if include_angular:
+            return transform, linear, np.column_stack([axis for _, axis in frames])
+        return transform, linear
 
 
 def coordinated_velocity(jacobian, requested, damping, speed_limits):
@@ -103,6 +106,22 @@ def coordinated_velocity(jacobian, requested, damping, speed_limits):
         raise ValueError('invalid differential IK inputs')
     velocity = jacobian.T @ np.linalg.solve(
         jacobian @ jacobian.T + damping*damping*np.eye(3), requested)
+    return velocity / max(1., float(np.max(np.abs(velocity) / speed_limits)))
+
+
+def vertical_pitch_velocity(chain, positions, speed, damping, speed_limits):
+    """Move vertically in root coordinates with zero horizontal/angular velocity.
+
+    Use the constraint nullspace so damping and speed limiting cannot relax
+    the pitch constraint. At a singularity an unreachable request stops.
+    """
+    _, linear, angular = chain.pose_and_jacobian(positions, include_angular=True)
+    constraints = np.vstack((linear[:2], angular))
+    _, singular, vh = np.linalg.svd(constraints, full_matrices=True)
+    rank = np.count_nonzero(singular > 1e-8)
+    basis = vh[rank:].T
+    vertical = linear[2] @ basis
+    velocity = basis @ (vertical * speed / (vertical @ vertical + damping*damping))
     return velocity / max(1., float(np.max(np.abs(velocity) / speed_limits)))
 
 
@@ -263,7 +282,7 @@ class ManualController(Node):
         self.ee_velocity_publisher.publish(Float64MultiArray(data=[float(velocity)]))
 
     def ee_velocity(self):
-        """O must remain held; D-pad up is clockwise and down counterclockwise."""
+        """O must remain held; the configured axis sets signed EE speed."""
         if not self.button('ee_enable_button'):
             return 0.
         value = self.axis('ee_velocity_axis')

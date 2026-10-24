@@ -11,7 +11,7 @@ from sensor_msgs.msg import JointState, Joy
 from std_msgs.msg import String
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts'))
-from manual import Manual, position_limit_violations
+from manual import Manual, STOP_POSE_RAD, position_limit_violations
 from manual_control_common import JOINTS, ArmChain, bounded_step, coordinated_velocity
 from test_manual_control_common import harness as base_harness
 
@@ -22,12 +22,13 @@ def harness():
     node.phase, node.status = 'ready', 'operator control'
     node.controller_ready, node.hardware_fault = True, False
     node.stop_target, node.neutral_required = None, False
+    node.stop_pose_active, node.previous_stop_pose = False, False
     node.last_dt = .02
     node.diagnostics = Mock()
     node.joy = Joy(axes=[0.]*8, buttons=[0]*11)
     node.params.update(forward_axis=4, wrist_yaw_axis=0, wrist_roll_axis=6,
-                       ee_velocity_axis=7, base_ccw_button=4, base_cw_button=5,
-                       ee_enable_button=1, focus_button=9, deadzone=.12, manage_focus=True)
+                       ee_velocity_axis=6, wrist_pitch_axis=7, vertical_axis=1, base_ccw_button=4, base_cw_button=5,
+                       ee_enable_button=1, focus_button=9, stop_pose_button=3, deadzone=.12, manage_focus=True)
     node.poll_controller = Mock()
     node.axis = lambda name: 0.
     node.list_client = Mock()
@@ -513,3 +514,134 @@ def test_one_rmd_lead_budget_cannot_freeze_the_other_two():
     assert node.target[1] == before[1]
     assert node.target[2] > before[2] and node.target[3] > before[3]
     assert node.rmd_lead_blocked_joints == ['shoulder_joint']
+
+
+def test_square_ramps_exact_stop_pose_without_ik_and_stops_on_timeout():
+    node = harness()
+    node.chain.pose_and_jacobian = Mock(side_effect=AssertionError('pose uses joint space'))
+    node.button = lambda name: bool(node.joy.buttons[node.params[name]])
+    node.previous_focus = False
+    node.on_joy(Joy(axes=[0.]*8, buttons=[0, 0, 0, 1]+[0]*7))
+    assert node.stop_pose_active
+    for _ in range(2000):
+        before = node.target.copy()
+        tick(node)
+        assert np.all(np.abs(node.target-before) <= node.speeds*.02+1e-12)
+        node.positions = dict(zip(JOINTS, node.target))
+        if not node.stop_pose_active:
+            break
+    np.testing.assert_allclose(node.target, STOP_POSE_RAD, atol=1e-12)
+    assert node.neutral_required
+    node = harness()
+    node.stop_pose_active = True
+    node.joy_time = .1
+    tick(node)
+    assert not node.stop_pose_active
+
+
+def test_square_accepts_stop_pose_within_real_hardware_limits():
+    node = storage_pose_harness()
+    node.startup_recovering = False
+    node.button = lambda name: bool(node.joy.buttons[node.params[name]])
+    node.previous_focus = False
+    node.on_joy(Joy(axes=[0.]*8, buttons=[0, 0, 0, 1]+[0]*7))
+    assert node.stop_pose_active
+    assert STOP_POSE_RAD[1] == pytest.approx(np.deg2rad(85.))
+    assert STOP_POSE_RAD[2] == pytest.approx(np.deg2rad(87.))
+    assert STOP_POSE_RAD[3] == pytest.approx(np.deg2rad(-89.))
+    node.get_logger().error.assert_not_called()
+
+
+@pytest.mark.parametrize('sign', [-1., 1.])
+def test_circle_layer_real_joy_mapping(sign):
+    from manual_control_common import ManualController
+    node = harness()
+    node.axis = ManualController.axis.__get__(node)
+    node.button = ManualController.button.__get__(node)
+    node.joy.buttons[1] = 1
+    node.joy.axes[6] = sign
+    np.testing.assert_array_equal(node.command_velocity(node.measured()), np.zeros(6))
+    assert node.ee_velocity() == pytest.approx(sign*.12)
+    node.joy.axes[6] = 0.
+    node.joy.axes[7] = sign
+    velocity = node.command_velocity(node.measured())
+    np.testing.assert_allclose(velocity, [0., 0., 0., sign*.12, 0., 0.])
+    assert node.ee_velocity() == 0.
+    node.joy.axes[7] = 0.
+    node.joy.axes[1] = sign
+    velocity = node.command_velocity(node.measured())
+    _, linear, angular = node.chain.pose_and_jacobian(node.positions, include_angular=True)
+    np.testing.assert_allclose(angular @ velocity[1:4], 0., atol=1e-12)
+    np.testing.assert_allclose((linear @ velocity[1:4])[:2], 0., atol=1e-12)
+    assert sign*(linear @ velocity[1:4])[2] > 0.
+    assert not node.neutral()
+    node.joy.buttons[1] = 0
+    np.testing.assert_array_equal(node.command_velocity(node.measured()), np.zeros(6))
+
+
+def test_pitch_adjust_then_vertical_keeps_adjusted_orientation():
+    node = harness()
+    node.button = lambda name: name == 'ee_enable_button'
+    node.axis = lambda name: 1. if name == 'wrist_pitch_axis' else 0.
+    for _ in range(20):
+        tick(node)
+        node.positions = dict(zip(JOINTS, node.target))
+    initial, _ = node.chain.pose_and_jacobian(node.positions)
+    node.axis = lambda name: 1. if name == 'vertical_axis' else 0.
+    for _ in range(100):
+        tick(node)
+        node.positions = dict(zip(JOINTS, node.target))
+    final, _ = node.chain.pose_and_jacobian(node.positions)
+    np.testing.assert_allclose(final[:3, :3], initial[:3, :3], atol=1e-10)
+    np.testing.assert_allclose(final[:2, 3], initial[:2, 3], atol=1e-4)
+    assert final[2, 3] > initial[2, 3]+.001
+
+
+@pytest.mark.parametrize('block', ['limit', 'lead'])
+def test_vertical_constraint_survives_joint_limits_and_lead(block):
+    node = harness()
+    node.button = lambda name: name == 'ee_enable_button'
+    node.axis = lambda name: 1. if name == 'vertical_axis' else 0.
+    velocity = node.command_velocity(node.measured())
+    index = 1+int(np.argmax(np.abs(velocity[1:4])))
+    sign = np.sign(velocity[index])
+    if block == 'limit':
+        if sign > 0:
+            node.upper[index] = node.target[index]+.02
+        else:
+            node.lower[index] = node.target[index]-.02
+    else:
+        node.positions[JOINTS[index]] = node.target[index]-sign*.0999
+    before = node.target.copy()
+    tick(node)
+    np.testing.assert_array_equal(node.target, before)
+
+
+def test_vertical_singularity_stops_and_adjustment_has_priority():
+    node = harness()
+    node.button = lambda name: name == 'ee_enable_button'
+    node.axis = lambda name: 1. if name in ('wrist_pitch_axis', 'vertical_axis', 'forward_axis', 'wrist_roll_axis') else 0.
+    np.testing.assert_allclose(node.command_velocity(node.measured()), [0., 0., 0., .12, 0., 0.])
+    from manual_control_common import vertical_pitch_velocity
+    chain = Mock()
+    chain.pose_and_jacobian.return_value = (np.eye(4), np.zeros((3, 3)), np.ones((3, 3)))
+    np.testing.assert_allclose(vertical_pitch_velocity(chain, {}, .03, .05, np.ones(3)), 0.)
+
+
+@pytest.mark.parametrize('base', [0., .7])
+@pytest.mark.parametrize('direction', [-1., 1.])
+def test_vertical_with_actual_robot_model(base, direction):
+    import xacro
+    from manual_control_common import vertical_pitch_velocity
+    path = Path(__file__).resolve().parents[2]/'tool_manipulator_description/urdf/tool_manipulator.urdf.xacro'
+    chain = ArmChain(xacro.process_file(str(path)).toxml())
+    q = np.array([base, -.4, .7, -.2, .3, -.2])
+    initial, _ = chain.pose_and_jacobian(dict(zip(JOINTS, q)))
+    for _ in range(100):
+        velocity = vertical_pitch_velocity(chain, dict(zip(JOINTS, q)), direction*.03, .05, np.full(3, .12))
+        assert np.max(np.abs(velocity)) <= .12+1e-12
+        q[1:4] += .02*velocity
+    final, _ = chain.pose_and_jacobian(dict(zip(JOINTS, q)))
+    np.testing.assert_allclose(final[:3, :3], initial[:3, :3], atol=1e-10)
+    np.testing.assert_allclose(final[:2, 3], initial[:2, 3], atol=1e-4)
+    assert direction*(final[2, 3]-initial[2, 3]) > .001
