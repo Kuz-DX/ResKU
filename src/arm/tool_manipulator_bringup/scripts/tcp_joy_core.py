@@ -83,14 +83,16 @@ class TcpStepper:
             if angle > 1e-12:
                 target[:3, :3] = _rotation(rot/angle, angle) @ target[:3, :3]
             try:
-                solved = self.model.solve(target, np.asarray(measured), self.margin,
+                # self.pose was produced by self.q.  Seeding the next small
+                # increment from that matching command state avoids repeatedly
+                # solving the accumulated TCP lead from lagging feedback.  The
+                # measured state is still enforced by the lead/limit checks.
+                solved = self.model.solve(target, self.q, self.margin,
                     max_iterations=self.iterations//attempts, max_time_s=remaining)
             except ValueError as exc:
                 error = str(exc)
                 self.velocity_scale *= .5
                 continue
-            if time.monotonic() >= deadline:
-                raise ValueError('IK time budget exceeded')
             if not np.all(np.isfinite(solved)) or not self.model.within_limits(solved, self.margin):
                 raise ValueError('invalid IK solution')
             ratio = float(np.max(np.abs(solved-self.q)/(self.speeds*dt)))

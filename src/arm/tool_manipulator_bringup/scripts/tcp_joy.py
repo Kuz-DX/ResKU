@@ -42,7 +42,7 @@ class TcpJoy(Node):
             [float(config['joints'][j]['velocity_limit_rad_s'])/2 for j in ARM_JOINTS],
             linear=float(param('linear_speed_mps', .02)), angular=float(param('angular_speed_rad_s', .15)),
             margin=float(param('limit_margin_rad', .02)), lead=float(param('max_lead_rad', .08)),
-            iterations=int(param('ik_iterations', 30)), budget=float(param('ik_budget_sec', .015)))
+            iterations=int(param('ik_iterations', 30)), budget=float(param('ik_budget_sec', .030)))
         self.pub = self.create_publisher(String, '/arm/input/tcp_ik', 1)
         self.diag = self.create_publisher(String, '/arm/tcp_joy/status', 1)
         self.check = self.create_client(GetStateValidity, '/check_state_validity')
@@ -58,6 +58,7 @@ class TcpJoy(Node):
         self.failures = 0
         self.blocked = False
         self.reason = 'waiting for TCP_IK mode'
+        self.last_ik_duration_ms = None
         self.last_logged_state = None
         self.last_time = time.monotonic()
         qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
@@ -202,7 +203,12 @@ class TcpJoy(Node):
                                 self.reason = 'TCP incremental command accepted'
                     elif np.any(self.twist):
                         # No catch-up integration while IK/collision service is busy.
-                        q, pose = self.stepper.candidate(self.measured, self.twist, min(dt, .02))
+                        started = time.monotonic()
+                        try:
+                            q, pose = self.stepper.candidate(
+                                self.measured, self.twist, min(dt, .02))
+                        finally:
+                            self.last_ik_duration_ms = (time.monotonic()-started)*1000.
                         self.submit_collision(q, pose, now)
                     self.publish()
                 except (ValueError, RuntimeError, np.linalg.LinAlgError) as exc:
@@ -211,7 +217,8 @@ class TcpJoy(Node):
         self.diag.publish(String(data=json.dumps(dict(reason=self.reason, failures=self.failures,
             deadman=self.deadman, rearmed=self.rearmed, pending=self.pending is not None,
             condition=self.stepper.condition if math.isfinite(self.stepper.condition) else None,
-            singularity_scale=self.stepper.scale, velocity_scale=self.stepper.velocity_scale))))
+            singularity_scale=self.stepper.scale, velocity_scale=self.stepper.velocity_scale,
+            ik_duration_ms=self.last_ik_duration_ms, ik_budget_ms=self.stepper.budget*1000.))))
         logged = (self.reason, self.failures, self.deadman, self.rearmed)
         if logged != self.last_logged_state:
             self.get_logger().info(

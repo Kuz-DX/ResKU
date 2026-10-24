@@ -64,7 +64,9 @@ def test_increment_only_commits_after_collision_acceptance():
     s.commit(q,target)
     _, target2 = s.candidate(q, np.array([1.,0,0,0,0,0]), .02)
     assert target2[0,3] == pytest.approx(.0008)
-    np.testing.assert_array_equal(s.model.solve.call_args.args[1], q)
+    # The accumulated target pose and its matching previous command solution
+    # form the next IK seed; live feedback is enforced separately by lead checks.
+    np.testing.assert_array_equal(s.model.solve.call_args.args[1], s.q)
 
 
 @pytest.mark.parametrize('kind', ['speed', 'lead', 'singularity', 'ik'])
@@ -144,6 +146,7 @@ def test_wait_for_collision_server_keeps_hold_heartbeat_without_failures():
     node.stepper = fake_stepper()
     node.blocked = False
     node.failures = 0
+    node.last_ik_duration_ms = None
     node.pending = None
     node.deadman = node.rearmed = True
     node.check.service_is_ready.return_value = False
