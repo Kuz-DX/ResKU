@@ -25,6 +25,8 @@ setup(
             os.path.join('share', package_name, 'config', 'camera'),
             glob('camera/config/*.yaml'),
         ),
+        (os.path.join('share', package_name, 'config', 'camera', 'calibration'),
+         glob('camera/config/calibration/*.yaml') + glob('camera/config/calibration/*.md')),
         (
             os.path.join('share', package_name, 'models'),
             glob('models/*.xml') + glob('models/*.bin') + glob('models/*.pt'),

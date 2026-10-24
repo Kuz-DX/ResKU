@@ -1,5 +1,13 @@
 # Back-to-Base visual localization
 
+APC850/D435i 실차 설치·보정·A/B 평가·검증 절차는
+[HARDWARE_VALIDATION.md](HARDWARE_VALIDATION.md)를 먼저 참고한다.
+**현재 기본은 stop 촬영, 보정 관찰만 수행(`visual_apply_correction=false`),
+자동 누락 정지/회전 탐색 비활성(`enable_landmark_recovery=false`)이다.**
+관찰 모드는 일반 복귀 컨트롤러나 모터를 비활성화하는 설정이 아니다.
+실제 측정 K/D·rear optical TF와 팔/차체의 `base_link` 이름 충돌 해결 전에는
+실차 준비가 완료됐다고 간주하지 않는다.
+
 This package records outbound landmark RGB keyframes and localizes the returning
 robot with the arm Intel D435i's RGB and aligned depth. No lidar, learned-model
 download, rear depth camera, or odometry reset is required.
@@ -7,7 +15,7 @@ download, rear depth camera, or odometry reset is required.
 SIFT features are matched bidirectionally with a ratio test. Current aligned
 depth lifts image features into metric current-camera 3D coordinates; PnP RANSAC
 and nonlinear refinement estimate `reference_camera <- current_camera` against
-the stored RGB pixels. This direction deliberately allows a future RGB-only rear
+the stored RGB pixels. This direction supports an RGB-only rear
 camera. Roll, pitch, yaw and translation are estimated together. It requires
 sufficient overlapping, textured, static scenery and valid depth; arbitrary
 viewpoint change, motion blur, occlusion and textureless ground are not guaranteed.
@@ -185,9 +193,9 @@ JSON `status`에서 표시하고 실제 중재 상태는 `/mission/return/state`
 +30°에서 -30°까지의 이동은 60°이고, 전체 회전 이동량은 약 120°이다.
 제한은 시작 방향에 대한 편차 ±30°이며, 총 이동량 60°라는 의미가 아니다.
 
-탐색 중에는 거리 제한 없이 저장된 대상 랜드마크를 검색한다. 후보 발견 시
+탐색 중에도 candidate radius를 유지하며 지정된 대상 랜드마크를 검색한다. 후보 발견 시
 회전을 멈추고 새 정지 영상 두 장의 매칭을 검증한다. 이때 일반 VPR의 inlier,
-재투영 오차 및 보정량 검사는 그대로 유지한다. 성공하면 제어기가 해당
+재투영 오차 및 보정량 검사는 그대로 유지한다. 보정 적용 모드에서 성공하면 제어기가 해당
 보정을 수신한 것을 확인하고 기존 Auto 재합류 검사(기본 3 m) 후 복귀한다.
 보정이 너무 커서 검증을 통과하지 못하면 자동 재개하지 않는다.
 
@@ -209,6 +217,7 @@ JSON `status`에서 표시하고 실제 중재 상태는 `/mission/return/state`
 
 ```bash
 ros2 launch robot_bringup manual_return_bringup.launch.py \
+  visual_apply_correction:=true enable_landmark_recovery:=true \
   resume_max_path_distance_m:=3.0 \
   landmark_miss_window_m:=1.0 landmark_miss_wait_s:=4.0 \
   landmark_search_angle_deg:=30.0 landmark_search_speed_radps:=0.15 \

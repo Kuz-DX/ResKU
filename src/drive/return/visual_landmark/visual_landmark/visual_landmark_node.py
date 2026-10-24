@@ -215,6 +215,11 @@ class VisualLandmarkNode(Node):
         self._last_image_arrival = arrival
         if not self.seq.accept_frame(arrival):
             return
+        image_time = msg.header.stamp.sec + msg.header.stamp.nanosec*1e-9
+        if image_time <= 0 or not 0 <= arrival-image_time <= self.image_stale_s:
+            return  # keep waiting for a fresh frame, never archive a queued old image
+        if self.seq._frame_after is not None and image_time < self.seq._frame_after:
+            return
         try:
             info = self._save_landmark(msg)
         except Exception as exc:  # 디스크/권한 오류도 주행을 막으면 안 된다
@@ -243,7 +248,7 @@ class VisualLandmarkNode(Node):
 
     def _ensure_mission_dir(self):
         if self._mission_dir is None:
-            stamp = time.strftime('%Y%m%d_%H%M%S')
+            stamp = time.strftime('%Y%m%d_%H%M%S') + f'_{time.time_ns() % 1000000000:09d}'
             self._mission_dir = os.path.join(self.db_root, stamp)
             os.makedirs(self._mission_dir, exist_ok=True)
             with open(os.path.join(self._mission_dir, 'mission.yaml'), 'w') as f:
@@ -256,11 +261,11 @@ class VisualLandmarkNode(Node):
                 }, f, sort_keys=False)
         return self._mission_dir
 
-    def _lookup_extrinsic(self, camera_frame: str):
+    def _lookup_extrinsic(self, camera_frame: str, stamp=None):
         if not camera_frame:
             return None
         try:
-            t = self.tf_buffer.lookup_transform(self.base_frame, camera_frame, Time())
+            t = self.tf_buffer.lookup_transform(self.base_frame, camera_frame, stamp if stamp is not None else Time())
         except TransformException:
             return None
         tr, q = t.transform.translation, t.transform.rotation
@@ -288,11 +293,12 @@ class VisualLandmarkNode(Node):
         mission = odom_pose.to_mission_frame(self._origin)
         camera_frame = img.header.frame_id or (
             self._camera_info.header.frame_id if self._camera_info else '')
-        extrinsic = self._lookup_extrinsic(camera_frame)
+        extrinsic = self._lookup_extrinsic(camera_frame, Time.from_msg(img.header.stamp))
         ci = self._camera_info
         # Use image-time TF, including body roll/pitch and articulated camera pose.
         # Keep capture usable without TF, but localization must reject such records.
         mission_camera = None
+        image_base = None
         try:
             t = self.tf_buffer.lookup_transform(
                 odom.header.frame_id, camera_frame, Time.from_msg(img.header.stamp))
@@ -300,6 +306,12 @@ class VisualLandmarkNode(Node):
             import numpy as np
             origin = transform([self._origin.x, self._origin.y, 0],
                                [0, 0, math.sin(self._origin.yaw/2), math.cos(self._origin.yaw/2)])
+            bt = self.tf_buffer.lookup_transform(
+                odom.header.frame_id, self.base_frame, Time.from_msg(img.header.stamp))
+            bp, bq = bt.transform.translation, bt.transform.rotation
+            image_base = transform([bp.x, bp.y, bp.z], [bq.x, bq.y, bq.z, bq.w])
+            odom_pose = Pose2D(float(bp.x), float(bp.y), math.atan2(image_base[1, 0], image_base[0, 0]))
+            mission = odom_pose.to_mission_frame(self._origin)
             mission_camera = (np.linalg.inv(origin) @ transform(
                 [tr.x, tr.y, tr.z], [q.x, q.y, q.z, q.w])).tolist()
         except TransformException:
@@ -307,6 +319,7 @@ class VisualLandmarkNode(Node):
         meta = {
             'schema_version': 2,
             'mission_camera_transform': mission_camera,
+            'image_time_base_transform': None if image_base is None else image_base.tolist(),
             'id': lid,
             'order': order,
             'image_file': image_file,

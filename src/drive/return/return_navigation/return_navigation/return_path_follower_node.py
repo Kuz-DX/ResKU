@@ -95,6 +95,7 @@ class ReturnPathFollowerNode(Node):
         self._mission_state = ''
         self._landmark_watch = LandmarkWatch()
         self._landmark_hold = None
+        self.declare_parameter('enable_landmark_recovery', False)
         self.declare_parameter('landmark_miss_window_m', 1.0)
         self.declare_parameter('landmark_miss_wait_s', 4.0)
         self.declare_parameter('lookahead_distance_m', 0.6)
@@ -321,7 +322,7 @@ class ReturnPathFollowerNode(Node):
         self._progress_index = max(self._progress_index, nearest_idx)
 
         lid = self._landmark_hold
-        if lid is None:
+        if lid is None and bool(self.get_parameter('enable_landmark_recovery').value):
             lid = self._landmark_watch.missed(
                 self._path, current, self.get_clock().now().nanoseconds*1e-9,
                 max(self._floor, self._progress_index-1), hi,

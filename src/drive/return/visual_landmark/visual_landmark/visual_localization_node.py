@@ -5,6 +5,7 @@ selection of historical missions. Failed matches leave the previous correction.
 """
 import json
 from pathlib import Path
+import time
 
 import cv2
 import message_filters
@@ -17,11 +18,15 @@ from rclpy.duration import Duration
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, qos_profile_sensor_data
 from rclpy.time import Time
+from nav_msgs.msg import Path as RoutePath
+from return_navigation.recovery import project_route
+from return_navigation.se2 import Pose2D
 from sensor_msgs.msg import CameraInfo, CompressedImage, Image
 from std_msgs.msg import String
 from tf2_ros import Buffer, TransformListener
 
-from visual_landmark.localization import features, match, planar, transform
+from visual_landmark.calibration import camera_model
+from visual_landmark.localization import MatchOptions, features, match, planar, transform, valid_transform, pose_fields
 
 
 RECORDING_STATES = {'MANUAL_RECORDING', 'WAIT_RETURN_COMMAND'}
@@ -41,9 +46,23 @@ class VisualLocalizationNode(Node):
             'base_frame': 'base_link', 'odom_frame': 'odom',
             'max_correction_m': 3.0, 'max_correction_yaw_rad': 0.7,
             'candidate_radius_m': 12.0, 'processing_period_s': 1.0,
+            'apply_correction': False, 'lock_pose_guard': True, 'expected_lock_pose_file': '',
+            'lock_translation_tolerance_m': 0.02, 'lock_rotation_tolerance_rad': 0.035,
+            'agreement_translation_m': 0.25, 'agreement_yaw_rad': 0.1,
+            'agreement_max_interval_s': 2.5, 'ambiguity_ratio': 0.85,
+            'route_backtrack_m': 2.0,
         }.items():
             self.declare_parameter(name, value)
         self.p = lambda n: self.get_parameter(n).value
+        defaults = MatchOptions()
+        for key, value in vars(defaults).items():
+            self.declare_parameter('match.'+key, value)
+        self.match_options = MatchOptions(**{key: self.p('match.'+key) for key in vars(defaults)})
+        self.lock_pose = None
+        self.reference_meta = {}
+        self.route = []
+        self.last_reference_arc = None
+        self.pending_stamp = None
         self.origin = None
         self.state = ''
         self.info = None
@@ -59,6 +78,7 @@ class VisualLocalizationNode(Node):
                              durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.pub = self.create_publisher(PoseStamped, '/visual_landmark/correction', 10)
         self.status = self.create_publisher(String, '/visual_landmark/localization_event', 10)
+        self.create_subscription(RoutePath, '/return_path', self.on_route, latched)
         self.create_subscription(Pose, '/mission/origin_pose', self.on_origin, latched)
         self.create_subscription(String, '/mission/return/state', self.on_state, 10)
         self.create_subscription(String, '/visual_landmark/event', self.on_landmark, 10)
@@ -72,6 +92,24 @@ class VisualLocalizationNode(Node):
         self.sync = message_filters.ApproximateTimeSynchronizer(
             [self.color_sub, self.depth_sub], queue_size=5, slop=0.04)
         self.sync.registerCallback(self.on_pair)
+
+    def on_route(self, msg):
+        self.route = [Pose2D.from_ros_pose(p.pose) for p in msg.poses]
+        self.last_reference_arc = None
+
+    def check_lock_pose(self, current):
+        if not bool(self.p('lock_pose_guard')):
+            return
+        if self.lock_pose is None:
+            filename = self.p('expected_lock_pose_file')
+            self.lock_pose = (np.array(yaml.safe_load(Path(filename).read_text())['base_from_camera'], dtype=float)
+                              if filename else current.copy())
+            if not valid_transform(self.lock_pose):
+                raise ValueError('invalid expected lock transform')
+        delta = np.linalg.inv(self.lock_pose) @ current
+        angle = float(np.arccos(np.clip((np.trace(delta[:3, :3])-1)/2, -1, 1)))
+        if np.linalg.norm(delta[:3, 3]) > self.p('lock_translation_tolerance_m') or angle > self.p('lock_rotation_tolerance_rad'):
+            raise ValueError('D435i left its locked arm pose')
 
     def on_search_request(self, msg):
         try:
@@ -95,6 +133,10 @@ class VisualLocalizationNode(Node):
             if msg.data in RECORDING_STATES and self.state not in RECORDING_STATES:
                 self.landmarks.clear()
                 self.correction = None
+                self.lock_pose = None
+                self.reference_meta.clear()
+                self.route = []
+                self.last_reference_arc = None
         self.state = msg.data
 
     def on_origin(self, msg):
@@ -105,6 +147,9 @@ class VisualLocalizationNode(Node):
             self.landmarks.clear()
             self.correction = None
             self.pending = None
+            self.lock_pose = None
+            self.reference_meta.clear()
+            self.last_reference_arc = None
 
     def event(self, kind, **fields):
         self.status.publish(String(data=json.dumps({'event': kind, **fields})))
@@ -128,18 +173,23 @@ class VisualLocalizationNode(Node):
             image = cv2.imread(str(directory / meta['image_file']), cv2.IMREAD_GRAYSCALE)
             if image is None or image.shape != (ci['height'], ci['width']):
                 raise ValueError('invalid reference image/calibration size')
+            camera_model(ci['width'], ci['height'], ci['k'], ci['d'], ci['distortion_model'], image.shape)
+            if not valid_transform(meta['mission_camera_transform']):
+                raise ValueError('invalid reference camera transform')
             points, descriptors = features(image)
             if descriptors is None or len(points) < 20:
                 raise ValueError('reference has fewer than 20 usable features')
             self.landmarks[meta['id']] = (
                 (points, descriptors, np.array(ci['k']).reshape(3, 3), np.array(ci['d'])),
                 np.array(meta['mission_camera_transform'], dtype=float))
+            self.reference_meta[meta['id']] = meta
             self.event('reference_loaded', id=meta['id'], features=len(points),
                        x=float(meta['mission_pose']['x']), y=float(meta['mission_pose']['y']))
         except (ValueError, KeyError, OSError, cv2.error, TypeError) as exc:
             self.event('reference_rejected', reason=str(exc))
 
     def on_pair(self, color, depth):
+        started = time.perf_counter()
         now = self.get_clock().now()
         if self.state not in {'FOLLOW_RETURN_PATH', 'RETURN_MANUAL', 'RETURN_RESUME_STOP', 'RETURN_INTERVENTION', 'RETURN_LANDMARK_SEARCH'} or self.origin is None or not self.landmarks or self.info is None:
             return
@@ -148,6 +198,8 @@ class VisualLocalizationNode(Node):
         self.last = now.nanoseconds*1e-9
         try:
             stamp = Time.from_msg(color.header.stamp)
+            if stamp.nanoseconds <= 0:
+                raise ValueError('zero image timestamp')
             if abs((now-stamp).nanoseconds*1e-9) > 0.5:
                 raise ValueError('stale RGB-D pair')
             ci = self.info
@@ -165,19 +217,33 @@ class VisualLocalizationNode(Node):
                 raise ValueError('RGB-D/calibration resolution mismatch')
             if ci.k[0] <= 0 or ci.k[4] <= 0:
                 raise ValueError('uncalibrated current camera')
+            k, d = camera_model(ci.width, ci.height, ci.k, ci.d, ci.distortion_model, image.shape)
             # Timestamped TF includes current arm joints and chassis roll/pitch.
             oc = tf_matrix(self.buffer.lookup_transform(self.p('odom_frame'), color.header.frame_id, stamp))
             ob = tf_matrix(self.buffer.lookup_transform(self.p('odom_frame'), self.p('base_frame'), stamp))
+            bc = np.linalg.inv(ob) @ oc
+            if not valid_transform(bc) or not valid_transform(oc) or not valid_transform(ob):
+                raise ValueError('invalid current camera/base TF')
+            self.check_lock_pose(bc)
             self.event('frame', stamp_ns=stamp.nanoseconds)
             current = features(image)
             prior = self.correction if self.correction is not None else np.linalg.inv(self.origin)
             ranked = []
+            attempts = []
             for lid, (reference, mc) in self.landmarks.items():
                 if self.state == 'RETURN_LANDMARK_SEARCH' and self.search is not None and lid != self.search.get('id'):
                     continue
-                if self.state != 'RETURN_LANDMARK_SEARCH' and np.linalg.norm((prior @ oc)[:2, 3] - mc[:2, 3]) > self.p('candidate_radius_m'):
+                if np.linalg.norm((prior @ oc)[:2, 3] - mc[:2, 3]) > self.p('candidate_radius_m'):
                     continue
-                result = match(reference, current, z, np.array(ci.k).reshape(3, 3), np.array(ci.d))
+                arc = None
+                if self.route:
+                    meta_pose = self.reference_meta[lid]['mission_pose']
+                    arc, _ = project_route(self.route, Pose2D(meta_pose['x'], meta_pose['y']))
+                    if self.last_reference_arc is not None and arc < self.last_reference_arc-self.p('route_backtrack_m'):
+                        continue
+                diagnostics = {'id': lid}
+                result = match(reference, current, z, k, d, options=self.match_options, diagnostics=diagnostics)
+                attempts.append(diagnostics)
                 if result is None:
                     continue
                 relative, count, error = result
@@ -187,17 +253,21 @@ class VisualLocalizationNode(Node):
                 delta = correction @ np.linalg.inv(prior)
                 displacement = np.linalg.norm((correction @ ob)[:2, 3] - (prior @ ob)[:2, 3])
                 yaw = abs(np.arctan2(delta[1, 0], delta[0, 0]))
+                diagnostics.update(correction_step_m=float(displacement), correction_step_yaw=float(yaw))
                 if displacement <= self.p('max_correction_m') and yaw <= self.p('max_correction_yaw_rad'):
-                    ranked.append((count, -error, lid, correction))
+                    ranked.append((count, -error, lid, correction, relative, diagnostics, arc))
+                else:
+                    diagnostics['reject_reason'] = 'correction_step_limit'
             ranked.sort(key=lambda item: item[:2], reverse=True)
             if not ranked:
                 self.pending = None
-                self.event('no_match')
+                self.event('no_match', attempts=attempts, current_features=len(current[0]),
+                           processing_latency_s=time.perf_counter()-started)
                 return
             best = ranked[0]
-            if len(ranked) > 1 and ranked[1][0] >= best[0]*0.85:
+            if len(ranked) > 1 and ranked[1][0] >= best[0]*self.p('ambiguity_ratio'):
                 raise ValueError('ambiguous landmarks')
-            _, neg_error, lid, correction = best
+            _, neg_error, lid, correction, relative, diagnostics, arc = best
             if self.state == 'RETURN_LANDMARK_SEARCH':
                 if self.search is None:
                     return
@@ -207,30 +277,42 @@ class VisualLocalizationNode(Node):
                     self.pending = None
                     return
             # Require two independent frames to agree before changing controller coordinates.
-            if self.pending is None or self.pending[0] != lid:
+            if self.pending is None or self.pending[0] != lid or self.pending_stamp is None or not 0 < (stamp.nanoseconds-self.pending_stamp)*1e-9 <= self.p('agreement_max_interval_s'):
                 self.pending = (lid, correction)
+                self.pending_stamp = stamp.nanoseconds
                 return
             previous = self.pending[1]
             delta = correction @ np.linalg.inv(previous)
             self.pending = (lid, correction)
-            if np.linalg.norm((correction @ ob)[:2, 3] - (previous @ ob)[:2, 3]) > 0.25 or abs(np.arctan2(delta[1, 0], delta[0, 0])) > 0.1:
+            self.pending_stamp = stamp.nanoseconds
+            if np.linalg.norm((correction @ ob)[:2, 3] - (previous @ ob)[:2, 3]) > self.p('agreement_translation_m') or abs(np.arctan2(delta[1, 0], delta[0, 0])) > self.p('agreement_yaw_rad'):
                 return
             # Processing can be slow; never publish an old-frame result into live control.
             if (self.get_clock().now()-stamp).nanoseconds*1e-9 > 1.5:
                 raise ValueError('localization processing too slow')
-            self.correction = correction
+            if bool(self.p('apply_correction')):
+                self.correction = correction
+                self.last_reference_arc = arc
             msg = PoseStamped()
             msg.header.stamp = color.header.stamp
             msg.header.frame_id = 'mission'
             msg.pose.position.x, msg.pose.position.y = map(float, correction[:2, 3])
             yaw = np.arctan2(correction[1, 0], correction[0, 0])
             msg.pose.orientation.z, msg.pose.orientation.w = float(np.sin(yaw/2)), float(np.cos(yaw/2))
-            self.pub.publish(msg)
-            self.event('localized', id=lid, inliers=best[0], reprojection_rmse=-neg_error,
+            if bool(self.p('apply_correction')):
+                self.pub.publish(msg)
+            self.event('localized' if bool(self.p('apply_correction')) else 'validated', id=lid, inliers=best[0], reprojection_rmse=-neg_error,
+                       diagnostics=diagnostics, relative_pose=pose_fields(relative),
+                       planar_correction=pose_fields(correction), correction_applied=bool(self.p('apply_correction')),
+                       current_camera_tf=bc.tolist(), reference_camera_tf=self.landmarks[lid][1].tolist(),
+                       reference_model=self.reference_meta[lid]['camera_info']['distortion_model'], current_model=ci.distortion_model,
+                       reference_resolution=[self.reference_meta[lid]['camera_info']['width'], self.reference_meta[lid]['camera_info']['height']],
+                       current_resolution=[ci.width, ci.height], processing_latency_s=time.perf_counter()-started,
                        stamp_ns=stamp.nanoseconds, request=self.search.get('request') if self.state == 'RETURN_LANDMARK_SEARCH' and self.search is not None else None)
         except Exception as exc:
             self.pending = None
-            self.event('rejected', reason=str(exc))
+            self.event('rejected', reason=str(exc), attempts=locals().get('attempts', []),
+                       processing_latency_s=time.perf_counter()-started)
 
 
 def main(args=None):

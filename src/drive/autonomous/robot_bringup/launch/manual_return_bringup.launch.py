@@ -158,11 +158,15 @@ def generate_launch_description():
         # mux hold를 풀어 수동 주행으로 돌아간다.
         DeclareLaunchArgument('rear_image_topic', default_value='/rear/camera/image_raw/compressed'),
         DeclareLaunchArgument('rear_camera_info_topic', default_value='/rear/camera/camera_info'),
-        # landmark 촬영 방식: 'moving' = 주행 중 바로 촬영(정지 안 함, 1차 시험용 기본값),
+        # landmark 촬영 방식: 기본 'stop'; 'moving'은 주행 중 촬영 시험용,
         # 'stop' = 버튼 누르면 drive_cmd_mux가 즉시 정지 -> 정지 확인 후 촬영.
         # moving으로 찍은 keyframe이 흐리면(meta.yaml의 odom_twist_at_capture 참고) stop으로.
-        DeclareLaunchArgument('landmark_capture_mode', default_value='moving'),
+        DeclareLaunchArgument('landmark_capture_mode', default_value='stop'),
         DeclareLaunchArgument('enable_visual_localization', default_value='true'),
+        DeclareLaunchArgument('enable_landmark_recovery', default_value='false'),
+        DeclareLaunchArgument('visual_apply_correction', default_value='false'),
+        DeclareLaunchArgument('visual_lock_pose_guard', default_value='true'),
+        DeclareLaunchArgument('visual_expected_lock_pose_file', default_value=''),
         DeclareLaunchArgument('resume_max_path_distance_m', default_value='3.0'),
         DeclareLaunchArgument('landmark_search_angle_deg', default_value='30.0'),
         DeclareLaunchArgument('landmark_search_speed_radps', default_value='0.15'),
@@ -222,6 +226,7 @@ def generate_launch_description():
             executable='return_path_follower_node',
             name='return_path_follower_node',
             parameters=[{
+                'enable_landmark_recovery': ParameterValue(LaunchConfiguration('enable_landmark_recovery'), value_type=bool),
                 'resume_max_path_distance_m': ParameterValue(LaunchConfiguration('resume_max_path_distance_m'), value_type=float),
                 'landmark_miss_window_m': ParameterValue(LaunchConfiguration('landmark_miss_window_m'), value_type=float),
                 'landmark_miss_wait_s': ParameterValue(LaunchConfiguration('landmark_miss_wait_s'), value_type=float),
@@ -236,6 +241,9 @@ def generate_launch_description():
             package='visual_landmark', executable='visual_localization_node',
             condition=IfCondition(LaunchConfiguration('enable_visual_localization')),
             parameters=[{
+                'apply_correction': ParameterValue(LaunchConfiguration('visual_apply_correction'), value_type=bool),
+                'expected_lock_pose_file': LaunchConfiguration('visual_expected_lock_pose_file'),
+                'lock_pose_guard': ParameterValue(LaunchConfiguration('visual_lock_pose_guard'), value_type=bool),
                 'color_topic': LaunchConfiguration('vpr_color_topic'),
                 'depth_topic': LaunchConfiguration('vpr_depth_topic'),
                 'camera_info_topic': LaunchConfiguration('vpr_camera_info_topic'),
