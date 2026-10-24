@@ -17,10 +17,17 @@ def bringup(context):
     common = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(common)
     source_config = Path(__file__).resolve().parents[1]/'config/manual_controllers.yaml'
+    real = LaunchConfiguration('real_hardware').perform(context) == 'true'
+    tcp_enabled = LaunchConfiguration('launch_tcp_joy').perform(context) == 'true'
+    initial = LaunchConfiguration('mock_initial_positions_file').perform(context)
+    if tcp_enabled and not real and not initial:
+        config_dir = source_config.parent if source_config.is_file() else Path(
+            get_package_share_directory('tool_manipulator_bringup'))/'config'
+        initial = str(config_dir/'tcp_mock_initial_positions.yaml')
     base = common.build_arm_base(
-        real_hardware=LaunchConfiguration('real_hardware').perform(context) == 'true',
+        real_hardware=real,
         hardware_file=LaunchConfiguration('hardware_config').perform(context), mock_ee_velocity=True,
-        mock_initial_positions_file=LaunchConfiguration('mock_initial_positions_file').perform(context),
+        mock_initial_positions_file=initial,
         manual_controller_file=str(source_config) if source_config.is_file() else '')
     scripts = Path(__file__).resolve().parents[1]/'scripts'
     if not scripts.is_dir():
@@ -37,6 +44,17 @@ def bringup(context):
         return RegisterEventHandler(OnProcessExit(target_action=process, on_exit=lambda event, ctx:
             actions if event.returncode == 0 else [EmitEvent(event=Shutdown(reason='managed startup failed'))]))
     ready = [manager, manual]
+    tcp_nodes = []
+    if LaunchConfiguration('launch_tcp_joy').perform(context) == 'true':
+        tcp = Node(executable=sys.executable, arguments=[str(scripts/'tcp_joy.py')],
+                   parameters=[base.description, {'hardware_config': base.hardware_file}], output='screen')
+        # Planning scene service only: no execution ownership or controller actions.
+        scene = Node(package='moveit_ros_move_group', executable='move_group',
+                     parameters=[base.moveit_config.to_dict(), base.description,
+                                 {'allow_trajectory_execution': False,
+                                  'publish_robot_description_semantic': True}], output='screen')
+        tcp_nodes = [tcp, scene]
+        ready.extend(tcp_nodes)
     if LaunchConfiguration('launch_joy').perform(context) == 'true':
         ready.append(Node(package='joy', executable='joy_node', parameters=[{'autorepeat_rate': 50.}]))
     preflight = Node(executable=sys.executable, arguments=[str(scripts/'manual.py'), '--check-exclusive'],
@@ -45,7 +63,7 @@ def bringup(context):
             after(jsb, [ee]), after(ee, [pos]), after(pos, ready),
             *[RegisterEventHandler(OnProcessExit(target_action=p, on_exit=[
                 EmitEvent(event=Shutdown(reason='managed control process exited'))]))
-              for p in (manager, manual, base.control_node, base.state_publisher)],
+              for p in (manager, manual, base.control_node, base.state_publisher, *tcp_nodes)],
             preflight]
 
 
@@ -56,5 +74,6 @@ def generate_launch_description():
         DeclareLaunchArgument('hardware_config', default_value=str(share/'config/hardware.yaml')),
         DeclareLaunchArgument('launch_joy', default_value='true', choices=['true', 'false']),
         DeclareLaunchArgument('mock_initial_positions_file', default_value=''),
+        DeclareLaunchArgument('launch_tcp_joy', default_value='false', choices=['true', 'false']),
         OpaqueFunction(function=bringup),
     ])

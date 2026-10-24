@@ -13,6 +13,7 @@ segment is checked before the full path is returned.
 from __future__ import annotations
 
 import math
+import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
@@ -81,9 +82,11 @@ class ArmKinematics:
     """Kinematic chain and limits generated directly from the shared URDF."""
 
     def __init__(self, urdf_xacro: str | Path, hardware_yaml: str | Path,
-                 base_link: str = "base_actuator", tip_link: str = "tcp_link"):
-        document = xacro.process_file(str(urdf_xacro), mappings={"use_mesh": "false", "tool_id": "0"})
-        root = ET.fromstring(document.toxml())
+                 base_link: str = "base_actuator", tip_link: str = "tcp_link",
+                 description: str | None = None):
+        if description is None:
+            description = xacro.process_file(str(urdf_xacro), mappings={"use_mesh": "false", "tool_id": "0"}).toxml()
+        root = ET.fromstring(description)
         joints = []
         for element in root.findall("joint"):
             parent = element.find("parent")
@@ -91,7 +94,8 @@ class ArmKinematics:
             if parent is None or child is None:
                 continue
             limit = element.find("limit")
-            limits = None if limit is None else (float(limit.get("lower")), float(limit.get("upper")))
+            limits = (None if limit is None or limit.get('lower') is None or limit.get('upper') is None
+                      else (float(limit.get("lower")), float(limit.get("upper"))))
             axis_element = element.find("axis")
             joints.append(Joint(element.get("name", ""), element.get("type", ""),
                                 _origin(element.find("origin")),
@@ -196,18 +200,27 @@ class ArmKinematics:
         return np.column_stack(columns)
 
     def within_limits(self, q: np.ndarray, margin_rad: float = 0.0) -> bool:
-        return all(self.limits[name][0] + margin_rad <= value <= self.limits[name][1] - margin_rad
-                   for name, value in zip(self.joint_names, q))
+        return (np.asarray(q).shape == (len(self.joint_names),) and np.all(np.isfinite(q)) and
+                all(self.limits[name][0] + margin_rad <= value <= self.limits[name][1] - margin_rad
+                   for name, value in zip(self.joint_names, q)))
 
     def solve(self, target: np.ndarray, seed: np.ndarray, margin_rad: float = 0.0,
-              max_iterations: int = 250, damping: float = 0.015) -> np.ndarray:
+              max_iterations: int = 250, damping: float = 0.015,
+              max_time_s: float | None = None) -> np.ndarray:
         """Return a bounded IK solution or raise; no clipping can hide a limit violation."""
         q = np.asarray(seed, dtype=float).copy()
+        if max_time_s is not None and (not math.isfinite(max_time_s) or max_time_s <= 0):
+            raise ValueError('IK time budget must be finite and positive')
+        deadline = math.inf if max_time_s is None else time.monotonic()+max_time_s
         if not self.within_limits(q, margin_rad):
             raise ValueError("IK seed violates soft limits")
         for _ in range(max_iterations):
+            if time.monotonic() >= deadline:
+                raise ValueError('IK time budget exceeded')
             error = self.pose_error(q, target)
             if np.linalg.norm(error[:3]) < 1.0e-5 and np.linalg.norm(error[3:]) < 1.0e-4:
+                if time.monotonic() >= deadline:
+                    raise ValueError('IK time budget exceeded')
                 return q
             jacobian = self.jacobian(q)
             delta = jacobian.T @ np.linalg.solve(

@@ -72,7 +72,7 @@ cannot guarantee a physical stop after its process or feedback disappears.
   feedback. Hardware faults require inspection and process restart.
 
 ```bash
-ros2 topic pub --once /control/active_target std_msgs/msg/String '{data: arm}'
+ros2 topic pub --once --qos-durability transient_local /control/active_target std_msgs/msg/String '{data: arm}'
 ros2 service call /arm/set_mode/manual std_srvs/srv/Trigger '{}'
 ros2 topic echo /arm/control_status
 ros2 service call /arm/cancel std_srvs/srv/Trigger '{}'
@@ -84,7 +84,70 @@ five samples. A fresh UUID epoch invalidates commands queued before each request
 cancel, or fault. Producers wait for transitioning=false and ready=true and copy
 the new epoch. Manual additionally requires neutral controls.
 
-## Producer protocol
+## TCP joystick
+
+Start the managed stack with its TCP producer and MoveIt planning-scene service:
+
+```bash
+ros2 launch ~/ResKU/src/arm/tool_manipulator_bringup/launch/managed_control.launch.py \
+  launch_tcp_joy:=true launch_joy:=false
+ros2 topic pub --once --qos-durability transient_local /control/active_target std_msgs/msg/String '{data: arm}'
+ros2 service call /arm/set_mode/tcp_ik std_srvs/srv/Trigger '{}'
+ros2 topic echo /arm/tcp_joy/status
+```
+
+The example uses mock hardware and a remote joystick publisher. Set
+`real_hardware:=true` for hardware, or `launch_joy:=true` for a locally connected
+joystick. Stop the old managed/manual stack first. Do not start another move_group
+with this launch. Startup recovery must finish before requesting TCP_IK.
+TCP mock startup defaults to `config/tcp_mock_initial_positions.yaml`, a
+nonsingular pose near manual home. An explicit `mock_initial_positions_file`
+overrides it. Real hardware continues to start from measured feedback.
+
+Sony joystick mapping (axes 1, 0, 4; buttons 4, 5):
+
+| Input while holding L1 | Translation | With R1 held |
+| --- | --- | --- |
+| Left stick up/down | +X / -X | +Roll / -Roll |
+| Left stick left/right | +Y / -Y | +Pitch / -Pitch |
+| Right stick up/down | +Z / -Z | +Yaw / -Yaw |
+
+These axes are expressed in `base_actuator`, with `tcp_link` as the controlled
+point. Rotation increments are about the base axes. Release L1 once after entering
+the mode, then hold it to move. Releasing L1 zeros increments and discards pending
+collision requests; it holds the last approved joint goal. The robot may still
+finish the small previously approved motion. Joy timeout also requires rearming.
+
+Each candidate integrates from the last approved TCP target and solves IK using
+current measured joints as seed. Defaults: 0.02 m/s, 0.15 rad/s, joint speed capped
+at min(0.12 rad/s, half hardware limit), 0.02 rad soft margin, 0.08 rad feedback
+lead, 30 IK iterations and a 15 ms deadline checked between iterations. The Python
+loop is not a hard real-time deadline. A dimensionally scaled Jacobian condition
+number slows motion from 20 to 100; at 100 or a singular Jacobian it rejects motion.
+No integration catches up while collision checks are pending. IK failure retains
+the last approved goal; five consecutive failures request HOLD.
+Joint demand is predicted from the Jacobian to scale the entire TCP increment.
+If the solved joint increment still exceeds speed limits, up to four smaller
+Cartesian candidates are tried with one shared time budget and a divided total
+iteration budget. Joint components are never independently clipped. Diagnostics
+report `velocity_scale` separately from `singularity_scale`.
+
+MoveIt's `/check_state_validity` must approve samples along both measured-to-goal
+and previous-goal-to-goal joint paths (at most 0.005 rad per joint between samples).
+The check includes the whole robot and planning-scene obstacles, subject to SRDF
+allowed-collision exclusions. While the service is unavailable the node holds its
+last goal, clears pending checks and requires L1 release after service recovery;
+waiting does not accumulate IK failures. A 150 ms response timeout rejects the
+candidate and counts as a failure. This is sampled collision validation, not continuous swept-volume
+validation. Environmental obstacles must be supplied to the planning scene;
+unmodelled objects cannot be detected by this node.
+
+TCP and tool-change use the same `ArmKinematics` implementation and the running
+URDF description. The legacy manual `ArmChain` remains; regression tests compare
+its FK and Jacobian with the shared implementation. Full migration of the legacy
+manual solver is not part of this change.
+
+## Producer message format
 
 Use volatile depth-1 String publishers. All joint positions are radians in order:
 base, shoulder, elbow, wrist_pitch, wrist_roll, wrist_yaw.
