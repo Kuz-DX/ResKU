@@ -1,0 +1,8 @@
+# Reported real joint feedback reproduced only in mock hardware.
+initial_positions:
+  base_joint: -0.00766990393963507
+  shoulder_joint: 1.5666074407163109
+  elbow_joint: 1.5433946628649078
+  wrist_pitch_joint: -1.597848850305976
+  wrist_roll_joint: -0.08897088569757416
+  wrist_yaw_joint: -0.06749515466676037

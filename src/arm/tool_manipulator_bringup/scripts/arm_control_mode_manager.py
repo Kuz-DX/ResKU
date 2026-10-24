@@ -60,6 +60,7 @@ class ControlModeManager(Node):
         self.activated = False
         self.last_error = ''
         self.last_report = None
+        self.activation_blockers = []
         self.create_timer(.02, self.tick)
         self.publish_status()
 
@@ -136,6 +137,22 @@ class ControlModeManager(Node):
             self.last_poll = now
             self.list_future = self.list_client.call_async(ListControllers.Request())
         fresh = now-self.controller_time < .75
+        blockers = []
+        if not fresh:
+            blockers.append('controller state missing/stale')
+        if self.controllers.get('manual_position_controller') != 'inactive':
+            blockers.append('position controller must be inactive before startup')
+        if self.controllers.get('ee_velocity_controller') != 'active':
+            blockers.append('EE velocity controller is not active')
+        if not self.core.fresh(now):
+            blockers.append('complete position/velocity feedback missing/stale')
+        elif max(map(abs, self.core.velocity)) > .02:
+            blockers.append('waiting for stopped feedback (max velocity > 0.02 rad/s)')
+        if not self.switch_client.service_is_ready():
+            blockers.append('switch_controller service unavailable')
+        if self.position.get_subscription_count() == 0:
+            blockers.append('position command subscriber not discovered')
+        self.activation_blockers = blockers if self.activation_started is None else []
         active = (fresh and self.controllers.get('manual_position_controller') == 'active'
                   and self.controllers.get('ee_velocity_controller') == 'active')
         if self.switch_future is not None:
@@ -157,8 +174,11 @@ class ControlModeManager(Node):
                 and self.controllers.get('manual_position_controller') == 'inactive'
                 and self.controllers.get('ee_velocity_controller') == 'active'
                 and self.core.fresh(now) and max(map(abs, self.core.velocity)) <= .02
-                and self.switch_client.service_is_ready()):
+                and self.switch_client.service_is_ready()
+                and self.position.get_subscription_count() > 0):
             self.core.begin_startup(now)
+            # Match legacy manual: seed measured position BEFORE asking for activation.
+            self.position.publish(Float64MultiArray(data=self.core.target))
             self.activation_started = now
             self.switch_future = self.switch_client.call_async(SwitchController.Request(
                 activate_controllers=['manual_position_controller'],
@@ -177,7 +197,7 @@ class ControlModeManager(Node):
         elif not c.fresh(now):
             blocker = 'waiting for complete fresh joint feedback'
         elif not c.ready:
-            blocker = 'waiting for controller activation'
+            blocker = '; '.join(self.activation_blockers) or 'waiting for controller activation confirmation'
         elif not c.startup_complete:
             blocker = c.reason or 'startup recovery pending'
         elif c.focus != 'arm':
@@ -202,6 +222,9 @@ class ControlModeManager(Node):
             epoch=c.epoch, ready=c.ready, reason=c.reason, controllers=self.controllers,
             startup_recovering=c.startup_recovering, startup_complete=c.startup_complete,
             startup_goal_rad=c.startup_goal,
+            activation_blockers=self.activation_blockers,
+            controller_age_sec=now-self.controller_time if self.controllers else None,
+            command_subscribers=self.position.get_subscription_count(),
             execution_id=c.execution_id, remaining_waypoints=len(c.queue), last_error=self.last_error))))
 
     def tick(self):

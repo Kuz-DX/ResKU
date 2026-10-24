@@ -103,8 +103,19 @@ class ModeCore:
             for v, (lo, hi) in zip(values, self.limits)))
 
     def feedback(self, position, velocity, now):
-        if not self.feedback_allowed(position) or len(velocity) != len(position) or not all(map(math.isfinite, velocity)):
-            self.fault('invalid joint feedback')
+        if not self.feedback_allowed(position):
+            names = ('base_joint', 'shoulder_joint', 'elbow_joint', 'wrist_pitch_joint',
+                     'wrist_roll_joint', 'wrist_yaw_joint')
+            detail = []
+            for i, (v, (lo, hi)) in enumerate(zip(position, self.limits)):
+                allowance = (self.startup_allowance if self.startup_enabled and
+                             not self.startup_complete and 1 <= i <= 3 else 0.)
+                if not math.isfinite(v) or not lo-allowance <= v <= hi+allowance:
+                    detail.append(f'{names[i]}={v:.6f}, allowed=[{lo-allowance:.6f}, {hi+allowance:.6f}]')
+            self.fault('invalid joint position: '+('; '.join(detail) or 'joint count mismatch'))
+            return
+        if len(velocity) != len(position) or not all(map(math.isfinite, velocity)):
+            self.fault('invalid joint velocity: missing or nonfinite values')
             return
         self.position, self.velocity, self.state_time = list(position), list(velocity), now
         if self.target is None:
