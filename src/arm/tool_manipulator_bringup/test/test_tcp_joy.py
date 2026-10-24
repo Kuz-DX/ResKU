@@ -107,10 +107,13 @@ def test_deadman_release_discards_pending_checks():
 
 
 def test_repeated_failure_requests_hold_and_stops_heartbeat():
-    node = Mock(failures=0, blocked=False)
+    node = Mock(failures=0, blocked=False, last_failure_reason='',
+                last_failure_time=-float('inf'))
     for _ in range(5):
         TcpJoy.fail(node, 'collision service failed')
     assert node.blocked
+    assert node.last_failure_reason == 'collision service failed'
+    assert np.isfinite(node.last_failure_time)
     node.cancel.call_async.assert_called_once()
 
 
@@ -146,6 +149,8 @@ def test_wait_for_collision_server_keeps_hold_heartbeat_without_failures():
     node.stepper = fake_stepper()
     node.blocked = False
     node.failures = 0
+    node.last_failure_reason = ''
+    node.last_failure_time = -float('inf')
     node.last_ik_duration_ms = None
     node.pending = None
     node.deadman = node.rearmed = True

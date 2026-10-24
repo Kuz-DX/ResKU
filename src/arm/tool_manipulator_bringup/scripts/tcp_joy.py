@@ -58,6 +58,8 @@ class TcpJoy(Node):
         self.failures = 0
         self.blocked = False
         self.reason = 'waiting for TCP_IK mode'
+        self.last_failure_reason = ''
+        self.last_failure_time = -math.inf
         self.last_ik_duration_ms = None
         self.last_logged_state = None
         self.last_time = time.monotonic()
@@ -102,6 +104,8 @@ class TcpJoy(Node):
     def fail(self, reason):
         self.discard()
         self.reason = reason
+        self.last_failure_reason = reason
+        self.last_failure_time = time.monotonic()
         self.failures += 1
         if self.failures >= 5:
             self.blocked = True
@@ -146,7 +150,9 @@ class TcpJoy(Node):
             self.discard()
             self.epoch = None
             self.rearmed = False
-            self.reason = 'waiting for active TCP_IK mode'
+            self.reason = (('blocked after failure: '+self.last_failure_reason)
+                           if self.blocked and self.last_failure_reason else
+                           'waiting for active TCP_IK mode')
         else:
             if self.epoch != s.get('epoch'):
                 self.discard()
@@ -154,6 +160,8 @@ class TcpJoy(Node):
                 self.rearmed = False
                 self.blocked = False
                 self.failures = 0
+                self.last_failure_reason = ''
+                self.last_failure_time = -math.inf
                 self.stepper.q = self.stepper.pose = None
             if now-self.state_time >= .3 or self.measured is None:
                 self.fail('joint feedback stale')
@@ -218,7 +226,10 @@ class TcpJoy(Node):
             deadman=self.deadman, rearmed=self.rearmed, pending=self.pending is not None,
             condition=self.stepper.condition if math.isfinite(self.stepper.condition) else None,
             singularity_scale=self.stepper.scale, velocity_scale=self.stepper.velocity_scale,
-            ik_duration_ms=self.last_ik_duration_ms, ik_budget_ms=self.stepper.budget*1000.))))
+            ik_duration_ms=self.last_ik_duration_ms, ik_budget_ms=self.stepper.budget*1000.,
+            last_failure=self.last_failure_reason,
+            last_failure_age_sec=(now-self.last_failure_time
+                                  if math.isfinite(self.last_failure_time) else None)))))
         logged = (self.reason, self.failures, self.deadman, self.rearmed)
         if logged != self.last_logged_state:
             self.get_logger().info(
