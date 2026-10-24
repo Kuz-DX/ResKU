@@ -28,7 +28,7 @@ def context(**overrides):
     values = dict(device='/dev/v4l/by-id/TEST_DEVICE', width='1280', height='720', fps='15.',
                   camera_info_url='', publish_extrinsic='false', parent_frame='base_link',
                   frame_id='rear_camera_optical_frame', pixel_format='mjpeg2rgb',
-                  x='', y='', z='', roll='', pitch='', yaw='')
+                  x='', y='0.0', z='0.650674', roll='', pitch='', yaw='')
     values.update(overrides)
     ctx.launch_configurations.update(values)
     return ctx
@@ -59,3 +59,23 @@ def test_calibration_resolution_mismatch_refuses_start(monkeypatch, tmp_path):
     measured.write_text(yaml.safe_dump(dict(image_width=640, image_height=480)))
     with pytest.raises(ValueError, match='resolution'):
         module.configure(context(camera_info_url=measured.as_uri()))
+
+
+def test_partial_measurements_require_remaining_extrinsics(monkeypatch):
+    module = rear_module(monkeypatch)
+    declarations = module.generate_launch_description().entities
+    defaults = {action.name: ''.join(part.text for part in action.default_value)
+                for action in declarations
+                if hasattr(action, 'default_value') and action.default_value is not None}
+    assert defaults['y'] == '0.0'
+    assert defaults['z'] == '0.650674'
+    assert defaults['x'] == '' and defaults['publish_extrinsic'] == 'false'
+    with pytest.raises(ValueError, match='measured x'):
+        module.configure(context(publish_extrinsic='true'))
+    with pytest.raises(ValueError, match='measured roll'):
+        module.configure(context(publish_extrinsic='true', x='-0.3'))
+    actions = module.configure(context(publish_extrinsic='true', x='-0.3',
+                                       roll='-1.570796', pitch='0', yaw='1.570796'))
+    tf = next(action for action in actions
+              if action.get('executable') == 'static_transform_publisher')
+    assert tf['arguments'][:6] == ['--x', '-0.3', '--y', '0.0', '--z', '0.650674']

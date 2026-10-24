@@ -1,4 +1,4 @@
-"""Rear APC850 RGB only. No guessed calibration or mounting transform."""
+"""Rear APC850 RGB only. Partially measured mounting; no guessed TF."""
 import math
 from pathlib import Path
 from urllib.parse import urlparse, unquote
@@ -65,6 +65,10 @@ def generate_launch_description():
     defaults = {'width': '1280', 'height': '720', 'fps': '15.0',
                 'pixel_format': 'mjpeg2rgb', 'frame_id': 'rear_camera_optical_frame',
                 'camera_info_url': '', 'publish_extrinsic': 'false', 'parent_frame': 'base_link',
-                'x': '', 'y': '', 'z': '', 'roll': '', 'pitch': '', 'yaw': ''}
+                # Vehicle base_link <- optical origin, metres. User measured
+                # y/z for both rear and locked arm cameras. x and optical RPY
+                # remain unknown: keep TF opt-in and require those arguments.
+                'x': '', 'y': '0.0', 'z': '0.650674',
+                'roll': '', 'pitch': '', 'yaw': ''}
     arguments.extend(DeclareLaunchArgument(k, default_value=v) for k, v in defaults.items())
     return LaunchDescription(arguments+[OpaqueFunction(function=configure)])
