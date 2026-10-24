@@ -21,15 +21,14 @@
         <joint name="wrist_roll_joint" value="0.0"/>
         <joint name="wrist_yaw_joint" value="0.0"/>
     </group_state>
-    <!-- Upright-zero RMD reference (2026-10-22): fold at +/-80 deg,
-         inside measured limits and the Servo 0.10 rad joint-limit margin. -->
+    <!-- Requested home direction with shoulder/elbow kept at safe +/-80 deg. -->
     <group_state name="home" group="arm">
         <joint name="base_joint" value="0.000000000000"/>
-        <joint name="elbow_joint" value="1.396263401595"/>
+        <joint name="elbow_joint" value="-1.396263401595"/>
         <joint name="shoulder_joint" value="1.396263401595"/>
-        <joint name="wrist_pitch_joint" value="-1.396263401595"/>
-        <joint name="wrist_roll_joint" value="0.055223308364"/>
-        <joint name="wrist_yaw_joint" value="0.010737865515"/>
+        <joint name="wrist_pitch_joint" value="1.570796326795"/>
+        <joint name="wrist_roll_joint" value="0.000000000000"/>
+        <joint name="wrist_yaw_joint" value="0.000000000000"/>
     </group_state>
     <group_state name="tagid1" group="arm">
         <joint name="base_joint" value="2.248815835040"/>
