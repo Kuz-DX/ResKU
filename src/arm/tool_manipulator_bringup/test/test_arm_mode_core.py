@@ -145,9 +145,10 @@ def test_reported_hardware_pose_recovers_inward_without_joystick():
                                        (1, 1.7), (2, float('nan'))])
 def test_recovery_rejects_dxl_excursions_large_rmd_errors_and_nan(index, value):
     c, initial = recovery_core()
+    last_valid = c.position[:]
     initial[index] = value
     c.feedback(initial, [0.]*6, .02)
-    assert c.mode == 'fault' and c.tick(.02, .02) is None
+    assert c.mode == 'fault' and c.tick(.02, .02) == last_valid
 
 
 def test_startup_blocks_producers_and_cancel_never_resumes():
@@ -159,7 +160,7 @@ def test_startup_blocks_producers_and_cancel_never_resumes():
     assert not c.path(c.epoch, 'run', [[0.]*6], 0.)
     c.request('hold', 0.)
     assert c.mode == 'fault'
-    assert c.tick(.02, .02) is None
+    assert c.tick(.02, .02) == c.position
     with pytest.raises(ValueError, match='restart'):
         c.reset(.02)
 
@@ -169,8 +170,33 @@ def test_startup_pauses_for_stale_feedback_and_times_out():
     c.tick(.02, .02)
     frozen = c.target[:]
     assert c.tick(.6, .02) == frozen
-    assert c.tick(15.1, .02) is None
+    assert c.tick(15.1, .02) == c.position
     assert c.mode == 'fault' and 'timeout' in c.reason
+
+
+def test_startup_slow_feedback_progress_is_not_an_absolute_15_second_fault():
+    c, initial = recovery_core()
+    measured = initial[:]
+    for i in range(1, 1501):
+        now = i*.02
+        # Model a loaded joint that moves slowly but continuously inward.
+        measured[1] = max(c.startup_goal[1], measured[1]-.00001)
+        c.feedback(measured, [0.]*6, now)
+        c.tick(now, .02)
+        assert c.mode != 'fault'
+    assert now == pytest.approx(30.)
+    assert c.startup_recovering
+
+
+def test_startup_fault_replaces_retained_command_with_measured_hold():
+    c, initial = recovery_core()
+    c.tick(.02, .02)
+    c.target[1] -= .05
+    c.feedback(initial, [0.]*6, .04)
+    c.fault('test fault')
+    assert c.goal == initial
+    assert c.target == initial
+    assert c.tick(.06, .02) == initial
 
 
 def test_startup_stalls_at_feedback_lead_and_requires_measured_completion():

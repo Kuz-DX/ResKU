@@ -32,10 +32,17 @@ class ModeCore:
         self.startup_recovering = False
         self.startup_goal = None
         self.startup_started = None
+        self.startup_progress_time = None
+        self.startup_best_error = math.inf
         self.startup_margin = math.radians(2.)
         self.startup_allowance = math.radians(5.)
         self.startup_speed = .03
-        self.startup_timeout = 15.
+        # Loaded RMD joints can start moving several seconds after the bounded
+        # position ramp begins.  Permit slow, measurable recovery progress, but
+        # never wait indefinitely on a stalled joint.
+        self.startup_timeout = 60.
+        self.startup_stall_timeout = 15.
+        self.startup_progress_epsilon = .0005
 
     def feedback_allowed(self, position):
         if self.startup_enabled and not self.startup_complete:
@@ -62,24 +69,41 @@ class ModeCore:
         self.startup_complete = not self.startup_recovering
         self.transitioning = self.startup_recovering
         self.goal = list(self.startup_goal)
+        self.startup_started = None
+        self.startup_progress_time = None
+        self.startup_best_error = max(
+            abs(self.position[i]-self.startup_goal[i]) for i in (1, 2, 3))
         self.reason = 'startup RMD recovery: inward to 2-degree inset' if self.startup_recovering else ''
 
     def run_startup(self, now, dt):
         self.ee = 0.
-        if self.startup_started is not None and now-self.startup_started > self.startup_timeout:
-            self.fault('startup recovery timeout; inspect hardware before restart')
-            return None
         if not self.fresh(now) or dt <= 0 or dt > .5:
+            if (self.startup_started is not None and
+                    now-self.startup_progress_time > self.startup_stall_timeout):
+                self.fault('startup recovery stalled timeout (15 seconds); inspect hardware before restart')
+                return list(self.target)
             self.reason = 'startup recovery paused: stale feedback or timer discontinuity'
             return list(self.target)
         if not self.feedback_allowed(self.position):
             self.fault('startup feedback outside 5-degree recovery envelope')
-            return None
+            return list(self.target)
         if max(abs(a-b) for a,b in zip(self.target, self.position)) > .10:
             self.fault('startup recovery following error')
-            return None
+            return list(self.target)
         if self.startup_started is None:
             self.startup_started = now
+            self.startup_progress_time = now
+        measured_error = max(
+            abs(self.position[i]-self.startup_goal[i]) for i in (1, 2, 3))
+        if measured_error < self.startup_best_error-self.startup_progress_epsilon:
+            self.startup_best_error = measured_error
+            self.startup_progress_time = now
+        if now-self.startup_started > self.startup_timeout:
+            self.fault('startup recovery total timeout; inspect hardware before restart')
+            return list(self.target)
+        if now-self.startup_progress_time > self.startup_stall_timeout:
+            self.fault('startup recovery stalled timeout (15 seconds); inspect hardware before restart')
+            return list(self.target)
         candidate = list(self.target)
         for i in (1, 2, 3):
             step = min(self.speeds[i], self.startup_speed)*min(dt, .02)
@@ -132,6 +156,12 @@ class ModeCore:
 
     def fault(self, reason):
         self.invalidate()
+        # ForwardCommandController retains its last sample.  Replace an
+        # in-flight recovery/trajectory sample with the measured position so a
+        # fault means HOLD, rather than continuing toward the previous goal.
+        if self.position is not None:
+            self.target = list(self.position)
+            self.goal = list(self.position)
         self.startup_recovering = False
         self.mode = self.requested = 'fault'
         self.transitioning = False
@@ -196,7 +226,9 @@ class ModeCore:
         if self.target is None:
             return None
         if self.startup_enabled and not self.startup_complete:
-            if self.mode == 'fault' or not self.ready:
+            if self.mode == 'fault':
+                return list(self.target) if self.ready and self.target is not None else None
+            if not self.ready:
                 return None
             if self.startup_recovering:
                 return self.run_startup(now, dt)
