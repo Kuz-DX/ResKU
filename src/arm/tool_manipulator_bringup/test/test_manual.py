@@ -432,6 +432,24 @@ def resku_chain():
     return ArmChain(xacro.process_file(str(path)).toxml())
 
 
+def test_measured_stop_pose_camera_world_transform_regression():
+    """Keep mesh alignment changes from altering the physical arm kinematics."""
+    import xacro
+    path = Path(__file__).resolve().parents[2] / 'tool_manipulator_description/urdf/tool_manipulator.urdf.xacro'
+    chain = ArmChain(
+        xacro.process_file(str(path)).toxml(), root='world', tip='cam_link')
+    measured = dict(zip(
+        JOINTS, np.deg2rad([0., 85.140, 86.340, -89.200, -5.098, -3.604])))
+    camera, _ = chain.pose_and_jacobian(measured)
+    np.testing.assert_allclose(
+        camera[:3, 3], [0.15347243, -0.00601448, 0.45803051], atol=1e-7)
+    np.testing.assert_allclose(camera[:3, :3], [
+        [-0.99601989, -0.08912048, 0.00138186],
+        [-0.08885953, 0.99407433, 0.06261153],
+        [-0.00695364, 0.06223954, -0.99803702],
+    ], atol=1e-7)
+
+
 @pytest.mark.parametrize('direction', [-1., 1.])
 def test_rmd_storage_pose_no_longer_freezes_all_axes_at_first_boundary(resku_chain, direction):
     node = storage_pose_harness()
