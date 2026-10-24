@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Supervised, collision-unchecked position-control experiment without Servo."""
+"""Main supervised position control without Servo or collision checking."""
 from __future__ import annotations
 
 import json
@@ -15,7 +15,7 @@ from rcl_interfaces.srv import GetParameters
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import Float64MultiArray, String
 
-from manual_controller import JOINTS, ManualController, bounded_step
+from manual_control_common import JOINTS, ManualController, bounded_step
 
 
 def position_limit_violations(positions, lower, upper):
@@ -33,8 +33,12 @@ def position_limit_violations(positions, lower, upper):
     return violations
 
 
-class ManualServoOut(ManualController):
-    node_name = 'manual_servo_out'
+class Manual(ManualController):
+    node_name = 'manual'
+    # Legacy Servo-mode on_timer gates only the joint at a directional limit.
+    # Keep the same DLS velocity coupling, but do not freeze all three RMDs
+    # because one position target reaches its boundary or lead budget.
+    limit_groups = tuple(slice(i, i+1) for i in range(6))
     extra_parameters = {
         'startup_recovery_enabled': True,
         'startup_recovery_margin_rad': math.radians(2.),
@@ -64,6 +68,10 @@ class ManualServoOut(ManualController):
         self.startup_recovering = False
         self.startup_recovery_started = None
         self.startup_complete = False
+        self.rmd_limit_blocked_joints = []
+        self.rmd_lead_blocked_joints = []
+        self.rmd_requested_velocity = np.zeros(3)
+        self.rmd_applied_velocity = np.zeros(3)
         super().__init__()
         for name in ('startup_recovery_margin_rad', 'startup_recovery_speed_rad_s',
                      'startup_recovery_max_excursion_rad', 'startup_recovery_timeout_sec'):
@@ -72,14 +80,14 @@ class ManualServoOut(ManualController):
         if (self.params['startup_recovery_margin_rad'] < self.params['limit_margin_rad'] or
                 np.any(2*self.params['startup_recovery_margin_rad'] >= self.upper[1:4]-self.lower[1:4])):
             raise ValueError('startup recovery margin must fit RMD limits and cover manual margin')
-        if self.params['servo_mode'] or self.jog_publisher is not None:
-            raise ValueError('manual_servo_out requires servo_mode:=false')
+        if self.params['servo_mode']:
+            raise ValueError('manual requires servo_mode:=false')
         if self.params['command_topic'] != '/manual_position_controller/commands':
-            raise ValueError('manual_servo_out only supports manual_position_controller')
+            raise ValueError('manual only supports manual_position_controller')
         self.list_client = self.create_client(ListControllers, '/controller_manager/list_controllers')
         self.switch_client = self.create_client(SwitchController, '/controller_manager/switch_controller')
         self.parameter_client = self.create_client(GetParameters, '/manual_position_controller/get_parameters')
-        self.diagnostics = self.create_publisher(String, '/manual_servo_out/diagnostics', 10)
+        self.diagnostics = self.create_publisher(String, '/manual/diagnostics', 10)
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE,
                          durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.create_subscription(String, '/control/hardware_fault', self.on_hardware_fault, qos)
@@ -166,7 +174,18 @@ class ManualServoOut(ManualController):
         # Reuse the existing ResKU FK/DLS, direction and mapping only when the
         # bend input is nonzero. No FK/Jacobian/IK for a Dynamixel-only input.
         if self.axis('forward_axis') != 0.:
-            return super().command_velocity(measured)
+            velocity = super().command_velocity(measured)
+            self.rmd_requested_velocity = velocity[1:4].copy()
+            self.rmd_limit_blocked_joints = []
+            for index in range(1, 4):
+                # Match the original manual_controller.py Servo branch's
+                # directional measured-position gate. Target limits are also
+                # enforced per joint when integrating below.
+                if ((velocity[index] > 0 and measured[index] >= self.upper[index]-self.params['limit_margin_rad']) or
+                        (velocity[index] < 0 and measured[index] <= self.lower[index]+self.params['limit_margin_rad'])):
+                    velocity[index] = 0.
+                    self.rmd_limit_blocked_joints.append(JOINTS[index])
+            return velocity
         velocity = np.zeros(6)
         velocity[0] = self.speeds[0]*(self.button('base_ccw_button')-self.button('base_cw_button'))
         velocity[4] = self.speeds[4]*self.axis('wrist_roll_axis')*(-1 if self.params['invert_wrist_roll'] else 1)
@@ -391,6 +410,10 @@ class ManualServoOut(ManualController):
                     startup_recovering=getattr(self, 'startup_recovering', False),
                     startup_complete=getattr(self, 'startup_complete', False),
                     startup_goal_rad=None if getattr(self, 'startup_goal', None) is None else self.startup_goal.tolist(),
+                    rmd_requested_velocity_rad_s=getattr(self, 'rmd_requested_velocity', np.zeros(3)).tolist(),
+                    rmd_applied_velocity_rad_s=getattr(self, 'rmd_applied_velocity', np.zeros(3)).tolist(),
+                    rmd_limit_blocked_joints=getattr(self, 'rmd_limit_blocked_joints', []),
+                    rmd_lead_blocked_joints=getattr(self, 'rmd_lead_blocked_joints', []),
                     controller_ready=self.controller_ready, controllers=self.controllers,
                     measured_rad=measured, target_rad=target,
                     error_rad=None if target is None else [
@@ -405,6 +428,10 @@ class ManualServoOut(ManualController):
         self.last_time = now
         dt = min(max(elapsed, 0.), 1/self.params['publish_rate_hz'])
         self.last_dt = dt
+        self.rmd_requested_velocity = np.zeros(3)
+        self.rmd_applied_velocity = np.zeros(3)
+        self.rmd_limit_blocked_joints = []
+        self.rmd_lead_blocked_joints = []
         self.poll_controller(now)
         fresh_joy = self.joy_time is not None and 0 <= now-self.joy_time <= self.params['joy_timeout_sec']
         if not self.controller_ready:
@@ -453,10 +480,19 @@ class ManualServoOut(ManualController):
             for indexes in self.limit_groups:
                 step = bounded_step(self.target[indexes], velocity[indexes], self.lower[indexes],
                                     self.upper[indexes], dt, self.params['limit_margin_rad'])
-                # A stalled DXL must not block another joint's input. RMDs
-                # retain a common scale and common lead acceptance.
+                index = indexes.start
+                if index in (1, 2, 3) and not np.allclose(
+                        step-self.target[indexes], velocity[indexes]*dt, atol=1e-12, rtol=0.):
+                    if JOINTS[index] not in self.rmd_limit_blocked_joints:
+                        self.rmd_limit_blocked_joints.append(JOINTS[index])
+                # Each joint retains its own lead budget; one bounded RMD
+                # must not suppress the other two, or any Dynamixel command.
                 if np.max(np.abs(step-measured[indexes])) <= self.params['max_target_lead_rad']:
                     candidate[indexes] = step
+                elif index in (1, 2, 3) and abs(velocity[index]) > 1e-12:
+                    self.rmd_lead_blocked_joints.append(JOINTS[index])
+            if dt > 0:
+                self.rmd_applied_velocity = (candidate[1:4]-self.target[1:4])/dt
             self.target = candidate
             self.publish_ee_velocity(self.ee_velocity())
             self.hold()
@@ -474,14 +510,14 @@ class ManualServoOut(ManualController):
 
 def check_exclusive():
     """Read-only graph check, before this launch opens any hardware devices."""
-    node = rclpy.create_node('manual_servo_out_preflight')
+    node = rclpy.create_node('manual_preflight')
     try:
         deadline = time.monotonic()+1.5
         while time.monotonic() < deadline:
             rclpy.spin_once(node, timeout_sec=.1)
         conflicts = set(node.get_node_names()) & {
             'controller_manager', 'manual_controller', 'manual_controller_sep',
-            'manual_servo_out', 'servo_node', 'joint_joy_teleop', 'tcp_joy_teleop'}
+            'manual', 'servo_node', 'joint_joy_teleop', 'tcp_joy_teleop'}
         if conflicts:
             node.get_logger().error('Stop the existing arm stack first: ' + ', '.join(sorted(conflicts)))
             return 1
@@ -503,7 +539,7 @@ def main():
     try:
         if '--check-exclusive' in sys.argv:
             return check_exclusive()
-        node = ManualServoOut()
+        node = Manual()
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass

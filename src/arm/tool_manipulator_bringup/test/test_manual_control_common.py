@@ -6,11 +6,10 @@ import unittest
 from unittest.mock import Mock
 
 import numpy as np
-from builtin_interfaces.msg import Time
 
-script = Path(__file__).resolve().parents[1]/'scripts/manual_controller.py'
+script = Path(__file__).resolve().parents[1]/'scripts/manual_control_common.py'
 if not script.exists():
-    script = Path(__file__).with_name('manual_controller.py')
+    script = Path(__file__).with_name('manual_control_common.py')
 spec = importlib.util.spec_from_file_location('manual_under_test', script)
 manual = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(manual)
@@ -92,7 +91,6 @@ def harness():
     node.speeds = np.full(6, .12)
     node.focus, node.fault, node.joy_time = 'arm', False, 1.
     node.publisher = SimpleNamespace(publish=Mock())
-    node.jog_publisher = None
     node.ee_velocity_publisher = SimpleNamespace(publish=Mock())
     node.get_logger = Mock()
     node.axis = lambda name: 1. if name == 'forward_axis' else 0.
@@ -120,21 +118,6 @@ class StopPathTest(unittest.TestCase):
         self.assertAlmostEqual(node.ee_velocity(), -.12)
         pressed.clear()
         self.assertEqual(node.ee_velocity(), 0.)
-
-    def test_servo_input_gap_publishes_zero_joint_jog(self):
-        node = harness()
-        node.jog_publisher = SimpleNamespace(publish=Mock())
-        node._jog_active = True
-        node.params['root_link'] = 'base_actuator'
-        node.get_clock = Mock(return_value=SimpleNamespace(now=Mock(return_value=SimpleNamespace(to_msg=Mock(return_value=Time())))))
-        node.joy_time = .5
-        node.on_timer()
-        message = node.jog_publisher.publish.call_args.args[0]
-        self.assertEqual(message.joint_names, list(manual.JOINTS))
-        self.assertEqual(list(message.velocities), [0.] * 6)
-        self.assertEqual(list(node.ee_velocity_publisher.publish.call_args.args[0].data), [0.])
-        node.on_timer()
-        self.assertEqual(node.jog_publisher.publish.call_count, 1)
 
     def test_options_logs_each_focus_change(self):
         node = harness()

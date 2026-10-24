@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Exercise an already-running mock-only launch; refuse real URDF plugins.
 
-Run on a dedicated ROS_DOMAIN_ID with manual_servo_out.launch.py (mock default).
+Run on a dedicated ROS_DOMAIN_ID with manual.launch.py (mock default).
 This is an explicit integration test, not part of ordinary pytest collection.
 """
 import json
@@ -23,9 +23,9 @@ from std_msgs.msg import String
 
 def main(expect_recovery=False):
     rclpy.init()
-    node = rclpy.create_node('servox_mock_smoke')
+    node = rclpy.create_node('manual_mock_smoke')
     samples = []
-    node.create_subscription(String, '/manual_servo_out/diagnostics',
+    node.create_subscription(String, '/manual/diagnostics',
                              lambda m: samples.append(json.loads(m.data)), 100)
     publisher = node.create_publisher(Joy, '/joy', 10)
     def spin(seconds, message=None):
@@ -166,8 +166,8 @@ if __name__ == '__main__':
     log = None
     try:
         if args.launch_mock:
-            log = open('/tmp/resku_servox_mock_' + os.environ.get('ROS_DOMAIN_ID', '0') + '.log', 'w')
-            command = ['ros2', 'launch', 'tool_manipulator_bringup', 'manual_servo_out.launch.py',
+            log = open('/tmp/resku_manual_mock_' + os.environ.get('ROS_DOMAIN_ID', '0') + '.log', 'w')
+            command = ['ros2', 'launch', 'tool_manipulator_bringup', 'manual.launch.py',
                        'real_hardware:=false', 'launch_joy:=false']
             if args.mock_initial_positions:
                 command.append('mock_initial_positions_file:=' + str(Path(args.mock_initial_positions).resolve(strict=True)))

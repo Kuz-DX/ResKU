@@ -1,4 +1,4 @@
-"""Isolated Servo-free manual experiment; mock hardware is the default."""
+"""Main Servo-free manual control; mock hardware is the default."""
 import fcntl
 import os
 from pathlib import Path
@@ -70,7 +70,6 @@ def _bringup(context):
     description = dict(model.robot_description)
     if not real:
         # This launch alone gives the mock EE the real velocity-only interface.
-        # Existing cooperative/separate models and launches remain untouched.
         root = ET.fromstring(description['robot_description'])
         ee = root.find("ros2_control/joint[@name='ee_joint']/command_interface")
         if ee is None:
@@ -90,7 +89,7 @@ def _bringup(context):
     jsb = spawner('joint_state_broadcaster')
     ee = spawner('ee_velocity_controller')
     manual_spawner = spawner('manual_position_controller', inactive=True)
-    manual = Node(package='tool_manipulator_bringup', executable='manual_servo_out.py',
+    manual = Node(package='tool_manipulator_bringup', executable='manual.py',
                   parameters=[description, {'hardware_config': hardware, 'servo_mode': False}],
                   output='screen', sigterm_timeout='3', sigkill_timeout='3')
     joy = Node(package='joy', executable='joy_node',
@@ -111,19 +110,19 @@ def _bringup(context):
             # Joystick is optional: its absence or driver restart must never
             # shut down the hardware/controller processes or startup recovery.
             joy_events,
-            LogInfo(msg='Servo-free experiment: startup RMD recovery to 2-degree inset; no collision checking.'),
+            LogInfo(msg='Servo-free manual control: startup RMD recovery to 2-degree inset; no collision checking.'),
             state, control, jsb]
 
 
 def _preflight(context):
     global _launch_lock
     domain = os.environ.get('ROS_DOMAIN_ID', '0')
-    _launch_lock = open(f'/tmp/resku_arm_servox_{domain}.lock', 'a')
+    _launch_lock = open(f'/tmp/resku_arm_manual_{domain}.lock', 'a')
     try:
         fcntl.flock(_launch_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError as exc:
-        raise RuntimeError('Another Resku_arm_servox launch is running') from exc
-    check = Node(package='tool_manipulator_bringup', executable='manual_servo_out.py',
+        raise RuntimeError('Another Resku_arm launch is running') from exc
+    check = Node(package='tool_manipulator_bringup', executable='manual.py',
                  arguments=['--check-exclusive'], output='screen')
     return [_after(check, [OpaqueFunction(function=_bringup)]), check]
 

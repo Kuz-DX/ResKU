@@ -13,9 +13,7 @@ import xml.etree.ElementTree as ET
 
 import numpy as np
 import yaml
-import rclpy
 from ament_index_python.packages import get_package_share_directory
-from control_msgs.msg import JointJog
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import JointState, Joy
@@ -121,7 +119,7 @@ def bounded_step(target, velocity, lower, upper, dt, margin):
 
 
 class ManualController(Node):
-    node_name = 'manual_controller'
+    node_name = 'manual_control_common'
     requires_model = True
     extra_parameters = {}
     limit_groups = (slice(1, 4), slice(0, 1), slice(4, 5), slice(5, 6))
@@ -133,15 +131,15 @@ class ManualController(Node):
             'hardware_config': str(share/'config/hardware.yaml'),
             'robot_description': '', 'root_link': 'base_actuator', 'controlled_link': 'tcp_link',
             'command_topic': '/manual_position_controller/commands', 'joy_topic': '/joy',
-            'servo_mode': False, 'joint_jog_topic': '/servo_node/delta_joint_cmds',
+            'servo_mode': False,
             'ee_velocity_command_topic': '/ee_velocity_controller/commands',
             'joint_state_topic': '/joint_states', 'publish_rate_hz': 50.,
             'linear_speed_mps': 0.03, 'joint_speed_rad_s': 0.12, 'damping': 0.05,
-            'ee_velocity_rad_s': 0.12,
+            'ee_velocity_rad_s': 0.12,  # 이거 바꾸면 ee_joint 회전 속도 바뀜
             'joy_timeout_sec': 0.25, 'joint_state_timeout_sec': 0.5,
             'max_target_lead_rad': 0.10, 'limit_margin_rad': 0.02, 'deadzone': 0.12,
-            'forward_axis': 4, 'invert_forward': False,
-            'wrist_yaw_axis': 0, 'invert_wrist_yaw': True,
+            'forward_axis': 4, 'invert_forward': True,
+            'wrist_yaw_axis': 0, 'invert_wrist_yaw': False,
             'wrist_roll_axis': 6, 'invert_wrist_roll': False,
             'ee_velocity_axis': 7, 'invert_ee_velocity': False, 'ee_enable_button': 1,
             'base_ccw_button': 4, 'base_cw_button': 5,
@@ -149,6 +147,8 @@ class ManualController(Node):
         }
         defaults.update(self.extra_parameters)
         self.params = {k: self.declare_parameter(k, v).value for k, v in defaults.items()}
+        if self.params['servo_mode']:
+            raise ValueError('manual control supports servo_mode:=false only')
         for name in ('publish_rate_hz', 'linear_speed_mps', 'joint_speed_rad_s', 'damping',
                      'ee_velocity_rad_s',
                      'joy_timeout_sec', 'joint_state_timeout_sec', 'max_target_lead_rad'):
@@ -177,13 +177,10 @@ class ManualController(Node):
         self.chain = None
         self.positions, self.state_times = {}, {}
         self.target, self.joy, self.joy_time = None, None, None
-        self._jog_active = False
         self.focus, self.previous_focus, self.fault = 'drive', False, False
         self.last_direction_warning = -math.inf
         self.last_time = self.now_seconds()
         self.publisher = self.create_publisher(Float64MultiArray, self.params['command_topic'], 1)
-        self.jog_publisher = (self.create_publisher(JointJog, self.params['joint_jog_topic'], 10)
-                              if self.params['servo_mode'] else None)
         self.ee_velocity_publisher = self.create_publisher(
             Float64MultiArray, self.params['ee_velocity_command_topic'], 1)
         qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
@@ -201,11 +198,6 @@ class ManualController(Node):
         self.create_timer(1/self.params['publish_rate_hz'], self.on_timer)
         if self.params['manage_focus']:
             self.focus_publisher.publish(String(data='drive'))
-        self.trajectory_diagnostics = None
-        if self.command_diagnostics and self.jog_publisher is not None:
-            from trajectory_diagnostics import TrajectoryDiagnostics
-            self.trajectory_diagnostics = TrajectoryDiagnostics(
-                self, self.params['joint_jog_topic'], self.params['joint_state_topic'])
         self.get_logger().info('ready to activate: press Options to switch drive -> arm')
 
     def now_seconds(self):
@@ -264,24 +256,8 @@ class ManualController(Node):
         self.previous_focus = pressed
 
     def hold(self):
-        if self.jog_publisher is not None:
-            self.publish_jog(np.zeros(len(JOINTS)))
-            return
         if self.target is not None:
             self.publisher.publish(Float64MultiArray(data=self.target.tolist()))
-
-    def publish_jog(self, velocity):
-        moving = bool(np.any(np.abs(velocity) > 1e-9))
-        if not moving and not getattr(self, '_jog_active', False):
-            return
-        self._jog_active = moving
-        message = JointJog()
-        message.header.stamp = self.get_clock().now().to_msg()
-        message.header.frame_id = self.params['root_link']
-        message.joint_names = list(JOINTS)
-        message.velocities = [float(value) for value in velocity]
-        message.duration = 1 / self.params['publish_rate_hz']
-        self.jog_publisher.publish(message)
 
     def publish_ee_velocity(self, velocity):
         self.ee_velocity_publisher.publish(Float64MultiArray(data=[float(velocity)]))
@@ -324,21 +300,6 @@ class ManualController(Node):
             self.get_logger().error('Following error: holding last target. Inspect arm, then cycle focus to reset.')
             return
         self.publish_ee_velocity(self.ee_velocity())
-        if self.jog_publisher is not None:
-            velocity = self.command_velocity(measured)
-            for index, value in enumerate(velocity):
-                if ((value > 0 and measured[index] >= self.upper[index]-self.params['limit_margin_rad']) or
-                        (value < 0 and measured[index] <= self.lower[index]+self.params['limit_margin_rad'])):
-                    velocity[index] = 0
-            if getattr(self, 'command_diagnostics', False) and np.any(np.abs(velocity) > 1e-9):
-                if now - getattr(self, '_last_command_log', -math.inf) >= 1.:
-                    self._last_command_log = now
-                    self.get_logger().info(
-                        'DIAG_JOG ' + ' '.join(f'{name}={v:.6f}' for name, v in zip(JOINTS, velocity))
-                        + ' rad/s -> /servo_node/delta_joint_cmds')
-            self.publish_jog(velocity)
-            self.target = measured.copy()
-            return
         dt = min(dt, 1/self.params['publish_rate_hz'])
         velocity = self.command_velocity(measured)
         candidate = self.target.copy()
@@ -368,31 +329,8 @@ class ManualController(Node):
         velocity[0] = self.speeds[0]*(self.button('base_ccw_button')-self.button('base_cw_button'))
         roll = self.axis('wrist_roll_axis')
         velocity[4] = self.speeds[4]*roll*(-1 if self.params['invert_wrist_roll'] else 1)
-        # Left-stick horizontal follows the same arm command path as the other
-        # five joints: Servo JointJog in coordinated mode, bounded position
-        # target integration in separate mode.
+        # Left-stick horizontal uses the same bounded position command path.
         yaw = self.axis('wrist_yaw_axis')
         velocity[5] = self.speeds[5]*yaw*(-1 if self.params['invert_wrist_yaw'] else 1)
         return velocity
 
-
-def main(controller_type=ManualController):
-    rclpy.init()
-    node = None
-    try:
-        node = controller_type()
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        if node is not None:
-            if rclpy.ok():
-                node.hold()
-                node.publish_ee_velocity(0.)
-            node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
-
-
-if __name__ == '__main__':
-    main()

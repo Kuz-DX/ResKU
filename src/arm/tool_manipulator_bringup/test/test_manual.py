@@ -3,7 +3,7 @@ from concurrent.futures import Future
 from pathlib import Path
 import sys
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import numpy as np
 import pytest
@@ -11,13 +11,13 @@ from sensor_msgs.msg import JointState, Joy
 from std_msgs.msg import String
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts'))
-from manual_servo_out import ManualServoOut, position_limit_violations
-from manual_controller import JOINTS
-from test_manual_controller import harness as base_harness
+from manual import Manual, position_limit_violations
+from manual_control_common import JOINTS, ArmChain, bounded_step, coordinated_velocity
+from test_manual_control_common import harness as base_harness
 
 
 def harness():
-    node = ManualServoOut.__new__(ManualServoOut)
+    node = Manual.__new__(Manual)
     node.__dict__.update(base_harness().__dict__)
     node.phase, node.status = 'ready', 'operator control'
     node.controller_ready, node.hardware_fault = True, False
@@ -171,7 +171,7 @@ def finished(value):
 def test_controller_failure_and_lost_state_block_all_arm_publication():
     for kind in ('switch', 'watchdog', 'arm_conflict', 'inactive', 'ee_inactive'):
         node = harness()
-        node.poll_controller = ManualServoOut.poll_controller.__get__(node)
+        node.poll_controller = Manual.poll_controller.__get__(node)
         if kind == 'switch':
             node.phase = 'switching'
             node.switch_future = finished(SimpleNamespace(ok=False))
@@ -196,7 +196,7 @@ def test_controller_failure_and_lost_state_block_all_arm_publication():
 
 def test_activation_seeds_nonzero_measured_before_switch_and_requires_confirmation():
     node = harness()
-    node.poll_controller = ManualServoOut.poll_controller.__get__(node)
+    node.poll_controller = Manual.poll_controller.__get__(node)
     node.phase, node.controller_ready = 'waiting', False
     node.controllers['manual_position_controller'] = 'inactive'
     node.target = None
@@ -225,7 +225,7 @@ def test_activation_seeds_nonzero_measured_before_switch_and_requires_confirmati
 
 def test_wrong_joint_order_prevents_activation():
     node = harness()
-    node.poll_controller = ManualServoOut.poll_controller.__get__(node)
+    node.poll_controller = Manual.poll_controller.__get__(node)
     node.phase, node.controller_ready = 'waiting', False
     node.parameters_verified = False
     node.parameter_future = finished(SimpleNamespace(values=[
@@ -247,7 +247,7 @@ def test_reported_real_startup_pose_is_blocked_with_exact_joint_reasons():
         1.5362387490158649, -1.5997687231358142, .0322135965453918, -.027611654181734835]))
     node.phase, node.controller_ready, node.target = 'waiting', False, None
     node.controllers['manual_position_controller'] = 'inactive'
-    node.poll_controller = ManualServoOut.poll_controller.__get__(node)
+    node.poll_controller = Manual.poll_controller.__get__(node)
     tick(node)
     assert not node.controller_ready and node.phase == 'waiting'
     assert node.target is None
@@ -320,7 +320,7 @@ def test_storage_pose_recovery_reaches_two_degree_inset_without_dxl_or_ik():
 @pytest.mark.parametrize('blocked', ['dxl_outside', 'rmd_far_outside'])
 def test_storage_pose_recovery_startup_gates(blocked):
     node = storage_pose_harness()
-    node.poll_controller = ManualServoOut.poll_controller.__get__(node)
+    node.poll_controller = Manual.poll_controller.__get__(node)
     node.phase, node.controller_ready, node.target = 'waiting', False, None
     node.controllers['manual_position_controller'] = 'inactive'
     if blocked == 'dxl_outside':
@@ -335,7 +335,7 @@ def test_storage_pose_recovery_startup_gates(blocked):
 
 def test_storage_pose_activation_seeds_real_measurement_without_boundary_jump():
     node = storage_pose_harness()
-    node.poll_controller = ManualServoOut.poll_controller.__get__(node)
+    node.poll_controller = Manual.poll_controller.__get__(node)
     node.phase, node.controller_ready, node.target = 'waiting', False, None
     node.controllers['manual_position_controller'] = 'inactive'
     node.switch_client.call_async = Mock(return_value=Future())
@@ -383,7 +383,7 @@ def test_startup_activation_and_recovery_do_not_wait_for_or_follow_joystick(joy_
     else:
         node.axis = lambda _: 1.
         node.button = lambda _: True
-    node.poll_controller = ManualServoOut.poll_controller.__get__(node)
+    node.poll_controller = Manual.poll_controller.__get__(node)
     node.phase, node.controller_ready, node.target = 'waiting', False, None
     node.controllers['manual_position_controller'] = 'inactive'
     node.switch_client.call_async = Mock(return_value=Future())
@@ -421,3 +421,95 @@ def test_manual_input_stays_blocked_after_startup_until_fresh_neutral_joystick(j
     np.testing.assert_array_equal(node.target, before)
     assert node.neutral_required
     assert list(node.ee_velocity_publisher.publish.call_args.args[0].data) == [0.]
+
+
+@pytest.fixture(scope='module')
+def resku_chain():
+    # Expand local URDF files only. No ROS node, driver, launch or hardware.
+    from moveit_configs_utils import MoveItConfigsBuilder
+    model = MoveItConfigsBuilder('tool_manipulator',
+                                package_name='tool_manipulator_moveit_config').to_moveit_configs()
+    return ArmChain(model.robot_description['robot_description'])
+
+
+@pytest.mark.parametrize('direction', [-1., 1.])
+def test_rmd_storage_pose_no_longer_freezes_all_axes_at_first_boundary(resku_chain, direction):
+    node = storage_pose_harness()
+    node.chain = resku_chain
+    node.target = node.startup_goal.copy()
+    node.positions = dict(zip(JOINTS, node.target))
+    node.startup_recovering, node.startup_complete = False, True
+    node.neutral_required = False
+    node.axis = lambda name: direction if name == 'forward_axis' else 0.
+    start = node.target.copy()
+    baseline = start.copy()
+    baseline_tail = []
+    now = 1.
+    for frame in range(500):
+        now += .02
+        # Reproduce the removed whole-RMD scaling using the identical model,
+        # direction, limits and ideal position feedback, isolating that policy.
+        _, jacobian = resku_chain.pose_and_jacobian(dict(zip(JOINTS, baseline)))
+        requested = .03*direction*np.array([np.cos(baseline[0]), np.sin(baseline[0]), 0.])
+        velocity = coordinated_velocity(jacobian, requested, .05, node.speeds[1:4])
+        baseline[1:4] = bounded_step(baseline[1:4], velocity, node.lower[1:4], node.upper[1:4], .02, .02)
+        if frame >= 400:
+            baseline_tail.append(baseline.copy())
+        node.now_seconds = lambda: now
+        node.joy_time = now
+        node.state_times = dict.fromkeys(JOINTS, now)
+        node.last_time = now-.02
+        before = node.target.copy()
+        node.on_timer()
+        assert not node.fault
+        assert np.all(np.abs(node.target-before) <= node.speeds*.02+1e-12)
+        assert np.all(node.target >= node.lower+.02-1e-12)
+        assert np.all(node.target <= node.upper-.02+1e-12)
+        np.testing.assert_array_equal(node.target[[0, 4, 5]], start[[0, 4, 5]])
+        node.positions = dict(zip(JOINTS, node.target))  # numerical feedback only
+    np.testing.assert_allclose(baseline_tail[-1], baseline_tail[0], atol=1e-10)
+    assert np.max(np.abs(baseline[1:4]-start[1:4])) < .05
+    assert np.max(np.abs(node.target[1:4]-start[1:4])) > .1
+    print(f'RMD {direction:+g}: old grouped delta={baseline[1:4]-start[1:4]}, '
+          f'new delta={node.target[1:4]-start[1:4]}')
+
+
+@pytest.mark.parametrize('index', [1, 2, 3])
+def test_rmd_limit_keeps_other_rmd_and_dxl_inputs_running(index):
+    node = harness()
+    node.target[index] = node.upper[index]-.02
+    node.positions[JOINTS[index]] = node.target[index]
+    node.command_velocity = Mock(return_value=np.array([.12, .1, .1, .1, .12, -.12]))
+    before = node.target.copy()
+    tick(node)
+    assert node.target[index] == before[index]
+    for other in {1, 2, 3}-{index}:
+        assert node.target[other] > before[other]
+    assert np.all(np.abs(node.target[[0, 4, 5]]-before[[0, 4, 5]]) > 0)
+    assert JOINTS[index] in node.rmd_limit_blocked_joints
+
+
+def test_rmd_directional_gate_matches_legacy_servo_branch_and_allows_reverse():
+    from manual_control_common import ManualController
+    node = harness()
+    node.axis = lambda name: 1. if name == 'forward_axis' else 0.
+    measured = node.measured()
+    measured[1], measured[2] = node.upper[1]-.02, node.lower[2]+.02
+    with patch.object(ManualController, 'command_velocity', return_value=np.array([0., .1, -.1, .05, 0., 0.])):
+        result = node.command_velocity(measured)
+    np.testing.assert_allclose(result[1:4], [0., 0., .05])
+    assert node.rmd_limit_blocked_joints == ['shoulder_joint', 'elbow_joint']
+    with patch.object(ManualController, 'command_velocity', return_value=np.array([0., -.1, .1, -.05, 0., 0.])):
+        result = node.command_velocity(measured)
+    np.testing.assert_allclose(result[1:4], [-.1, .1, -.05])
+
+
+def test_one_rmd_lead_budget_cannot_freeze_the_other_two():
+    node = harness()
+    node.target[1] += .099
+    node.command_velocity = Mock(return_value=np.array([0., .1, .1, .1, 0., 0.]))
+    before = node.target.copy()
+    tick(node)
+    assert node.target[1] == before[1]
+    assert node.target[2] > before[2] and node.target[3] > before[3]
+    assert node.rmd_lead_blocked_joints == ['shoulder_joint']

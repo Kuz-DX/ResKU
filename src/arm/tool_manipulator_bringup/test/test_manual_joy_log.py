@@ -5,8 +5,8 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 
-source = Path(__file__).resolve().parents[1]/'launch/manual_servo_out.launch.py'
-spec = importlib.util.spec_from_file_location('servox_launch_joy_log', source)
+source = Path(__file__).resolve().parents[1]/'launch/manual.launch.py'
+spec = importlib.util.spec_from_file_location('manual_launch_joy_log', source)
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
