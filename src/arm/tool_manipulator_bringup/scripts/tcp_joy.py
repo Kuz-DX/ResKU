@@ -182,8 +182,15 @@ class TcpJoy(Node):
                         if now-p['started'] > .15:
                             self.fail('collision check timeout')
                         elif all(f.done() for f in p['futures']):
-                            if not all(f.result() is not None and f.result().valid for f in p['futures']):
-                                self.fail('self/environment collision')
+                            responses = [f.result() for f in p['futures']]
+                            invalid = [r for r in responses if r is None or not r.valid]
+                            if invalid:
+                                pairs = sorted({tuple(sorted((c.contact_body_1, c.contact_body_2)))
+                                                for r in invalid if r is not None
+                                                for c in r.contacts})
+                                detail = ', '.join(a+'<->'+b for a, b in pairs[:6])
+                                self.fail('self/environment collision' +
+                                          (': '+detail if detail else ''))
                             elif np.max(np.abs(self.measured-p['measured'])) > .01:
                                 self.fail('feedback changed during collision check')
                             elif np.max(np.abs(p['q']-self.measured)) > self.stepper.lead:

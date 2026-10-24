@@ -182,4 +182,9 @@
     <disable_collisions link1="wrist_actuator_yaw" link2="wrist_link_pitch" reason="Adjacent"/>
     <disable_collisions link1="wrist_link_pitch" link2="wrist_link_roll" reason="Adjacent"/>
     <disable_collisions link1="wrist_link_roll" link2="wrist_link_yaw" reason="Adjacent"/>
+    <!-- Tool-1 gripper mating geometry. The racks intentionally run through
+         the actuator/gear envelope and remain adjacent to the yaw housing. -->
+    <disable_collisions link1="rack_left" link2="ee_actuator" reason="ToolMating"/>
+    <disable_collisions link1="tool_spurgear" link2="ee_actuator" reason="ToolMating"/>
+    <disable_collisions link1="rack_right" link2="wrist_link_yaw" reason="ToolMating"/>
 </robot>
