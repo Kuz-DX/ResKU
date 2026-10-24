@@ -76,6 +76,7 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from geometry_msgs.msg import Pose, PoseStamped, Twist
 from std_msgs.msg import String
+from return_navigation.recovery import LandmarkWatch
 from return_navigation.rejoin import distance_to_remaining_segment
 from nav_msgs.msg import Odometry, Path
 
@@ -90,8 +91,12 @@ class ReturnPathFollowerNode(Node):
         super().__init__('return_path_follower_node')
 
         self.declare_parameter('control_rate_hz', 20.0)
-        self.declare_parameter('resume_max_path_distance_m', 1.0)
+        self.declare_parameter('resume_max_path_distance_m', 3.0)
         self._mission_state = ''
+        self._landmark_watch = LandmarkWatch()
+        self._landmark_hold = None
+        self.declare_parameter('landmark_miss_window_m', 1.0)
+        self.declare_parameter('landmark_miss_wait_s', 4.0)
         self.declare_parameter('lookahead_distance_m', 0.6)
         self.declare_parameter('linear_speed_mps', 0.5)
         self.declare_parameter('min_linear_speed_mps', 0.05)
@@ -179,6 +184,8 @@ class ReturnPathFollowerNode(Node):
         self.create_subscription(PoseStamped, '/visual_landmark/correction', self._on_visual_correction, 10)
         self.create_subscription(String, '/mission/return/state', self._on_mission_state, 10)
         self.create_subscription(String, '/mission/return/resume_request', self._on_resume_request, 10)
+        self.create_subscription(String, '/visual_landmark/localization_event', self._on_localization_event, 10)
+        self.missed_pub = self.create_publisher(String, '/visual_landmark/missed', 10)
         self.resume_pub = self.create_publisher(String, '/mission/return/resume_result', 10)
         self.create_timer(self.control_period, self._tick)
 
@@ -241,7 +248,22 @@ class ReturnPathFollowerNode(Node):
         self._rotate_settle_since = None
         self._v_cmd = self._w_cmd = 0.0
 
+    def _on_localization_event(self, msg):
+        try:
+            data = json.loads(msg.data)
+            if data.get('event') == 'reference_loaded' and self._mission_state in {'MANUAL_RECORDING', 'WAIT_RETURN_COMMAND'}:
+                self._landmark_watch.references[data['id']] = Pose2D(float(data['x']), float(data['y']))
+            elif data.get('event') == 'localized' and self._mission_state not in {'IDLE', 'MANUAL_RECORDING', 'WAIT_RETURN_COMMAND'}:
+                self._landmark_watch.seen.add(data['id'])
+        except (ValueError, KeyError, TypeError):
+            return
+
     def _on_mission_state(self, msg):
+        if msg.data in {'MANUAL_RECORDING', 'WAIT_RETURN_COMMAND'} and self._mission_state not in {'MANUAL_RECORDING', 'WAIT_RETURN_COMMAND'}:
+            self._landmark_watch = LandmarkWatch()
+        if msg.data != 'FOLLOW_RETURN_PATH':
+            self._landmark_hold = None
+            self._landmark_watch.near_since.clear()
         if msg.data != self._mission_state:
             self._v_cmd = self._w_cmd = 0.0
             self._rotate_settle_since = None
@@ -297,6 +319,21 @@ class ReturnPathFollowerNode(Node):
         hi = corner_idx if corner_idx is not None else len(self._path) - 1
         nearest_idx = self._nearest_index(current, max(self._floor, self._progress_index-1), hi)
         self._progress_index = max(self._progress_index, nearest_idx)
+
+        lid = self._landmark_hold
+        if lid is None:
+            lid = self._landmark_watch.missed(
+                self._path, current, self.get_clock().now().nanoseconds*1e-9,
+                max(self._floor, self._progress_index-1), hi,
+                window=float(self.get_parameter('landmark_miss_window_m').value),
+                wait_s=float(self.get_parameter('landmark_miss_wait_s').value))
+        if lid is not None:
+            self._landmark_hold = lid
+            self._v_cmd = self._w_cmd = 0.0
+            self._publish(0.0, 0.0)
+            self.missed_pub.publish(String(data=json.dumps({
+                'id': lid, 'stamp_ns': self.get_clock().now().nanoseconds})))
+            return
 
         if self._mode == TRACK_PATH:
             # heading_error is measured against the INCOMING segment while a

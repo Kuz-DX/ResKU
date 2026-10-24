@@ -87,6 +87,7 @@ from geometry_msgs.msg import Pose, PoseStamped, Twist
 from nav_msgs.msg import Odometry, Path
 from std_msgs.msg import Bool, String
 
+from return_navigation.recovery import YawSearch
 from return_navigation.se2 import apply_correction, Pose2D, normalize_angle
 
 IDLE = 'IDLE'
@@ -99,7 +100,8 @@ FINISHED = 'FINISHED'
 RETURN_MANUAL = 'RETURN_MANUAL'
 RETURN_RESUME_STOP = 'RETURN_RESUME_STOP'
 RETURN_INTERVENTION = 'RETURN_INTERVENTION'
-RETURN_ACTIVE_STATES = {STOP_BEFORE_TURN, TURN_180, FOLLOW_RETURN_PATH, RETURN_MANUAL, RETURN_RESUME_STOP, RETURN_INTERVENTION}
+RETURN_LANDMARK_SEARCH = 'RETURN_LANDMARK_SEARCH'
+RETURN_ACTIVE_STATES = {RETURN_LANDMARK_SEARCH,STOP_BEFORE_TURN, TURN_180, FOLLOW_RETURN_PATH, RETURN_MANUAL, RETURN_RESUME_STOP, RETURN_INTERVENTION}
 
 
 class ReturnStateMachineNode(Node):
@@ -108,6 +110,10 @@ class ReturnStateMachineNode(Node):
 
         self.declare_parameter('control_rate_hz', 20.0)
         self.declare_parameter('resume_timeout_s', 5.0)
+        self.declare_parameter('landmark_search_angle_deg', 30.0)
+        self.declare_parameter('landmark_search_speed_radps', 0.15)
+        self.declare_parameter('landmark_search_dwell_s', 3.0)
+        self.declare_parameter('landmark_search_timeout_s', 60.0)
         self.declare_parameter('odom_timeout_s', 0.5)
         self.declare_parameter('min_waypoints_for_return', 2)
 
@@ -156,6 +162,14 @@ class ReturnStateMachineNode(Node):
         self.finished_hold_s = float(p('finished_hold_s').value)
         self.emergency_stop_hold_s = float(p('emergency_stop_hold_s').value)
 
+        # Reject invalid search configuration at startup rather than silently
+        # rejecting a missed-landmark request while the follower holds zero.
+        YawSearch(0., 0.,
+                  angle=math.radians(float(p('landmark_search_angle_deg').value)),
+                  speed=float(p('landmark_search_speed_radps').value),
+                  dwell=float(p('landmark_search_dwell_s').value),
+                  timeout=float(p('landmark_search_timeout_s').value))
+
         # ---- runtime state ----
         self._state = IDLE
         self._state_entered_time = self.get_clock().now()
@@ -187,6 +201,13 @@ class ReturnStateMachineNode(Node):
         self._resume_request = None
         self._resume_sent_at = None
         self._auto_follow_after = None
+        self._search = None
+        self._search_id = None
+        self._search_request = None
+        self._search_commit_after = None
+        self._search_match = None
+        self._last_visual_stamp = None
+        self._last_visual_frame = None
 
         transient_qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
                                     durability=DurabilityPolicy.TRANSIENT_LOCAL)
@@ -208,6 +229,9 @@ class ReturnStateMachineNode(Node):
 
         self.create_subscription(PoseStamped, '/visual_landmark/correction', self._on_visual_correction, 10)
         self.mode_status_pub = self.create_publisher(String, '/mission/return/control_status', transient_qos)
+        self.search_request_pub = self.create_publisher(String, '/visual_landmark/search_request', transient_qos)
+        self.create_subscription(String, '/visual_landmark/missed', self._on_landmark_missed, 10)
+        self.create_subscription(String, '/visual_landmark/localization_event', self._on_localization_event, 10)
         self.resume_request_pub = self.create_publisher(String, '/mission/return/resume_request', 10)
         self.create_subscription(String, '/mission/return/control_mode', self._on_control_mode, 10)
         self.create_subscription(String, '/mission/return/resume_result', self._on_resume_result, 10)
@@ -231,6 +255,7 @@ class ReturnStateMachineNode(Node):
         # Persistent mission<-odom transform: continue propagating live odometry
         # after a landmark goes out of view, until the next validated correction.
         self._visual_correction = Pose2D.from_ros_pose(msg.pose)
+        self._last_visual_stamp = stamp.nanoseconds
 
     def _on_odom(self, msg: Odometry):
         self._last_odom_time = self.get_clock().now()
@@ -242,6 +267,103 @@ class ReturnStateMachineNode(Node):
         self.mode_status_pub.publish(String(data=json.dumps({
             'status': status, 'state': self._state, 'reason': reason,
             'path_preserved': bool(self._return_path)})))
+
+    def _publish_search_request(self):
+        self.search_request_pub.publish(String(data=json.dumps({
+            'active': self._state == RETURN_LANDMARK_SEARCH,
+            'id': self._search_id, 'request': self._search_request,
+            'commit_after_ns': self._search_commit_after})))
+
+    def _on_landmark_missed(self, msg):
+        if self._state != FOLLOW_RETURN_PATH or self._emergency_stop_active:
+            return
+        try:
+            data = json.loads(msg.data)
+            stamp = int(data['stamp_ns'])
+            now = self.get_clock().now()
+            if not 0 <= (now.nanoseconds-stamp)*1e-9 <= 2.0 or stamp < self._origin_received_at.nanoseconds:
+                return
+            if self._odom_pose is None or self._last_odom_time is None:
+                return
+            self._search_id = str(data['id'])
+            self._search_request = str(now.nanoseconds)
+            self._search_commit_after = None
+            self._search_match = None
+            self._search = YawSearch(
+                self._odom_pose.yaw, now.nanoseconds*1e-9,
+                angle=math.radians(float(self.get_parameter('landmark_search_angle_deg').value)),
+                speed=float(self.get_parameter('landmark_search_speed_radps').value),
+                dwell=float(self.get_parameter('landmark_search_dwell_s').value),
+                timeout=float(self.get_parameter('landmark_search_timeout_s').value))
+        except (ValueError, KeyError, TypeError):
+            return
+        self.cmd_vel_return_pub.publish(Twist())
+        self._go_to(RETURN_LANDMARK_SEARCH)
+        self.state_pub.publish(String(data=self._state))
+        self._publish_search_request()
+        self._control_status('landmark_search', 'stopping before bounded yaw search: '+self._search_id)
+
+    def _on_localization_event(self, msg):
+        try:
+            data = json.loads(msg.data)
+            now_ns = self.get_clock().now().nanoseconds
+            stamp = int(data.get('stamp_ns', 0))
+            if not 0 <= (now_ns-stamp)*1e-9 <= 2.0:
+                return
+            if data.get('event') == 'frame':
+                self._last_visual_frame = stamp
+                return
+            if self._state != RETURN_LANDMARK_SEARCH or data.get('request') != self._search_request or data.get('id') != self._search_id:
+                return
+            if data.get('event') == 'candidate':
+                self._search.candidate(self._odom_pose.yaw)
+                self.cmd_vel_return_pub.publish(Twist())
+            elif data.get('event') == 'localized' and self._search_commit_after is not None and stamp >= self._search_commit_after:
+                self._search_match = stamp
+        except (ValueError, KeyError, TypeError):
+            return
+
+    def _finish_search(self, success, reason):
+        self.cmd_vel_return_pub.publish(Twist())
+        self._go_to(RETURN_INTERVENTION)
+        self.state_pub.publish(String(data=self._state))
+        self._publish_search_request()
+        if success:
+            # Re-use the stopped, distance-checked Auto rejoin handshake.
+            self._on_control_mode(String(data='AUTO'))
+        else:
+            self._control_status('manual_intervention_required', reason)
+
+    def _tick_landmark_search(self):
+        self.cmd_vel_return_pub.publish(Twist())
+        now = self.get_clock().now()
+        seconds = now.nanoseconds*1e-9
+        if self._last_odom_time is None or not 0 <= (now-self._last_odom_time).nanoseconds*1e-9 <= float(self.get_parameter('odom_timeout_s').value):
+            self._finish_search(False, 'search odometry stale')
+            return
+        # No blind rotation with a dead camera/TF pipeline.
+        if seconds-self._search.started > 3.0 and (self._last_visual_frame is None or (now.nanoseconds-self._last_visual_frame)*1e-9 > 2.5):
+            self._finish_search(False, 'RGB-D or camera TF unavailable during search')
+            return
+        speed, phase = self._search.tick(self._odom_pose.yaw, self._odom_vx, self._odom_wz, seconds)
+        if phase in {'timeout', 'not_found', 'angle_limit'}:
+            self._finish_search(False, 'landmark search '+phase)
+            return
+        settled = (phase == 'observing' and self._search.hold_since is not None
+                   and seconds-self._search.hold_since >= self.stop_settle_duration)
+        if settled and self._search_commit_after is None:
+            self._search_commit_after = now.nanoseconds
+            self._publish_search_request()
+        elif not settled and self._search_commit_after is not None:
+            self._search_commit_after = None
+            self._search_match = None
+            self._publish_search_request()
+        if settled and self._search_match is not None and self._last_visual_stamp == self._search_match and self._resume_still():
+            self._finish_search(True, 'landmark localized')
+            return
+        cmd = Twist()
+        cmd.angular.z = speed
+        self.cmd_vel_return_pub.publish(cmd)
 
     def _on_control_mode(self, msg):
         mode = msg.data.strip().upper()
@@ -373,7 +495,10 @@ class ReturnStateMachineNode(Node):
             if new_state == MANUAL_RECORDING:
                 self._visual_correction = None
                 self._origin_received_at = self.get_clock().now()
+            old_state = self._state
             self._state = new_state
+            if old_state == RETURN_LANDMARK_SEARCH and new_state != RETURN_LANDMARK_SEARCH:
+                self._publish_search_request()
             self._state_entered_time = self.get_clock().now()
             if new_state == WAIT_RETURN_COMMAND:
                 # Publishers that only ever send True (keyboard, `topic pub -1`)
@@ -414,6 +539,8 @@ class ReturnStateMachineNode(Node):
             self._tick_turn_180()
         elif self._state == FOLLOW_RETURN_PATH:
             self._tick_follow_return_path()
+        elif self._state == RETURN_LANDMARK_SEARCH:
+            self._tick_landmark_search()
         elif self._state == RETURN_RESUME_STOP:
             self._tick_resume_stop()
         elif self._state in {RETURN_MANUAL, RETURN_INTERVENTION}:

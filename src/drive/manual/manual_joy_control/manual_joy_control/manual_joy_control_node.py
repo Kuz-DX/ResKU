@@ -24,8 +24,6 @@ class ManualJoyControlNode(Node):
         # [하림 수정] L1/R1/L2/R2로 좌우 모터 기본속도를 독립 조정하도록 변경.
         # L2/R2 digital button index(6/7)는 표준 Linux joydev DS4 매핑 기준으로,
         # arm 코드의 axis 6/7=D-pad, button 4/5=L1/R1과 교차검증해 확정.
-        # 버튼 10(PS)은 drive emergency-stop용으로 예약되어 있어 사용하지 않음
-        # (arm/robot_arm_bringup/scripts/safety_manager.py 참고).
         self.declare_parameter('button_l1', 4)   # 왼쪽 speed 증가
         self.declare_parameter('button_l2', 6)   # 왼쪽 speed 감소
         self.declare_parameter('button_r1', 5)   # 오른쪽 speed 증가
@@ -70,8 +68,8 @@ class ManualJoyControlNode(Node):
         self.declare_parameter('joy_timeout', 0.5)
 
         # [manual+return 통합] RETURN 미션 트리거용 버튼. 기존 버튼 매핑
-        # (0/1/2/3/4/5/6/7=조향, 9=arm 포커스 토글, 10=drive e-stop 예약,
-        # 11/12=diff 테스트) 중 미사용으로 확인된 버튼 8(PS4 Share/Options 계열)
+        # (0/1/2/3/4/5/6/7=조향, 9=arm 포커스 토글, 10=기록 시작,
+        # 11/12=diff 테스트) 중 미사용으로 확인된 버튼 8(DS4 Share)
         # 기본값 사용.
         self.declare_parameter('button_return', 8)
         # [UI 불리언 인터페이스] 녹화 시작(/path/record)용 버튼 = 10번(PS).
@@ -88,6 +86,13 @@ class ManualJoyControlNode(Node):
         self.declare_parameter('landmark_axis', 7)
         self.declare_parameter('landmark_axis_sign', 1.0)
         self.declare_parameter('landmark_axis_threshold', 0.5)
+
+        # DS4 joydev: down=axes[7] -1, right=axes[6] -1.
+        self.declare_parameter('manual_mode_axis', 7)
+        self.declare_parameter('manual_mode_axis_sign', -1.0)
+        self.declare_parameter('auto_mode_axis', 6)
+        self.declare_parameter('auto_mode_axis_sign', -1.0)
+        self.declare_parameter('control_mode_axis_threshold', 0.5)
 
         p = self.get_parameter
         self.axis_left_motor = p('axis_left_motor').value
@@ -119,6 +124,13 @@ class ManualJoyControlNode(Node):
         self.landmark_axis_sign = float(p('landmark_axis_sign').value)
         self.landmark_axis_threshold = float(p('landmark_axis_threshold').value)
         self._prev_landmark = False
+        self.manual_mode_axis = int(p('manual_mode_axis').value)
+        self.manual_mode_axis_sign = float(p('manual_mode_axis_sign').value)
+        self.auto_mode_axis = int(p('auto_mode_axis').value)
+        self.auto_mode_axis_sign = float(p('auto_mode_axis_sign').value)
+        self.control_mode_axis_threshold = float(p('control_mode_axis_threshold').value)
+        self._prev_manual_mode = self._prev_auto_mode = False
+        self._mode_rearm_required = False
 
         self._prev_l1 = 0
         self._prev_l2 = 0
@@ -161,6 +173,7 @@ class ManualJoyControlNode(Node):
         # 시작한다.
         self.return_trigger_pub = self.create_publisher(Bool, '/path/return', 10)
         self.record_trigger_pub = self.create_publisher(Bool, '/path/record', 10)
+        self.control_mode_pub = self.create_publisher(String, '/mission/return/control_mode', 10)
         self.landmark_trigger_pub = self.create_publisher(Bool, '/path/landmark', 10)
 
         rate = p('cmd_publish_rate_hz').value
@@ -176,6 +189,7 @@ class ManualJoyControlNode(Node):
         # 메시지를 기다리지 않음).
         self.active_target = msg.data
         if self.active_target != 'drive':
+            self._mode_rearm_required = True
             self._latest_left_cmd = 0.0
             self._latest_right_cmd = 0.0
             if self._prev_landmark:
@@ -191,6 +205,8 @@ class ManualJoyControlNode(Node):
             self._latest_left_cmd = 0.0
             self._latest_right_cmd = 0.0
             return
+
+        self._handle_control_mode(msg)
 
         # [하림 수정] L1/L2 -> 왼쪽 speed, R1/R2 -> 오른쪽 speed로 독립 조정.
         # 이전에는 L1/R1이 좌우를 동시에 올리고 내렸으나 요청에 따라 분리.
@@ -301,6 +317,30 @@ class ManualJoyControlNode(Node):
                 self.get_logger().info('[JOY] LANDMARK trigger pressed.')
             self.landmark_trigger_pub.publish(Bool(data=landmark_held))
         self._prev_landmark = landmark_held
+
+    def _handle_control_mode(self, msg: Joy):
+        if self.active_target != 'drive':
+            return
+        def pressed(axis, sign):
+            return (0 <= axis < len(msg.axes)
+                    and msg.axes[axis]*sign > self.control_mode_axis_threshold)
+        manual = pressed(self.manual_mode_axis, self.manual_mode_axis_sign)
+        auto = pressed(self.auto_mode_axis, self.auto_mode_axis_sign)
+        # A D-pad held while controlling the arm must not resume Auto on focus change.
+        if self._mode_rearm_required:
+            self._prev_manual_mode, self._prev_auto_mode = manual, auto
+            if not manual and not auto:
+                self._mode_rearm_required = False
+            return
+        mode = None
+        if manual and not self._prev_manual_mode:
+            mode = 'MANUAL'
+        elif auto and not self._prev_auto_mode and not manual:
+            mode = 'AUTO'
+        if mode is not None:
+            self.control_mode_pub.publish(String(data=mode))
+            self.get_logger().info(f'[JOY] Return control mode requested: {mode}')
+        self._prev_manual_mode, self._prev_auto_mode = manual, auto
 
     def publish_cmd(self):
         elapsed = (self.get_clock().now() - self.last_joy_time).nanoseconds / 1e9

@@ -50,6 +50,7 @@ class VisualLocalizationNode(Node):
         self.landmarks = {}
         self.correction = None
         self.pending = None
+        self.search = None
         self.last = -float('inf')
         self.bridge = CvBridge()
         self.buffer = Buffer(cache_time=Duration(seconds=30))
@@ -61,6 +62,7 @@ class VisualLocalizationNode(Node):
         self.create_subscription(Pose, '/mission/origin_pose', self.on_origin, latched)
         self.create_subscription(String, '/mission/return/state', self.on_state, 10)
         self.create_subscription(String, '/visual_landmark/event', self.on_landmark, 10)
+        self.create_subscription(String, '/visual_landmark/search_request', self.on_search_request, 10)
         self.create_subscription(CameraInfo, self.p('camera_info_topic'), self.on_info,
                                  qos_profile_sensor_data)
         self.color_sub = message_filters.Subscriber(self, CompressedImage, self.p('color_topic'),
@@ -70,6 +72,19 @@ class VisualLocalizationNode(Node):
         self.sync = message_filters.ApproximateTimeSynchronizer(
             [self.color_sub, self.depth_sub], queue_size=5, slop=0.04)
         self.sync.registerCallback(self.on_pair)
+
+    def on_search_request(self, msg):
+        try:
+            data = json.loads(msg.data)
+            if data.get('active'):
+                if self.search is None or self.search.get('request') != data.get('request') or self.search.get('commit_after_ns') != data.get('commit_after_ns'):
+                    self.pending = None
+                self.search = data
+            else:
+                self.search = None
+                self.pending = None
+        except (ValueError, TypeError):
+            return
 
     def on_info(self, msg):
         self.info = msg
@@ -114,16 +129,19 @@ class VisualLocalizationNode(Node):
             if image is None or image.shape != (ci['height'], ci['width']):
                 raise ValueError('invalid reference image/calibration size')
             points, descriptors = features(image)
+            if descriptors is None or len(points) < 20:
+                raise ValueError('reference has fewer than 20 usable features')
             self.landmarks[meta['id']] = (
                 (points, descriptors, np.array(ci['k']).reshape(3, 3), np.array(ci['d'])),
                 np.array(meta['mission_camera_transform'], dtype=float))
-            self.event('reference_loaded', id=meta['id'], features=len(points))
+            self.event('reference_loaded', id=meta['id'], features=len(points),
+                       x=float(meta['mission_pose']['x']), y=float(meta['mission_pose']['y']))
         except (ValueError, KeyError, OSError, cv2.error, TypeError) as exc:
             self.event('reference_rejected', reason=str(exc))
 
     def on_pair(self, color, depth):
         now = self.get_clock().now()
-        if self.state not in {'FOLLOW_RETURN_PATH', 'RETURN_MANUAL', 'RETURN_RESUME_STOP', 'RETURN_INTERVENTION'} or self.origin is None or not self.landmarks or self.info is None:
+        if self.state not in {'FOLLOW_RETURN_PATH', 'RETURN_MANUAL', 'RETURN_RESUME_STOP', 'RETURN_INTERVENTION', 'RETURN_LANDMARK_SEARCH'} or self.origin is None or not self.landmarks or self.info is None:
             return
         if now.nanoseconds*1e-9 - self.last < self.p('processing_period_s'):
             return
@@ -150,11 +168,14 @@ class VisualLocalizationNode(Node):
             # Timestamped TF includes current arm joints and chassis roll/pitch.
             oc = tf_matrix(self.buffer.lookup_transform(self.p('odom_frame'), color.header.frame_id, stamp))
             ob = tf_matrix(self.buffer.lookup_transform(self.p('odom_frame'), self.p('base_frame'), stamp))
+            self.event('frame', stamp_ns=stamp.nanoseconds)
             current = features(image)
             prior = self.correction if self.correction is not None else np.linalg.inv(self.origin)
             ranked = []
             for lid, (reference, mc) in self.landmarks.items():
-                if np.linalg.norm((prior @ oc)[:2, 3] - mc[:2, 3]) > self.p('candidate_radius_m'):
+                if self.state == 'RETURN_LANDMARK_SEARCH' and self.search is not None and lid != self.search.get('id'):
+                    continue
+                if self.state != 'RETURN_LANDMARK_SEARCH' and np.linalg.norm((prior @ oc)[:2, 3] - mc[:2, 3]) > self.p('candidate_radius_m'):
                     continue
                 result = match(reference, current, z, np.array(ci.k).reshape(3, 3), np.array(ci.d))
                 if result is None:
@@ -177,6 +198,14 @@ class VisualLocalizationNode(Node):
             if len(ranked) > 1 and ranked[1][0] >= best[0]*0.85:
                 raise ValueError('ambiguous landmarks')
             _, neg_error, lid, correction = best
+            if self.state == 'RETURN_LANDMARK_SEARCH':
+                if self.search is None:
+                    return
+                self.event('candidate', id=lid, request=self.search.get('request'), stamp_ns=stamp.nanoseconds)
+                commit_after = self.search.get('commit_after_ns')
+                if commit_after is None or stamp.nanoseconds < commit_after:
+                    self.pending = None
+                    return
             # Require two independent frames to agree before changing controller coordinates.
             if self.pending is None or self.pending[0] != lid:
                 self.pending = (lid, correction)
@@ -197,7 +226,8 @@ class VisualLocalizationNode(Node):
             yaw = np.arctan2(correction[1, 0], correction[0, 0])
             msg.pose.orientation.z, msg.pose.orientation.w = float(np.sin(yaw/2)), float(np.cos(yaw/2))
             self.pub.publish(msg)
-            self.event('localized', id=lid, inliers=best[0], reprojection_rmse=-neg_error)
+            self.event('localized', id=lid, inliers=best[0], reprojection_rmse=-neg_error,
+                       stamp_ns=stamp.nanoseconds, request=self.search.get('request') if self.state == 'RETURN_LANDMARK_SEARCH' and self.search is not None else None)
         except Exception as exc:
             self.pending = None
             self.event('rejected', reason=str(exc))
