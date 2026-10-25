@@ -1,0 +1,15 @@
+/**:
+  ros__parameters:
+    # Planned VPR front D455. Set actual serial at launch; do not reuse D435i serial.
+    camera_name: arm_camera
+    initial_reset: false
+    enable_color: true
+    enable_depth: true
+    enable_infra1: false
+    enable_infra2: false
+    enable_gyro: false
+    enable_accel: false
+    pointcloud.enable: false
+    align_depth.enable: true
+    rgb_camera.color_profile: "640x480x30"
+    depth_module.depth_profile: "640x480x30"

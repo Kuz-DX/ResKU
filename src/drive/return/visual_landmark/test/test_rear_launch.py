@@ -79,3 +79,11 @@ def test_partial_measurements_require_remaining_extrinsics(monkeypatch):
     tf = next(action for action in actions
               if action.get('executable') == 'static_transform_publisher')
     assert tf['arguments'][:6] == ['--x', '-0.3', '--y', '0.0', '--z', '0.650674']
+
+
+def test_by_id_is_resolved_before_usb_cam_to_avoid_relative_symlink_bug(monkeypatch):
+    module = rear_module(monkeypatch)
+    monkeypatch.setattr(module.Path, 'resolve', lambda self: Path('/dev/video2'))
+    actions = module.configure(context())
+    camera = next(action for action in actions if action.get('package') == 'usb_cam')
+    assert camera['parameters'][0]['video_device'] == '/dev/video2'

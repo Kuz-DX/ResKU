@@ -1,5 +1,7 @@
 # 카메라 VPR 재개 TODO
 
+2026-10-26 변경: 전방은 D455로 교체 예정. 기존 D435i 측정값·시리얼·LOCK TF는 D455에 자동 재사용하지 않는다. 후방 영상/시험 intrinsic 연결은 확인했으며, 전방 RGB-D 및 차체 TF는 미연결 상태다.
+
 2026-10-25: 카메라 장착 완료(사용자 보고). 아래 좌표는 카메라 뒷면 기준이며 optical 좌표가 아니다.
 아직 extrinsic 보정, 런타임 intrinsic 연결, 실차 VPR 검증은 완료되지 않았다.
 
@@ -207,3 +209,8 @@ Auto 재개를 확인한다. UI에는 검색/검증/보정 적용/실패/재탐�
 - [ ] Phase 5: 오보정·TF·LOCK·Manual/Auto 회귀 검증 후에만 실제 correction 적용.
 - [ ] ROS bag에서 전체 check 요청→결과 평균/최대 지연과 CPU·처리 후보 개수 측정.
 - [ ] 교차/평행 경로에서 outbound s와 단순화 return 경로 arc의 오차·분기 선택 검증.
+
+
+장착 후 카메라 전용 실행·현장 연결 상태·읽기 전용 검사 명령: [MOUNTED_CAMERA_SETUP.md](MOUNTED_CAMERA_SETUP.md).
+
+후방 체커보드 기반 외부 보정 준비/측정/후보 계산: [REAR_EXTRINSIC_CHECKERBOARD.md](REAR_EXTRINSIC_CHECKERBOARD.md).

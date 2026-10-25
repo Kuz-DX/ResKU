@@ -43,7 +43,7 @@ def configure(context):
     actions.append(Node(
         package='usb_cam', executable='usb_cam_node_exe',
         namespace='rear/camera', name='apc850_rear', output='screen',
-        parameters=[{'video_device': device, 'image_width': width, 'image_height': height,
+        parameters=[{'video_device': str(Path(device).resolve()), 'image_width': width, 'image_height': height,
                      'framerate': fps, 'pixel_format': value('pixel_format'),
                      'io_method': 'mmap', 'brightness': -1,
                      'camera_name': 'apc850_rear', 'frame_id': value('frame_id'),
