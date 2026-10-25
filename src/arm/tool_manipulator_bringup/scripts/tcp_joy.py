@@ -117,6 +117,7 @@ class TcpJoy(Node):
             if self.entry_pending:
                 self.entry_pending['future'].cancel()
             self.entry_pending = None
+            self.ready_safe_at = None
             return
 
         def report(safe, reason, q):
@@ -124,7 +125,12 @@ class TcpJoy(Node):
                 epoch=s.get('epoch'), safe=safe, reason=reason, positions=q.tolist()))))
             if safe and self.auto_entry_armed and self.ready_state in ('idle', 'await_entry'):
                 self.ready_state = 'await_entry'
-                self.ready_safe_at = now
+                if self.ready_safe_at is None:
+                    self.ready_safe_at = now
+            elif not safe:
+                self.ready_safe_at = None
+                if self.ready_state == 'await_entry':
+                    self.reason = 'TCP ready entry blocked: '+reason
 
         q = self.measured.copy()
         try:

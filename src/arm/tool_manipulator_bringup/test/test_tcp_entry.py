@@ -90,6 +90,25 @@ def assessment_node():
     return n
 
 
+def test_repeated_safe_proofs_do_not_restart_auto_entry_delay():
+    n = assessment_node()
+    n.auto_entry_armed = True
+    n.ready_state = 'await_entry'
+    n.ready_safe_at = None
+    n.check.call_async.return_value.done.return_value = True
+    n.check.call_async.return_value.result.return_value = SimpleNamespace(valid=True)
+    TcpJoy.assess_entry(n, 1.)
+    TcpJoy.assess_entry(n, 1.02)
+    assert n.ready_safe_at == 1.02
+    TcpJoy.assess_entry(n, 1.04)
+    TcpJoy.assess_entry(n, 1.06)
+    assert n.ready_safe_at == 1.02
+    n.model.within_limits.return_value = False
+    TcpJoy.assess_entry(n, 1.08)
+    assert n.ready_safe_at is None
+    assert 'entry blocked' in n.reason
+
+
 def test_entry_requires_collision_result_before_approval():
     n = assessment_node()
     future = n.check.call_async.return_value
