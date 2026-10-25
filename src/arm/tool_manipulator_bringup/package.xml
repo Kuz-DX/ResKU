@@ -9,6 +9,7 @@
   <exec_depend>tool_manipulator_description</exec_depend>
   <exec_depend>tool_manipulator_moveit_config</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>python3-serial</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>dynamixel_sdk</exec_depend>
   <exec_depend>forward_command_controller</exec_depend>

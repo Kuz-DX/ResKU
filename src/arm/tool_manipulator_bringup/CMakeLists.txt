@@ -8,6 +8,7 @@ install(DIRECTORY launch DESTINATION share/${PROJECT_NAME}
 install(PROGRAMS scripts/capture_arm_pose.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/capture_tool_trajectory.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/capture_arm_raw.py DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS scripts/print_motor_currents.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/capture_rmd_calibration.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/set_current_zero.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/check_hardware_config.py DESTINATION lib/${PROJECT_NAME})
