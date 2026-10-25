@@ -15,6 +15,11 @@ rear_apc850:
     roll_deg: null
   translation_m: {x: -0.316627, y: 0.0, z: 0.650674}
   rotation_rpy_rad: {roll: null, pitch: null, yaw: null}
+  lens_offset_report_20261026:
+    back_to_lens_distance_m_approx: 0.027
+    trial_translation_m: {x: -0.343627, y: 0.0, z: 0.650674}
+    assumptions: rearward_offset_zero_lateral_and_vertical_components
+    status: approximate_lens_surface_not_verified_optical_origin
   optical_translation_m: {x: null, y: null, z: null}
 front_d435i_lock:
   translation_m: {x: 0.152853, y: 0.0, z: 0.650674}

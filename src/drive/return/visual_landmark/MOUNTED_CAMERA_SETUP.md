@@ -92,3 +92,29 @@ vpr_mount_measurements.yaml에 기록돼 있다. 여기에 임의의 optical 오
 - preflight `rear_image_intrinsic_ready=true`. 전체 `ready_for_observation=false`는 전방 RGB-D와 base_link/odom TF 부재 때문이다.
 - 최신 읽기 전용 점검 결과: `/tmp/resku_rear_ready.json`.
 - 실사용 intrinsic 품질과 extrinsic이 검증됐다는 의미는 아니다.
+
+## 후방 실차 VPR 초기 근사 설정 (2026-10-26)
+
+사용자 추가 실측: 후방 케이스 뒷면→렌즈 약 27mm.
+`rear_vpr_trial.launch.py`는 이를 차체 정후방 오프셋으로 가정해
+(-0.343627, 0, 0.650674)m를 사용한다. 렌즈 표면을 optical 원점으로
+근사하며, 기존 약 3도 하향 관찰과 housing roll=0을 가정한다.
+이는 검증된 extrinsic이 아니다. 실제 기울기에 따른 오프셋의 z 성분도
+현재 초기값에는 반영하지 않았다. 모든 xyz/optical RPY는 launch에서 덮어쓸 수 있다.
+
+기존 후방 driver와 rear optical TF 발행자를 먼저 종료한 뒤:
+
+```bash
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+ros2 launch vision rear_vpr_trial.launch.py
+```
+
+차체 base_link가 다른 이름이면 `parent_frame:=ACTUAL_FRAME`을 지정한다.
+이 launch는 후방 driver와 초기 optical static TF만 실행한다.
+실차 manual_return_bringup과 함께 사용하되 다른 후방 driver/TF는 중복 실행하지 않는다.
+기존 vpr_observation을 함께 쓸 경우 `start_rear:=false`로 지정한다.
+전방 D455의 RGB/aligned depth/CameraInfo 및 차체→팔→color optical TF는
+별도로 필요하다. 후방만 준비돼도 전후방 VPR 전체가 준비된 것은 아니다.
+`visual_apply_correction=false`, `enable_landmark_recovery=false`를 유지하고,
+이 TF로 새 mission/랜드마크를 기록한 뒤 known-offset 관찰 시험을 수행한다.
