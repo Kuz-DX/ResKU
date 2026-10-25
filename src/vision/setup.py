@@ -35,6 +35,10 @@ setup(
             os.path.join('share', package_name, 'models', 'supplyboxv3_int8_openvino_model'),
             glob('models/supplyboxv3_int8_openvino_model/*'),
         ),
+        (
+            os.path.join('share', package_name, 'models', 'person_480_openvino_model'),
+            glob('models/person_480_openvino_model/*'),
+        ),
     ],
     install_requires=[
         'setuptools',

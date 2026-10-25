@@ -3,7 +3,7 @@ Drive_CAM,python3 ~/ResKU/util/terminal_launcher/remote_shell.py --setup 'cd ~/R
 Arm_CAM,python3 ~/ResKU/util/terminal_launcher/remote_shell.py --setup 'cd ~/ResKU && sr && si' --command 'ros2 run realsense2_camera realsense2_camera_node --ros-args -r __ns:=/arm -r __node:=camera --params-file ~/ResKU/src/vision/camera/config/arm_d435i.yaml'
 Side_CAM,"python3 ~/ResKU/util/terminal_launcher/remote_shell.py --setup 'cd ~/ResKU && sr && si' --command 'ros2 launch dolbotz side_cameras.launch.py left_device:=""$(readlink -f /dev/v4l/by-id/usb-046d_C922_Pro_Stream_Webcam_26FFF4DF-video-index0)"" right_device:=""$(readlink -f /dev/v4l/by-id/usb-046d_HD_Pro_Webcam_C920-video-index0)""'"
 ROS_Bridge,python3 ~/ResKU/util/terminal_launcher/remote_shell.py --setup 'cd ~/ResKU && sr && si' --command 'ros2 launch rosbridge_server rosbridge_websocket_launch.xml'
-Person_Detect,python3 ~/ResKU/util/terminal_launcher/remote_shell.py --setup 'cd ~/ResKU && sr && si' --command 'ros2 launch vision person_detection.launch.py enable_side_cameras:=false'
+Person_Detect,python3 ~/ResKU/util/terminal_launcher/remote_shell.py --setup 'cd ~/ResKU && sr && si' --command 'ros2 launch vision person_detection.launch.py'
 Supply_BOX,python3 ~/ResKU/util/terminal_launcher/remote_shell.py --setup 'cd ~/ResKU && sr && si' --command 'ros2 launch vision supply.launch.py'
 JOY_NODE,cd ~/ResKU && sr && si && ros2 launch manual_joy_control manual_control.launch.py
 UI_Server,cd ~/ResKU && sr && si && cd ~/DolbotZ-Center/deploy && sudo docker compose up -d && python3 -m http.server 8080

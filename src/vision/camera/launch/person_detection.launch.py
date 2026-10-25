@@ -1,8 +1,5 @@
-"""Run one shared YOLO person detector for drive/left/right/arm cameras."""
+"""Run the production two-lane person detector."""
 
-from pathlib import Path
-
-from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
@@ -11,20 +8,20 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description() -> LaunchDescription:
-    installed_model = (
-        Path(get_package_share_directory("vision")) / "models" / "person.pt"
-    )
-    source_model = Path(__file__).resolve().parents[2] / "models" / "person.pt"
-    default_model = str(
-        installed_model if installed_model.is_file() else source_model
-    )
-
     arguments = [
+        DeclareLaunchArgument("backend", default_value="openvino"),
         DeclareLaunchArgument(
             "model_path",
-            default_value=default_model,
-            description="Ultralytics YOLO person.pt model path",
+            default_value="",
+            description="Model path; empty selects the backend-specific packaged model",
         ),
+        DeclareLaunchArgument("perf_hint", default_value="LATENCY"),
+        DeclareLaunchArgument("lane1_pattern", default_value="left,right"),
+        DeclareLaunchArgument("lane2_pattern", default_value="drive,drive,arm"),
+        DeclareLaunchArgument("lane1_max_fps", default_value="0.0"),
+        DeclareLaunchArgument("lane2_max_fps", default_value="0.0"),
+        DeclareLaunchArgument("lane_work_stealing", default_value="false"),
+        DeclareLaunchArgument("stats_period_s", default_value="0.0"),
         DeclareLaunchArgument(
             "input_topic",
             default_value="/drive/camera/color/image_raw/compressed",
@@ -102,8 +99,32 @@ def generate_launch_description() -> LaunchDescription:
         emulate_tty=True,
         parameters=[
             {
+                "backend": ParameterValue(
+                    LaunchConfiguration("backend"), value_type=str
+                ),
                 "model_path": ParameterValue(
                     LaunchConfiguration("model_path"), value_type=str
+                ),
+                "perf_hint": ParameterValue(
+                    LaunchConfiguration("perf_hint"), value_type=str
+                ),
+                "lane1_pattern": ParameterValue(
+                    LaunchConfiguration("lane1_pattern"), value_type=str
+                ),
+                "lane2_pattern": ParameterValue(
+                    LaunchConfiguration("lane2_pattern"), value_type=str
+                ),
+                "lane1_max_fps": ParameterValue(
+                    LaunchConfiguration("lane1_max_fps"), value_type=float
+                ),
+                "lane2_max_fps": ParameterValue(
+                    LaunchConfiguration("lane2_max_fps"), value_type=float
+                ),
+                "lane_work_stealing": ParameterValue(
+                    LaunchConfiguration("lane_work_stealing"), value_type=bool
+                ),
+                "stats_period_s": ParameterValue(
+                    LaunchConfiguration("stats_period_s"), value_type=float
                 ),
                 "input_topic": ParameterValue(
                     LaunchConfiguration("input_topic"), value_type=str
