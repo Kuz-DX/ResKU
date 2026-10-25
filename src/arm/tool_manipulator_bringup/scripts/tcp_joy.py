@@ -64,7 +64,7 @@ class TcpJoy(Node):
                 or not np.all(np.isfinite(self.ready_goal))
                 or not self.model.within_limits(self.ready_goal, .101)
                 or not 0 < self.ready_duration < 120. or not 0 < self.ready_step <= .01
-                or not .1 < self.ready_timeout <= 10.):
+                or not .1 < self.ready_timeout <= 30.):
             raise ValueError('invalid executable tcp_ready configuration')
         self.ready_state = 'idle'
         self.ready_checks = []
@@ -214,7 +214,10 @@ class TcpJoy(Node):
             return
         if self.ready_state == 'checking':
             if now-self.ready_started > self.ready_timeout:
-                self._fail_ready('TCP ready collision check timeout; remain HOLD')
+                completed = sum(f.done() for f in self.ready_checks)
+                self._fail_ready(
+                    'TCP ready collision check timeout (%d/%d complete); remain HOLD' %
+                    (completed, len(self.ready_checks)))
                 return
             if np.max(np.abs(self.measured-self.ready_snapshot)) > .01:
                 self._fail_ready('feedback changed during TCP ready check; remain HOLD')
