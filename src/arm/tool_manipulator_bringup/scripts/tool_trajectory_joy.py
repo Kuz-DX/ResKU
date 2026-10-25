@@ -130,8 +130,13 @@ class ToolTrajectoryJoy(Node):
     def report(self, state, reason):
         self.diagnostics.publish(String(data=json.dumps(dict(
             state=state, reason=reason, path_id=self.path_id))))
-        log = self.get_logger().error if state == 'failed' else self.get_logger().info
-        log(reason)
+        # rclpy associates severity with the Python call site.  Calling a
+        # dynamically selected logger method from one site raises when a later
+        # message changes severity, so keep the sites distinct.
+        if state == 'failed':
+            self.get_logger().error(reason)
+        else:
+            self.get_logger().info(reason)
 
     def fail(self, reason):
         if self.execution_id is not None and self.status.get('epoch') is not None:
@@ -179,7 +184,8 @@ class ToolTrajectoryJoy(Node):
         available = (now-self.status_time < .3 and now-self.state_time < .3
                      and self.full_state is not None and s.get('ready')
                      and s.get('startup_complete') and s.get('focus') == 'arm'
-                     and s.get('mode') != 'fault' and not s.get('transitioning'))
+                     and s.get('mode') != 'fault' and not s.get('transitioning')
+                     and s.get('requested', s.get('mode')) == s.get('mode'))
         if not available:
             self.path_id = request
             self.report('blocked', 'fresh ready arm focus is required')
@@ -201,7 +207,8 @@ class ToolTrajectoryJoy(Node):
         s = self.status
         if (now-self.status_time >= .3 or now-self.state_time >= .3
                 or self.full_state is None or not s.get('ready') or not s.get('startup_complete')
-                or s.get('focus') != 'arm' or s.get('mode') != 'hold' or s.get('transitioning')):
+                or s.get('focus') != 'arm' or s.get('mode') != 'hold' or s.get('transitioning')
+                or s.get('requested', s.get('mode')) != 'hold'):
             raise RuntimeError('fresh stopped HOLD with arm focus is required')
         return s
 

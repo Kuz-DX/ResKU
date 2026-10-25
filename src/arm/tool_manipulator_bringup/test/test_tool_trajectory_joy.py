@@ -2,6 +2,7 @@
 from pathlib import Path
 import sys
 from unittest.mock import Mock
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -56,3 +57,13 @@ def test_l2_plus_first_button_has_one_rising_edge():
 def test_simultaneous_path_buttons_are_ignored():
     request, held = requested_path([0., 0., -1.], [0, 0, 1, 1, 0], [False]*3)
     assert request is None and held == [True, True, False]
+
+
+def test_report_uses_distinct_logger_calls_for_different_severities():
+    node = SimpleNamespace(diagnostics=Mock(), path_id=0, get_logger=Mock())
+    logger = node.get_logger.return_value
+    from tool_trajectory_joy import ToolTrajectoryJoy
+    ToolTrajectoryJoy.report(node, 'checking', 'checking')
+    ToolTrajectoryJoy.report(node, 'failed', 'failed')
+    logger.info.assert_called_once_with('checking')
+    logger.error.assert_called_once_with('failed')

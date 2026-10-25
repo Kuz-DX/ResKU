@@ -73,7 +73,7 @@ def bringup(context):
             after(jsb, [ee]), after(ee, [pos]), after(pos, ready),
             *[RegisterEventHandler(OnProcessExit(target_action=p, on_exit=[
                 EmitEvent(event=Shutdown(reason='managed control process exited'))]))
-              for p in (manager, manual, base.control_node, base.state_publisher, *tcp_nodes)],
+              for p in (manager, manual, base.control_node, base.state_publisher)],
             preflight]
 
 
