@@ -8,7 +8,7 @@ import pytest
 ARM = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ARM/'tool_change_min'))
 sys.path.insert(0, str(ARM/'tool_manipulator_bringup/scripts'))
-from tcp_joy_core import TcpStepper, joy_twist
+from tcp_joy_core import TcpStepper, joy_twist, LimitBlocked
 from tcp_joy import TcpJoy
 from tool_change_min.kinematics import ArmKinematics
 from manual_control_common import ArmChain
@@ -78,6 +78,51 @@ def fake_stepper():
     step = TcpStepper(model, [.12]*6)
     step.reset(np.zeros(6))
     return step
+
+
+def test_limit_block_preserves_target_and_reverse_can_succeed():
+    s = fake_stepper()
+    s.model.solve.side_effect = ValueError('IK iteration would violate soft limits')
+    for _ in range(6):
+        with pytest.raises(LimitBlocked):
+            s.candidate(np.zeros(6), np.array([1., 0, 0, 0, 0, 0]), .02)
+    np.testing.assert_array_equal(s.q, np.zeros(6))
+    np.testing.assert_array_equal(s.pose, np.eye(4))
+    s.model.solve.side_effect = None
+    q, pose = s.candidate(np.zeros(6), np.array([-1., 0, 0, 0, 0, 0]), .02)
+    assert pose[0, 3] < 0
+
+
+def test_mixed_ik_errors_are_not_classified_as_limit_block():
+    s = fake_stepper()
+    s.model.solve.side_effect = [ValueError('IK did not converge')] + [
+        ValueError('IK iteration would violate soft limits')]*3
+    with pytest.raises(ValueError) as exc:
+        s.candidate(np.zeros(6), np.array([1., 0, 0, 0, 0, 0]), .02)
+    assert not isinstance(exc.value, LimitBlocked)
+
+
+def test_real_model_can_reverse_from_blocked_tcp_direction(model):
+    measured = np.array([-.00767, 1.4830934, 1.5070934, -1.5570934,
+                         .1549321, .0567573])
+    s = TcpStepper(model, [.12]*6)
+    s.reset(measured)
+    twist = np.array([1., 0, 0, 0, 0, 0])
+    with patch('time.monotonic', return_value=10.):
+        for _ in range(100):
+            try:
+                q, pose = s.candidate(measured, twist, .02)
+            except LimitBlocked:
+                break
+            s.commit(q, pose)
+            measured = q.copy()
+        else:
+            pytest.fail('expected outward direction to reach joint margin')
+        before = s.pose.copy()
+        q, pose = s.candidate(measured, -twist, .02)
+    assert pose[0, 3] < before[0, 3]
+    assert model.within_limits(q, s.margin)
+    assert np.max(np.abs(q-s.q)) <= .12*.02+1e-9
 
 
 def test_increment_only_commits_after_collision_acceptance():

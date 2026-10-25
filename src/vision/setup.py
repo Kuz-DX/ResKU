@@ -51,6 +51,7 @@ setup(
         'console_scripts': [
             'apriltag = vision.apriltag:main',
             'person_detection = vision.person_detection:main',
+            'person_detection_ov = cputest.person_detection_ov:main',  # TEST-ONLY
             'supply = vision.supply:main',
             'export_rfdetr_openvino = vision.export_rfdetr_openvino:main',
         ],

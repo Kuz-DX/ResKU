@@ -24,7 +24,7 @@ try:
     from tool_change_min.kinematics import ArmKinematics, ARM_JOINTS
 except ImportError:
     from arm_shared_kinematics import ArmKinematics, ARM_JOINTS
-from tcp_joy_core import TcpStepper, joy_twist
+from tcp_joy_core import TcpStepper, joy_twist, LimitBlocked
 
 
 class TcpJoy(Node):
@@ -225,6 +225,13 @@ class TcpJoy(Node):
                         finally:
                             self.last_ik_duration_ms = (time.monotonic()-started)*1000.
                         self.submit_collision(q, pose, now)
+                    self.publish()
+                except LimitBlocked as exc:
+                    self.discard()
+                    self.reason = str(exc)
+                    # An infeasible jog direction is not a producer failure.
+                    # Keep both the validated joint/pose target and any existing
+                    # failure count; reversing the stick may produce a valid step.
                     self.publish()
                 except (ValueError, RuntimeError, np.linalg.LinAlgError) as exc:
                     self.fail(str(exc))

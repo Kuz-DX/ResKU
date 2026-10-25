@@ -1,4 +1,4 @@
-"""D435i 2대와 Logitech C920 2대를 함께 실행한다.
+"""주행용 D455, 로봇팔용 D435i와 Logitech C920 2대를 함께 실행한다.
 
 주요 이미지 토픽:
   /drive/camera/color/image_raw       (RGB 전용)
@@ -45,7 +45,7 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument(
             "drive_config",
             default_value=_default_config("drive_d435i.yaml"),
-            description="주행용 D435i 파라미터 YAML",
+            description="주행용 D455 파라미터 YAML",
         ),
         DeclareLaunchArgument(
             "arm_config",
@@ -65,11 +65,11 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument(
             "drive_serial_no",
             default_value="_117222251401",
-            description="주행용 D435i 시리얼 번호",
+            description="주행용 D455 시리얼 번호",
         ),
         DeclareLaunchArgument(
             "arm_serial_no",
-            default_value="_243322074693",
+            default_value="_339222071362",
             description="로봇팔용 D435i 시리얼 번호",
         ),
         DeclareLaunchArgument(
