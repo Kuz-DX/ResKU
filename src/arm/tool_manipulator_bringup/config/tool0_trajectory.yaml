@@ -1,4 +1,16 @@
 # Fill with capture_tool_trajectory.py; review before enabling execution.
-execution_enabled: false
+execution_enabled: true
 joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
-points: []
+points:
+  - time_from_start_sec: 0.0
+    positions_rad: [-0.00766990393963507, 1.3056807708063805, 1.3669418648356366, -1.2812461346468489,
+      0.004601942363450018, 0.004601942363863465]
+  - time_from_start_sec: 1.665333
+    positions_rad: [-0.009203884727520872, 1.2992230046371018, 1.4227923476362334, -1.2201596108270474,
+      0.0030679615755646594, 0.0030679615759776624]
+  - time_from_start_sec: 4.499105
+    positions_rad: [-0.013805827091177836, 1.2234757790164141, 1.424537650256617, -1.1412707872264478,
+      -0.001533980788092304, 0.004601942363863465]
+  - time_from_start_sec: 23.677137
+    positions_rad: [-0.056757289151975865, 1.0581930775472623, 1.4035937524959068, -0.9981537752471072,
+      -0.05368932757620426, 0.01840776945483391]

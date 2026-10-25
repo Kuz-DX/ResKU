@@ -18,6 +18,7 @@ def bringup(context):
     spec.loader.exec_module(common)
     source_config = Path(__file__).resolve().parents[1]/'config/manual_controllers.yaml'
     ready_config = source_config.parent/'tcp_ready.yaml'
+    trajectory_dir = source_config.parent
     real = LaunchConfiguration('real_hardware').perform(context) == 'true'
     tcp_enabled = LaunchConfiguration('launch_tcp_joy').perform(context) == 'true'
     initial = LaunchConfiguration('mock_initial_positions_file').perform(context)
@@ -52,12 +53,17 @@ def bringup(context):
         tcp = Node(executable=sys.executable, arguments=[str(scripts/'tcp_joy.py')],
                    parameters=[base.description, {'hardware_config': base.hardware_file,
                                                   'tcp_ready_yaml': str(ready_config)}], output='screen')
+        tool_paths = Node(executable=sys.executable,
+                          arguments=[str(scripts/'tool_trajectory_joy.py')],
+                          parameters=[base.description, {'hardware_config': base.hardware_file,
+                                                        'trajectory_dir': str(trajectory_dir)}],
+                          output='screen')
         # Planning scene service only: no execution ownership or controller actions.
         scene = Node(package='moveit_ros_move_group', executable='move_group',
                      parameters=[base.moveit_config.to_dict(), base.description,
                                  {'allow_trajectory_execution': False,
                                   'publish_robot_description_semantic': True}], output='screen')
-        tcp_nodes = [tcp, scene]
+        tcp_nodes = [tcp, tool_paths, scene]
         ready.extend(tcp_nodes)
     if LaunchConfiguration('launch_joy').perform(context) == 'true':
         ready.append(Node(package='joy', executable='joy_node', parameters=[{'autorepeat_rate': 50.}]))
