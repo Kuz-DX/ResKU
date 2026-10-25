@@ -114,7 +114,33 @@ def generate_launch_description():
         )
     )
 
+    # Optional visual layer parameters never alter the odometry/controller pipeline.
     return LaunchDescription([
+        DeclareLaunchArgument('enable_auto_keyframes', default_value='true'),
+        DeclareLaunchArgument('auto_keyframe_distance_m', default_value='1.25'),
+        DeclareLaunchArgument('auto_keyframe_yaw_deg', default_value='12.0'),
+        DeclareLaunchArgument('auto_keyframe_max_interval_s', default_value='6.0'),
+        DeclareLaunchArgument('auto_keyframe_min_motion_for_timeout_m', default_value='0.5'),
+        DeclareLaunchArgument('auto_keyframe_min_features', default_value='20'),
+        DeclareLaunchArgument('auto_keyframe_blur_min', default_value='0.0'),
+        DeclareLaunchArgument('auto_keyframe_retry_s', default_value='1.0'),
+        DeclareLaunchArgument('enable_adaptive_visual_check', default_value='true'),
+        DeclareLaunchArgument('visual_check_distance_m', default_value='8.0'),
+        DeclareLaunchArgument('max_visual_candidates', default_value='3'),
+        DeclareLaunchArgument('visual_check_retry_cooldown_s', default_value='5.0'),
+        DeclareLaunchArgument('visual_check_timeout_s', default_value='5.0'),
+        DeclareLaunchArgument('visual_check_max_frames', default_value='4'),
+        DeclareLaunchArgument('enable_slip_early_trigger', default_value='true'),
+        DeclareLaunchArgument('slip_wz_deadband_radps', default_value='0.15'),
+        DeclareLaunchArgument('slip_score_trigger', default_value='0.35'),
+        DeclareLaunchArgument('slip_score_decay', default_value='0.02'),
+        DeclareLaunchArgument('wheel_timeout_s', default_value='0.5'),
+        DeclareLaunchArgument('gyro_timeout_s', default_value='0.5'),
+        DeclareLaunchArgument('diagnostics_timeout_s', default_value='2.0'),
+        DeclareLaunchArgument('visual_check_on_return_start', default_value='false'),
+        DeclareLaunchArgument('correction_min_translation_m', default_value='0.03'),
+        DeclareLaunchArgument('correction_min_yaw_rad', default_value='0.01'),
+
         DeclareLaunchArgument('can_interface', default_value='can_drive'),
         DeclareLaunchArgument('imu_port', default_value='/dev/ttyACM0'),
         # RETURN 직전 180도 정렬 회전 방향 ('left'=반시계, 'right'=시계).
@@ -238,9 +264,33 @@ def generate_launch_description():
         ),
 
         Node(
+            package='visual_landmark', executable='visual_check_scheduler_node',
+            condition=IfCondition(LaunchConfiguration('enable_visual_localization')),
+            parameters=[{
+                'enable_adaptive_visual_check': ParameterValue(LaunchConfiguration('enable_adaptive_visual_check'), value_type=bool),
+                'visual_check_distance_m': ParameterValue(LaunchConfiguration('visual_check_distance_m'), value_type=float),
+                'visual_check_retry_cooldown_s': ParameterValue(LaunchConfiguration('visual_check_retry_cooldown_s'), value_type=float),
+                'visual_check_timeout_s': ParameterValue(LaunchConfiguration('visual_check_timeout_s'), value_type=float),
+                'enable_slip_early_trigger': ParameterValue(LaunchConfiguration('enable_slip_early_trigger'), value_type=bool),
+                'slip_wz_deadband_radps': ParameterValue(LaunchConfiguration('slip_wz_deadband_radps'), value_type=float),
+                'slip_score_trigger': ParameterValue(LaunchConfiguration('slip_score_trigger'), value_type=float),
+                'slip_score_decay': ParameterValue(LaunchConfiguration('slip_score_decay'), value_type=float),
+                'wheel_timeout_s': ParameterValue(LaunchConfiguration('wheel_timeout_s'), value_type=float),
+                'gyro_timeout_s': ParameterValue(LaunchConfiguration('gyro_timeout_s'), value_type=float),
+                'diagnostics_timeout_s': ParameterValue(LaunchConfiguration('diagnostics_timeout_s'), value_type=float),
+                'visual_check_on_return_start': ParameterValue(LaunchConfiguration('visual_check_on_return_start'), value_type=bool),
+            }], output='screen',
+        ),
+        Node(
             package='visual_landmark', executable='visual_localization_node',
             condition=IfCondition(LaunchConfiguration('enable_visual_localization')),
             parameters=[{
+                'enable_adaptive_visual_check': ParameterValue(LaunchConfiguration('enable_adaptive_visual_check'), value_type=bool),
+                'max_visual_candidates': ParameterValue(LaunchConfiguration('max_visual_candidates'), value_type=int),
+                'visual_check_timeout_s': ParameterValue(LaunchConfiguration('visual_check_timeout_s'), value_type=float),
+                'visual_check_max_frames': ParameterValue(LaunchConfiguration('visual_check_max_frames'), value_type=int),
+                'correction_min_translation_m': ParameterValue(LaunchConfiguration('correction_min_translation_m'), value_type=float),
+                'correction_min_yaw_rad': ParameterValue(LaunchConfiguration('correction_min_yaw_rad'), value_type=float),
                 'apply_correction': ParameterValue(LaunchConfiguration('visual_apply_correction'), value_type=bool),
                 'expected_lock_pose_file': LaunchConfiguration('visual_expected_lock_pose_file'),
                 'lock_pose_guard': ParameterValue(LaunchConfiguration('visual_lock_pose_guard'), value_type=bool),
@@ -257,6 +307,14 @@ def generate_launch_description():
             executable='visual_landmark_node',
             name='visual_landmark_node',
             parameters=[{
+                'enable_auto_keyframes': ParameterValue(LaunchConfiguration('enable_auto_keyframes'), value_type=bool),
+                'auto_keyframe_distance_m': ParameterValue(LaunchConfiguration('auto_keyframe_distance_m'), value_type=float),
+                'auto_keyframe_yaw_deg': ParameterValue(LaunchConfiguration('auto_keyframe_yaw_deg'), value_type=float),
+                'auto_keyframe_max_interval_s': ParameterValue(LaunchConfiguration('auto_keyframe_max_interval_s'), value_type=float),
+                'auto_keyframe_min_motion_for_timeout_m': ParameterValue(LaunchConfiguration('auto_keyframe_min_motion_for_timeout_m'), value_type=float),
+                'auto_keyframe_min_features': ParameterValue(LaunchConfiguration('auto_keyframe_min_features'), value_type=int),
+                'auto_keyframe_blur_min': ParameterValue(LaunchConfiguration('auto_keyframe_blur_min'), value_type=float),
+                'auto_keyframe_retry_s': ParameterValue(LaunchConfiguration('auto_keyframe_retry_s'), value_type=float),
                 'rear_image_topic': rear_image_topic,
                 'rear_camera_info_topic': rear_camera_info_topic,
                 'capture_mode': landmark_capture_mode,

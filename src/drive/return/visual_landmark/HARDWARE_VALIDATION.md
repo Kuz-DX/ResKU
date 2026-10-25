@@ -13,6 +13,9 @@ are required. Raw grayscale is still the production preprocessing.
 No EKF redesign/reset, roll/pitch correction, SLAM, learned VPR download or MPPI
 change is made. Relative camera pose is 6DOF but control correction is x,y,yaw.
 
+Adaptive moving capture / request-gated checks are documented in [ADAPTIVE_VISUAL.md](ADAPTIVE_VISUAL.md).
+Manual button capture remains stop mode; automatic capture never holds motion.
+
 Two pre-existing behaviors needed changes for hardware validation: launch capture
 was `moving`, and missing-landmark recovery could stop an odometry return even
 when the visual node died. Defaults are now `stop`, observation-only visual
@@ -174,11 +177,11 @@ Do not add a base->arm optical shortcut while the same optical child already
 has a parent. There must be exactly one authoritative chain per child.
 
 Rear mounting option: `apc850_rear.launch.py` publishes **no TF by default**.
-Confirmed partial measurements (vehicle `base_link` origin, metres):
+2026-10-25 housing-back measurements (vehicle `base_link` origin, metres; NOT optical origin):
 
 | Camera | x | y | z | optical roll/pitch/yaw |
 | --- | --- | --- | --- | --- |
-| Rear APC850 | unmeasured | 0.0 | 0.650674 | unmeasured |
+| Rear APC850 | -0.316627 | 0.0 | 0.650674 | unmeasured |
 | Front arm D435i at intended LOCK pose | 0.152853 | 0.0 | 0.650674 | unmeasured |
 
 These partial measurements are also recorded in
@@ -188,11 +191,10 @@ TF broadcaster or `visual_expected_lock_pose_file`: unknown rotation prevents
 forming a complete LOCK matrix. The arm's existing articulated TF remains the
 runtime source of its extrinsics.
 
-The rear launch defaults now include measured y/z. x is deliberately empty,
-not a provisional zero. TF publication still requires x and optical rotation;
-partial measurements alone do not enable VPR pose correction. These distances
-must describe the optical origin; verify any offset from the housing measuring
-point when finalizing extrinsics.
+All rear optical translation defaults are now empty: the user clarified that
+these positions refer to the camera housing back, not the optical origin.
+Measure the back-reference-to-RGB-optical offset and mounting rotation first.
+Do not publish the housing coordinates as an optical TF.
 
 If rear optical TF is not already in URDF, supply the remaining measured
 values and opt in. RPY is fixed-axis radians for parent<-optical-child:
@@ -202,23 +204,21 @@ ros2 launch vision apc850_rear.launch.py \
   device:=/dev/v4l/by-id/ACTUAL_APC850-video-index0 \
   camera_info_url:=package://vision/config/camera/calibration/apc850_rear.yaml \
   publish_extrinsic:=true parent_frame:=base_link \
-  x:=MEASURED_X y:=0.0 z:=0.650674 \
+  x:=OPTICAL_X y:=OPTICAL_Y z:=OPTICAL_Z \
   roll:=MEASURED_ROLL pitch:=MEASURED_PITCH yaw:=MEASURED_YAW
 ```
 
-Replace all MEASURED values; empty/invalid values refuse TF publication. Optical
+Replace all OPTICAL/MEASURED values; empty/invalid values refuse TF publication. Optical
 axes are x right, y down, z forward. Rear-facing yaw alone is insufficient to
 specify the optical rotation. Equal front/rear height does not remove their
 translation difference or substitute for mounting measurement.
 
 ### D435i LOCK pose
 
-Use the measured x=0.152853 m, y=0.0 m and z=0.650674 m above to check the final
-vehicle<-D435i optical TF at the intended LOCK pose. They are validation
-targets, not a replacement for the articulated TF chain or a complete
-`base_from_camera` matrix. Do not change the TCP-to-camera mounting transform
-to these vehicle-relative values. Orientation still needs measurement; verify
-that the measured point is the optical origin when finalizing this transform.
+The recorded front housing-back position is (0.152853, 0, 0.650674)m.
+Convert the housing reference to the D435i RGB optical origin before comparing
+against vehicle<-D435i optical TF. Do not use the housing position directly in
+a LOCK matrix or overwrite the TCP-to-camera mounting transform with it.
 
 Physically lock/command a repeatable arm pose for the entire VPR return. The
 optional guard compares image-time vehicle<-D435i TF with expected LOCK TF,

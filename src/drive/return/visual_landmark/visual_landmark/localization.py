@@ -1,6 +1,7 @@
 """Metric RGB-D to RGB localization. Matrices use parent <- child convention."""
 from dataclasses import dataclass
 
+import time
 import cv2
 import numpy as np
 
@@ -74,9 +75,11 @@ def estimate_pose(points3d, pixels, k, distortion, min_inliers=20, options=None,
     if not np.all(np.isfinite(xyz)) or not np.all(np.isfinite(uv)):
         diagnostics['reject_reason'] = 'nonfinite_correspondences'
         return None
+    pnp_started = time.perf_counter()
     ok, r, t, indices = cv2.solvePnPRansac(
         xyz, uv, k, distortion, iterationsCount=300, reprojectionError=options.ransac_px,
         confidence=0.999, flags=cv2.SOLVEPNP_EPNP)
+    diagnostics['pnp_s'] = time.perf_counter()-pnp_started
     diagnostics['reject_reason'] = 'pnp_inliers'
     if indices is not None:
         diagnostics.update(inliers=len(indices), inlier_ratio=len(indices)/len(xyz))
@@ -89,7 +92,9 @@ def estimate_pose(points3d, pixels, k, distortion, min_inliers=20, options=None,
         return None
     if np.min(np.ptp(uv[idx], axis=0)) < 60:
         return None
+    refine_started = time.perf_counter()
     r, t = cv2.solvePnPRefineLM(xyz[idx], uv[idx], k, distortion, r, t)
+    diagnostics['pnp_s'] += time.perf_counter()-refine_started
     rot = cv2.Rodrigues(r)[0]
     projected = cv2.projectPoints(xyz[idx], r, t, k, distortion)[0].reshape(-1, 2)
     error = float(np.sqrt(np.mean(np.sum((projected - uv[idx])**2, axis=1))))
@@ -102,7 +107,7 @@ def estimate_pose(points3d, pixels, k, distortion, min_inliers=20, options=None,
     return result, len(idx), error
 
 
-def match(reference, current, depth, current_k, current_d, options=None, diagnostics=None):
+def _match(reference, current, depth, current_k, current_d, options=None, diagnostics=None):
     options = options or MatchOptions()
     diagnostics = {} if diagnostics is None else diagnostics
     rp, rd, rk, distortion = reference
@@ -135,3 +140,14 @@ def match(reference, current, depth, current_k, current_d, options=None, diagnos
         xyz.append([ray[0]*z, ray[1]*z, z])
         pixels.append(rp[ri])
     return estimate_pose(xyz, pixels, rk, distortion, options=options, diagnostics=diagnostics)
+
+
+def match(reference, current, depth, current_k, current_d, options=None, diagnostics=None):
+    """Time bounded candidate work without changing geometric acceptance gates."""
+    diagnostics = {} if diagnostics is None else diagnostics
+    started = time.perf_counter()
+    try:
+        return _match(reference, current, depth, current_k, current_d, options, diagnostics)
+    finally:
+        diagnostics['candidate_total_s'] = time.perf_counter()-started
+        diagnostics['matching_and_depth_s'] = max(0., diagnostics['candidate_total_s']-diagnostics.get('pnp_s', 0.))

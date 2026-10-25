@@ -139,7 +139,9 @@ def live_fixture(monkeypatch, apply=False, relative_x=.1):
     ci.header.frame_id = color.header.frame_id
     ci.width, ci.height, ci.distortion_model = 640, 480, 'plumb_bob'
     ci.k, ci.d = [500., 0., 320., 0., 500., 240., 0., 0., 1.], [0.]*5
-    values = dict(processing_period_s=1., base_frame='base_link', odom_frame='odom',
+    values = dict(enable_adaptive_visual_check=True, max_visual_candidates=3, route_backtrack_m=2.,
+                  correction_min_translation_m=.03, correction_min_yaw_rad=.01, visual_check_max_frames=4, visual_check_timeout_s=5.,
+                  processing_period_s=1., base_frame='base_link', odom_frame='odom',
                   candidate_radius_m=12., max_correction_m=3., max_correction_yaw_rad=.7,
                   ambiguity_ratio=.85, agreement_translation_m=.25, agreement_yaw_rad=.1,
                   agreement_max_interval_s=2.5, apply_correction=apply, lock_pose_guard=True,
@@ -157,13 +159,17 @@ def live_fixture(monkeypatch, apply=False, relative_x=.1):
               landmarks={'L1': ((np.zeros((30, 2)), None, np.eye(3), np.zeros(5)), np.eye(4))},
               reference_meta={'L1': {'camera_info': dict(distortion_model='plumb_bob', width=640, height=480)}},
               p=lambda name: values[name], get_clock=lambda: NS(now=clock), pending=None, pending_stamp=None,
-              lock_pose=None, correction=None, route=[], last_reference_arc=None, search=None,
+              lock_pose=None, correction=None, route=[None, None], last_reference_arc=None, search=None,
+              check=dict(request='test', deadline=110.), check_frames=0, check_expansion=0,
+              route_progress=(0., clock().nanoseconds), cached_arcs={'L1':0.},
               match_options=MatchOptions(), pub=NS(publish=output.append),
               event=lambda event, **fields: events.append(dict(event=event, **fields)),
               bridge=NS(imgmsg_to_cv2=lambda *args, **kwargs: np.full((480, 640), 2000, np.uint16)),
               buffer=NS(lookup_transform=lookup))
     node.check_lock_pose = lambda t: VisualLocalizationNode.check_lock_pose(node, t)
+    node.check_timeout = lambda: VisualLocalizationNode.check_timeout(node)
     def pair():
+        node.route_progress = (0., clock().nanoseconds)
         color.header.stamp = clock().to_msg()
         depth.header.stamp = color.header.stamp
         VisualLocalizationNode.on_pair(node, color, depth)
@@ -263,3 +269,93 @@ def test_current_camera_frame_mismatch_rejects(monkeypatch):
     pair()
     assert not output and events[-1]['event'] == 'rejected'
     assert 'optical frame' in events[-1]['reason']
+
+
+def test_adaptive_idle_does_not_extract_current_sift(monkeypatch):
+    import visual_landmark.visual_localization_node as module
+    node, output, events, pair = live_fixture(monkeypatch)
+    node.check = None
+    def forbidden(*args):
+        raise AssertionError('idle visual compute')
+    monkeypatch.setattr(module, 'features', forbidden)
+    pair()
+    assert not events and not output
+
+
+def test_adaptive_deadband_validates_without_publishing(monkeypatch):
+    node, output, events, pair = live_fixture(monkeypatch, apply=True, relative_x=0.)
+    pair(); pair()
+    assert not output and node.correction is None
+    assert events[-1]['event'] == 'validated'
+    assert events[-1]['correction_deadband'] and not events[-1]['correction_applied']
+
+
+def test_adaptive_primary_matches_at_most_three_of_100(monkeypatch):
+    import visual_landmark.visual_localization_node as module
+    node, output, events, pair = live_fixture(monkeypatch)
+    ref = node.landmarks['L1']
+    node.landmarks = {f'L{i}':ref for i in range(100)}
+    node.reference_meta = {lid:dict(camera_info=dict(distortion_model='plumb_bob',width=640,height=480)) for lid in node.landmarks}
+    node.cached_arcs = {f'L{i}':float(i) for i in range(100)}
+    calls=[]
+    monkeypatch.setattr(module, 'match', lambda *args, **kw:calls.append(kw['diagnostics']['id']))
+    pair()
+    assert len(calls)==3
+    node.check_expansion=2
+    calls.clear(); pair()
+    assert len(calls)==5
+
+
+def test_ambiguous_candidates_never_publish(monkeypatch):
+    node, output, events, pair = live_fixture(monkeypatch, apply=True)
+    node.landmarks['L2']=node.landmarks['L1']
+    node.cached_arcs['L2']=.1
+    pair(); pair()
+    assert not output and events[-1]['event']=='rejected'
+    assert 'ambiguous' in events[-1]['reason']
+
+
+def test_check_cancellation_and_terminal_event_clear_agreement(monkeypatch):
+    from std_msgs.msg import String
+    node, output, events, pair = live_fixture(monkeypatch)
+    pair()
+    assert node.pending is not None
+    VisualLocalizationNode.on_check_request(node, String(data=json.dumps(dict(active=False,request='test'))))
+    assert node.check is None and node.pending is None
+
+
+def test_agreement_crossing_deadline_never_commits(monkeypatch):
+    node, output, events, pair=live_fixture(monkeypatch,apply=True)
+    pair()
+    # Allow input checks but simulate expensive processing passing the deadline.
+    node.check['deadline']=100.5
+    node.check_timeout=lambda:None
+    pair()
+    assert not output and node.correction is None
+    assert events[-1]['event']=='rejected' and 'deadline' in events[-1]['reason']
+
+
+def test_event_finishes_check_only_on_terminal_result(monkeypatch):
+    node, output, events, pair=live_fixture(monkeypatch)
+    logged=[]
+    node.status=NS(publish=lambda msg:logged.append(json.loads(msg.data)))
+    node.check_frames=1
+    VisualLocalizationNode.event(node,'no_match')
+    assert node.check is not None and node.check_expansion==2
+    assert logged[-1]['check_request']=='test' and not logged[-1]['check_complete']
+    node.check_frames=4
+    VisualLocalizationNode.event(node,'rejected',reason='bad geometry')
+    assert node.check is None and logged[-1]['check_complete']
+    node.check=dict(request='success',trigger='distance')
+    VisualLocalizationNode.event(node,'validated',correction_applied=False)
+    assert node.check is None and logged[-1]['check_request']=='success'
+
+
+def test_stale_debug_request_cannot_activate_compute(monkeypatch):
+    from std_msgs.msg import String
+    node, output, events, pair=live_fixture(monkeypatch)
+    node.check=None
+    VisualLocalizationNode.on_check_request(node,String(data=json.dumps(dict(active=True,request='stale',requested_at=1.))))
+    assert node.check is None
+    VisualLocalizationNode.on_check_request(node,String(data=json.dumps(dict(active=True,request='fresh',requested_at=100.,trigger='manual/debug'))))
+    assert node.check['request']=='fresh' and node.pending is None
