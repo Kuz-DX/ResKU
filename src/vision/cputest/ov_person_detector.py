@@ -110,6 +110,7 @@ class OpenVINOPersonDetector:
         if len(input_shape) != 4 or input_shape[0] != 1 or input_shape[1] != 3:
             raise ValueError(f'Expected static NCHW input [1,3,H,W], got {input_shape}.')
         self.input_height, self.input_width = input_shape[2], input_shape[3]
+        self.model_input_shape = 'x'.join(str(value) for value in input_shape)
         metadata_imgsz = self._metadata_imgsz(self.metadata.get('imgsz'))
         self.infer_size = metadata_imgsz or int(infer_size)
         if (self.input_height, self.input_width) != (self.infer_size, self.infer_size):

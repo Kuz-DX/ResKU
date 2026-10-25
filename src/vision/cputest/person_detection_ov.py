@@ -7,6 +7,7 @@ import csv
 import json
 import os
 import platform
+import socket
 import threading
 from collections import deque
 from dataclasses import dataclass, field
@@ -20,7 +21,7 @@ import cv2
 import numpy as np
 import rclpy
 from ament_index_python.packages import get_package_share_directory
-from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import (
@@ -39,6 +40,7 @@ METRIC_NAMES = (
     'pre',
     'infer',
     'post',
+    'req_wait',
     'draw_enc',
     'pub',
     'queue_wait',
@@ -80,7 +82,27 @@ class AsyncContext:
     decode_ms: float
     preprocess_ms: float
     queue_wait_ms: float
+    request_wait_ms: float
     infer_started: float
+
+
+@dataclass
+class CompletedResult:
+    """Postprocessed async result waiting for the publisher thread."""
+
+    camera: str
+    message: CompressedImage
+    image: np.ndarray
+    detections: list[Detection]
+    received_perf: float
+    received_wall: float
+    decode_ms: float
+    preprocess_ms: float
+    inference_ms: float
+    postprocess_ms: float
+    queue_wait_ms: float
+    request_wait_ms: float
+    sequence: int = 0
 
 
 @dataclass
@@ -88,6 +110,7 @@ class CameraStats:
     """Fixed-size interval statistics for one camera."""
 
     input_count: int = 0
+    camera_count: int = 0
     processed_count: int = 0
     drop_count: int = 0
     stale_drop_count: int = 0
@@ -103,6 +126,7 @@ class CameraStats:
     def reset_interval(self) -> None:
         """Reset interval data while preserving the previous publish time."""
         self.input_count = 0
+        self.camera_count = 0
         self.processed_count = 0
         self.drop_count = 0
         self.stale_drop_count = 0
@@ -154,6 +178,7 @@ class UltralyticsPersonDetector:
         except Exception:
             pass
         self.output_shape: str = 'Ultralytics Results[N,6]'
+        self.model_input_shape = f'dynamic(imgsz={self.infer_size})'
         self.optimal_num_requests: str = 'n/a'
         self.num_streams: str = 'n/a'
         self.warmup_ms = 0.0
@@ -285,6 +310,7 @@ class PersonDetectionOVNode(Node):
         self.max_wait_s = int(get('max_wait_ms')) / 1000.0
         self.stale_input_s = int(get('stale_input_ms')) / 1000.0
         self.async_infer = bool(get('async_infer'))
+        self.separated_mode = str(get('separated')).strip().lower()
         self.jpeg_quality = int(get('jpeg_quality'))
         self.publish_visualization = bool(get('publish_visualization'))
         self.latency_mode = str(get('latency_mode')).strip().lower()
@@ -300,8 +326,21 @@ class PersonDetectionOVNode(Node):
             )
             self.num_requests = 1
             self.async_infer = False
+        elif not self.async_infer and self.num_requests > 1:
+            self.get_logger().warning(
+                'async_infer=false cannot execute concurrent requests; '
+                'forcing num_requests=1.'
+            )
+            self.num_requests = 1
+        requires_separated = self.scheduler != 'fifo' or self.async_infer
+        if self.separated_mode == 'false' and requires_separated:
+            raise ValueError(
+                'separated=false is incompatible with a non-fifo scheduler or '
+                'async_infer=true.'
+            )
         self._separated = (
-            self.scheduler != 'fifo' or self.num_requests > 1 or self.async_infer
+            self.separated_mode == 'true'
+            or (self.separated_mode == 'auto' and requires_separated)
         )
 
         model_path = str(get('model_path'))
@@ -334,7 +373,9 @@ class PersonDetectionOVNode(Node):
         self._condition = threading.Condition(self._lock)
         self._publish_lock = threading.Lock()
         self._stopping = False
+        self._publisher_stopping = False
         self._sequence = 0
+        self._completion_sequence = 0
         self._rr_index = 0
         self._priority_index = 0
         self._slots: dict[str, FrameSlot] = {}
@@ -343,14 +384,18 @@ class PersonDetectionOVNode(Node):
         self._stats = {name: CameraStats() for name in CAMERA_ORDER}
         self._stats_started = perf_counter()
         self._memory = ProcessMemory()
+        self.hostname = socket.gethostname()
+        self.logical_cpu_count = os.cpu_count() or 1
 
         qos_depth = int(get('qos_depth'))
         self.qos = self._make_qos(qos_depth)
         self.qos_description = 'sensor_data' if qos_depth == 0 else f'BEST_EFFORT/VOLATILE/KEEP_LAST/{qos_depth}'
         self._callback_group = MutuallyExclusiveCallbackGroup()
+        self._counter_callback_group = ReentrantCallbackGroup()
         self.detections_pubs: dict[str, Any] = {}
         self.image_pubs: dict[str, Any] = {}
         self._camera_subscriptions: list[Any] = []
+        self._counter_subscriptions: list[Any] = []
         self.camera_topics = self._camera_topics(get)
         for camera, input_topic, detections_topic, output_topic in self.camera_topics:
             self.detections_pubs[camera] = self.create_publisher(
@@ -368,18 +413,38 @@ class PersonDetectionOVNode(Node):
                     callback_group=self._callback_group,
                 )
             )
+            self._counter_subscriptions.append(
+                self.create_subscription(
+                    CompressedImage,
+                    input_topic,
+                    lambda _message, name=camera: self._count_camera_frame(name),
+                    self.qos,
+                    callback_group=self._counter_callback_group,
+                )
+            )
 
         self._csv_file, self._csv_writer, self._csv_path, self._meta_path = self._open_logs(
             str(get('csv_dir')), str(get('run_tag'))
         )
         self._async_queue: Any = None
+        self._request_slots: threading.Semaphore | None = None
+        self._publish_condition = threading.Condition()
+        self._pending_results: dict[str, CompletedResult] = {}
+        self._publisher_thread: threading.Thread | None = None
         if self.async_infer:
             assert self._openvino_detector_type is not None
             assert isinstance(self.detector, self._openvino_detector_type)
             self._async_queue = self._ov_module.AsyncInferQueue(
                 self.detector.compiled_model, self.num_requests
             )
+            self._request_slots = threading.Semaphore(self.num_requests)
             self._async_queue.set_callback(self._async_complete)
+            self._publisher_thread = threading.Thread(
+                target=self._publisher_loop,
+                name='person-detection-publisher',
+                daemon=True,
+            )
+            self._publisher_thread.start()
 
         self._write_startup_meta(model_path)
         self._worker: threading.Thread | None = None
@@ -407,6 +472,7 @@ class PersonDetectionOVNode(Node):
             'max_wait_ms': 300,
             'stale_input_ms': 1000,
             'async_infer': False,
+            'separated': 'auto',
             'log_period_s': 5.0,
             'csv_dir': '~/perf_logs',
             'run_tag': '',
@@ -446,6 +512,8 @@ class PersonDetectionOVNode(Node):
             raise ValueError("scheduler must be 'fifo', 'roundrobin', or 'priority'.")
         if self.num_requests <= 0:
             raise ValueError('num_requests must be greater than zero.')
+        if self.separated_mode not in {'auto', 'true', 'false'}:
+            raise ValueError("separated must be 'auto', 'true', or 'false'.")
         if self.max_wait_s < 0.0 or self.stale_input_s < 0.0:
             raise ValueError('max_wait_ms and stale_input_ms must not be negative.')
         if self.log_period_s <= 0.0:
@@ -512,9 +580,11 @@ class PersonDetectionOVNode(Node):
         stream = csv_path.open('w', encoding='utf-8', newline='')
         fields = [
             'timestamp', 'period_s', 'camera', 'backend', 'perf_hint',
-            'num_requests', 'scheduler', 'async_infer', 'run_tag', 'latency_mode',
-            'cpu_percent', 'rss_mb', 'pss_mb', 'in_fps', 'proc_fps', 'drop',
-            'stale_drop', 'err',
+            'num_requests', 'scheduler', 'async_infer', 'separated',
+            'publish_visualization', 'model_input_shape', 'precision',
+            'num_streams', 'hostname', 'run_tag', 'latency_mode',
+            'cpu_percent', 'rss_mb', 'pss_mb', 'cam_fps', 'in_fps',
+            'proc_fps', 'lost', 'drop', 'stale_drop', 'err',
         ]
         for metric in METRIC_NAMES:
             fields.extend((f'{metric}_avg_ms', f'{metric}_p95_ms'))
@@ -542,7 +612,12 @@ class PersonDetectionOVNode(Node):
             'precision': self.detector.precision,
             'device': self.detector.device,
             'cpu': self._cpu_name(),
-            'cpu_threads': os.cpu_count(),
+            'cpu_threads': self.logical_cpu_count,
+            'cpu_percent_definition': (
+                'This node process; 100% = one CPU core; maximum = '
+                f'{self.logical_cpu_count * 100}%.'
+            ),
+            'hostname': self.hostname,
             'perf_hint': self.perf_hint,
             'num_streams': str(self.detector.num_streams),
             'optimal_num_requests': str(self.detector.optimal_num_requests),
@@ -550,6 +625,9 @@ class PersonDetectionOVNode(Node):
             'scheduler': self.scheduler,
             'priority_pattern': self.priority_pattern,
             'async_infer': self.async_infer,
+            'separated': self._separated,
+            'publish_visualization': self.publish_visualization,
+            'model_input_shape': self.detector.model_input_shape,
             'qos': self.qos_description,
             'load_compile_ms': self.detector.load_compile_ms,
             'load_ms': self.detector.load_ms,
@@ -569,7 +647,9 @@ class PersonDetectionOVNode(Node):
             f'backend={self.backend} model={self.detector.model_path}',
             f'precision={self.detector.precision} device={self.detector.device} CPU={meta["cpu"]} threads={meta["cpu_threads"]}',
             f'hint={self.perf_hint} streams={meta["num_streams"]} requests={self.num_requests} optimal={meta["optimal_num_requests"]}',
-            f'scheduler={self.scheduler} pattern={self.priority_pattern} async={self.async_infer}',
+            f'scheduler={self.scheduler} pattern={self.priority_pattern} async={self.async_infer} separated={self._separated}',
+            f'visualization={self.publish_visualization} input_shape={self.detector.model_input_shape} host={self.hostname}',
+            f'CPU%: this process; 100% = one CPU core, maximum={meta["cpu_threads"] * 100}%',
             f'qos={self.qos_description}',
             f'load={self.detector.load_ms:.1f}ms compile={self.detector.compile_ms:.1f}ms warmup(3 avg)={self.detector.warmup_ms:.1f}ms',
             f'output_shape={self.detector.output_shape}',
@@ -602,19 +682,43 @@ class PersonDetectionOVNode(Node):
             )
             self._condition.notify()
 
+    def _count_camera_frame(self, camera: str) -> None:
+        """Count source frames without running decode or inference."""
+        with self._lock:
+            self._stats[camera].camera_count += 1
+
     def _worker_loop(self) -> None:
         while True:
             with self._condition:
                 self._condition.wait_for(lambda: self._stopping or bool(self._slots))
-                if self._stopping and not self._slots:
+                if self._stopping:
+                    return
+            request_wait_ms = 0.0
+            if self.async_infer:
+                wait_started = perf_counter()
+                assert self._request_slots is not None
+                while not self._request_slots.acquire(timeout=0.1):
+                    if self._stopping:
+                        return
+                request_wait_ms = (perf_counter() - wait_started) * 1000.0
+            with self._condition:
+                if self._stopping:
+                    if self.async_infer:
+                        assert self._request_slots is not None
+                        self._request_slots.release()
                     return
                 selected = self._select_slot_locked()
             if selected is None:
+                if self.async_infer:
+                    assert self._request_slots is not None
+                    self._request_slots.release()
                 continue
             camera, slot = selected
             queue_wait_ms = (perf_counter() - slot.received_perf) * 1000.0
             if self.async_infer:
-                self._submit_async(camera, slot, queue_wait_ms)
+                self._submit_async(
+                    camera, slot, queue_wait_ms, request_wait_ms
+                )
             else:
                 self._process_synchronous(camera, slot, queue_wait_ms)
 
@@ -686,12 +790,17 @@ class PersonDetectionOVNode(Node):
                 inference_ms=result.inference_ms,
                 postprocess_ms=result.postprocess_ms,
                 queue_wait_ms=queue_wait_ms,
+                request_wait_ms=0.0,
             )
         except Exception as exc:
             self._frame_error(camera, exc)
 
     def _submit_async(
-        self, camera: str, slot: FrameSlot, queue_wait_ms: float
+        self,
+        camera: str,
+        slot: FrameSlot,
+        queue_wait_ms: float,
+        request_wait_ms: float,
     ) -> None:
         assert self._openvino_detector_type is not None
         assert isinstance(self.detector, self._openvino_detector_type)
@@ -713,17 +822,22 @@ class PersonDetectionOVNode(Node):
                 decode_ms=(decoded - started) * 1000.0,
                 preprocess_ms=(prepared - decoded) * 1000.0,
                 queue_wait_ms=queue_wait_ms,
+                request_wait_ms=request_wait_ms,
                 infer_started=perf_counter(),
             )
             self._async_queue.start_async(
                 {self.detector.input_port: context.tensor}, userdata=context
             )
         except Exception as exc:
+            assert self._request_slots is not None
+            self._request_slots.release()
             self._frame_error(camera, exc)
 
     def _async_complete(self, request: Any, userdata: Any) -> None:
         context = userdata
         if not isinstance(context, AsyncContext):
+            if self._request_slots is not None:
+                self._request_slots.release()
             return
         infer_done = perf_counter()
         try:
@@ -733,21 +847,75 @@ class PersonDetectionOVNode(Node):
             post_started = perf_counter()
             detections = self.detector.postprocess(output, context.letterbox)
             post_done = perf_counter()
-            self._publish_result(
-                camera=context.camera,
-                message=context.message,
-                image=context.image,
-                detections=detections,
-                received_perf=context.received_perf,
-                received_wall=context.received_wall,
-                decode_ms=context.decode_ms,
-                preprocess_ms=context.preprocess_ms,
-                inference_ms=(infer_done - context.infer_started) * 1000.0,
-                postprocess_ms=(post_done - post_started) * 1000.0,
-                queue_wait_ms=context.queue_wait_ms,
+            self._enqueue_completed(
+                CompletedResult(
+                    camera=context.camera,
+                    message=context.message,
+                    image=context.image,
+                    detections=detections,
+                    received_perf=context.received_perf,
+                    received_wall=context.received_wall,
+                    decode_ms=context.decode_ms,
+                    preprocess_ms=context.preprocess_ms,
+                    inference_ms=(infer_done - context.infer_started) * 1000.0,
+                    postprocess_ms=(post_done - post_started) * 1000.0,
+                    queue_wait_ms=context.queue_wait_ms,
+                    request_wait_ms=context.request_wait_ms,
+                )
             )
         except Exception as exc:
             self._frame_error(context.camera, exc)
+        finally:
+            assert self._request_slots is not None
+            self._request_slots.release()
+
+    def _enqueue_completed(self, result: CompletedResult) -> None:
+        """Keep only the newest completed result for each camera."""
+        with self._publish_condition:
+            self._completion_sequence += 1
+            result.sequence = self._completion_sequence
+            pending = self._pending_results.get(result.camera)
+            if pending is not None:
+                if _stamp_tuple(result.message) <= _stamp_tuple(pending.message):
+                    with self._lock:
+                        self._stats[result.camera].stale_drop_count += 1
+                    return
+                with self._lock:
+                    self._stats[result.camera].stale_drop_count += 1
+            self._pending_results[result.camera] = result
+            self._publish_condition.notify()
+
+    def _publisher_loop(self) -> None:
+        """Draw, encode and publish async results outside OpenVINO callbacks."""
+        while True:
+            with self._publish_condition:
+                self._publish_condition.wait_for(
+                    lambda: self._publisher_stopping or bool(self._pending_results)
+                )
+                if self._publisher_stopping and not self._pending_results:
+                    return
+                camera = min(
+                    self._pending_results,
+                    key=lambda name: self._pending_results[name].sequence,
+                )
+                result = self._pending_results.pop(camera)
+            try:
+                self._publish_result(
+                    camera=result.camera,
+                    message=result.message,
+                    image=result.image,
+                    detections=result.detections,
+                    received_perf=result.received_perf,
+                    received_wall=result.received_wall,
+                    decode_ms=result.decode_ms,
+                    preprocess_ms=result.preprocess_ms,
+                    inference_ms=result.inference_ms,
+                    postprocess_ms=result.postprocess_ms,
+                    queue_wait_ms=result.queue_wait_ms,
+                    request_wait_ms=result.request_wait_ms,
+                )
+            except Exception as exc:
+                self._frame_error(result.camera, exc)
 
     def _publish_result(
         self,
@@ -763,6 +931,7 @@ class PersonDetectionOVNode(Node):
         inference_ms: float,
         postprocess_ms: float,
         queue_wait_ms: float,
+        request_wait_ms: float,
     ) -> None:
         stamp = _stamp_tuple(message)
         with self._publish_lock:
@@ -835,6 +1004,7 @@ class PersonDetectionOVNode(Node):
                 'pre': preprocess_ms,
                 'infer': inference_ms,
                 'post': postprocess_ms,
+                'req_wait': request_wait_ms,
                 'draw_enc': (draw_done - draw_started) * 1000.0,
                 'pub': (published - pub_started) * 1000.0,
                 'queue_wait': queue_wait_ms,
@@ -881,8 +1051,8 @@ class PersonDetectionOVNode(Node):
             snapshots: dict[str, dict[str, Any]] = {}
             for camera in active:
                 stats = self._stats[camera]
-                snapshots[camera] = self._snapshot(stats, period)
-            snapshots['total'] = self._total_snapshot(active, period)
+                snapshots[camera] = self._snapshot(stats, period, now)
+            snapshots['total'] = self._total_snapshot(active, period, now)
             for camera in active:
                 self._stats[camera].reset_interval()
             self._stats_started = now
@@ -894,16 +1064,16 @@ class PersonDetectionOVNode(Node):
                 flush=True,
             )
             print(
-                '  cam   | in_fps proc_fps drop stale err | decode avg(p95) | pre avg(p95) | infer avg(p95) | post avg(p95) | draw+enc avg(p95) | pub avg(p95) | queue avg(p95) | latency avg(p95) | max_gap',
+                '  cam   | cam_fps in_fps proc_fps lost drop stale err | decode avg(p95) | pre avg(p95) | req_wait avg(p95) | infer avg(p95) | post avg(p95) | draw+enc avg(p95) | pub avg(p95) | queue avg(p95) | latency avg(p95) | max_gap',
                 flush=True,
             )
             for camera in active + ['total']:
                 row = snapshots[camera]
-                warning = '!' if row['in_fps'] > 0.0 and row['proc_fps'] < row['in_fps'] * 0.5 else ' '
+                warning = '!' if row['cam_fps'] > 0.0 and row['proc_fps'] < row['cam_fps'] * 0.5 else ' '
                 metric = lambda name: f'{row[name + "_avg_ms"]:6.1f}({row[name + "_p95_ms"]:6.1f})'
                 print(
-                    f'{warning} {camera:<6}| {row["in_fps"]:6.1f} {row["proc_fps"]:8.1f} {row["drop"]:4d} {row["stale_drop"]:5d} {row["err"]:3d} | '
-                    f'{metric("decode")} | {metric("pre")} | {metric("infer")} | {metric("post")} | '
+                    f'{warning} {camera:<6}| {row["cam_fps"]:7.1f} {row["in_fps"]:6.1f} {row["proc_fps"]:8.1f} {row["lost"]:4d} {row["drop"]:4d} {row["stale_drop"]:5d} {row["err"]:3d} | '
+                    f'{metric("decode")} | {metric("pre")} | {metric("req_wait")} | {metric("infer")} | {metric("post")} | '
                     f'{metric("draw_enc")} | {metric("pub")} | {metric("queue_wait")} | {metric("latency")} | {row["max_gap_ms"]:7.1f}',
                     flush=True,
                 )
@@ -918,6 +1088,12 @@ class PersonDetectionOVNode(Node):
                 'num_requests': self.num_requests,
                 'scheduler': self.scheduler,
                 'async_infer': self.async_infer,
+                'separated': self._separated,
+                'publish_visualization': self.publish_visualization,
+                'model_input_shape': self.detector.model_input_shape,
+                'precision': self.detector.precision,
+                'num_streams': str(self.detector.num_streams),
+                'hostname': self.hostname,
                 'run_tag': str(self.get_parameter('run_tag').value),
                 'latency_mode': self.latency_mode,
                 'cpu_percent': cpu,
@@ -928,14 +1104,27 @@ class PersonDetectionOVNode(Node):
             self._csv_writer.writerow(row)
         self._csv_file.flush()
 
-    def _snapshot(self, stats: CameraStats, period: float) -> dict[str, Any]:
+    @staticmethod
+    def _gap_value(stats: CameraStats, period: float, now: float) -> float:
+        since_publish = (
+            (now - stats.last_publish_perf) * 1000.0
+            if stats.last_publish_perf is not None
+            else period * 1000.0
+        )
+        return max(stats.max_gap_ms, since_publish)
+
+    def _snapshot(
+        self, stats: CameraStats, period: float, now: float
+    ) -> dict[str, Any]:
         result: dict[str, Any] = {
+            'cam_fps': stats.camera_count / period,
             'in_fps': stats.input_count / period,
             'proc_fps': stats.processed_count / period,
+            'lost': max(0, stats.camera_count - stats.processed_count),
             'drop': stats.drop_count,
             'stale_drop': stats.stale_drop_count,
             'err': stats.error_count,
-            'max_gap_ms': stats.max_gap_ms,
+            'max_gap_ms': self._gap_value(stats, period, now),
         }
         for name, values in stats.values.items():
             average, p95 = self._metric_summary(values)
@@ -943,20 +1132,25 @@ class PersonDetectionOVNode(Node):
             result[f'{name}_p95_ms'] = p95
         return result
 
-    def _total_snapshot(self, cameras: list[str], period: float) -> dict[str, Any]:
+    def _total_snapshot(
+        self, cameras: list[str], period: float, now: float
+    ) -> dict[str, Any]:
         combined = CameraStats()
+        combined.camera_count = sum(self._stats[name].camera_count for name in cameras)
         combined.input_count = sum(self._stats[name].input_count for name in cameras)
         combined.processed_count = sum(self._stats[name].processed_count for name in cameras)
         combined.drop_count = sum(self._stats[name].drop_count for name in cameras)
         combined.stale_drop_count = sum(self._stats[name].stale_drop_count for name in cameras)
         combined.error_count = sum(self._stats[name].error_count for name in cameras)
         combined.max_gap_ms = max(
-            (self._stats[name].max_gap_ms for name in cameras), default=0.0
+            (self._gap_value(self._stats[name], period, now) for name in cameras),
+            default=period * 1000.0,
         )
+        combined.last_publish_perf = now
         for metric in METRIC_NAMES:
             for camera in cameras:
                 combined.values[metric].extend(self._stats[camera].values[metric])
-        return self._snapshot(combined, period)
+        return self._snapshot(combined, period, now)
 
     def shutdown(self) -> None:
         """Stop scheduling, drain OpenVINO requests and flush logs."""
@@ -972,6 +1166,11 @@ class PersonDetectionOVNode(Node):
                 self._async_queue.wait_all()
             except Exception as exc:
                 self.get_logger().error(f'Error while draining inference requests: {exc}')
+        if self._publisher_thread is not None:
+            with self._publish_condition:
+                self._publisher_stopping = True
+                self._publish_condition.notify_all()
+            self._publisher_thread.join()
         try:
             try:
                 self._report_interval()

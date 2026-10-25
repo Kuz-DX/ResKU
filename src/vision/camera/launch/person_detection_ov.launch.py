@@ -31,6 +31,7 @@ def generate_launch_description() -> LaunchDescription:
         'max_wait_ms': '300',
         'stale_input_ms': '1000',
         'async_infer': 'false',
+        'separated': 'auto',
         'log_period_s': '5.0',
         'csv_dir': '~/perf_logs',
         'run_tag': '',
