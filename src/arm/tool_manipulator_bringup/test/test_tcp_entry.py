@@ -20,6 +20,7 @@ def core():
     c.tcp_entry_required = True
     c.ready, c.focus = True, 'arm'
     c.feedback([0.]*6, [0.]*6, 1.)
+    c.entry_stable_since = .7
     c.tcp_entry = dict(epoch=c.epoch, safe=True, reason='checked', positions=[0.]*6, time=1.)
     return c
 
@@ -65,6 +66,32 @@ def test_manual_does_not_require_tcp_assessment():
     c.tcp_entry = None
     c.request('manual', 1.01)
     assert c.requested == 'manual'
+
+
+def test_entry_accepts_one_dxl_count_but_rejects_two():
+    c = core()
+    c.position[0] = 2*np.pi/4096
+    assert c.tcp_entry_blocker(1.01) == ''
+    c.position[0] *= 2
+    assert 'feedback changed' in c.tcp_entry_blocker(1.01)
+
+
+def test_rmd_entry_tolerance_remains_one_milliradian():
+    c = core()
+    c.position[1] = .0011
+    assert 'feedback changed' in c.tcp_entry_blocker(1.01)
+
+
+def test_entry_requires_stability_and_resets_on_drift():
+    c = core()
+    c.entry_stable_since = 1.
+    assert 'stable feedback' in c.tcp_entry_blocker(1.1)
+    c.feedback([0.]*6, [0.]*6, 1.21)
+    assert c.tcp_entry_blocker(1.21) == ''
+    c.feedback([.004]+[0.]*5, [0.]*6, 1.22)
+    assert c.entry_stable_since == 1.22
+    c.feedback([.004]+[0.]*5, [.03]+[0.]*5, 1.23)
+    assert c.entry_stable_since is None
 
 
 def test_manager_rejects_old_or_malformed_proof():
@@ -296,3 +323,29 @@ def test_home_completion_stays_hold_and_restores_tcp_ready_target():
     assert not n.returning_home and not n.auto_entry_armed
     np.testing.assert_array_equal(n.ready_goal, n.default_ready_goal)
     n.tcp_mode.call_async.assert_not_called()
+
+
+def test_home_executes_without_l1_and_does_not_cancel_on_release():
+    n = ready_node()
+    n.returning_home = True
+    n.default_ready_goal = n.ready_goal.copy()
+    n.ready_goal = np.radians([0., 85., 87., -89., 0., 0.])
+    n.deadman = False
+    n.joy_time = 0.
+    n.check.call_async.return_value.done.return_value = True
+    n.check.call_async.return_value.result.return_value = SimpleNamespace(valid=True)
+    TcpJoy.drive_ready(n, 1.)
+    for _ in range(len(n.ready_requests)+1):
+        if n.ready_state == 'checking':
+            TcpJoy.drive_ready(n, 1.1)
+    assert n.ready_state == 'request_tool'
+    n.ready_future.done.return_value = True
+    n.ready_future.result.return_value = SimpleNamespace(success=True)
+    TcpJoy.drive_ready(n, 1.1)
+    n.status.update(mode='tool_auto')
+    TcpJoy.drive_ready(n, 1.1)
+    assert n.ready_state == 'executing'
+    n.tool_pub.publish.reset_mock()
+    TcpJoy.drive_ready(n, 1.1)
+    assert n.ready_state == 'executing'
+    n.tool_pub.publish.assert_not_called()

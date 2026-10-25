@@ -154,7 +154,9 @@ class ControlModeManager(Node):
                     data.get('epoch') == self.core.epoch):
                 self.core.fault(source+' producer fault')
                 return
-            if source == 'tcp_ik' and data.get('stop') is True:
+            if source == 'tcp_ik' and data.get('pause') is True:
+                accepted = self.core.pause_tcp(data['epoch'], time.monotonic())
+            elif source == 'tcp_ik' and data.get('stop') is True:
                 accepted = self.core.stop_tcp(data['epoch'], time.monotonic())
             elif source == 'tool_auto':
                 if data.get('cancel') is True:

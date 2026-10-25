@@ -36,19 +36,20 @@ def active_core():
     return c
 
 
-def test_release_cancels_pending_and_fast_repress_cannot_resume():
+def test_release_cancels_pending_and_repress_solves_from_measured_pose():
     n = node()
     future = Mock()
     future.done.return_value = False
     n.pending = dict(futures=[future])
     send(n, joy(False))
     future.cancel.assert_called_once()
-    assert n.pending is None and n.blocked and not n.rearmed
-    assert messages(n) == [dict(epoch='e', stop=True)]
+    assert n.pending is None and not n.blocked and n.rearmed
+    assert messages(n) == [dict(epoch='e', pause=True)]
     send(n, joy(True, 1.), 10.015)
     tick(n)
-    assert messages(n) == [dict(epoch='e', stop=True)]
-    n.model.solve.assert_not_called()
+    assert messages(n)[0] == dict(epoch='e', pause=True)
+    n.model.solve.assert_called()
+    assert n.pending is not None
     assert n.failures == 0
 
 
@@ -154,5 +155,14 @@ def test_release_stops_even_after_collision_loss_clears_rearm_flag():
     assert not n.rearmed and n.deadman_engaged
     n.pub.publish.reset_mock()
     send(n, joy(False), 10.03)
-    assert n.blocked
-    assert messages(n) == [dict(epoch='e', stop=True)]
+    assert not n.blocked
+    assert messages(n) == [dict(epoch='e', pause=True)]
+
+
+def test_pause_retains_mode_and_epoch_but_discards_old_lead():
+    c = active_core()
+    epoch = c.epoch
+    assert c.pause_tcp(epoch, 10.01)
+    assert c.mode == 'tcp_ik' and c.epoch == epoch
+    assert c.target == c.goal == [.2]*6
+    assert not c.pause_tcp('old', 10.02)

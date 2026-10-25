@@ -4,6 +4,9 @@ import uuid
 
 
 MODES = ('manual', 'tcp_ik', 'tool_auto', 'hold', 'fault')
+# One DXL encoder count plus numerical allowance; retain the existing RMD bound.
+TCP_ENTRY_TOLERANCE = (2*math.pi/4096+1e-6, .001, .001, .001,
+                       2*math.pi/4096+1e-6, 2*math.pi/4096+1e-6)
 
 
 class ModeCore:
@@ -49,6 +52,8 @@ class ModeCore:
         self.startup_progress_epsilon = .0005
         self.tcp_entry_required = False
         self.tcp_entry = None
+        self.entry_stable_since = None
+        self.entry_anchor = None
 
     def tcp_entry_blocker(self, now):
         if not self.tcp_entry_required:
@@ -62,10 +67,13 @@ class ModeCore:
             return 'TCP entry feedback invalid'
         if any(min(v-lo, hi-v) < .1 for v, (lo, hi) in zip(self.position, self.limits)):
             return 'TCP entry requires 0.10 rad joint margin; request tcp_ready assessment'
-        if max(abs(a-b) for a, b in zip(self.position, proof['positions'])) > .001:
+        if any(abs(a-b) > tol for a, b, tol in
+               zip(self.position, proof['positions'], TCP_ENTRY_TOLERANCE)):
             return 'TCP entry feedback changed; recheck required'
         if max(map(abs, self.velocity)) > .02:
             return 'TCP entry requires stopped feedback'
+        if self.entry_stable_since is None or now-self.entry_stable_since < .2:
+            return 'TCP entry waiting for 0.20 sec stable feedback'
         return ''
 
     def feedback_allowed(self, position):
@@ -165,6 +173,14 @@ class ModeCore:
         if len(velocity) != len(position) or not all(map(math.isfinite, velocity)):
             self.fault('invalid joint velocity: missing or nonfinite values')
             return
+        if (not self.fresh(now) or self.entry_anchor is None
+                or max(map(abs, velocity)) > .02
+                or any(abs(a-b) > tol for a, b, tol in
+                       zip(position, self.entry_anchor, TCP_ENTRY_TOLERANCE))):
+            self.entry_anchor = list(position)
+            self.entry_stable_since = now if max(map(abs, velocity)) <= .02 else None
+        elif self.entry_stable_since is None:
+            self.entry_stable_since = now
         self.position, self.velocity, self.state_time = list(position), list(velocity), now
         if self.target is None:
             self.target = list(position)
@@ -241,6 +257,19 @@ class ModeCore:
         if max(abs(a-b) for a, b in zip(positions, self.position)) > .10:
             raise ValueError('streaming target exceeds 0.10 rad feedback lead')
         self.goal, self.ee, self.command_time = list(positions), ee, now
+        return True
+
+    def pause_tcp(self, epoch, now):
+        """Drop command lead at measured position while retaining TCP ownership."""
+        if self.mode != 'tcp_ik' or epoch != self.epoch or self.transitioning:
+            return False
+        if not self.ready or not self.fresh(now) or not self.valid(self.position):
+            self.fault('TCP pause without healthy controller/feedback')
+            return True
+        self.target = list(self.position)
+        self.goal = list(self.position)
+        self.command_time = now
+        self.reason = 'TCP paused; press L1 to resume from measured pose'
         return True
 
     def stop_tcp(self, epoch, now):

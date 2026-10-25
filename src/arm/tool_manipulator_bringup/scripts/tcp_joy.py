@@ -26,9 +26,11 @@ try:
 except ImportError:
     from arm_shared_kinematics import ArmKinematics, ARM_JOINTS
 from tcp_joy_core import TcpStepper, joy_twist, LimitBlocked, SafetyError, TcpMetrics
+from arm_mode_core import TCP_ENTRY_TOLERANCE
+from tcp_motion_workflow import TcpMotionWorkflow
 
 
-class TcpJoy(Node):
+class TcpJoy(TcpMotionWorkflow, Node):
     def __init__(self):
         super().__init__('tcp_joy')
         def param(name, default):
@@ -150,10 +152,10 @@ class TcpJoy(Node):
                 raise ValueError('TCP entry collision service unavailable; remain HOLD')
             if self.entry_pending:
                 p = self.entry_pending
-                if (p['epoch'] != s.get('epoch') or np.max(np.abs(q-p['q'])) > .001
+                if (p['epoch'] != s.get('epoch') or np.any(np.abs(q-p['q']) > TCP_ENTRY_TOLERANCE)
                         or self.full_state.keys() != p['full_state'].keys()
                         or any(abs(v-p['full_state'][j]) > .001
-                               for j, v in self.full_state.items())):
+                               for j, v in self.full_state.items() if j not in ARM_JOINTS)):
                     raise ValueError('TCP entry snapshot changed; recheck required')
                 if now-p['started'] > .15:
                     raise ValueError('TCP entry collision timeout; remain HOLD')
@@ -178,159 +180,6 @@ class TcpJoy(Node):
             self.entry_pending = None
             report(False, str(exc), q)
 
-    def _reset_ready(self):
-        for future in self.ready_checks:
-            if not future.done():
-                future.cancel()
-        self.ready_state, self.ready_checks = 'idle', []
-        self.ready_snapshot = self.ready_started = self.ready_future = None
-        self.ready_execution_id = self.ready_safe_at = None
-
-    def _fail_ready(self, reason):
-        self._reset_ready()
-        self.ready_state = 'failed'
-        self.auto_entry_armed = False
-        self.reason = reason
-
-    def drive_ready(self, now):
-        """Collision-check and execute one explicit-focus TCP-ready entry."""
-        s = self.status
-        if not self.ready_enabled or not self.auto_entry_armed:
-            return
-        if (now-self.status_time >= .3 or now-self.state_time >= .3 or self.measured is None
-                or not s.get('ready') or not s.get('startup_complete') or s.get('focus') != 'arm'):
-            return
-        if self.ready_state == 'idle':
-            if s.get('mode') != 'hold' or s.get('transitioning'):
-                return
-            if not self.check.service_is_ready():
-                self.reason = 'waiting for MoveIt collision service before TCP ready'
-                return
-            count = max(1, math.ceil(float(np.max(np.abs(self.ready_goal-self.measured))) /
-                                     self.ready_step))
-            self.ready_snapshot = self.measured.copy()
-            self.ready_full_state = dict(self.full_state)
-            self.ready_started = now
-            self.ready_checks = []
-            self.ready_requests = []
-            for q in np.linspace(self.measured, self.ready_goal, count+1):
-                req = GetStateValidity.Request()
-                values = dict(self.full_state)
-                values.update(zip(ARM_JOINTS, map(float, q)))
-                req.robot_state.joint_state.name = list(values)
-                req.robot_state.joint_state.position = list(values.values())
-                req.robot_state.is_diff = True
-                self.ready_requests.append(req)
-            self.ready_checks.append(self.check.call_async(self.ready_requests[0]))
-            self.ready_state = 'checking'
-            self.reason = 'checking path to TCP ready'
-            return
-        if self.ready_state == 'checking':
-            if (self.full_state.keys() != self.ready_full_state.keys()
-                    or any(abs(v-self.ready_full_state[j]) > .001
-                           for j, v in self.full_state.items() if j not in ARM_JOINTS)):
-                self._fail_ready('non-arm feedback changed during TCP ready check; remain HOLD')
-                return
-            if (not all(f.done() for f in self.ready_checks)
-                    and now-self.ready_started > self.ready_timeout):
-                completed = sum(f.done() for f in self.ready_checks)
-                self._fail_ready(
-                    'TCP ready collision check timeout (%d/%d complete); remain HOLD' %
-                    (completed, len(self.ready_requests)))
-                return
-            if np.max(np.abs(self.measured-self.ready_snapshot)) > .01:
-                self._fail_ready('feedback changed during TCP ready check; remain HOLD')
-                return
-            if not all(f.done() for f in self.ready_checks):
-                return
-            if any(f.result() is None or not f.result().valid for f in self.ready_checks):
-                self._fail_ready('TCP ready path collision/state invalid; remain HOLD')
-                return
-            if len(self.ready_checks) < len(self.ready_requests):
-                self.reason = 'checking path to TCP ready (%d/%d complete)' % (
-                    len(self.ready_checks), len(self.ready_requests))
-                self.ready_checks.append(self.check.call_async(
-                    self.ready_requests[len(self.ready_checks)]))
-                self.ready_started = now
-                return
-            if not self.deadman or now-self.joy_time >= .25:
-                self.reason = 'TCP ready path verified; hold L1 to move'
-                return
-            if not self.tool_mode.service_is_ready():
-                self._fail_ready('tool_auto mode service unavailable; remain HOLD')
-                return
-            self.ready_future = self.tool_mode.call_async(Trigger.Request())
-            self.ready_state = 'request_tool'
-            self.reason = 'requesting managed TCP ready motion'
-            return
-        if self.ready_state == 'request_tool':
-            if not self.ready_future.done():
-                return
-            result = self.ready_future.result()
-            if result is None or not result.success:
-                self._fail_ready('tool_auto request rejected; remain HOLD')
-                return
-            self.ready_state = 'wait_tool'
-            return
-        if self.ready_state == 'wait_tool':
-            if s.get('mode') != 'tool_auto' or s.get('transitioning'):
-                return
-            if not self.deadman or now-self.joy_time >= .25:
-                self._fail_ready('L1 released before TCP ready motion; remain HOLD')
-                if self.cancel.service_is_ready():
-                    self.cancel.call_async(Trigger.Request())
-                return
-            self.ready_execution_id = 'tcp-ready-'+uuid.uuid4().hex
-            self.tool_pub.publish(String(data=json.dumps(dict(
-                epoch=s['epoch'], execution_id=self.ready_execution_id,
-                waypoints=[self.ready_goal.tolist()], durations=[self.ready_duration]))))
-            self.ready_state = 'executing'
-            self.reason = 'moving to TCP ready'
-            return
-        if self.ready_state == 'executing':
-            if not self.deadman or now-self.joy_time >= .25:
-                self.tool_pub.publish(String(data=json.dumps(dict(
-                    epoch=s['epoch'], execution_id=self.ready_execution_id, cancel=True))))
-                self._fail_ready('L1 released or joystick stale during TCP ready; remain HOLD')
-                return
-            if (s.get('last_execution_id') == self.ready_execution_id and
-                    s.get('last_execution_result') == 'succeeded' and s.get('mode') == 'hold'):
-                self.ready_state = 'await_entry'
-                self.ready_safe_at = None
-                self.reason = 'TCP ready reached; verifying entry'
-                if vars(self).get('returning_home', False):
-                    self.returning_home = False
-                    self.ready_goal = self.default_ready_goal.copy()
-                    self.auto_entry_armed = False
-                    self.ready_state = 'idle'
-                    self.reason = 'manual Stop_pose reached; release and press L1 for TCP entry'
-            elif s.get('mode') == 'fault' or (s.get('last_execution_id') == self.ready_execution_id
-                                              and s.get('last_execution_result') == 'aborted'):
-                self._fail_ready('TCP ready execution failed; inspect arm')
-            return
-        if self.ready_state == 'await_entry' and self.ready_safe_at is not None:
-            # Allow the manager subscription to consume the published proof first.
-            if now-self.ready_safe_at < .1 or not self.tcp_mode.service_is_ready():
-                return
-            self.ready_future = self.tcp_mode.call_async(Trigger.Request())
-            self.ready_state = 'request_tcp'
-            self.reason = 'requesting TCP_IK after verified TCP ready'
-            return
-        if self.ready_state == 'request_tcp' and self.ready_future.done():
-            result = self.ready_future.result()
-            self.auto_entry_armed = False
-            if result is not None and result.success:
-                self.reason = 'TCP_IK transition requested'
-            else:
-                detail = getattr(result, 'message', '') if result is not None else ''
-                if detail == 'TCP entry feedback changed; recheck required':
-                    self.ready_state = 'await_entry'
-                    self.ready_safe_at = None
-                    self.auto_entry_armed = True
-                    self.reason = 'TCP entry feedback changed; checking again'
-                else:
-                    self.ready_state = 'failed'
-                    self.reason = 'TCP_IK request rejected: '+detail
 
     def on_status(self, msg):
         try:
@@ -345,6 +194,8 @@ class TcpJoy(Node):
                 self.auto_entry_armed = True
             elif focus != 'arm':
                 self._reset_ready()
+                self.returning_home = False
+                self.ready_goal = self.default_ready_goal.copy()
                 self.auto_entry_armed = False
             self.last_focus = focus
         except ValueError:
@@ -392,6 +243,15 @@ class TcpJoy(Node):
         self.joy_time = time.monotonic()
         home = valid and bool(msg.buttons[3])
         if (home and not vars(self).get('previous_home', False)
+                and vars(self).get('returning_home', False)):
+            if self.ready_execution_id is not None:
+                self.tool_pub.publish(String(data=json.dumps(dict(
+                    epoch=self.status['epoch'], execution_id=self.ready_execution_id, cancel=True))))
+            if self.cancel.service_is_ready():
+                self.cancel.call_async(Trigger.Request())
+            self._fail_ready('manual Stop_pose cancelled by square')
+            self.previous_home = True
+        if (home and not vars(self).get('previous_home', False)
                 and vars(self).get('ready_enabled', False)
                 and self.status.get('focus') == 'arm'
                 and self.status.get('mode') in ('tcp_ik', 'hold')
@@ -404,18 +264,16 @@ class TcpJoy(Node):
             self.blocked = True
             if self.cancel.service_is_ready():
                 self.cancel.call_async(Trigger.Request())
-            self.reason = 'manual Stop_pose requested; hold L1 after path check'
+            self.reason = 'manual Stop_pose requested; checking path'
         self.previous_home = home
-        if (not self.deadman and vars(self).get('ready_state') == 'executing'):
+        if (not self.deadman and vars(self).get('ready_state') == 'executing'
+                and not vars(self).get('returning_home', False)):
             self.tool_pub.publish(String(data=json.dumps(dict(
                 epoch=self.status['epoch'], execution_id=self.ready_execution_id, cancel=True))))
             self._fail_ready('L1 released during TCP ready; remain HOLD')
-        if (valid and self.deadman and not was_pressed
-                and vars(self).get('ready_enabled', False)
-                and self.status.get('mode') == 'hold'
-                and self.status.get('focus') == 'arm'):
-            self._reset_ready()
-            self.auto_entry_armed = True
+        if valid and self.deadman and not was_pressed and self.rearmed and not self.blocked:
+            self.discard()
+            self.stepper.q = self.stepper.pose = None
         if not valid:
             self.deadman = False
             self.twist = np.zeros(6)
@@ -438,6 +296,12 @@ class TcpJoy(Node):
         self.twist = np.zeros(6)
         self.rearmed = False
         if self.epoch is None or self.blocked:
+            return
+        if reason == 'L1 released':
+            self.deadman_engaged = False
+            self.stepper.q = self.stepper.pose = None
+            self.reason = 'TCP paused; press L1 to resume from measured pose'
+            self.pub.publish(String(data=json.dumps(dict(epoch=self.epoch, pause=True))))
             return
         self.blocked = True
         self.reason = 'HOLD requested: '+reason+'; explicitly re-enter TCP_IK'
@@ -463,6 +327,9 @@ class TcpJoy(Node):
             # Stop heartbeat as a second stop path: manager command watchdog -> HOLD.
 
     def publish(self):
+        if not self.blocked and self.epoch is not None and not self.deadman:
+            self.pub.publish(String(data=json.dumps(dict(epoch=self.epoch, pause=True))))
+            return
         if self.stepper.q is not None and not self.blocked:
             self.pub.publish(String(data=json.dumps(dict(epoch=self.epoch,
                 positions=self.stepper.q.tolist(), ee_velocity=0.))))
