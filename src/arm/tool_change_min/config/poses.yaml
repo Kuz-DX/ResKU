@@ -8,6 +8,13 @@
 # Current captures fail joint limits. Do not enable later stages before re-teaching.
 development:
   stop_after_state: home
+tool_changer:
+  enabled: false
+  command: LOCK  # UNLOCK is also supported; no automatic command changes.
+  docking_timeout_s: null  # Set after reviewing docking/Arduino timing.
+  position_tolerance_rad: 0.005
+  velocity_tolerance_rad_s: 0.02
+  settled_samples: 5
 feedback:
   # /joint_states receive-age upper bound; set from the approved publisher rate.
   joint_state_max_age_s: 0.5

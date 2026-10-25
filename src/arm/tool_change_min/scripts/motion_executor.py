@@ -45,7 +45,8 @@ from tool_change_min.config import require_for_stop_state
 # URDF와 하드웨어 설정을 이용해 관절 순서와 제한을 확인합니다.
 from tool_change_min.kinematics import ArmKinematics
 from tool_change_min.ee_alignment import EeAlignment
-# 자세 이동, 궤적 실행, 상대 손목 회전 서비스 형식입니다.
+from tool_change_min.managed_path import ManagedPath
+# 자세 이동, 궤적 실행 및 별도 EE 정렬 서비스 형식입니다.
 from tool_change_min.srv import AlignEe, ExecuteTrajectory, MoveNamedPose
 
 
@@ -82,6 +83,9 @@ class MotionExecutor(Node):
         # FollowJointTrajectory 액션 서버의 이름을 기본 경로와 함께 선언합니다.
         self.declare_parameter("arm_action", "/arm_controller/follow_joint_trajectory")
         self.declare_parameter("ee_action", "/ee_controller/follow_joint_trajectory")
+        self.backend = self.declare_parameter('control_backend', 'jtc').value
+        if self.backend not in ('jtc', 'managed'):
+            raise ValueError('control_backend must be jtc or managed')
         # 필수 자세 및 정지 상태 설정을 로드하고 검증합니다.
         self.config = require_for_stop_state(self.get_parameter("poses_yaml").value, tool_id=None)
         # 서비스 응답 및 궤적 벡터의 기준 관절 순서를 보관합니다.
@@ -89,8 +93,7 @@ class MotionExecutor(Node):
         # URDF와 하드웨어 설정을 바탕으로 팔 기구학 및 제한 모델을 생성합니다.
         self.model = ArmKinematics(self.get_parameter("urdf_xacro").value,
                                    self.get_parameter("hardware_yaml").value)
-        self.ee_model = EeAlignment(self.get_parameter("urdf_xacro").value,
-                                   self.get_parameter("hardware_yaml").value)
+        self.ee_model = None  # Construct only for an explicitly requested legacy EE alignment.
         self.ee_snapshot = None
         # YAML과 URDF의 관절 순서가 다르면 위치값 대응이 어긋나므로 시작을 거부합니다.
         if self.joint_names != self.model.joint_names:
@@ -113,11 +116,17 @@ class MotionExecutor(Node):
         self.create_subscription(JointState, "/joint_states", self._joint_state, 20,
                                  callback_group=self.feedback_group)
         # 지정된 FollowJointTrajectory 서버에 목표 궤적을 보낼 액션 클라이언트를 만듭니다.
-        self.client = ActionClient(self, FollowJointTrajectory, self.get_parameter("arm_action").value,
-                                   callback_group=self.feedback_group)
-        self.ee_client = ActionClient(
-            self, FollowJointTrajectory, self.get_parameter("ee_action").value,
-            callback_group=self.feedback_group)
+        self.managed = None
+        self.client = self.ee_client = None
+        if self.backend == 'managed':
+            self.managed = ManagedPath(self, self.model, self.joint_names,
+                float(self.config['motion']['ik_limit_margin_rad']), self.feedback_group)
+        else:
+            self.client = ActionClient(self, FollowJointTrajectory, self.get_parameter("arm_action").value,
+                                       callback_group=self.feedback_group)
+            self.ee_client = ActionClient(
+                self, FollowJointTrajectory, self.get_parameter("ee_action").value,
+                callback_group=self.feedback_group)
         self.create_subscription(JointState, "/joint_states", self._ee_state, 20,
                                  callback_group=self.feedback_group)
         self.create_service(AlignEe, "align_ee", self._align_ee)
@@ -125,7 +134,6 @@ class MotionExecutor(Node):
         self.create_service(MoveNamedPose, "move_to_named_pose", self._move_named)
         # 전달된 관절 궤적의 검증 및 실행 요청을 처리하는 서비스를 등록합니다.
         self.create_service(ExecuteTrajectory, "execute_trajectory", self._execute)
-        # 상대 손목 yaw 회전 요청을 처리하는 서비스를 등록합니다.
 
     # 한 메시지에서 완전하고 안전한 여섯 축 관절 상태만 저장합니다.
     def _joint_state(self, message: JointState):
@@ -181,6 +189,8 @@ class MotionExecutor(Node):
     def _send(self, trajectory: JointTrajectory, timeout_s: float) -> str:
         if self.motion_fault:
             raise RuntimeError("motion blocked until restart and physical stop check: " + self.motion_fault)
+        if getattr(self, 'managed', None) is not None:
+            return self.managed.send(trajectory, timeout_s)
         # 제한 시간은 유한한 양수여야 합니다.
         if timeout_s <= 0.0 or not math.isfinite(timeout_s):
             # 유효하지 않은 제한 시간으로 액션을 보내지 않습니다.
@@ -269,8 +279,13 @@ class MotionExecutor(Node):
 
     def _align_ee(self, request, response):
         try:
+            if getattr(self, 'backend', 'jtc') == 'managed':
+                raise RuntimeError('EE alignment required but managed velocity-mode alignment is not implemented')
             if self.motion_fault:
                 raise RuntimeError(self.motion_fault)
+            if self.ee_model is None:
+                self.ee_model = EeAlignment(self.get_parameter('urdf_xacro').value,
+                                           self.get_parameter('hardware_yaml').value)
             settings = self.config["motion"]["ee_align"]
             reference = float(settings["reference_raw"])
             duration = float(settings["duration_s"])

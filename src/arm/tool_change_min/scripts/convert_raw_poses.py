@@ -20,6 +20,8 @@ def convert(capture, hardware, names, margin):
         raise ValueError("capture raw units do not match hardware vendors")
     converted, errors = {}, []
     for label, sample in capture["captures"].items():
+        if label in ("tool_lock", "tool_lock1"):
+            continue  # Retired arm-lock captures are not motion candidates.
         if len(sample["raw"]) != len(expected):
             raise ValueError(f"{label}: incorrect number of raw values")
         joints = {}

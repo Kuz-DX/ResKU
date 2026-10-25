@@ -1,0 +1,160 @@
+{
+  "scope": "actual ROS topics/services; mocked arm/EE/IK/controller state",
+  "domain": 187,
+  "no_hardware": true,
+  "results": [
+    {
+      "scenario": "success",
+      "result": "PASS",
+      "commands": [
+        "LOCK"
+      ],
+      "moves": [
+        "HOME",
+        "DOCKING_WAIT",
+        "TOOL1_PRE",
+        "DOCKED_MOCK",
+        "RETURN_DOCKING_WAIT",
+        "RETURN_HOME"
+      ],
+      "final_state": "DONE"
+    },
+    {
+      "scenario": "unlock",
+      "result": "PASS",
+      "commands": [
+        "UNLOCK"
+      ],
+      "moves": [
+        "HOME",
+        "DOCKING_WAIT",
+        "TOOL1_PRE",
+        "DOCKED_MOCK",
+        "RETURN_DOCKING_WAIT",
+        "RETURN_HOME"
+      ],
+      "final_state": "DONE"
+    },
+    {
+      "scenario": "wrong_then_success",
+      "result": "PASS",
+      "commands": [
+        "LOCK"
+      ],
+      "moves": [
+        "HOME",
+        "DOCKING_WAIT",
+        "TOOL1_PRE",
+        "DOCKED_MOCK",
+        "RETURN_DOCKING_WAIT",
+        "RETURN_HOME"
+      ],
+      "final_state": "DONE"
+    },
+    {
+      "scenario": "timeout",
+      "result": "PASS",
+      "commands": [
+        "LOCK",
+        "STOP"
+      ],
+      "moves": [
+        "HOME",
+        "DOCKING_WAIT",
+        "TOOL1_PRE",
+        "DOCKED_MOCK"
+      ],
+      "final_state": "HOLD"
+    },
+    {
+      "scenario": "error",
+      "result": "PASS",
+      "commands": [
+        "LOCK",
+        "STOP"
+      ],
+      "moves": [
+        "HOME",
+        "DOCKING_WAIT",
+        "TOOL1_PRE",
+        "DOCKED_MOCK"
+      ],
+      "final_state": "HOLD"
+    },
+    {
+      "scenario": "cancel",
+      "result": "PASS",
+      "commands": [
+        "LOCK",
+        "STOP"
+      ],
+      "moves": [
+        "HOME",
+        "DOCKING_WAIT",
+        "TOOL1_PRE",
+        "DOCKED_MOCK"
+      ],
+      "final_state": "HOLD"
+    },
+    {
+      "scenario": "drift",
+      "result": "PASS",
+      "commands": [
+        "LOCK",
+        "STOP"
+      ],
+      "moves": [
+        "HOME",
+        "DOCKING_WAIT",
+        "TOOL1_PRE",
+        "DOCKED_MOCK"
+      ],
+      "final_state": "HOLD"
+    },
+    {
+      "scenario": "feedback_loss",
+      "result": "PASS",
+      "commands": [
+        "LOCK",
+        "STOP"
+      ],
+      "moves": [
+        "HOME",
+        "DOCKING_WAIT",
+        "TOOL1_PRE",
+        "DOCKED_MOCK"
+      ],
+      "final_state": "HOLD"
+    },
+    {
+      "scenario": "controller_loss",
+      "result": "PASS",
+      "commands": [
+        "LOCK",
+        "STOP"
+      ],
+      "moves": [
+        "HOME",
+        "DOCKING_WAIT",
+        "TOOL1_PRE",
+        "DOCKED_MOCK"
+      ],
+      "final_state": "HOLD"
+    },
+    {
+      "scenario": "hardware_fault",
+      "result": "PASS",
+      "commands": [
+        "LOCK",
+        "STOP"
+      ],
+      "moves": [
+        "HOME",
+        "DOCKING_WAIT",
+        "TOOL1_PRE",
+        "DOCKED_MOCK"
+      ],
+      "final_state": "HOLD"
+    }
+  ]
+}

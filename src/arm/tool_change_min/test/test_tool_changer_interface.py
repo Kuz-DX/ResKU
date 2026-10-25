@@ -16,7 +16,7 @@ from tool_change_min.config import load_poses, validate_request_config
 def test_unimplemented_handshake_rejected_before_any_arm_motion(stage):
     config = load_poses(PACKAGE/'config/poses.yaml')
     config['development']['stop_after_state'] = stage
-    with pytest.raises(ValueError, match='Arduino tool changer handshake is not implemented'):
+    with pytest.raises(ValueError, match='Arduino tool changer interface is disabled'):
         validate_request_config(config)
 
 
@@ -38,6 +38,7 @@ def harness(validate):
     n.config = load_poses(PACKAGE/'config/poses.yaml')
     n.config['timeouts_s']['ee_align'] = 1.
     n.state = 'IDLE'
+    n.hardware_error = ''
     n._named = Mock()
     n._cartesian_target = Mock()
     n._pause_after = Mock(return_value=False)
@@ -76,3 +77,23 @@ def test_old_arm_lock_endpoint_and_runtime_configuration_removed():
     assert 'lock_duration_s' not in config['motion']
     assert not {'tool_lock', 'tool_lock1'} & config['named_poses'].keys()
     assert config['development']['stop_after_state'] == 'home'
+
+
+@pytest.mark.parametrize('success', [False, True])
+def test_fsm_retreat_only_after_handshake_success(success):
+    n = harness(lambda *args: None)
+    events = []
+    n._named.side_effect = lambda state, *args: events.append(state)
+    def handshake():
+        events.append('ARDUINO_WAIT')
+        if not success:
+            raise RuntimeError('Arduino timeout')
+        events.append('ARDUINO_COMPLETE')
+    n._arduino_lock = handshake
+    n._run(1)
+    if success:
+        assert events[-3:] == ['ARDUINO_COMPLETE', 'RETURN_DOCKING_WAIT', 'RETURN_HOME']
+        assert n.state == 'DONE'
+    else:
+        assert events[-1] == 'ARDUINO_WAIT' and n.state == 'HOLD'
+        assert 'RETURN_DOCKING_WAIT' not in events

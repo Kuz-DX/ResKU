@@ -1,5 +1,6 @@
 """Fail-closed, stage-scoped loading for the tool 1 teach-pose file."""
 from pathlib import Path
+import math
 from typing import Any
 
 import yaml
@@ -95,9 +96,23 @@ def validate_request_config(data: dict[str, Any], tool_id: int = 1) -> None:
     if tool_id not in (0, 1):
         raise ValueError(f"unsupported tool ID: {tool_id}")
     stop_after = stop_after_state(data)
+    if data.get('control_backend') == 'managed' and stop_after not in ('home', 'docking_wait'):
+        raise ValueError('EE alignment is required; managed velocity-mode alignment is not implemented')
     if stop_after in ('lock', 'return_docking_wait', 'return_home', 'done'):
-        raise ValueError('Arduino tool changer handshake is not implemented; '
-                         'development.stop_after_state must not advance beyond tool1_target')
+        settings = data.get('tool_changer', {})
+        if settings.get('enabled') is not True:
+            raise ValueError('Arduino tool changer interface is disabled')
+        if settings.get('command') not in ('LOCK', 'UNLOCK'):
+            raise ValueError('tool_changer.command must be LOCK or UNLOCK')
+        for name, value in [*[(n, settings.get(n)) for n in
+                ('docking_timeout_s', 'position_tolerance_rad', 'velocity_tolerance_rad_s')],
+                ('feedback.joint_state_max_age_s', data.get('feedback', {}).get('joint_state_max_age_s')),
+                ('timeouts_s.lock', data.get('timeouts_s', {}).get('lock'))]:
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(value) or value <= 0):
+                raise ValueError(f'{name} must be finite and positive')
+        if type(settings.get('settled_samples')) is not int or settings['settled_samples'] < 2:
+            raise ValueError('settled_samples must be an integer >=2')
     missing = []
     for path in _required_paths(stop_after):
         dotted_path = path.replace("tool1_", f"tool{tool_id}_")

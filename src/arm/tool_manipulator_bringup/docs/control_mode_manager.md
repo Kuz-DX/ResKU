@@ -205,3 +205,15 @@ least 0.10 rad joint margin and scaled condition <=20. Requests without a valid
 assessment remain HOLD and report a reason; this also applies to Options focus
 activation. No tcp_ready movement is automatic. Candidate comparisons, limitations
 and the assessment protocol are documented in [tcp_ready.md](tcp_ready.md).
+
+## Timed tool paths
+
+Tool-auto messages may include `durations`, one positive segment duration per
+waypoint (each <120 s). The manager synchronizes joint interpolation, extends time
+when existing speed caps require it, and still waits for feedback settling at each
+point. No acceleration bound is inferred. Untimed paths retain previous behavior.
+Status adds `last_execution_id` and `last_execution_result` (`succeeded`/`aborted`).
+A tool producer can send `{epoch, execution_id, cancel:true}` on
+`/arm/input/tool_auto`; only its matching active execution can be cancelled.
+See [managed tool paths](../../tool_change_min/docs/managed_tool_paths.md) for the
+adapter, collision validation and required EE alignment blocker.

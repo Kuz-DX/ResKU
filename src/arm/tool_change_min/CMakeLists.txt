@@ -21,6 +21,9 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 ament_get_python_install_dir(PYTHON_INSTALL_DIR)
 install(FILES
   ${PROJECT_NAME}/config.py
+  ${PROJECT_NAME}/changer_protocol.py
+  ${PROJECT_NAME}/managed_path.py
+  ${PROJECT_NAME}/ee_alignment.py
   ${PROJECT_NAME}/grasp_sequence.py
   ${PROJECT_NAME}/kinematics.py
   DESTINATION "${PYTHON_INSTALL_DIR}/${PROJECT_NAME}")

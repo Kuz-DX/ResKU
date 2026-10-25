@@ -25,6 +25,10 @@ class ModeCore:
         self.command_time = -math.inf
         self.queue = []
         self.execution_id = None
+        self.path_durations = []
+        self.path_speeds = list(speeds)
+        self.last_execution_id = None
+        self.last_execution_result = None
         self.started = 0.
         self.settled = 0
         self.startup_enabled = startup_recovery_enabled
@@ -169,10 +173,15 @@ class ModeCore:
         return self.position is not None and 0 <= now-self.state_time < .5
 
     def invalidate(self):
+        if self.execution_id is not None:
+            self.last_execution_id = self.execution_id
+            self.last_execution_result = 'aborted'
         self.epoch = uuid.uuid4().hex
         self.goal, self.queue, self.execution_id, self.ee = None, [], None, 0.
         self.command_time = -math.inf
         self.settled = 0
+        self.path_durations = []
+        self.path_speeds = list(self.speeds)
 
     def fault(self, reason):
         self.invalidate()
@@ -249,7 +258,7 @@ class ModeCore:
         self.reason = 'TCP deadman stop; explicit mode request required'
         return True
 
-    def path(self, epoch, execution_id, waypoints, now):
+    def path(self, epoch, execution_id, waypoints, now, durations=None):
         if (self.mode != 'tool_auto' or epoch != self.epoch or self.transitioning or
                 self.focus != 'arm' or not self.ready or not self.fresh(now)):
             return False
@@ -259,10 +268,36 @@ class ModeCore:
             raise ValueError('execution_id and 1..1000 waypoints required')
         if not all(self.valid(p) for p in waypoints):
             raise ValueError('invalid waypoint')
+        if durations is not None and (len(durations) != len(waypoints) or
+                not all(type(d) in (int, float) and math.isfinite(d) and 0 < d < 120.
+                        for d in durations)):
+            raise ValueError('invalid waypoint durations')
         self.queue = [list(p) for p in waypoints]
+        self.path_durations = list(durations) if durations is not None else [None]*len(waypoints)
         self.execution_id = execution_id
-        self.goal = self.queue.pop(0)
+        self._next_waypoint()
         self.started = now
+        return True
+
+    def _next_waypoint(self):
+        self.goal = self.queue.pop(0)
+        duration = self.path_durations.pop(0)
+        if duration is None:
+            self.path_speeds = list(self.speeds)
+        else:
+            # Preserve synchronized joint-line geometry, extending time if
+            # necessary instead of speeding past any existing joint bound.
+            duration = max(duration, max(abs(b-a)/s for a, b, s in
+                                         zip(self.target, self.goal, self.speeds)))
+            self.path_speeds = [abs(b-a)/duration for a, b in zip(self.target, self.goal)]
+
+    def cancel_path(self, epoch, execution_id, now):
+        if (self.mode != 'tool_auto' or epoch != self.epoch
+                or self.execution_id != execution_id or execution_id is None):
+            return False
+        self.request('hold', now)
+        if self.fresh(now):
+            self.target = self.goal = list(self.position)
         return True
 
     def tick(self, now, dt):
@@ -294,8 +329,9 @@ class ModeCore:
                 self.goal = list(self.position)
         goal = self.goal if self.goal is not None else self.target
         step = min(max(dt, 0.), .04)
+        speeds = self.path_speeds if self.mode == 'tool_auto' and self.execution_id else self.speeds
         self.target = [a+max(-s*step, min(s*step,b-a))
-                       for a,b,s in zip(self.target, goal, self.speeds)]
+                       for a,b,s in zip(self.target, goal, speeds)]
         stopped = (max(map(abs, self.velocity)) <= .02 and
                    max(abs(a-b) for a,b in zip(self.position, goal)) <= .01 and
                    max(abs(a-b) for a,b in zip(self.target, goal)) < 1e-6)
@@ -321,9 +357,12 @@ class ModeCore:
                 self.fault('waypoint timeout')
             elif self.settled >= 5:
                 if self.queue:
-                    self.goal = self.queue.pop(0)
+                    self._next_waypoint()
                     self.started, self.settled = now, 0
                 else:
+                    completed = self.execution_id
                     self.request('hold', now)
+                    self.last_execution_id = completed
+                    self.last_execution_result = 'succeeded'
                     self.reason = 'path completed'
         return list(self.target)

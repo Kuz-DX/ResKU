@@ -9,8 +9,8 @@ Position waypoint k is ``p0 + (k/N)(pt-p0)`` and orientation follows the
 shortest SO(3) rotation; N is the larger position/rotation step count. Every
 waypoint must solve within the joint limits before the resulting multi-point
 JointTrajectory is sent to the controller.
-LOCK is reserved for the Arduino command/completion handshake. Until that
-interface is implemented, the stage fails closed without wrist motion or retreat.
+LOCK/UNLOCK sends an Arduino command after measured docking and waits for its
+matching completion. Errors never permit speculative retreat or wrist locking.
 Every service/controller failure or timeout enters HOLD without retry or any
 speculative return motion.
 EE_ALIGN chooses the nearest bounded q_ref+n*pi EE angle and verifies actual
@@ -24,6 +24,9 @@ from __future__ import annotations
 
 # 서비스 대기 루프에서 짧은 간격으로 실행을 양보하고 제한 시간을 측정합니다.
 import time
+import math
+import threading
+import json
 
 # ROS 2 Python 클라이언트를 초기화하고 종료하는 기능을 제공합니다.
 import rclpy
@@ -36,6 +39,11 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.node import Node
 # 요청 번호와 상태 문자열을 토픽으로 주고받는 메시지 형식입니다.
 from std_msgs.msg import Int32, String
+from sensor_msgs.msg import JointState
+from std_srvs.srv import Trigger
+from controller_manager_msgs.srv import ListControllers
+from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
+from tool_change_min.changer_protocol import ChangerTransaction
 
 # 정지 상태 설정 검증과 개발 단계별 정지 지점을 처리합니다.
 from tool_change_min.config import require_for_stop_state, stop_after_state, validate_request_config
@@ -55,6 +63,12 @@ class ToolChangeFsm(Node):
         self.declare_parameter("poses_yaml", f"{share}/config/poses.yaml")
         # 정지 자세를 포함한 필수 설정을 읽고 검증합니다.
         self.config = require_for_stop_state(self.get_parameter("poses_yaml").value, tool_id=None)
+        self.control_backend = self.declare_parameter('control_backend', 'jtc').value
+        if self.control_backend not in ('jtc', 'managed'):
+            raise ValueError('invalid control_backend')
+        self.config['control_backend'] = self.control_backend
+        if self.control_backend == 'managed' and self.config['development']['stop_after_state'] not in ('home', 'docking_wait'):
+            raise ValueError('EE alignment required; compatible managed alignment is not implemented')
         # 설정된 개발용 정지 단계 이름을 가져옵니다.
         self.stop_after = stop_after_state(self.config)
         # 시작 상태는 어떤 요청도 처리 중이지 않은 IDLE입니다.
@@ -65,6 +79,36 @@ class ToolChangeFsm(Node):
         self.create_subscription(Int32, "/selected_tool_id", self._request, 10)
         # 미리 지정한 관절 자세로 이동하는 서비스 클라이언트를 만듭니다.
         self.client_group = ReentrantCallbackGroup()
+        self.changer_guard = threading.RLock()
+        self.transaction = None
+        self.docking_goal = None
+        self.feedback_snapshot = None
+        self.feedback_sequence = 0
+        self.hardware_error = ''
+        self.manager_status = ({}, -math.inf)
+        self.cancelled = False
+        self.controller_checked = -math.inf
+        self.controller_active = False
+        self.controller_future = None
+        self.controller_client = self.create_client(ListControllers,
+            '/controller_manager/list_controllers', callback_group=self.client_group)
+        self.create_timer(.2, self._controller_health, callback_group=self.client_group)
+        qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE,
+                         durability=DurabilityPolicy.VOLATILE)
+        self.changer_pub = self.create_publisher(String, '/tool_changer/command', qos)
+        self.create_subscription(String, '/tool_changer/status', self._changer_status, qos,
+                                 callback_group=self.client_group)
+        self.create_subscription(JointState, '/joint_states', self._feedback, 10,
+                                 callback_group=self.client_group)
+        fault_qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                              durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self.create_subscription(String, '/control/hardware_fault', self._hardware_fault,
+                                 fault_qos, callback_group=self.client_group)
+        if self.control_backend == 'managed':
+            self.create_subscription(String, '/arm/control_status', self._manager_status,
+                                     fault_qos, callback_group=self.client_group)
+        self.create_service(Trigger, '/tool_change/cancel', self._cancel_changer,
+                            callback_group=self.client_group)
         self.named = self.create_client(MoveNamedPose, "move_to_named_pose",
                                        callback_group=self.client_group)
         self.align = self.create_client(AlignEe, "align_ee", callback_group=self.client_group)
@@ -117,6 +161,8 @@ class ToolChangeFsm(Node):
 
     # 설정된 이름 자세로 이동하는 단계를 실행합니다.
     def _named(self, state: str, pose: str, timeout_key: str):
+        if self.cancelled or self.hardware_error:
+            raise RuntimeError(self.hardware_error or 'tool changer cancelled')
         # 서비스 요청 전에 현재 FSM 단계를 상태 토픽에 알립니다.
         self._publish(state)
         # 이름 자세 이동 서비스의 요청 메시지를 만듭니다.
@@ -144,6 +190,14 @@ class ToolChangeFsm(Node):
         solved = self._call(self.linear_pose, request, timeout)
         execute = ExecuteTrajectory.Request()
         execute.trajectory, execute.timeout_s = solved.trajectory, timeout
+        # Keep the executed endpoint; controller action success alone is not docking proof.
+        if (list(execute.trajectory.joint_names) != list(self.config['joint_names'])
+                or not execute.trajectory.points):
+            raise ValueError('invalid docking trajectory endpoint')
+        self.docking_goal = list(execute.trajectory.points[-1].positions)
+        if (len(self.docking_goal) != len(self.config['joint_names'])
+                or not all(math.isfinite(v) for v in self.docking_goal)):
+            raise ValueError('invalid docking goal')
         self._call(self.execute, execute, timeout)
 
     # 설정에서 지정한 단계에 도달했는지 확인하고 개발용 일시 정지를 수행합니다.
@@ -161,14 +215,163 @@ class ToolChangeFsm(Node):
         return True
 
     def _arduino_lock(self):
-        """Reserved interface; no motion until command/completion integration exists."""
-        raise RuntimeError('Arduino tool changer handshake is not implemented; no retreat permitted')
+        """Wait for measured docking, then one command and matching completion."""
+        settings = self.config['tool_changer']
+        if settings.get('enabled') is not True:
+            raise RuntimeError('Arduino tool changer interface is disabled')
+        deadline = time.monotonic()+float(settings['docking_timeout_s'])
+        settled, previous = 0, self.feedback_sequence
+        while rclpy.ok() and time.monotonic() < deadline:
+            with self.changer_guard:
+                self._check_changer_safety()
+                if self.feedback_sequence != previous:
+                    previous = self.feedback_sequence
+                    settled = settled+1 if self._docked() else 0
+                if settled >= settings['settled_samples']:
+                    if self.changer_pub.get_subscription_count() == 0:
+                        raise RuntimeError('Arduino command subscriber unavailable')
+                    self.transaction = ChangerTransaction(settings['command'],
+                        float(self.config['timeouts_s']['lock']), time.monotonic())
+                    try:
+                        self.changer_pub.publish(String(data=self.transaction.request()))
+                    except Exception:
+                        self.transaction = None
+                        raise
+                    break
+            time.sleep(.01)
+        else:
+            raise TimeoutError('measured docking did not settle')
+        try:
+            while rclpy.ok():
+                with self.changer_guard:
+                    self._check_changer_safety()
+                    if not self._docked():
+                        raise RuntimeError('arm departed docking pose')
+                    if self.transaction.check(time.monotonic()):
+                        self.transaction = None
+                        return
+                time.sleep(.01)
+            raise RuntimeError('ROS shutdown while waiting for Arduino')
+        except Exception as exc:
+            with self.changer_guard:
+                self._abort_changer(str(exc))
+                self.transaction = None
+            raise
+
+    def _feedback(self, msg):
+        with self.changer_guard:
+            self.feedback_sequence += 1
+            names = self.config['joint_names']
+            valid = (len(msg.name) == len(msg.position) == len(msg.velocity)
+                     and len(set(msg.name)) == len(msg.name)
+                     and all(j in msg.name for j in names)
+                     and all(math.isfinite(v) for v in (*msg.position, *msg.velocity)))
+            self.feedback_snapshot = ((time.monotonic(),
+                [msg.position[msg.name.index(j)] for j in names],
+                [msg.velocity[msg.name.index(j)] for j in names]) if valid else None)
+            if self.transaction is not None and (not valid or not self._docked()):
+                self._abort_changer('invalid feedback or departed docking pose')
+
+    def _controller_health(self):
+        with self.changer_guard:
+            if self.controller_future is not None and self.controller_future.done():
+                try:
+                    states = {c.name: c.state for c in self.controller_future.result().controller}
+                    if self.control_backend == 'managed':
+                        self.controller_active = (states.get('manual_position_controller') == 'active'
+                            and states.get('arm_controller') != 'active')
+                    else:
+                        self.controller_active = (states.get('arm_controller') == 'active'
+                            and states.get('manual_position_controller') != 'active')
+                    self.controller_checked = time.monotonic()
+                except Exception:
+                    self.controller_active = False
+                self.controller_future = None
+            if self.controller_future is None and self.controller_client.service_is_ready():
+                self.controller_future = self.controller_client.call_async(ListControllers.Request())
+            if self.transaction is not None and (not self.controller_active or
+                    time.monotonic()-self.controller_checked >= .75):
+                self._abort_changer('arm controller inactive/stale')
+
+    def _check_changer_safety(self):
+        if self.cancelled or self.hardware_error:
+            raise RuntimeError(self.hardware_error or 'tool changer cancelled')
+        if not self.controller_active or time.monotonic()-self.controller_checked >= .75:
+            raise RuntimeError('arm controller inactive/stale')
+        if getattr(self, 'control_backend', 'jtc') == 'managed':
+            s, stamp = self.manager_status
+            if (time.monotonic()-stamp >= .3 or s.get('mode') != 'hold' or not s.get('ready')
+                    or s.get('focus') != 'arm' or s.get('transitioning')):
+                raise RuntimeError('managed ownership lost during Arduino wait')
+        if (self.feedback_snapshot is None or time.monotonic()-self.feedback_snapshot[0]
+                >= float(self.config['feedback']['joint_state_max_age_s'])):
+            raise RuntimeError('docking feedback missing/stale')
+
+    def _docked(self):
+        settings = self.config['tool_changer']
+        _, position, velocity = self.feedback_snapshot
+        return (self.docking_goal is not None and len(self.docking_goal) == len(position)
+                and all(math.isfinite(v) for v in self.docking_goal)
+                and max(abs(a-b) for a, b in zip(position, self.docking_goal))
+                    <= settings['position_tolerance_rad']
+                and max(map(abs, velocity)) <= settings['velocity_tolerance_rad_s'])
+
+    def _changer_status(self, msg):
+        with self.changer_guard:
+            if self.transaction is not None:
+                try:
+                    self.transaction.receive(msg.data, time.monotonic())
+                except RuntimeError:
+                    pass  # Deadline is latched; the wait loop issues STOP and HOLD.
+
+    def _abort_changer(self, reason):
+        if self.transaction is not None:
+            command = self.transaction.abort(reason)
+            if command is not None:
+                try:
+                    self.changer_pub.publish(String(data=command))
+                except Exception as exc:
+                    self.get_logger().error(f'Arduino STOP delivery failed: {exc}')
+
+    def _hardware_fault(self, msg):
+        if msg.data.strip() and msg.data.lower() not in ('ok', 'false', '0', 'none'):
+            with self.changer_guard:
+                self.hardware_error = 'hardware fault: '+msg.data
+                self._abort_changer(self.hardware_error)
+
+    def _manager_status(self, msg):
+        with self.changer_guard:
+            try:
+                value = json.loads(msg.data)
+                if not isinstance(value, dict): raise ValueError('invalid manager status')
+                self.manager_status = (value, time.monotonic())
+            except ValueError:
+                self.manager_status = ({}, -math.inf)
+            if self.transaction is not None:
+                try:
+                    self._check_changer_safety()
+                except RuntimeError as exc:
+                    self._abort_changer(str(exc))
+
+    def _cancel_changer(self, req, res):
+        with self.changer_guard:
+            if self.state not in ('LOCK', 'UNLOCK'):
+                res.success, res.message = False, 'cancel applies only to docking/Arduino wait'
+            else:
+                self.cancelled = True
+                self._abort_changer('tool changer cancelled')
+                res.success, res.message = True, 'cancel latched; no retreat'
+        return res
 
     # 도구 장착 절차의 모든 단계를 정해진 순서로 실행합니다.
     def _run(self, tool_id=1):
         # 어느 단계에서든 실패하면 아래 공통 예외 처리로 이동합니다.
         try:
             validate_request_config(self.config, tool_id)
+            self.cancelled = False
+            self.docking_goal = None
+            if self.hardware_error:
+                raise RuntimeError(self.hardware_error)
             pre = f"tool{tool_id}_pre"
             target = f"tool{tool_id}_target"
             # 로봇을 기준 HOME 자세로 이동합니다.
@@ -196,7 +399,7 @@ class ToolChangeFsm(Node):
             if self._pause_after("tool1_target", target):
                 return
             # Never substitute arm motion or assumed success for Arduino completion.
-            self._publish("LOCK")
+            self._publish(self.config['tool_changer']['command'])
             self._arduino_lock()
             if self._pause_after("lock"):
                 return

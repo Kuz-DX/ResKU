@@ -157,7 +157,11 @@ class ControlModeManager(Node):
             if source == 'tcp_ik' and data.get('stop') is True:
                 accepted = self.core.stop_tcp(data['epoch'], time.monotonic())
             elif source == 'tool_auto':
-                accepted = self.core.path(data['epoch'], data['execution_id'], data['waypoints'], time.monotonic())
+                if data.get('cancel') is True:
+                    accepted = self.core.cancel_path(data['epoch'], data['execution_id'], time.monotonic())
+                else:
+                    accepted = self.core.path(data['epoch'], data['execution_id'], data['waypoints'],
+                                              time.monotonic(), durations=data.get('durations'))
             else:
                 accepted = self.core.command(source, data['epoch'], data['positions'],
                                              data.get('ee_velocity', 0.), time.monotonic())
@@ -283,6 +287,7 @@ class ControlModeManager(Node):
             activation_blockers=self.activation_blockers,
             controller_age_sec=now-self.controller_time if self.controllers else None,
             command_subscribers=self.position.get_subscription_count(),
+            last_execution_id=c.last_execution_id, last_execution_result=c.last_execution_result,
             execution_id=c.execution_id, remaining_waypoints=len(c.queue), last_error=self.last_error))))
 
     def tick(self):

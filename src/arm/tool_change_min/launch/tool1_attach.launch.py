@@ -13,7 +13,9 @@ def generate_launch_description():
     poses = LaunchConfiguration("poses_yaml")
     hardware = LaunchConfiguration("hardware_yaml")
     ee_action = LaunchConfiguration("ee_action")
+    backend = LaunchConfiguration('control_backend')
     return LaunchDescription([
+        DeclareLaunchArgument('control_backend', default_value='managed', choices=['managed', 'jtc']),
         DeclareLaunchArgument("ee_action", default_value="/ee_controller/follow_joint_trajectory"),
         DeclareLaunchArgument("poses_yaml", default_value=PathJoinSubstitution(
             [FindPackageShare("tool_change_min"), "config", "poses.yaml"])),
@@ -23,7 +25,8 @@ def generate_launch_description():
         Node(package="tool_change_min", executable="ik_node.py", name="ik_node", output="screen",
              parameters=[{"poses_yaml": poses, "hardware_yaml": hardware}]),
         Node(package="tool_change_min", executable="motion_executor.py", name="motion_executor", output="screen",
-             parameters=[{"poses_yaml": poses, "hardware_yaml": hardware, "ee_action": ee_action}]),
+             parameters=[{"poses_yaml": poses, "hardware_yaml": hardware, "ee_action": ee_action,
+                          'control_backend': backend}]),
         Node(package="tool_change_min", executable="tool_change_fsm.py", name="tool_change_fsm", output="screen",
-             parameters=[{"poses_yaml": poses}]),
+             parameters=[{"poses_yaml": poses, 'control_backend': backend}]),
     ])

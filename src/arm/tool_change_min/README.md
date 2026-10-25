@@ -1,7 +1,11 @@
+> managed 통합: tool1_attach의 기본 backend는 managed입니다.
+> EE 정렬은 필수이며 호환 제어가 아직 없어 managed 전체 시퀀스는 시작 전에
+> 차단됩니다. [연결 방식과 제한](docs/managed_tool_paths.md)을 확인하세요.
+
 > 체결 방식 변경: 팔의 wrist yaw 체결 회전과 전용 서비스는 삭제되었습니다.
-> Arduino 토픽 요청/완료 인터페이스는 현재 설계 단계입니다.
-> `lock` 이후 실행은 설정 검증에서 차단되며, 아래 과거 전체 시퀀스 예시를
-> 그대로 실행할 수 없습니다. [현재 인터페이스 설계](docs/tool_changer_interface.md)를 참고하세요.
+> Arduino 토픽 요청/완료 인터페이스의 ROS 측 구현이 추가되었습니다.
+> 기본 설정은 비활성화이며 도킹/Arduino 시간과 기존 EE 호환성 검증 전에는
+> 아래 전체 시퀀스 예시를 그대로 실행할 수 없습니다. [현재 인터페이스 설계](docs/tool_changer_interface.md)를 참고하세요.
 
 # 도구 0·1 장착
 
