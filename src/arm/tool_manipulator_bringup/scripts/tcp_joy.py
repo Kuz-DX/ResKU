@@ -176,6 +176,12 @@ class TcpJoy(Node):
         self.ready_snapshot = self.ready_started = self.ready_future = None
         self.ready_execution_id = self.ready_safe_at = None
 
+    def _fail_ready(self, reason):
+        self._reset_ready()
+        self.ready_state = 'failed'
+        self.auto_entry_armed = False
+        self.reason = reason
+
     def drive_ready(self, now):
         """Collision-check and execute one explicit-focus TCP-ready entry."""
         s = self.status
@@ -185,7 +191,10 @@ class TcpJoy(Node):
                 or not s.get('ready') or not s.get('startup_complete') or s.get('focus') != 'arm'):
             return
         if self.ready_state == 'idle':
-            if s.get('mode') != 'hold' or s.get('transitioning') or not self.check.service_is_ready():
+            if s.get('mode') != 'hold' or s.get('transitioning'):
+                return
+            if not self.check.service_is_ready():
+                self.reason = 'waiting for MoveIt collision service before TCP ready'
                 return
             count = max(1, math.ceil(float(np.max(np.abs(self.ready_goal-self.measured))) /
                                      self.ready_step))
@@ -205,22 +214,18 @@ class TcpJoy(Node):
             return
         if self.ready_state == 'checking':
             if now-self.ready_started > self.ready_timeout:
-                self._reset_ready(); self.auto_entry_armed = False
-                self.reason = 'TCP ready collision check timeout; remain HOLD'
+                self._fail_ready('TCP ready collision check timeout; remain HOLD')
                 return
             if np.max(np.abs(self.measured-self.ready_snapshot)) > .01:
-                self._reset_ready(); self.auto_entry_armed = False
-                self.reason = 'feedback changed during TCP ready check; remain HOLD'
+                self._fail_ready('feedback changed during TCP ready check; remain HOLD')
                 return
             if not all(f.done() for f in self.ready_checks):
                 return
             if any(f.result() is None or not f.result().valid for f in self.ready_checks):
-                self._reset_ready(); self.auto_entry_armed = False
-                self.reason = 'TCP ready path collision/state invalid; remain HOLD'
+                self._fail_ready('TCP ready path collision/state invalid; remain HOLD')
                 return
             if not self.tool_mode.service_is_ready():
-                self._reset_ready(); self.auto_entry_armed = False
-                self.reason = 'tool_auto mode service unavailable; remain HOLD'
+                self._fail_ready('tool_auto mode service unavailable; remain HOLD')
                 return
             self.ready_future = self.tool_mode.call_async(Trigger.Request())
             self.ready_state = 'request_tool'
@@ -231,8 +236,7 @@ class TcpJoy(Node):
                 return
             result = self.ready_future.result()
             if result is None or not result.success:
-                self._reset_ready(); self.auto_entry_armed = False
-                self.reason = 'tool_auto request rejected; remain HOLD'
+                self._fail_ready('tool_auto request rejected; remain HOLD')
                 return
             self.ready_state = 'wait_tool'
             return
@@ -254,8 +258,7 @@ class TcpJoy(Node):
                 self.reason = 'TCP ready reached; verifying entry'
             elif s.get('mode') == 'fault' or (s.get('last_execution_id') == self.ready_execution_id
                                               and s.get('last_execution_result') == 'aborted'):
-                self.auto_entry_armed = False
-                self.reason = 'TCP ready execution failed; inspect arm'
+                self._fail_ready('TCP ready execution failed; inspect arm')
             return
         if self.ready_state == 'await_entry' and self.ready_safe_at is not None:
             # Allow the manager subscription to consume the published proof first.
@@ -268,8 +271,11 @@ class TcpJoy(Node):
         if self.ready_state == 'request_tcp' and self.ready_future.done():
             result = self.ready_future.result()
             self.auto_entry_armed = False
-            self.reason = ('TCP_IK transition requested' if result is not None and result.success
-                           else 'TCP_IK request rejected after TCP ready; remain HOLD')
+            if result is not None and result.success:
+                self.reason = 'TCP_IK transition requested'
+            else:
+                self.ready_state = 'failed'
+                self.reason = 'TCP_IK request rejected after TCP ready; remain HOLD'
 
     def on_status(self, msg):
         try:
@@ -421,7 +427,10 @@ class TcpJoy(Node):
             self.discard()
             self.epoch = None
             self.rearmed = False
-            if not self.blocked:
+            ready_state = vars(self).get('ready_state', 'idle')
+            auto_entry_armed = vars(self).get('auto_entry_armed', False)
+            if (not self.blocked and ready_state == 'idle'
+                    and not auto_entry_armed):
                 self.reason = 'waiting for active TCP_IK mode'
         else:
             if self.epoch != s.get('epoch'):
@@ -520,13 +529,19 @@ class TcpJoy(Node):
             performance=self.metrics.snapshot(),
             last_failure=self.last_failure_reason,
             last_failure_age_sec=(now-self.last_failure_time
-                                  if math.isfinite(self.last_failure_time) else None)))))
-        logged = (self.reason, self.failures, self.deadman, self.rearmed)
+                                  if math.isfinite(self.last_failure_time) else None),
+            tcp_ready_state=vars(self).get('ready_state', 'disabled'),
+            tcp_ready_auto_armed=vars(self).get('auto_entry_armed', False)))))
+        logged = (self.reason, self.failures, self.deadman, self.rearmed,
+                  vars(self).get('ready_state', 'disabled'))
         if logged != self.last_logged_state:
             self.get_logger().info(
-                'reason=%s failures=%d deadman=%s rearmed=%s mode=%s focus=%s' %
+                'reason=%s failures=%d deadman=%s rearmed=%s mode=%s focus=%s '
+                'tcp_ready_state=%s tcp_ready_auto_armed=%s' %
                 (self.reason, self.failures, self.deadman, self.rearmed,
-                 s.get('mode', 'missing'), s.get('focus', 'missing')))
+                 s.get('mode', 'missing'), s.get('focus', 'missing'),
+                 vars(self).get('ready_state', 'disabled'),
+                 vars(self).get('auto_entry_armed', False)))
             self.last_logged_state = logged
         self.metrics.observe('callback', (time.perf_counter()-callback_started)*1000.)
 

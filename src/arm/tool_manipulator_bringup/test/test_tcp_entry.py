@@ -168,6 +168,7 @@ def ready_node():
     n.tool_mode.service_is_ready.return_value = True
     n.tcp_mode.service_is_ready.return_value = True
     n._reset_ready = lambda: TcpJoy._reset_ready(n)
+    n._fail_ready = lambda reason: TcpJoy._fail_ready(n, reason)
     return n
 
 
@@ -204,6 +205,6 @@ def test_tcp_ready_collision_failure_never_requests_motion():
         future.result.return_value = SimpleNamespace(valid=True)
     n.ready_checks[-1].result.return_value = SimpleNamespace(valid=False)
     TcpJoy.drive_ready(n, 1.1)
-    assert not n.auto_entry_armed
+    assert not n.auto_entry_armed and n.ready_state == 'failed'
     n.tool_mode.call_async.assert_not_called()
     n.tool_pub.publish.assert_not_called()
