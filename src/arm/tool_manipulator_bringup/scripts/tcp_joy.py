@@ -284,11 +284,6 @@ class TcpJoy(TcpMotionWorkflow, Node):
                 self.cancel.call_async(Trigger.Request())
             self.reason = 'manual Stop_pose requested; checking path'
         self.previous_home = home
-        if (not self.deadman and vars(self).get('ready_state') == 'executing'
-                and not vars(self).get('returning_home', False)):
-            self.tool_pub.publish(String(data=json.dumps(dict(
-                epoch=self.status['epoch'], execution_id=self.ready_execution_id, cancel=True))))
-            self._fail_ready('L1 released during TCP ready; remain HOLD')
         if valid and self.deadman and not was_pressed and self.rearmed and not self.blocked:
             self.discard()
             self.stepper.q = self.stepper.pose = None

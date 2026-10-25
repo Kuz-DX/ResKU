@@ -133,11 +133,9 @@ class TcpMotionWorkflow:
             self.reason = 'moving to TCP ready'
             return
         if self.ready_state == 'executing':
-            if not vars(self).get('returning_home', False) and (not self.deadman or now-self.joy_time >= .25):
-                self.tool_pub.publish(String(data=json.dumps(dict(
-                    epoch=s['epoch'], execution_id=self.ready_execution_id, cancel=True))))
-                self._fail_ready('L1 released or joystick stale during TCP ready; remain HOLD')
-                return
+            # L1 authorizes this collision-checked one-shot move at its start.
+            # Releasing it afterward must not turn a reached ready pose into a
+            # failed state; TCP motion still requires a fresh release/re-press.
             if (s.get('last_execution_id') == self.ready_execution_id and
                     s.get('last_execution_result') == 'succeeded' and s.get('mode') == 'hold'):
                 self.ready_state = 'await_entry'
