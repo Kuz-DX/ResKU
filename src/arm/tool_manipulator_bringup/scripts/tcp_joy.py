@@ -45,6 +45,8 @@ class TcpJoy(Node):
             iterations=int(param('ik_iterations', 30)), budget=float(param('ik_budget_sec', .030)))
         self.pub = self.create_publisher(String, '/arm/input/tcp_ik', 1)
         self.diag = self.create_publisher(String, '/arm/tcp_joy/status', 1)
+        self.entry_pub = self.create_publisher(String, '/arm/tcp_joy/entry_status', 1)
+        self.entry_pending = None
         self.check = self.create_client(GetStateValidity, '/check_state_validity')
         self.cancel = self.create_client(Trigger, '/arm/cancel')
         self.status, self.epoch = {}, None
@@ -76,6 +78,64 @@ class TcpJoy(Node):
                 if not future.done():
                     future.cancel()
         self.pending = None
+
+    def assess_entry(self, now):
+        """Read-only assessment in HOLD; never requests motion or changes mode."""
+        s = self.status
+        eligible = (now-self.status_time < .3 and s.get('mode') == 'hold'
+                    and s.get('ready') and s.get('startup_complete')
+                    and now-self.state_time < .3 and self.measured is not None)
+        if not eligible:
+            if self.entry_pending:
+                self.entry_pending['future'].cancel()
+            self.entry_pending = None
+            return
+
+        def report(safe, reason, q):
+            self.entry_pub.publish(String(data=json.dumps(dict(
+                epoch=s.get('epoch'), safe=safe, reason=reason, positions=q.tolist()))))
+
+        q = self.measured.copy()
+        try:
+            # Extra 0.001 covers the manager's snapshot comparison tolerance.
+            if not self.model.within_limits(q, .101):
+                raise ValueError('TCP entry requires 0.10 rad margin; remain HOLD, assess tcp_ready')
+            jac = self.model.jacobian(q).copy()
+            jac[:3] /= .2
+            cond = np.linalg.cond(jac)
+            if not math.isfinite(cond) or cond > 20.:
+                raise ValueError('TCP entry condition exceeds 20; remain HOLD, assess tcp_ready')
+            if not self.check.service_is_ready():
+                raise ValueError('TCP entry collision service unavailable; remain HOLD')
+            if self.entry_pending:
+                p = self.entry_pending
+                if (p['epoch'] != s.get('epoch') or np.max(np.abs(q-p['q'])) > .001
+                        or self.full_state.keys() != p['full_state'].keys()
+                        or any(abs(v-p['full_state'][j]) > .001
+                               for j, v in self.full_state.items())):
+                    raise ValueError('TCP entry snapshot changed; recheck required')
+                if now-p['started'] > .15:
+                    raise ValueError('TCP entry collision timeout; remain HOLD')
+                if not p['future'].done():
+                    return
+                response = p['future'].result()
+                self.entry_pending = None
+                if response is None or not response.valid:
+                    raise ValueError('TCP entry collision/state invalid; remain HOLD')
+                report(True, 'TCP entry current pose verified', p['q'])
+                return
+            req = GetStateValidity.Request()
+            req.robot_state.joint_state.name = list(self.full_state)
+            req.robot_state.joint_state.position = list(self.full_state.values())
+            req.robot_state.is_diff = True
+            self.entry_pending = dict(future=self.check.call_async(req), q=q,
+                                      epoch=s.get('epoch'), started=now,
+                                      full_state=dict(self.full_state))
+        except (ValueError, RuntimeError, np.linalg.LinAlgError) as exc:
+            if self.entry_pending:
+                self.entry_pending['future'].cancel()
+            self.entry_pending = None
+            report(False, str(exc), q)
 
     def on_status(self, msg):
         try:
@@ -149,6 +209,7 @@ class TcpJoy(Node):
         now = time.monotonic()
         dt, self.last_time = now-self.last_time, now
         s = self.status
+        self.assess_entry(now)
         active = (now-self.status_time < .3 and s.get('mode') == 'tcp_ik' and
                   s.get('focus') == 'arm' and s.get('ready') and not s.get('transitioning'))
         if not active:

@@ -118,16 +118,16 @@ Sony joystick mapping (axes 1, 0, 4; buttons 4, 5):
 | Left stick left/right | +Y / -Y | +Pitch / -Pitch |
 | Right stick up/down | +Z / -Z | +Yaw / -Yaw |
 
-These axes are expressed in `base_actuator`, with `tcp_link` as the controlled
-point. Rotation increments are about the base axes. Release L1 once after entering
+Translation axes are expressed in `base_actuator`, with `tcp_link` as the controlled
+point. Rotation increments are about the target TCP local axes. Release L1 once after entering
 the mode, then hold it to move. Releasing L1 zeros increments and discards pending
 collision requests; it holds the last approved joint goal. The robot may still
 finish the small previously approved motion. Joy timeout also requires rearming.
 
 Each candidate integrates from the last approved TCP target and solves IK using
-current measured joints as seed. Defaults: 0.02 m/s, 0.15 rad/s, joint speed capped
+the previous accepted joint solution as seed. Defaults: 0.02 m/s, 0.15 rad/s, joint speed capped
 at min(0.12 rad/s, half hardware limit), 0.02 rad soft margin, 0.08 rad feedback
-lead, 30 IK iterations and a 15 ms deadline checked between iterations. The Python
+lead, 30 IK iterations and a 30 ms deadline checked between iterations. The Python
 loop is not a hard real-time deadline. A dimensionally scaled Jacobian condition
 number slows motion from 20 to 100; at 100 or a singular Jacobian it rejects motion.
 No integration catches up while collision checks are pending. IK failure retains
@@ -194,3 +194,11 @@ when those are unavailable it cannot certify that physical holding succeeded.
 ```bash
 python3 -m pytest -q ~/ResKU/src/arm/tool_manipulator_bringup/test/test_arm_mode_core.py
 ```
+
+## TCP entry assessment
+
+TCP_IK now requires a fresh collision-checked, stationary current pose with at
+least 0.10 rad joint margin and scaled condition <=20. Requests without a valid
+assessment remain HOLD and report a reason; this also applies to Options focus
+activation. No tcp_ready movement is automatic. Candidate comparisons, limitations
+and the assessment protocol are documented in [tcp_ready.md](tcp_ready.md).

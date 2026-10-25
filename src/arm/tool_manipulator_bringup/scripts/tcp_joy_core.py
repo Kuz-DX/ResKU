@@ -48,6 +48,7 @@ class TcpStepper:
         self.pose = self.model.fk(self.q)
 
     def candidate(self, measured, twist, dt):
+        """Propose base-frame translation and target-TCP-local rotation."""
         deadline = time.monotonic() + self.budget
         try:
             from tool_change_min.kinematics import _rotation
@@ -71,6 +72,10 @@ class TcpStepper:
         # direction is retained. Never clip individual joints after solving IK.
         scaled_increment = increment.copy()
         scaled_increment[:3] /= .2
+        # The geometric Jacobian is spatial (base-frame). Map the local
+        # angular increment using the accepted target orientation, which also
+        # defines the rotation below, even when measured feedback lags.
+        scaled_increment[3:] = self.pose[:3, :3] @ increment[3:]
         predicted = np.linalg.solve(jac, scaled_increment)
         ratio = float(np.max(np.abs(predicted)/(self.speeds*dt)))
         self.velocity_scale = min(1., .9/max(ratio, 1e-12))
@@ -86,7 +91,7 @@ class TcpStepper:
             rot = increment[3:]*self.velocity_scale
             angle = np.linalg.norm(rot)
             if angle > 1e-12:
-                target[:3, :3] = _rotation(rot/angle, angle) @ target[:3, :3]
+                target[:3, :3] = target[:3, :3] @ _rotation(rot/angle, angle)
             try:
                 # self.pose was produced by self.q.  Seeding the next small
                 # increment from that matching command state avoids repeatedly

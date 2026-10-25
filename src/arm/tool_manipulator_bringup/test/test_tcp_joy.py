@@ -80,6 +80,60 @@ def fake_stepper():
     return step
 
 
+@pytest.mark.parametrize('axis', range(6))
+@pytest.mark.parametrize('sign', [-1., 1.])
+def test_increment_frames_at_nonidentity_target(axis, sign):
+    step = fake_stepper()
+    # Local X -> base Y, local Y -> base Z, local Z -> base X.
+    step.pose[:3, :3] = np.array([[0., 0., 1.], [1., 0., 0.], [0., 1., 0.]])
+    step.pose[:3, 3] = [.2, -.1, .3]
+    before = step.pose.copy()
+    twist = np.zeros(6)
+    twist[axis] = sign
+    with patch('time.monotonic', return_value=10.):
+        _, target = step.candidate(np.zeros(6), twist, .02)
+    if axis < 3:
+        expected = before[:3, 3].copy()
+        expected[axis] += sign*step.linear*.02*step.scale*step.velocity_scale
+        np.testing.assert_allclose(target[:3, 3], expected)
+        np.testing.assert_array_equal(target[:3, :3], before[:3, :3])
+    else:
+        # Independently construct the elementary local-axis rotation.
+        angle = sign*step.angular*.02*step.scale*step.velocity_scale
+        local = np.eye(3)
+        i, j = ((1, 2), (2, 0), (0, 1))[axis-3]
+        local[i, i] = local[j, j] = np.cos(angle)
+        local[i, j], local[j, i] = -np.sin(angle), np.sin(angle)
+        np.testing.assert_allclose(before[:3, :3].T @ target[:3, :3], local, atol=1e-14)
+        np.testing.assert_array_equal(target[:3, 3], before[:3, 3])
+    np.testing.assert_array_equal(step.pose, before)
+
+
+def test_local_rotation_speed_prediction_uses_target_frame():
+    step = fake_stepper()
+    step.pose[:3, :3] = np.array([[0., -1., 0.], [1., 0., 0.], [0., 0., 1.]])
+    # Local X rotation demands the slower base-Y joint, not base X.
+    step.speeds[4] = .03
+    step.model.solve.return_value = np.zeros(6)
+    with patch('time.monotonic', return_value=10.):
+        step.candidate(np.zeros(6), np.array([0., 0., 0., 1., 0., 0.]), .02)
+    assert step.velocity_scale == pytest.approx(.9*.03/step.angular)
+
+
+def test_combined_translation_and_local_rotation_preserve_frames():
+    step = fake_stepper()
+    step.pose[:3, :3] = np.array([[0., -1., 0.], [1., 0., 0.], [0., 0., 1.]])
+    before = step.pose.copy()
+    twist = np.array([.4, -.3, .2, .2, -.4, .3])
+    with patch('time.monotonic', return_value=10.):
+        _, target = step.candidate(np.zeros(6), twist, .02)
+    from tool_change_min.kinematics import _rotvec
+    factor = .02*step.scale*step.velocity_scale
+    np.testing.assert_allclose(target[:3, 3]-before[:3, 3], twist[:3]*step.linear*factor)
+    np.testing.assert_allclose(_rotvec(before[:3, :3].T @ target[:3, :3]),
+                               twist[3:]*step.angular*factor, atol=1e-12)
+
+
 def test_limit_block_preserves_target_and_reverse_can_succeed():
     s = fake_stepper()
     s.model.solve.side_effect = ValueError('IK iteration would violate soft limits')

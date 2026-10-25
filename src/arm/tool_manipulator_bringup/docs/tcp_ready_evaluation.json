@@ -1,0 +1,463 @@
+{
+  "recovery_reference": {
+    "positions_rad": [
+      0.0,
+      1.4831,
+      1.5071,
+      -1.5571,
+      0.0,
+      0.0
+    ],
+    "limit_margins_rad": [
+      3.503,
+      0.03489999999999993,
+      0.03489999999999993,
+      0.03490000000000015,
+      0.63,
+      5.76
+    ],
+    "condition": 8.937056914090666,
+    "directions": {
+      "X-": {
+        "ik": false,
+        "collision_free": null,
+        "max_condition": 9.294132753867931,
+        "reason": "IK iteration would violate soft limits"
+      },
+      "X+": {
+        "ik": false,
+        "collision_free": null,
+        "max_condition": 8.937056914090666,
+        "reason": "IK iteration would violate soft limits"
+      },
+      "Y-": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 8.937056914090666
+      },
+      "Y+": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 8.937056914090666
+      },
+      "Z-": {
+        "ik": false,
+        "collision_free": null,
+        "max_condition": 8.937056914090666,
+        "reason": "IK iteration would violate soft limits"
+      },
+      "Z+": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 8.969749914940897
+      },
+      "Roll-": {
+        "ik": false,
+        "collision_free": null,
+        "max_condition": 8.937056914090666,
+        "reason": "IK iteration would violate soft limits"
+      },
+      "Roll+": {
+        "ik": false,
+        "collision_free": null,
+        "max_condition": 8.956836515252585,
+        "reason": "IK iteration would violate soft limits"
+      },
+      "Pitch-": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 8.937056914090666
+      },
+      "Pitch+": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 8.937056914090666
+      },
+      "Yaw-": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 8.937056914090666
+      },
+      "Yaw+": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 8.937056914090666
+      }
+    },
+    "collision_free": true,
+    "approach": {
+      "reference_positions_rad": [
+        0.0,
+        1.4831,
+        1.5071,
+        -1.5571,
+        0.0,
+        0.0
+      ],
+      "reference_is_live_feedback": false,
+      "limits_ok": true,
+      "collision_free": true,
+      "duration_sec": 10.0,
+      "peak_velocity_rad_s": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "peak_acceleration_rad_s2": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "acceleration_verified": false
+  },
+  "candidate_a": {
+    "positions_rad": [
+      0.0,
+      1.2,
+      1.2,
+      -1.2,
+      0.0,
+      0.0
+    ],
+    "limit_margins_rad": [
+      3.503,
+      0.31800000000000006,
+      0.3420000000000001,
+      0.3920000000000001,
+      0.63,
+      5.76
+    ],
+    "condition": 11.847587545665549,
+    "directions": {
+      "X-": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 12.294288222988195
+      },
+      "X+": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 12.119030819687657
+      },
+      "Y-": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 11.909090515855553
+      },
+      "Y+": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 11.909090515855548
+      },
+      "Z-": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 11.847587545665549
+      },
+      "Z+": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 12.622967371941781
+      },
+      "Roll-": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 13.241085129096579
+      },
+      "Roll+": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 11.847587545665549
+      },
+      "Pitch-": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 11.884112698226472
+      },
+      "Pitch+": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 11.884112698226467
+      },
+      "Yaw-": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 11.847587575130362
+      },
+      "Yaw+": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 11.847587575130364
+      }
+    },
+    "collision_free": true,
+    "approach": {
+      "reference_positions_rad": [
+        0.0,
+        1.4831,
+        1.5071,
+        -1.5571,
+        0.0,
+        0.0
+      ],
+      "reference_is_live_feedback": false,
+      "limits_ok": true,
+      "collision_free": true,
+      "duration_sec": 10.0,
+      "peak_velocity_rad_s": [
+        0.0,
+        0.053081250000000024,
+        0.05758125000000003,
+        0.06695625,
+        0.0,
+        0.0
+      ],
+      "peak_acceleration_rad_s2": [
+        0.0,
+        0.016344786120758313,
+        0.01773042676681342,
+        0.020617178112761536,
+        0.0,
+        0.0
+      ]
+    },
+    "acceleration_verified": false
+  },
+  "candidate_b": {
+    "positions_rad": [
+      0.0,
+      0.9,
+      1.0,
+      -1.0,
+      0.0,
+      0.0
+    ],
+    "limit_margins_rad": [
+      3.503,
+      0.618,
+      0.542,
+      0.5920000000000001,
+      0.63,
+      5.76
+    ],
+    "condition": 23.088376565484026,
+    "directions": {
+      "X-": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 29.369125751747276
+      },
+      "X+": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 23.088376565484026
+      },
+      "Y-": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 23.088376565484026
+      },
+      "Y+": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 23.088376565484026
+      },
+      "Z-": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 23.088376565484026
+      },
+      "Z+": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 23.203895965817956
+      },
+      "Roll-": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 23.088376565484026
+      },
+      "Roll+": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 27.37400554737252
+      },
+      "Pitch-": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 23.088376565484026
+      },
+      "Pitch+": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 23.088376565484026
+      },
+      "Yaw-": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 23.08837774637132
+      },
+      "Yaw+": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 23.088377746371318
+      }
+    },
+    "collision_free": true,
+    "approach": {
+      "reference_positions_rad": [
+        0.0,
+        1.4831,
+        1.5071,
+        -1.5571,
+        0.0,
+        0.0
+      ],
+      "reference_is_live_feedback": false,
+      "limits_ok": true,
+      "collision_free": true,
+      "duration_sec": 10.0,
+      "peak_velocity_rad_s": [
+        0.0,
+        0.10933125000000002,
+        0.09508125000000002,
+        0.10445624999999999,
+        0.0,
+        0.0
+      ],
+      "peak_acceleration_rad_s2": [
+        0.0,
+        0.033665294196447086,
+        0.029277432150605933,
+        0.032164183496554054,
+        0.0,
+        0.0
+      ]
+    },
+    "acceleration_verified": false
+  },
+  "candidate_c": {
+    "positions_rad": [
+      0.0,
+      0.6,
+      0.8,
+      -0.8,
+      0.0,
+      0.0
+    ],
+    "limit_margins_rad": [
+      3.503,
+      0.918,
+      0.742,
+      0.792,
+      0.63,
+      5.76
+    ],
+    "condition": 242.68331565773866,
+    "directions": {
+      "X-": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 242.68331565773866
+      },
+      "X+": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 3133.6943793443124
+      },
+      "Y-": {
+        "ik": false,
+        "collision_free": null,
+        "max_condition": 242.68331565773866,
+        "reason": "IK iteration would violate soft limits"
+      },
+      "Y+": {
+        "ik": false,
+        "collision_free": null,
+        "max_condition": 242.68331565773866,
+        "reason": "IK iteration would violate soft limits"
+      },
+      "Z-": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 242.68331565773866
+      },
+      "Z+": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 243.75547229133278
+      },
+      "Roll-": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 41434.805460269534
+      },
+      "Roll+": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 242.68331565773866
+      },
+      "Pitch-": {
+        "ik": false,
+        "collision_free": null,
+        "max_condition": 242.68331565773866,
+        "reason": "IK iteration would violate soft limits"
+      },
+      "Pitch+": {
+        "ik": false,
+        "collision_free": null,
+        "max_condition": 242.68331565773866,
+        "reason": "IK iteration would violate soft limits"
+      },
+      "Yaw-": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 242.6838437960938
+      },
+      "Yaw+": {
+        "ik": true,
+        "collision_free": true,
+        "max_condition": 242.6838437960911
+      }
+    },
+    "collision_free": true,
+    "approach": {
+      "reference_positions_rad": [
+        0.0,
+        1.4831,
+        1.5071,
+        -1.5571,
+        0.0,
+        0.0
+      ],
+      "reference_is_live_feedback": false,
+      "limits_ok": true,
+      "collision_free": true,
+      "duration_sec": 13.798437500000002,
+      "peak_velocity_rad_s": [
+        0.0,
+        0.12,
+        0.09608424866945985,
+        0.1028784962065451,
+        0.0,
+        0.0
+      ],
+      "peak_acceleration_rad_s2": [
+        0.0,
+        0.026778696666297213,
+        0.021441757912737808,
+        0.022957933694999,
+        0.0,
+        0.0
+      ]
+    },
+    "acceleration_verified": false
+  }
+}
