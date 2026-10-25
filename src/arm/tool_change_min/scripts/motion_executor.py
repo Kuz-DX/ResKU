@@ -6,9 +6,8 @@ Named poses are converted to one controller trajectory point.  Cartesian IK
 paths retain their ``ceil(distance/step)`` interpolation from ``ik_node`` and
 are forwarded unchanged. Tool locking belongs to a separate Arduino actuator;
 this node has no wrist-rotation locking service.
-EE_ALIGN selects q_ref+n*pi nearest to measured ee_joint inside joint bounds,
-using q=sign*(raw-zero)*2*pi/4096. Only ee_controller receives that trajectory;
-post-result fresh feedback must satisfy the configured angular tolerance.
+Docking alignment belongs to the taught arm pre-pose and Cartesian target; this
+node does not rotate ee_joint as a separate alignment stage.
 """
 # 이 노드는 검증된 궤적만 6축 팔 컨트롤러 액션으로 전달합니다.
 # 제어기 실패나 제한 시간 초과를 자동 재시도하지 않고 호출자에게 실패로 반환합니다.
@@ -44,10 +43,9 @@ from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from tool_change_min.config import require_for_stop_state
 # URDF와 하드웨어 설정을 이용해 관절 순서와 제한을 확인합니다.
 from tool_change_min.kinematics import ArmKinematics
-from tool_change_min.ee_alignment import EeAlignment
 from tool_change_min.managed_path import ManagedPath
-# 자세 이동, 궤적 실행 및 별도 EE 정렬 서비스 형식입니다.
-from tool_change_min.srv import AlignEe, ExecuteTrajectory, MoveNamedPose
+# 자세 이동과 궤적 실행 서비스 형식입니다.
+from tool_change_min.srv import ExecuteTrajectory, MoveNamedPose
 
 
 # 실수 초 단위를 ROS Duration 메시지의 정수 초와 나노초로 변환합니다.
@@ -82,7 +80,6 @@ class MotionExecutor(Node):
         self.declare_parameter("hardware_yaml", f"{bringup}/config/hardware.yaml")
         # FollowJointTrajectory 액션 서버의 이름을 기본 경로와 함께 선언합니다.
         self.declare_parameter("arm_action", "/arm_controller/follow_joint_trajectory")
-        self.declare_parameter("ee_action", "/ee_controller/follow_joint_trajectory")
         self.backend = self.declare_parameter('control_backend', 'jtc').value
         if self.backend not in ('jtc', 'managed'):
             raise ValueError('control_backend must be jtc or managed')
@@ -93,8 +90,6 @@ class MotionExecutor(Node):
         # URDF와 하드웨어 설정을 바탕으로 팔 기구학 및 제한 모델을 생성합니다.
         self.model = ArmKinematics(self.get_parameter("urdf_xacro").value,
                                    self.get_parameter("hardware_yaml").value)
-        self.ee_model = None  # Construct only for an explicitly requested legacy EE alignment.
-        self.ee_snapshot = None
         # YAML과 URDF의 관절 순서가 다르면 위치값 대응이 어긋나므로 시작을 거부합니다.
         if self.joint_names != self.model.joint_names:
             # 잘못된 관절 순서 설정을 식별할 수 있도록 예외를 발생시킵니다.
@@ -117,19 +112,13 @@ class MotionExecutor(Node):
                                  callback_group=self.feedback_group)
         # 지정된 FollowJointTrajectory 서버에 목표 궤적을 보낼 액션 클라이언트를 만듭니다.
         self.managed = None
-        self.client = self.ee_client = None
+        self.client = None
         if self.backend == 'managed':
             self.managed = ManagedPath(self, self.model, self.joint_names,
                 float(self.config['motion']['ik_limit_margin_rad']), self.feedback_group)
         else:
             self.client = ActionClient(self, FollowJointTrajectory, self.get_parameter("arm_action").value,
                                        callback_group=self.feedback_group)
-            self.ee_client = ActionClient(
-                self, FollowJointTrajectory, self.get_parameter("ee_action").value,
-                callback_group=self.feedback_group)
-        self.create_subscription(JointState, "/joint_states", self._ee_state, 20,
-                                 callback_group=self.feedback_group)
-        self.create_service(AlignEe, "align_ee", self._align_ee)
         # 이름 있는 자세 이동 요청을 처리하는 서비스를 등록합니다.
         self.create_service(MoveNamedPose, "move_to_named_pose", self._move_named)
         # 전달된 관절 궤적의 검증 및 실행 요청을 처리하는 서비스를 등록합니다.
@@ -258,71 +247,6 @@ class MotionExecutor(Node):
             raise RuntimeError(f"controller result status={result.status}, error={result.result.error_string}")
         # 액션 성공을 서비스 응답에 전달할 메시지로 반환합니다.
         return "controller trajectory succeeded"
-
-    def _ee_state(self, message):
-        # EE is read only from JointState, never from raw/degree diagnostic topics.
-        try:
-            if len(message.name) != len(message.position) or message.name.count("ee_joint") != 1:
-                raise ValueError("missing/duplicate ee_joint")
-            value = float(message.position[message.name.index("ee_joint")])
-            if not math.isfinite(value):
-                raise ValueError("non-finite EE feedback")
-            self.ee_snapshot = (value, time.monotonic())
-        except ValueError:
-            self.ee_snapshot = None
-
-    def _current_ee(self):
-        snapshot = self.ee_snapshot
-        if snapshot is None or time.monotonic() - snapshot[1] > self.joint_state_max_age_s:
-            raise ValueError("missing/stale ee_joint feedback")
-        return snapshot
-
-    def _align_ee(self, request, response):
-        try:
-            if getattr(self, 'backend', 'jtc') == 'managed':
-                raise RuntimeError('EE alignment required but managed velocity-mode alignment is not implemented')
-            if self.motion_fault:
-                raise RuntimeError(self.motion_fault)
-            if self.ee_model is None:
-                self.ee_model = EeAlignment(self.get_parameter('urdf_xacro').value,
-                                           self.get_parameter('hardware_yaml').value)
-            settings = self.config["motion"]["ee_align"]
-            reference = float(settings["reference_raw"])
-            duration = float(settings["duration_s"])
-            tolerance = float(settings["tolerance_rad"])
-            if not all(math.isfinite(v) and v > 0 for v in
-                       (duration, tolerance, request.timeout_s)):
-                raise ValueError("EE duration/tolerance/timeout must be finite and positive")
-            deadline = time.monotonic() + request.timeout_s
-            current, _ = self._current_ee()
-            target = self.ee_model.target(
-                current, reference, float(self.config["motion"]["ik_limit_margin_rad"]))
-            # A positions-only segment has average velocity abs(dq)/duration.
-            if abs(target - current) / duration > self.ee_model.velocity:
-                raise ValueError("EE duration would exceed hardware velocity limit")
-            if duration >= request.timeout_s:
-                raise ValueError("EE duration must leave time for completion feedback")
-            trajectory = JointTrajectory(joint_names=["ee_joint"])
-            trajectory.points = [JointTrajectoryPoint(
-                positions=[target], time_from_start=_duration(duration))]
-            self._send_action(self.ee_client, trajectory, deadline - time.monotonic())
-            completed_at = time.monotonic()
-            while time.monotonic() < deadline:
-                actual, received_at = self._current_ee()
-                if received_at > completed_at and abs(actual - target) <= tolerance:
-                    response.success = True
-                    response.target_rad, response.actual_rad = target, actual
-                    response.message = "EE alignment confirmed by post-result joint_states"
-                    self.get_logger().info(
-                        f"EE_ALIGN start={current:.6f}, target={target:.6f}, actual={actual:.6f}")
-                    return response
-                time.sleep(0.01)
-            raise TimeoutError("EE post-result alignment feedback not confirmed")
-        except Exception as exc:
-            self.motion_fault = f"EE_ALIGN failed: {exc}"
-            response.success, response.message = False, self.motion_fault
-            self.get_logger().error(self.motion_fault)
-            return response
 
     def _request_cancel(self, handle):
         """Queue cancellation; neither this request nor its ACK proves a stop."""

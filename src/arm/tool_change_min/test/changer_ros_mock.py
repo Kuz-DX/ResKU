@@ -41,7 +41,7 @@ class MockArmService:
     Request = SimpleNamespace
 
 
-namespace = dict(__name__='changer_mock_source', AlignEe=MockArmService, ExecuteTrajectory=MockArmService,
+namespace = dict(__name__='changer_mock_source', ExecuteTrajectory=MockArmService,
                  LinearMoveToPose=MockArmService, MoveNamedPose=MockArmService)
 exec(compile(ast.fix_missing_locations(tree), str(source), 'exec'), namespace)
 Base = namespace['ToolChangeFsm']
@@ -66,11 +66,6 @@ class Fsm(Base):
         self._publish(state)
         self.docking_goal = [0.]*6
         self.moves.append(('DOCKED_MOCK', time.monotonic()))
-
-    def _call(self, client, request, timeout):
-        # The only remaining call is EE_ALIGN. Never invoke a motion service.
-        assert client is self.align
-        return SimpleNamespace(success=True)
 
 
 class Peer(Node):
@@ -220,7 +215,7 @@ def main():
                                    moves=moves, final_state=fsm.state))
                 print('PASS '+scenario, flush=True)
             Path('/tmp/changer_ros_mock_results.json').write_text(json.dumps(dict(
-                scope='actual ROS topics/services; mocked arm/EE/IK/controller state',
+                scope='actual ROS topics/services; mocked arm/IK/controller state',
                 domain=187, no_hardware=True, results=report), indent=2))
         finally:
             executor.shutdown(timeout_sec=3.)

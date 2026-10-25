@@ -1,4 +1,4 @@
-# Managed tool paths and required EE alignment
+# Managed tool paths and docking alignment
 
 `tool1_attach.launch.py` now selects `control_backend:=managed` by default.
 It still starts no hardware/controller manager. Run against the existing managed
@@ -37,32 +37,22 @@ Loss of ROS delivery cannot certify physical stopping. A previously accepted pat
 is not a producer heartbeat stream; manager watchdogs remain its independent
 protection if the producer process disappears.
 
-## Required EE alignment: blocked, not skipped
+## Docking alignment is part of the taught path
 
-The user confirmed that EE_ALIGN is still required. Hardware operating_mode=1
-is velocity-only and the current ee_joint is continuous; the legacy position
-FollowJointTrajectory alignment and its bounded-position assumptions do not match.
-No limits or operating mode were changed and no EE velocity was commanded.
+Docking alignment is the six-axis TCP pose, not a separate `ee_joint` rotation.
+Teach the safe approach in `named_poses.tool0_pre` / `tool1_pre`, then store the
+full docking position and quaternion in `cartesian_targets.tool0_target` /
+`tool1_target`. The managed adapter validates and collision-checks that arm path
+before publishing it. There is no `EE_ALIGN` state, `AlignEe` service, or EE
+controller action in this sequence.
 
-Managed configuration stages from EE_ALIGN onward are rejected before the first
-HOME movement. Direct managed align_ee calls also fail explicitly. Independent
-home/docking_wait development stops remain possible with validated poses, but
-are not a full tool-change run. The default home development stop and Arduino
-`enabled:false` settings remain unchanged. Required managed EE alignment needs a
-separate bounded velocity-control design, measured references/travel constraints,
-feedback termination, cancellation and collision validation before enabling the
-whole sequence. It will not be silently bypassed.
-
-Legacy EE model construction is now lazy, so an unused incompatible alignment
-model does not prevent unrelated arm-only startup. Legacy alignment requests still
-validate/fail under the existing EE model; the old 5 EE model test failures and
-raw-converter limit mismatch have not been disguised by changing hardware config.
+The default home development stop and Arduino `enabled:false` settings remain
+unchanged. A full run remains unavailable until the selected tool's YAML poses,
+timeouts, Arduino timing and collision scene have been measured and approved.
 
 The FSM understands managed controller ownership and monitors manager HOLD/focus
-while waiting for Arduino. Full managed Arduino sequencing remains intentionally
-unreachable until required alignment is implemented. Existing ROS Mock results
-for the Arduino handshake used the JTC Mock branch and do not validate this new
-managed backend over ROS or on hardware.
+while waiting for Arduino. Existing ROS Mock results for the Arduino handshake do
+not validate managed motion over ROS or on hardware.
 
 ## Verification
 

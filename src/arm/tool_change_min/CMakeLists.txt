@@ -13,7 +13,6 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/SolvePoint.srv"
   "srv/MoveNamedPose.srv"
   "srv/ExecuteTrajectory.srv"
-  "srv/AlignEe.srv"
   DEPENDENCIES geometry_msgs trajectory_msgs)
 
 # rosidl_generator_py already installs the Python package and its __init__.py.
@@ -23,7 +22,6 @@ install(FILES
   ${PROJECT_NAME}/config.py
   ${PROJECT_NAME}/changer_protocol.py
   ${PROJECT_NAME}/managed_path.py
-  ${PROJECT_NAME}/ee_alignment.py
   ${PROJECT_NAME}/grasp_sequence.py
   ${PROJECT_NAME}/kinematics.py
   DESTINATION "${PYTHON_INSTALL_DIR}/${PROJECT_NAME}")

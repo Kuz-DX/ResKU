@@ -1,10 +1,10 @@
 > managed 통합: tool1_attach의 기본 backend는 managed입니다.
-> EE 정렬은 필수이며 호환 제어가 아직 없어 managed 전체 시퀀스는 시작 전에
-> 차단됩니다. [연결 방식과 제한](docs/managed_tool_paths.md)을 확인하세요.
+> 도킹 위치·방향 정렬은 YAML의 접근 자세와 6D TCP 목표로 정의합니다.
+> [연결 방식과 제한](docs/managed_tool_paths.md)을 확인하세요.
 
 > 체결 방식 변경: 팔의 wrist yaw 체결 회전과 전용 서비스는 삭제되었습니다.
 > Arduino 토픽 요청/완료 인터페이스의 ROS 측 구현이 추가되었습니다.
-> 기본 설정은 비활성화이며 도킹/Arduino 시간과 기존 EE 호환성 검증 전에는
+> 기본 설정은 비활성화이며 도킹/Arduino 시간 검증 전에는
 > 아래 전체 시퀀스 예시를 그대로 실행할 수 없습니다. [현재 인터페이스 설계](docs/tool_changer_interface.md)를 참고하세요.
 
 # 도구 0·1 장착
@@ -185,7 +185,7 @@ python3 src/arm/tool_change_min/scripts/convert_raw_poses.py
 
 현재 기록은 모든 자세의 wrist_yaw raw가 허용 범위 `[-1887, 2201]` 밖이다.
 HOME의 shoulder/elbow, 일부 자세의 elbow/wrist_roll도 변환 후 한계를 초과한다.
-EE raw `305`, `281`도 허용 범위 `[459, 3843]` 밖이다. 오류 시 종료코드는 2이며
+EE raw 값은 기록용으로 변환하지만 팔 경로 리밋 검사 대상은 아니다. 오류 시 종료코드는 2이며
 적용용 파일을 생성하지 않는다. 이 값들을 맞추기 위해 자동으로 각도를 wrap하거나
 영점·리밋을 변경하지 않는다. 실제 영점 기준과 허용 범위를 확인한 뒤 재티칭한다.
 
@@ -200,7 +200,7 @@ python3 src/arm/tool_change_min/scripts/convert_raw_poses.py \
 검사 통과 시 6축 named_poses와 도킹 raw 기반 FK 목표를 생성한다. 기존 파일은
 덮어쓰지 않는다. EE 측정값은 검증·보존하되 6축 팔 자세에 넣지 않는다.
 기존 팔 회전 체결 자세·명령은 삭제했다. 체결은 별도 Arduino 모터가 담당한다.
-EE_ALIGN 시간·허용오차·기준과 개발 정지 단계도 자동 변경하지 않는다.
+EE 출력축은 도킹 정렬이나 팔 자세에 사용하지 않는다.
 공급 자세는 저장되지만 현재 tool1 FSM에는 공급 이동 단계가 없다.
 한계/FK 검사 통과만으로 이동 경로·충돌·실기 구동이 검증되지는 않는다.
 
@@ -208,9 +208,9 @@ EE_ALIGN 시간·허용오차·기준과 개발 정지 단계도 자동 변경�
 ## UI tag0·tag1 이동 요청
 
 `tool_change_fsm`은 기존 UI 토픽 `/selected_tool_id`를 구독한다.
-0과 1 모두 HOME → DOCKING_WAIT → EE_ALIGN → 선택 도구 PRE → 선택 도구 TARGET
+0과 1 모두 HOME → DOCKING_WAIT → 선택 도구 PRE → 선택 도구 TARGET
 → LOCK → RETURN_DOCKING_WAIT → RETURN_HOME 순서를 사용한다.
-공통 EE 정렬·잠금 설정을 사용하며 선택한 목표는 `poses.yaml`에서 읽는다.
+공통 잠금 설정을 사용하며 선택한 목표는 `poses.yaml`에서 읽는다.
 AprilTag 검출이 목표를 자동 갱신하지는 않는다.
 
 - tag0: `named_poses.tool0_pre`, `cartesian_targets.tool0_target`,
@@ -230,45 +230,18 @@ tag0 요청에서는 각각 TOOL0_PRE, TOOL0_TARGET 뒤에 멈춘다.
 ros2 topic pub --once /selected_tool_id std_msgs/msg/Int32 '{data: 0}'
 ```
 
-## 도킹 전 EE_ALIGN
+## 도킹 위치 정렬
 
-현재 요청 ID 1 흐름은 HOME → DOCKING_WAIT → EE_ALIGN → TOOL1_PRE →
-TOOL1_TARGET → LOCK → RETURN_DOCKING_WAIT → RETURN_HOME → DONE이다.
-tag0(그리퍼)도 같은 순서를 사용하며 TOOL0_PRE → TOOL0_TARGET으로 분기한다.
-그리퍼 열기/닫기 명령은 이 흐름에 추가하지 않는다.
+도킹 정렬은 별도 `ee_joint` 회전이 아니라 팔 TCP의 위치와 방향이다.
+안전한 진입점은 `named_poses.tool0_pre` / `tool1_pre`, 최종 도킹점은
+`cartesian_targets.tool0_target` / `tool1_target`의 XYZ와 quaternion으로
+티칭한다. FSM은 PRE에서 TARGET까지 IK 경로를 실행하고 실제 도착·정지를
+확인한 뒤 Arduino에 LOCK 또는 UNLOCK을 발행한다. 완료 응답을 받기 전에는
+후퇴하지 않는다. 그리퍼 열기/닫기는 이 흐름에 포함하지 않는다.
 
-EE_ALIGN은 motion_executor의 align_ee 서비스를 호출한다. /joint_states의
-ee_joint만 읽고 q=sign*(pulse-zero_raw)*2*pi/4096으로 기준 위상을 변환한다.
-q_ref+n*pi 후보 중 리밋 안의 가장 가까운 점을 선택한다. 현재 EE도 리밋
-안에 있어야 하며 범위 밖이면 복구 이동 없이 HOLD다. 이 검사는 관절 범위
-검사이며 충돌 검사가 아니므로 docking_wait 자세의 EE 회전 여유를 확인한다.
-
-poses.yaml에서 다음 네 키를 측정·승인 후 입력한다:
-motion.ee_align.reference_raw, motion.ee_align.duration_s,
-motion.ee_align.tolerance_rad, timeouts_s.ee_align.
-현재는 null이다. development.stop_after_state가 ee_align 이후이면 미입력
-키를 로그로 출력하고 종료한다. 기준 raw=0이면 기존 허용 범위 459..3843
-안의 후보는 raw=2048 하나이다. raw=0으로 자동 복귀하지 않는다.
-
-기존 URDF 및 raw 리밋에 맞춰 hardware.yaml의 EE rad 리밋만
-[-2.351592547829, 2.839398438376]로 정정했다. zero_raw=1992와 raw 범위는
-유지한다. 모델은 시작 시 EE raw/rad/URDF 리밋의 일치를 검사한다.
-
-외부 ee_controller가 활성화되어 있어야 한다. 액션 주소는 launch 인자
-ee_action (기본 /ee_controller/follow_joint_trajectory)로 변경 가능하다.
-EE 궤적에는 ee_joint만 들어가며 팔 컨트롤러에는 새 명령을 보내지 않는다.
-액션 성공 후 새 피드백에서 목표 오차가 tolerance_rad 이내인지 확인한다.
-결과 timeout에는 취소를 요청하고 모션을 잠근다. 취소 요청은 물리적 정지를
-보장하지 않으며 실패 후 재시작 전 실제 정지 여부를 확인해야 한다.
-
-Mock 확인: 외부 mock 스택의 arm_controller와 ee_controller를 활성화하고
-EE 초기값을 허용 범위 안에 둔다. 승인된 설정 복사본에서 정렬 기준과 시간,
-허용오차를 입력하고 development.stop_after_state=ee_align로 실행한다.
-요청 ID 1 후 EE_ALIGN → PAUSED_EE_ALIGN 및 실제 ee_joint 값을 확인한다.
-전체 흐름은 stop_after_state=done으로 확인한다. 실패 시험은 mock EE를
-범위 밖으로 놓거나 ee_controller를 비활성화하여 수행한다.
-EE_ALIGN → HOLD 뒤 TOOL1_PRE나 추가 목표가 발생하지 않아야 한다.
-IK·실행기·FSM 3개 노드 launch에 새 노드를 추가하지 않는다.
+기존 `EE_ALIGN`, `AlignEe` 서비스와 EE controller action은 제거했다.
+따라서 도킹 자세가 아직 측정되지 않은 도구는 설정 검증에서 차단되며,
+임의 정렬 동작으로 대신하지 않는다.
 
 ## 실기 준비 상태와 보정
 
@@ -348,12 +321,11 @@ python3 src/arm/tool_manipulator_bringup/scripts/set_current_zero.py \
 
 ### 힌지 정렬, 태그 크기와 도킹 목표
 
-힌지가 12시/6시인 체결 정렬은 사용자가 지정한 EE 쪽 기준이다.
-이를 `wrist_yaw_joint=nπ` 제약으로 임의 변환하지 않는다. 현재 URDF에서는
+힌지가 12시/6시인 체결 정렬도 티칭한 TCP 목표 방향에 포함한다.
+이를 `wrist_yaw_joint=nπ` 제약이나 별도 `ee_joint` 동작으로 임의 변환하지 않는다. 현재 URDF에서는
 `wrist_link_yaw → ee_actuator`가 고정 변환이고 `ee_actuator → tcp_link`는
 위치·방향이 같은 고정 변환이다. 회전 출력축 `ee_joint`(ID 4)는 TCP 뒤에 있다.
-6축 도킹 실행기는 ID 4를 명령하지 않으므로 출력축 정렬이 필요한 경우 접근 전에
-맞추고 유지한다. 체결용 wrist_yaw 회전은 사용하지 않는다.
+6축 도킹 실행기는 ID 4를 명령하지 않는다. 체결용 wrist_yaw 회전도 사용하지 않는다.
 
 AprilTag 검은 외곽 정사각형은 **2 cm × 2 cm**로 확정:
 검출기는 `tag_size_cm:=2.0`, 계측기는 `tag_size_m:=0.02`를 사용한다.
@@ -376,7 +348,7 @@ T_base_target = T_base_tag × T_tag_target
 
 - DXL raw pulse: base(ID 1), wrist_roll(ID 2), wrist_yaw(ID 3).
 - RMD raw_deg: shoulder(ID 4), elbow(ID 5), wrist_pitch(ID 6).
-- 그때 사용한 `hardware.yaml` 영점·방향. EE 출력축 정렬 확인용 ID 4 DXL raw도 기록한다.
+- 그때 사용한 `hardware.yaml` 영점·방향. EE 출력축 ID 4 DXL raw는 진단 기록으로만 보존한다.
 
 운영 제어기를 종료하고 보정 터미널 A의 읽기 전용 bridge를 실행한 뒤,
 다른 터미널에서 아래 명령을 실행하고 정지 자세에서 Enter를 눌러 기록한다:

@@ -26,8 +26,7 @@ def fsm_class(validate):
     cls = next(n for n in tree.body if isinstance(n, ast.ClassDef))
     cls.body = [n for n in cls.body if isinstance(n, ast.FunctionDef)
                 and n.name in ('_run', '_arduino_lock')]
-    namespace = dict(Node=object, validate_request_config=validate,
-                     AlignEe=SimpleNamespace(Request=SimpleNamespace))
+    namespace = dict(Node=object, validate_request_config=validate)
     exec(compile(ast.fix_missing_locations(ast.Module(body=[cls], type_ignores=[])),
                  str(path), 'exec'), namespace)
     return namespace['ToolChangeFsm']
@@ -36,14 +35,11 @@ def fsm_class(validate):
 def harness(validate):
     n = fsm_class(validate)()
     n.config = load_poses(PACKAGE/'config/poses.yaml')
-    n.config['timeouts_s']['ee_align'] = 1.
     n.state = 'IDLE'
     n.hardware_error = ''
     n._named = Mock()
     n._cartesian_target = Mock()
     n._pause_after = Mock(return_value=False)
-    n._call = Mock()
-    n.align = Mock()
     n.get_logger = Mock()
     n._publish = Mock(side_effect=lambda state: setattr(n, 'state', state))
     return n
@@ -72,11 +68,20 @@ def test_old_arm_lock_endpoint_and_runtime_configuration_removed():
     assert not any(isinstance(n, ast.FunctionDef) and n.name == '_rotate_yaw'
                    for n in ast.walk(tree))
     assert not (PACKAGE/'srv/RotateWristYaw.srv').exists()
+    assert not (PACKAGE/'srv/AlignEe.srv').exists()
     config = load_poses(PACKAGE/'config/poses.yaml')
     assert 'yaw_delta_rad' not in config['motion']
     assert 'lock_duration_s' not in config['motion']
     assert not {'tool_lock', 'tool_lock1'} & config['named_poses'].keys()
     assert config['development']['stop_after_state'] == 'home'
+
+
+def test_docking_alignment_is_yaml_path_without_ee_stage():
+    from tool_change_min.config import STAGES
+    config = load_poses(PACKAGE/'config/poses.yaml')
+    assert 'ee_align' not in STAGES
+    assert 'ee_align' not in config['motion']
+    assert 'ee_align' not in config['timeouts_s']
 
 
 @pytest.mark.parametrize('success', [False, True])

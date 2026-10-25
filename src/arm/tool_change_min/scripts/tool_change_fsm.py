@@ -2,7 +2,7 @@
 # 이 파일을 직접 실행할 때 Python 3 인터프리터를 사용하도록 지정합니다.
 """One-shot, hold-on-failure FSM for the tool-1 Cartesian target routine.
 
-The state order is HOME, DOCKING_WAIT, EE_ALIGN, TOOL1_PRE, TOOL1_TARGET, LOCK,
+The state order is HOME, DOCKING_WAIT, TOOL1_PRE, TOOL1_TARGET, LOCK,
 RETURN_DOCKING_WAIT, RETURN_HOME, DONE.  TOOL1_TARGET reads a fixed
 ``base_actuator`` XYZ+quaternion from YAML and asks IK for a Cartesian path.
 Position waypoint k is ``p0 + (k/N)(pt-p0)`` and orientation follows the
@@ -13,8 +13,8 @@ LOCK/UNLOCK sends an Arduino command after measured docking and waits for its
 matching completion. Errors never permit speculative retreat or wrist locking.
 Every service/controller failure or timeout enters HOLD without retry or any
 speculative return motion.
-EE_ALIGN chooses the nearest bounded q_ref+n*pi EE angle and verifies actual
-feedback through motion_executor before entering the docking approach.
+Docking alignment is encoded by the taught pre-pose and base-frame Cartesian
+target loaded from YAML; the FSM does not rotate ee_joint for alignment.
 """
 # 이 모듈은 도구 1 장착 절차를 한 번 실행하고 실패 시 HOLD에 머뭅니다.
 # 목표 자세는 base_actuator 기준 XYZ와 quaternion을 모두 IK에 전달합니다.
@@ -48,7 +48,7 @@ from tool_change_min.changer_protocol import ChangerTransaction
 # 정지 상태 설정 검증과 개발 단계별 정지 지점을 처리합니다.
 from tool_change_min.config import require_for_stop_state, stop_after_state, validate_request_config
 # 이 FSM이 호출하는 자세 이동, IK, 궤적 실행 서비스 형식입니다.
-from tool_change_min.srv import AlignEe, ExecuteTrajectory, LinearMoveToPose, MoveNamedPose
+from tool_change_min.srv import ExecuteTrajectory, LinearMoveToPose, MoveNamedPose
 
 
 # 도구 장착 절차의 상태와 서비스 호출을 관리하는 ROS 2 노드입니다.
@@ -111,7 +111,6 @@ class ToolChangeFsm(Node):
                             callback_group=self.client_group)
         self.named = self.create_client(MoveNamedPose, "move_to_named_pose",
                                        callback_group=self.client_group)
-        self.align = self.create_client(AlignEe, "align_ee", callback_group=self.client_group)
         # 고정 Cartesian pose까지 다점 직선 IK 경로를 만드는 서비스 클라이언트입니다.
         self.linear_pose = self.create_client(LinearMoveToPose, "linear_move_to_pose",
                                              callback_group=self.client_group)
@@ -383,12 +382,6 @@ class ToolChangeFsm(Node):
             self._named("DOCKING_WAIT", "docking_wait", "docking_wait")
             # 도킹 대기 단계가 정지 지점이면 절차를 반환합니다.
             if self._pause_after("docking_wait"):
-                return
-            self._publish("EE_ALIGN")
-            alignment = AlignEe.Request()
-            alignment.timeout_s = float(self.config["timeouts_s"]["ee_align"])
-            self._call(self.align, alignment, alignment.timeout_s)
-            if self._pause_after("ee_align"):
                 return
             # 선택된 tag의 Cartesian 목표에 접근하기 전 티칭 자세로 이동합니다.
             self._named(pre.upper(), pre, pre)

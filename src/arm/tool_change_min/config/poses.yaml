@@ -41,9 +41,6 @@ cartesian_targets:
     position_m: [null, null, null]
     orientation_xyzw: [null, null, null, null]
 motion:
-  # Physical EE alignment phase; 180-degree spacing is 2048 motor pulses.
-  # Confirm the measured reference in the current Homing Offset convention.
-  ee_align: {reference_raw: null, duration_s: null, tolerance_rad: null}
   # 현재 FSM은 insert.speed_m_s만 사용한다 (0.005 m/s = 5 mm/s).
   # 삽입 거리는 현재 TCP에서 tool1_target까지 계산하며 distance_m은 예약 필드다.
   insert: {distance_m: null, speed_m_s: 0.005}
@@ -56,7 +53,6 @@ motion:
   ik_orientation_step_rad: 0.02
   ik_limit_margin_rad: 0.01
 timeouts_s:
-  ee_align: null
   home: 120.0
   docking_wait: 120.0
   tool0_pre: 120.0

@@ -131,10 +131,8 @@ def test_timed_core_segment_preserves_direction_with_joint_speed_caps():
     assert c.requested == 'manual'
 
 
-@pytest.mark.parametrize('stage', ['ee_align', 'tool1_pre', 'lock', 'done'])
-def test_required_ee_alignment_blocks_managed_sequence_before_motion(stage):
+def test_removed_ee_alignment_stage_is_rejected_as_unknown():
     data = load_poses(ARM/'tool_change_min/config/poses.yaml')
-    data['control_backend'] = 'managed'
-    data['development']['stop_after_state'] = stage
-    with pytest.raises(ValueError, match='EE alignment is required'):
+    data['development']['stop_after_state'] = 'ee_align'
+    with pytest.raises(ValueError, match='must be one of'):
         validate_request_config(data)

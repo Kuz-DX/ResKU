@@ -7,7 +7,7 @@ import yaml
 
 
 STAGES = (
-    "home", "docking_wait", "ee_align", "tool1_pre", "tool1_target", "lock",
+    "home", "docking_wait", "tool1_pre", "tool1_target", "lock",
     "return_docking_wait", "return_home",
 )
 STOP_AFTER_STATES = frozenset((*STAGES, "done"))
@@ -75,10 +75,6 @@ def _required_paths(stop_after: str) -> list[str]:
         pose = _NAMED_POSE_BY_STAGE.get(stage)
         if pose is not None:
             required.extend((f"named_poses.{pose}", "motion.named_pose_duration_s"))
-        elif stage == "ee_align":
-            required.extend(("motion.ee_align.reference_raw",
-                             "motion.ee_align.duration_s",
-                             "motion.ee_align.tolerance_rad"))
         elif stage == "tool1_target":
             required.extend((
                 "cartesian_targets.tool1_target.frame_id",
@@ -96,8 +92,6 @@ def validate_request_config(data: dict[str, Any], tool_id: int = 1) -> None:
     if tool_id not in (0, 1):
         raise ValueError(f"unsupported tool ID: {tool_id}")
     stop_after = stop_after_state(data)
-    if data.get('control_backend') == 'managed' and stop_after not in ('home', 'docking_wait'):
-        raise ValueError('EE alignment is required; managed velocity-mode alignment is not implemented')
     if stop_after in ('lock', 'return_docking_wait', 'return_home', 'done'):
         settings = data.get('tool_changer', {})
         if settings.get('enabled') is not True:

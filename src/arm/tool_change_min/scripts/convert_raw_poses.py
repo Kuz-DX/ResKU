@@ -35,18 +35,21 @@ def convert(capture, hardware, names, margin):
                     raise ValueError(f"{label}.{name}: raw_pulse must be an integer")
                 sign = 1 if spec["raw_increases_ccw"] else -1
                 q = sign * (raw - spec["zero_raw"]) * 2 * math.pi / 4096
-                lo, hi = spec["soft_limit_raw"]
-                if not lo <= raw <= hi:
-                    errors.append(f"{label}.{name}: raw={raw:g} outside [{lo}, {hi}]")
+                if name in names:
+                    lo, hi = spec["soft_limit_raw"]
+                    if not lo <= raw <= hi:
+                        errors.append(f"{label}.{name}: raw={raw:g} outside [{lo}, {hi}]")
             elif spec["vendor"] == "rmd":
                 q = spec["sign"] * (math.radians(raw) - spec["q_offset_rad"])
             else:
                 raise ValueError(f"unsupported vendor for {name}")
-            lo, hi = spec["soft_limit_rad"]
-            padding = margin if name in names else 0
-            if not math.isfinite(q) or not lo + padding <= q <= hi - padding:
-                errors.append(f"{label}.{name}: q={q:.6f} outside "
-                              f"[{lo + padding:.6f}, {hi - padding:.6f}]")
+            if not math.isfinite(q):
+                errors.append(f"{label}.{name}: nonfinite converted position")
+            elif name in names:
+                lo, hi = spec["soft_limit_rad"]
+                if not lo + margin <= q <= hi - margin:
+                    errors.append(f"{label}.{name}: q={q:.6f} outside "
+                                  f"[{lo + margin:.6f}, {hi - margin:.6f}]")
             joints[name] = q
         converted[label] = joints
     return converted, errors
@@ -94,7 +97,7 @@ def main():
         with args.output.open("x", encoding="utf-8") as stream:
             yaml.safe_dump(poses, stream, sort_keys=False)
         print(f"Candidate written: {args.output}")
-    print("Capture limits/FK checked; motion paths, EE alignment and collision clearance are not validated.")
+    print("Capture limits/FK checked; motion paths and collision clearance are not validated.")
     return 0
 
 

@@ -10,8 +10,8 @@
 체결용 named pose와 raw capture, 변환기의 해당 출력은 삭제했다.
 정상적인 wrist_yaw 관절 제어와 Manual 매핑은 유지한다.
 `ee_joint`는 Manual EE 출력과 gripper mimic 등에서도 사용하므로 삭제하지
-않는다. `EE_ALIGN`은 별도 도킹 정렬 단계로 현재 유지하지만, 새 기구에서
-필요한지 확인 전에는 자동 제거하거나 새 체결 동작으로 사용하지 않는다.
+않는다. 다만 도킹 정렬은 YAML에 티칭한 팔의 접근 자세와 6D TCP 목표가
+담당하며, 별도 `EE_ALIGN` 단계나 `ee_joint` 명령은 사용하지 않는다.
 
 ROS 측 publisher/subscriber와 완료 대기, 명시적 취소가 구현되었다. Arduino
 펌웨어는 작성하지 않았다. 기본 `tool_changer.enabled: false`, 개발 정지점 home,
@@ -104,10 +104,8 @@ ForwardCommandController와 Mode Manager를 사용한다. 이 둘은 현재 연�
 - STOP에는 원 명령 ID를 사용하고 중복 발행을 막는다. 취소는 이미 수신된
   완료보다 우선한다. 오류 후 자동 재시도하지 않는다.
 
-남은 배포 작업: 기존 EE_ALIGN/실행기와 현재 하드웨어의 호환성 해결,
-managed 단일 소유권으로의 도킹/후퇴 연결, Arduino 통신 연결 방식·시간 확정,
-실제 ROS Mock 및 별도 승인된 실기 검증. 이 변경은 기존 JTC 기반 FSM에
-토픽 단계를 추가한 것이며 managed와 동시에 실행할 수 있게 만든 변경이 아니다.
+남은 배포 작업: 도킹 접근·목표 자세 티칭, Arduino 통신 연결 방식·시간 확정,
+managed ROS 통합 및 별도 승인된 실기 검증이다.
 
 ## 검증 시나리오
 
@@ -122,14 +120,6 @@ managed 단일 소유권으로의 도킹/후퇴 연결, Arduino 통신 연결 �
 ROS 패키지는 빌드하지 않았다. 기존 install에 남은 generated 서비스 파일은
 이번 source 삭제만으로 없어지지 않을 수 있다. 배포 시 source/install 일치 확인이
 필요하며, 여기서는 install 산출물을 임의 수정하거나 실행하지 않았다.
-
-## 이번 검증 결과와 기존 불일치
-
-Tool Changer 오프라인 테스트: 30개 통과, 6개 실패. 새 삭제/차단 회귀 7개는
-통과했다. 실패 5개는 `EeAlignment`가 continuous ee_joint에 없는 URDF lower/upper를
-읽는 문제이고, 1개는 raw 변환기가 현재 ee_joint에 없는 soft_limit_raw를 요구하는
-문제다. 해당 모델/하드웨어 설정을 수정하지 않았다. EE_ALIGN과 예전 JTC 실행기
-구조는 현재 하드웨어에 그대로 배포 가능한 상태로 간주하지 않는다.
 
 ## ROS 측 구현 검증
 
@@ -164,7 +154,7 @@ Arduino 하드웨어 통신과 실제 팔 동작은 아직 시험하지 않았�
 범위: 실제 production FSM 생성자·요청/순서·Arduino callback·대기·안전 검사와
 실제 ROS 토픽/서비스를 사용했다. 설치본에 프로젝트의 생성된 srv 타입이 없어
 빌드 없이 시험하기 위해 custom 서비스 import 타입만 시험용으로 대체했다.
-팔 named 이동·IK/도킹 실행·EE 정렬의 호출 경계는 Mock 처리했고, 후퇴는
+팔 named 이동·IK/도킹 실행의 호출 경계는 Mock 처리했고, 후퇴는
 메서드 호출 기록으로 확인했다. 실제 팔 액션, 기구학, physical stopping,
 설치된 패키지의 실행 가능성 및 Arduino 펌웨어 검증을 의미하지 않는다.
 
