@@ -70,10 +70,12 @@ def bringup(context):
 
 
 def generate_launch_description():
-    share = Path(get_package_share_directory('tool_manipulator_bringup'))
+    source_config = Path(__file__).resolve().parents[1]/'config/hardware.yaml'
+    hardware_default = (source_config if source_config.is_file() else
+                        Path(get_package_share_directory('tool_manipulator_bringup'))/'config/hardware.yaml')
     return LaunchDescription([
         DeclareLaunchArgument('real_hardware', default_value='true', choices=['true', 'false']),
-        DeclareLaunchArgument('hardware_config', default_value=str(share/'config/hardware.yaml')),
+        DeclareLaunchArgument('hardware_config', default_value=str(hardware_default)),
         DeclareLaunchArgument('launch_joy', default_value='false', choices=['true', 'false']),
         DeclareLaunchArgument('mock_initial_positions_file', default_value=''),
         DeclareLaunchArgument('launch_tcp_joy', default_value='true', choices=['true', 'false']),

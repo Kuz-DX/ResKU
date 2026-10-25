@@ -41,7 +41,8 @@ MANUAL/TCP_IK/TOOL_AUTO를 중재하지만, 다른 launch와의 동시 실행은
 반드시 기존 팔 launch를 완전히 종료한 뒤 다른 모드를 실행한다.
 
 ```bash
-ros2 launch tool_manipulator_bringup ik_manual.launch.py
+# 빌드 전에는 소스 launch를 직접 지정한다.
+ros2 launch src/arm/tool_manipulator_bringup/launch/ik_manual.launch.py
 ```
 
 ## 수동 구동
