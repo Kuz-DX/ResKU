@@ -25,6 +25,7 @@ try:
     from tool_change_min.kinematics import ArmKinematics, ARM_JOINTS
 except ImportError:
     from arm_shared_kinematics import ArmKinematics, ARM_JOINTS
+from arm_mode_core import TCP_ENTRY_TOLERANCE
 
 
 def load_path(path, model, margin=.02):
@@ -274,8 +275,11 @@ class ToolTrajectoryJoy(Node):
             self.reset()
 
     def unchanged(self):
-        return (self.full_state is not None and self.full_state.keys() == self.snapshot.keys()
-                and all(abs(self.full_state[j]-v) <= .001 for j, v in self.snapshot.items()))
+        if self.full_state is None or self.full_state.keys() != self.snapshot.keys():
+            return False
+        tolerances = dict(zip(ARM_JOINTS, TCP_ENTRY_TOLERANCE))
+        return all(abs(self.full_state[j]-v) <= tolerances.get(j, .001)
+                   for j, v in self.snapshot.items())
 
     def tick(self):
         if self.stage == 'idle':
@@ -302,8 +306,10 @@ class ToolTrajectoryJoy(Node):
                 return
             if self.stage == 'checking':
                 s = self.healthy_hold(now)
-                if s.get('epoch') != self.original_epoch or not self.unchanged():
-                    raise RuntimeError('robot state or ownership changed during path validation')
+                if s.get('epoch') != self.original_epoch:
+                    raise RuntimeError('arm ownership changed during path validation')
+                if not self.unchanged():
+                    raise RuntimeError('robot state changed beyond stopped-feedback tolerance during path validation')
                 if now-self.started > self.collision_timeout:
                     raise TimeoutError('tool path collision check timed out')
                 if not self.future.done():

@@ -85,3 +85,15 @@ def test_far_start_remains_blocked():
                 durations=[2.], total=2.)
     with pytest.raises(ValueError, match='automatic approach limit'):
         execution_plan(path, np.ones(6)*.101)
+
+
+def test_path_snapshot_accepts_dxl_hunt_but_keeps_rmd_tight():
+    names = ['base_joint', 'shoulder_joint', 'elbow_joint',
+             'wrist_pitch_joint', 'wrist_roll_joint', 'wrist_yaw_joint']
+    node = SimpleNamespace(snapshot=dict.fromkeys(names, 0.),
+                           full_state=dict.fromkeys(names, 0.))
+    from tool_trajectory_joy import ToolTrajectoryJoy
+    node.full_state['wrist_roll_joint'] = .019
+    assert ToolTrajectoryJoy.unchanged(node)
+    node.full_state['shoulder_joint'] = .0011
+    assert not ToolTrajectoryJoy.unchanged(node)
