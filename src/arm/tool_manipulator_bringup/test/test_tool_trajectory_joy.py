@@ -44,7 +44,7 @@ def test_invalid_timing_is_rejected(tmp_path, times):
 
 
 def test_l2_plus_first_button_has_one_rising_edge():
-    axes, buttons = [0., 0., -1.], [0, 1, 0, 0]
+    axes, buttons = [0., 0., -1.], [0, 0, 1, 0, 0]
     request, held = requested_path(axes, buttons, [False]*3)
     assert request == 0
     assert requested_path(axes, buttons, held)[0] is None
@@ -54,5 +54,5 @@ def test_l2_plus_first_button_has_one_rising_edge():
 
 
 def test_simultaneous_path_buttons_are_ignored():
-    request, held = requested_path([0., 0., -1.], [0, 1, 1, 0], [False]*3)
+    request, held = requested_path([0., 0., -1.], [0, 0, 1, 1, 0], [False]*3)
     assert request is None and held == [True, True, False]

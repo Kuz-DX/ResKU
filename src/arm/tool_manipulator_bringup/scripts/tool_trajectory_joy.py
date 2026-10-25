@@ -61,7 +61,7 @@ def load_path(path, model, margin=.02):
                 durations=[b-a for a, b in zip(times, times[1:])], total=times[-1])
 
 
-def requested_path(axes, buttons, previous, l2_axis=2, threshold=-.5, first_button=1):
+def requested_path(axes, buttons, previous, l2_axis=2, threshold=-.5, first_button=2):
     """Return a new 0..2 path request, plus current combo edge state."""
     valid = (len(axes) > l2_axis and len(buttons) > first_button+2
              and all(math.isfinite(v) for v in axes)
@@ -88,8 +88,9 @@ class ToolTrajectoryJoy(Node):
         self.collision_timeout = float(param('collision_timeout_sec', 10.))
         self.l2_axis = int(param('l2_axis', 2))
         self.l2_threshold = float(param('l2_pressed_below', -.5))
-        # Path 0/1/2 use ROS Joy buttons 1/2/3 respectively.
-        self.first_button = int(param('first_path_button', 1))
+        # This controller's physical button 1 is reported as ROS Joy button 2.
+        # Path 0 starts there; the parameter remains overridable per controller.
+        self.first_button = int(param('first_path_button', 2))
         if (not 0 < self.margin <= .1 or not 0 < self.start_tolerance <= .1
                 or not 0 < self.collision_step <= .01 or not .1 < self.collision_timeout <= 60.
                 or self.l2_axis < 0 or self.first_button < 0):
