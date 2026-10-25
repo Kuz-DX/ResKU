@@ -42,7 +42,7 @@
     </ros2_control>
   </xacro:macro>
 
-  <xacro:macro name="dxl_joint" params="name spec wrap">
+  <xacro:macro name="dxl_joint" params="name spec state_wrap:=false command_nearest_turn:=false">
     <joint name="${name}">
       <xacro:if value="${spec['operating_mode'] == 1}">
         <command_interface name="velocity">
@@ -60,7 +60,11 @@
       <!-- Model coordinate is raw_tick*2pi/4096-pi. -->
       <param name="position_zero_offset">${spec['zero_raw'] * 2.0 * pi / 4096.0 - pi}</param>
       <param name="position_direction">${1.0 if spec['raw_increases_ccw'] else -1.0}</param>
-      <param name="position_wraparound">${wrap}</param>
+      <!-- Extended-position feedback may restart on another 2*pi branch.
+           Normalize only the ROS state; map position commands to the raw turn
+           nearest the measured motor position to avoid a full-revolution jump. -->
+      <param name="position_state_wraparound">${'true' if state_wrap else 'false'}</param>
+      <param name="position_command_nearest_turn">${'true' if command_nearest_turn else 'false'}</param>
     </joint>
   </xacro:macro>
 
@@ -122,10 +126,11 @@
           <param name="transmission_to_joint_matrix">1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1</param>
           <param name="joint_to_transmission_matrix">1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1</param>
         </hardware>
-        <xacro:dxl_joint name="base_joint" spec="${j['base_joint']}" wrap="false"/>
-        <xacro:dxl_joint name="wrist_roll_joint" spec="${j['wrist_roll_joint']}" wrap="false"/>
-        <xacro:dxl_joint name="wrist_yaw_joint" spec="${j['wrist_yaw_joint']}" wrap="false"/>
-        <xacro:dxl_joint name="ee_joint" spec="${j['ee_joint']}" wrap="false"/>
+        <xacro:dxl_joint name="base_joint" spec="${j['base_joint']}"/>
+        <xacro:dxl_joint name="wrist_roll_joint" spec="${j['wrist_roll_joint']}"/>
+        <xacro:dxl_joint name="wrist_yaw_joint" spec="${j['wrist_yaw_joint']}"
+                         state_wrap="true" command_nearest_turn="true"/>
+        <xacro:dxl_joint name="ee_joint" spec="${j['ee_joint']}"/>
         <xacro:dxl_gpio name="base_motor" spec="${j['base_joint']}"/>
         <xacro:dxl_gpio name="wrist_roll_motor" spec="${j['wrist_roll_joint']}"/>
         <xacro:dxl_gpio name="wrist_yaw_motor" spec="${j['wrist_yaw_joint']}"/>
