@@ -31,7 +31,7 @@ def test_unsafe_entry_rejected_in_hold(reason):
     if reason == 'missing': c.tcp_entry = None
     if reason == 'stale': c.tcp_entry['time'] = 0.
     if reason == 'collision': c.tcp_entry.update(safe=False, reason='collision')
-    if reason == 'changed': c.position[0] = .01
+    if reason == 'changed': c.position[0] = .021
     if reason == 'margin': c.position[0] = 1.95
     if reason == 'moving': c.velocity[0] = .03
     if reason == 'epoch': c.tcp_entry['epoch'] = 'old'
@@ -68,11 +68,11 @@ def test_manual_does_not_require_tcp_assessment():
     assert c.requested == 'manual'
 
 
-def test_entry_accepts_one_dxl_count_but_rejects_two():
+def test_entry_accepts_stopped_dxl_hunt_but_rejects_larger_change():
     c = core()
-    c.position[0] = 2*np.pi/4096
+    c.position[0] = .019
     assert c.tcp_entry_blocker(1.01) == ''
-    c.position[0] *= 2
+    c.position[0] = .021
     assert 'feedback changed' in c.tcp_entry_blocker(1.01)
 
 
@@ -88,9 +88,9 @@ def test_entry_requires_stability_and_resets_on_drift():
     assert 'stable feedback' in c.tcp_entry_blocker(1.1)
     c.feedback([0.]*6, [0.]*6, 1.21)
     assert c.tcp_entry_blocker(1.21) == ''
-    c.feedback([.004]+[0.]*5, [0.]*6, 1.22)
+    c.feedback([.021]+[0.]*5, [0.]*6, 1.22)
     assert c.entry_stable_since == 1.22
-    c.feedback([.004]+[0.]*5, [.03]+[0.]*5, 1.23)
+    c.feedback([.021]+[0.]*5, [.03]+[0.]*5, 1.23)
     assert c.entry_stable_since is None
 
 
@@ -201,7 +201,8 @@ def ready_node():
     n = SimpleNamespace(
         ready_enabled=True, auto_entry_armed=True, ready_state='idle',
         ready_goal=np.array([0., 1.2, 1.2, -1.2, 0., 0.]), ready_duration=10.,
-        ready_step=.005, ready_timeout=3., ready_checks=[], ready_snapshot=None,
+        ready_step=.005, ready_timeout=3., ready_max_delta=.5, entry_retry_count=0,
+        ready_checks=[], ready_snapshot=None,
         ready_started=None, ready_future=None, ready_execution_id=None,
         ready_safe_at=None, measured=np.array([0., 1.48, 1.50, -1.55, 0., 0.]),
         full_state=dict(zip(('base_joint', 'shoulder_joint', 'elbow_joint',
@@ -311,6 +312,18 @@ def test_entry_feedback_race_rechecks_without_relaxing_guard():
     n.tool_pub.publish.assert_not_called()
 
 
+def test_entry_feedback_race_stops_after_three_attempts():
+    n = ready_node()
+    n.ready_state = 'request_tcp'
+    n.entry_retry_count = 2
+    n.ready_future = Mock()
+    n.ready_future.result.return_value = SimpleNamespace(
+        success=False, message='TCP entry feedback changed; recheck required')
+    TcpJoy.drive_ready(n, 1.)
+    assert n.ready_state == 'failed' and not n.auto_entry_armed
+    assert 'three checks' in n.reason
+
+
 def test_home_completion_stays_hold_and_restores_tcp_ready_target():
     n = ready_node()
     n.default_ready_goal = n.ready_goal.copy()
@@ -320,7 +333,8 @@ def test_home_completion_stays_hold_and_restores_tcp_ready_target():
     n.ready_execution_id = 'home'
     n.status.update(last_execution_id='home', last_execution_result='succeeded')
     TcpJoy.drive_ready(n, 1.)
-    assert not n.returning_home and not n.auto_entry_armed
+    assert not n.returning_home and n.auto_entry_armed
+    assert n.ready_state == 'idle'
     np.testing.assert_array_equal(n.ready_goal, n.default_ready_goal)
     n.tcp_mode.call_async.assert_not_called()
 

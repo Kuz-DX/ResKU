@@ -45,6 +45,12 @@ class TcpMotionWorkflow:
             if not self.check.service_is_ready():
                 self.reason = 'waiting for MoveIt collision service before TCP ready'
                 return
+            delta = float(np.max(np.abs(self.ready_goal-self.measured)))
+            if delta > self.ready_max_delta:
+                self._fail_ready(
+                    'TCP ready automatic move blocked: %.3f rad exceeds %.3f rad limit' %
+                    (delta, self.ready_max_delta))
+                return
             count = max(1, math.ceil(float(np.max(np.abs(self.ready_goal-self.measured))) /
                                      self.ready_step))
             self.ready_snapshot = self.measured.copy()
@@ -136,13 +142,16 @@ class TcpMotionWorkflow:
                     s.get('last_execution_result') == 'succeeded' and s.get('mode') == 'hold'):
                 self.ready_state = 'await_entry'
                 self.ready_safe_at = None
+                self.entry_retry_count = 0
                 self.reason = 'TCP ready reached; verifying entry'
                 if vars(self).get('returning_home', False):
                     self.returning_home = False
                     self.ready_goal = self.default_ready_goal.copy()
-                    self.auto_entry_armed = False
+                    # HOME is intentionally outside the TCP-entry joint margin.
+                    # Prepare the fixed, bounded ready path again and wait for L1.
+                    self.auto_entry_armed = True
                     self.ready_state = 'idle'
-                    self.reason = 'manual Stop_pose reached; holding'
+                    self.reason = 'manual Stop_pose reached; release then hold L1 for TCP ready'
             elif s.get('mode') == 'fault' or (s.get('last_execution_id') == self.ready_execution_id
                                               and s.get('last_execution_result') == 'aborted'):
                 self._fail_ready('TCP ready execution failed; inspect arm')
@@ -165,10 +174,17 @@ class TcpMotionWorkflow:
                 if detail in ('TCP entry feedback changed; recheck required',
                               'TCP entry waiting for 0.20 sec stable feedback',
                               'TCP entry requires stopped feedback'):
-                    self.ready_state = 'await_entry'
-                    self.ready_safe_at = None
-                    self.auto_entry_armed = True
-                    self.reason = 'TCP entry feedback changed; checking again'
+                    self.entry_retry_count += 1
+                    if self.entry_retry_count >= 3:
+                        self.ready_state = 'failed'
+                        self.auto_entry_armed = False
+                        self.reason = 'TCP entry remained unstable after three checks; remain HOLD'
+                    else:
+                        self.ready_state = 'await_entry'
+                        self.ready_safe_at = None
+                        self.auto_entry_armed = True
+                        self.reason = 'TCP entry feedback changed; checking again (%d/3)' % (
+                            self.entry_retry_count)
                 else:
                     self.ready_state = 'failed'
                     self.reason = 'TCP_IK request rejected: '+detail

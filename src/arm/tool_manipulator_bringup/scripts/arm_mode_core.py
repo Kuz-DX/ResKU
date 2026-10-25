@@ -4,9 +4,10 @@ import uuid
 
 
 MODES = ('manual', 'tcp_ik', 'tool_auto', 'hold', 'fault')
-# One DXL encoder count plus numerical allowance; retain the existing RMD bound.
-TCP_ENTRY_TOLERANCE = (2*math.pi/4096+1e-6, .001, .001, .001,
-                       2*math.pi/4096+1e-6, 2*math.pi/4096+1e-6)
+# DXL feedback hunts by several encoder counts while physically stopped.  Keep
+# the tighter RMD bound, but accept only a small 0.02-rad DXL neighborhood around
+# the collision-checked snapshot so entry cannot retry forever on quantization.
+TCP_ENTRY_TOLERANCE = (.02, .001, .001, .001, .02, .02)
 
 
 class ModeCore:

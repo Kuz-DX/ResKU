@@ -63,12 +63,14 @@ class TcpJoy(TcpMotionWorkflow, Node):
         self.returning_home = False
         self.previous_home = False
         self.ready_duration = float(ready_data.get('duration_sec', 10.))
+        self.ready_max_delta = float(ready_data.get('max_start_delta_rad', .35))
         self.ready_step = float(ready_data.get('collision_step_rad', .005))
         self.ready_timeout = float(ready_data.get('collision_timeout_sec', 3.))
         if self.ready_enabled and (self.ready_goal.shape != (len(ARM_JOINTS),)
                 or not np.all(np.isfinite(self.ready_goal))
                 or not self.model.within_limits(self.ready_goal, .101)
-                or not 0 < self.ready_duration < 120. or not 0 < self.ready_step <= .01
+                or not 0 < self.ready_duration < 120. or not 0 < self.ready_max_delta <= .5
+                or not 0 < self.ready_step <= .01
                 or not .1 < self.ready_timeout <= 30.):
             raise ValueError('invalid executable tcp_ready configuration')
         self.ready_state = 'idle'
@@ -79,6 +81,7 @@ class TcpJoy(TcpMotionWorkflow, Node):
         self.ready_execution_id = None
         self.ready_safe_at = None
         self.auto_entry_armed = False
+        self.entry_retry_count = 0
         self.last_focus = None
         self.status, self.epoch = {}, None
         self.status_time = self.state_time = self.joy_time = -math.inf
@@ -191,12 +194,14 @@ class TcpJoy(TcpMotionWorkflow, Node):
             focus = status.get('focus')
             if focus == 'arm' and self.last_focus != 'arm':
                 self._reset_ready()
+                self.entry_retry_count = 0
                 self.auto_entry_armed = True
             elif focus != 'arm':
                 self._reset_ready()
                 self.returning_home = False
                 self.ready_goal = self.default_ready_goal.copy()
                 self.auto_entry_armed = False
+                self.entry_retry_count = 0
             self.last_focus = focus
         except ValueError:
             self.status = {}
