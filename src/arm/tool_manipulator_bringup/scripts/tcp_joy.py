@@ -57,6 +57,9 @@ class TcpJoy(Node):
         ready_data = yaml.safe_load(ready_path.read_text())['tcp_ready'] if ready_path.is_file() else {}
         self.ready_enabled = ready_data.get('execution_enabled') is True
         self.ready_goal = np.asarray(ready_data.get('positions_rad', []), dtype=float)
+        self.default_ready_goal = self.ready_goal.copy()
+        self.returning_home = False
+        self.previous_home = False
         self.ready_duration = float(ready_data.get('duration_sec', 10.))
         self.ready_step = float(ready_data.get('collision_step_rad', .005))
         self.ready_timeout = float(ready_data.get('collision_timeout_sec', 3.))
@@ -123,7 +126,8 @@ class TcpJoy(Node):
         def report(safe, reason, q):
             self.entry_pub.publish(String(data=json.dumps(dict(
                 epoch=s.get('epoch'), safe=safe, reason=reason, positions=q.tolist()))))
-            if safe and self.auto_entry_armed and self.ready_state in ('idle', 'await_entry'):
+            if (safe and self.auto_entry_armed and self.ready_state in ('idle', 'await_entry')
+                    and not vars(self).get('returning_home', False)):
                 self.ready_state = 'await_entry'
                 if self.ready_safe_at is None:
                     self.ready_safe_at = now
@@ -294,6 +298,12 @@ class TcpJoy(Node):
                 self.ready_state = 'await_entry'
                 self.ready_safe_at = None
                 self.reason = 'TCP ready reached; verifying entry'
+                if vars(self).get('returning_home', False):
+                    self.returning_home = False
+                    self.ready_goal = self.default_ready_goal.copy()
+                    self.auto_entry_armed = False
+                    self.ready_state = 'idle'
+                    self.reason = 'manual Stop_pose reached; release and press L1 for TCP entry'
             elif s.get('mode') == 'fault' or (s.get('last_execution_id') == self.ready_execution_id
                                               and s.get('last_execution_result') == 'aborted'):
                 self._fail_ready('TCP ready execution failed; inspect arm')
@@ -312,8 +322,15 @@ class TcpJoy(Node):
             if result is not None and result.success:
                 self.reason = 'TCP_IK transition requested'
             else:
-                self.ready_state = 'failed'
-                self.reason = 'TCP_IK request rejected after TCP ready; remain HOLD'
+                detail = getattr(result, 'message', '') if result is not None else ''
+                if detail == 'TCP entry feedback changed; recheck required':
+                    self.ready_state = 'await_entry'
+                    self.ready_safe_at = None
+                    self.auto_entry_armed = True
+                    self.reason = 'TCP entry feedback changed; checking again'
+                else:
+                    self.ready_state = 'failed'
+                    self.reason = 'TCP_IK request rejected: '+detail
 
     def on_status(self, msg):
         try:
@@ -373,6 +390,22 @@ class TcpJoy(Node):
                  and all(b in (0, 1) for b in msg.buttons))
         self.deadman, self.twist = joy_twist(msg.axes, msg.buttons)
         self.joy_time = time.monotonic()
+        home = valid and bool(msg.buttons[3])
+        if (home and not vars(self).get('previous_home', False)
+                and vars(self).get('ready_enabled', False)
+                and self.status.get('focus') == 'arm'
+                and self.status.get('mode') in ('tcp_ik', 'hold')
+                and self.ready_state not in ('request_tool', 'wait_tool', 'executing')):
+            self._reset_ready()
+            self.returning_home = True
+            self.ready_goal = np.radians([0., 85., 87., -89., 0., 0.])
+            self.auto_entry_armed = True
+            self.discard()
+            self.blocked = True
+            if self.cancel.service_is_ready():
+                self.cancel.call_async(Trigger.Request())
+            self.reason = 'manual Stop_pose requested; hold L1 after path check'
+        self.previous_home = home
         if (not self.deadman and vars(self).get('ready_state') == 'executing'):
             self.tool_pub.publish(String(data=json.dumps(dict(
                 epoch=self.status['epoch'], execution_id=self.ready_execution_id, cancel=True))))

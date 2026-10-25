@@ -270,3 +270,29 @@ def test_tcp_ready_execution_cancels_on_stale_joystick():
     assert payload['cancel'] is True
     assert payload['execution_id'] == 'ready-test'
     assert n.ready_state == 'failed'
+
+
+def test_entry_feedback_race_rechecks_without_relaxing_guard():
+    n = ready_node()
+    n.ready_state = 'request_tcp'
+    n.ready_future = Mock()
+    n.ready_future.result.return_value = SimpleNamespace(
+        success=False, message='TCP entry feedback changed; recheck required')
+    TcpJoy.drive_ready(n, 1.)
+    assert n.ready_state == 'await_entry'
+    assert n.auto_entry_armed and n.ready_safe_at is None
+    n.tool_pub.publish.assert_not_called()
+
+
+def test_home_completion_stays_hold_and_restores_tcp_ready_target():
+    n = ready_node()
+    n.default_ready_goal = n.ready_goal.copy()
+    n.ready_goal = np.radians([0., 85., 87., -89., 0., 0.])
+    n.returning_home = True
+    n.ready_state = 'executing'
+    n.ready_execution_id = 'home'
+    n.status.update(last_execution_id='home', last_execution_result='succeeded')
+    TcpJoy.drive_ready(n, 1.)
+    assert not n.returning_home and not n.auto_entry_armed
+    np.testing.assert_array_equal(n.ready_goal, n.default_ready_goal)
+    n.tcp_mode.call_async.assert_not_called()
