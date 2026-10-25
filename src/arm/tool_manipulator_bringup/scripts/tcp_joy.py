@@ -54,6 +54,7 @@ class TcpJoy(Node):
         self.measured = None
         self.full_state = None
         self.deadman = False
+        self.deadman_engaged = False
         self.rearmed = False
         self.twist = np.zeros(6)
         self.pending = None
@@ -181,11 +182,42 @@ class TcpJoy(Node):
         # feedback/controller watchdogs if a request cannot be delivered.
 
     def on_joy(self, msg):
+        was_enabled = self.deadman_engaged or (self.deadman and self.rearmed)
+        valid = (len(msg.axes) >= 5 and len(msg.buttons) >= 6
+                 and np.all(np.isfinite(msg.axes))
+                 and all(b in (0, 1) for b in msg.buttons))
         self.deadman, self.twist = joy_twist(msg.axes, msg.buttons)
         self.joy_time = time.monotonic()
+        if not valid:
+            self.deadman = False
+            self.twist = np.zeros(6)
+            self.rearmed = False
+            self.deadman_stop('invalid joystick packet')
+            return
         if not self.deadman:
             self.discard()
-            self.rearmed = True
+            if was_enabled:
+                self.deadman_stop('L1 released')
+            if not self.blocked:
+                self.rearmed = True
+        elif self.rearmed and not self.blocked and self.epoch is not None:
+            self.deadman_engaged = True
+
+    def deadman_stop(self, reason):
+        """Stop only the currently owned TCP epoch, never an unrelated mode."""
+        self.discard()
+        self.deadman = False
+        self.twist = np.zeros(6)
+        self.rearmed = False
+        if self.epoch is None or self.blocked:
+            return
+        self.blocked = True
+        self.reason = 'HOLD requested: '+reason+'; explicitly re-enter TCP_IK'
+        self.last_failure_reason = reason
+        self.last_failure_time = time.monotonic()
+        self.pub.publish(String(data=json.dumps(dict(epoch=self.epoch, stop=True))))
+        # Stop normal heartbeat as backup. The manager invalidates this epoch,
+        # so a rapid release/repress or delayed command cannot resume movement.
 
     def fail(self, reason):
         self.discard()
@@ -247,14 +279,14 @@ class TcpJoy(Node):
             self.discard()
             self.epoch = None
             self.rearmed = False
-            self.reason = (('blocked after failure: '+self.last_failure_reason)
-                           if self.blocked and self.last_failure_reason else
-                           'waiting for active TCP_IK mode')
+            if not self.blocked:
+                self.reason = 'waiting for active TCP_IK mode'
         else:
             if self.epoch != s.get('epoch'):
                 self.discard()
                 self.epoch = s.get('epoch')
                 self.rearmed = False
+                self.deadman_engaged = False
                 self.blocked = False
                 self.failures = 0
                 self.last_failure_reason = ''
@@ -264,18 +296,20 @@ class TcpJoy(Node):
                 self.safety_stop('joint feedback stale')
             elif not self.blocked:
                 try:
+                    if self.deadman and self.rearmed:
+                        self.deadman_engaged = True
                     if self.stepper.q is None:
                         self.stepper.reset(self.measured)
                     if np.max(np.abs(self.stepper.q-self.measured)) > self.stepper.lead:
                         self.safety_stop('feedback lead exceeded', fault=False)
+                    elif now-self.joy_time >= .25:
+                        self.deadman_stop('joystick timeout')
                     elif not self.check.service_is_ready():
                         self.discard()
                         self.rearmed = False
                         self.reason = 'waiting for MoveIt collision service; release L1 when ready'
-                    elif now-self.joy_time >= .25 or not self.deadman or not self.rearmed:
+                    elif not self.deadman or not self.rearmed:
                         self.discard()
-                        if now-self.joy_time >= .25:
-                            self.rearmed = False
                         self.reason = 'deadman released / release L1 to rearm'
                     elif not 0 < dt <= .1:
                         self.fail('timer discontinuity')

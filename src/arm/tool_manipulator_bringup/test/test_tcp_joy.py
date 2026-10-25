@@ -242,7 +242,7 @@ def test_repeated_increments_with_lagging_feedback(model):
 
 
 def test_deadman_release_discards_pending_checks():
-    node = Mock()
+    node = Mock(deadman=False, deadman_engaged=False, rearmed=False, blocked=False)
     node.on_joy = TcpJoy.on_joy.__get__(node)
     node.on_joy(Mock(axes=[0.]*8, buttons=[0]*13))
     node.discard.assert_called_once()
@@ -289,7 +289,7 @@ def test_wait_for_collision_server_keeps_hold_heartbeat_without_failures():
     node.metrics = TcpMetrics()
     node.status = dict(mode='tcp_ik', focus='arm', ready=True,
                        transitioning=False, epoch='test')
-    node.status_time = node.state_time = node.last_time = 10.
+    node.status_time = node.state_time = node.last_time = node.joy_time = 10.
     node.epoch = 'test'
     node.measured = np.zeros(6)
     node.stepper = fake_stepper()

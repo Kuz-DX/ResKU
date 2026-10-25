@@ -77,19 +77,17 @@ def main():
     from scipy.spatial.transform import Rotation
     model = ArmKinematics(args.urdf, args.hardware)
     for label, joints in converted.items():
+        if label in ("tool_lock", "tool_lock1"):
+            continue  # Never regenerate obsolete arm-lock poses from old captures.
         poses["named_poses"][label] = {n: joints[n] for n in model.joint_names}
+    for obsolete in ("tool_lock", "tool_lock1"):
+        poses["named_poses"].pop(obsolete, None)
     docking = converted["tool1_docking"]
     transform = model.fk([docking[n] for n in model.joint_names])
     poses["cartesian_targets"]["tool1_target"] = {
         "frame_id": "base_actuator", "position_m": transform[:3, 3].tolist(),
         "orientation_xyzw": Rotation.from_matrix(transform[:3, :3]).as_quat().tolist(),
     }
-    lock_yaw = converted["tool_lock1"]["wrist_yaw_joint"]
-    poses["named_poses"]["tool_lock"] = {
-        "wrist_yaw_joint": lock_yaw,
-        "delta_rad": lock_yaw - docking["wrist_yaw_joint"],
-    }
-    # Preserve staged execution, EE alignment settings and the commanded yaw delta.
     if args.output:
         with args.output.open("x", encoding="utf-8") as stream:
             yaml.safe_dump(poses, stream, sort_keys=False)

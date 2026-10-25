@@ -4,17 +4,14 @@
 
 Named poses are converted to one controller trajectory point.  Cartesian IK
 paths retain their ``ceil(distance/step)`` interpolation from ``ik_node`` and
-are forwarded unchanged.  Wrist lock reads the current yaw as a baseline,
-commands ``baseline + delta_rad`` while preserving the other five current
-positions, then computes and logs ``joint_states_after - baseline``; it never
-uses an absolute yaw target or retries a failed controller goal.
+are forwarded unchanged. Tool locking belongs to a separate Arduino actuator;
+this node has no wrist-rotation locking service.
 EE_ALIGN selects q_ref+n*pi nearest to measured ee_joint inside joint bounds,
 using q=sign*(raw-zero)*2*pi/4096. Only ee_controller receives that trajectory;
 post-result fresh feedback must satisfy the configured angular tolerance.
 """
 # 이 노드는 검증된 궤적만 6축 팔 컨트롤러 액션으로 전달합니다.
 # 제어기 실패나 제한 시간 초과를 자동 재시도하지 않고 호출자에게 실패로 반환합니다.
-# 손목 회전량은 명령값이 아니라 실제 JointState 피드백 변화량으로 계산합니다.
 # 타입 어노테이션을 지연 평가해 전방 참조를 지원합니다.
 from __future__ import annotations
 
@@ -49,7 +46,7 @@ from tool_change_min.config import require_for_stop_state
 from tool_change_min.kinematics import ArmKinematics
 from tool_change_min.ee_alignment import EeAlignment
 # 자세 이동, 궤적 실행, 상대 손목 회전 서비스 형식입니다.
-from tool_change_min.srv import AlignEe, ExecuteTrajectory, MoveNamedPose, RotateWristYaw
+from tool_change_min.srv import AlignEe, ExecuteTrajectory, MoveNamedPose
 
 
 # 실수 초 단위를 ROS Duration 메시지의 정수 초와 나노초로 변환합니다.
@@ -129,7 +126,6 @@ class MotionExecutor(Node):
         # 전달된 관절 궤적의 검증 및 실행 요청을 처리하는 서비스를 등록합니다.
         self.create_service(ExecuteTrajectory, "execute_trajectory", self._execute)
         # 상대 손목 yaw 회전 요청을 처리하는 서비스를 등록합니다.
-        self.create_service(RotateWristYaw, "rotate_wrist_yaw_relative", self._rotate_yaw)
 
     # 한 메시지에서 완전하고 안전한 여섯 축 관절 상태만 저장합니다.
     def _joint_state(self, message: JointState):
@@ -376,59 +372,6 @@ class MotionExecutor(Node):
         # 실행 결과가 채워진 서비스 응답을 반환합니다.
         return response
 
-    # 현재 yaw를 기준으로 상대 회전 목표를 실행하고 피드백 기반 실제 변화를 반환합니다.
-    def _rotate_yaw(self, request, response):
-        # 요청값과 현재 상태, 제한, 액션 결과를 검증하는 구간입니다.
-        try:
-            # 상대 회전량은 유한한 숫자여야 합니다.
-            if not math.isfinite(request.delta_rad):
-                # NaN이나 무한대 회전 요청을 차단합니다.
-                raise ValueError("delta_rad must be finite")
-            # 현재 모든 관절 위치를 설정된 순서로 읽습니다.
-            current = self._current()
-            baseline_sequence = self.joint_state_sequence
-            # 설정된 관절 목록에서 손목 yaw 관절이 위치한 인덱스를 구합니다.
-            index = self.joint_names.index("wrist_yaw_joint")
-            # 현재 yaw를 기준값으로 저장하고 요청한 상대량을 더해 목표를 계산합니다.
-            baseline, target = current[index], current[index] + request.delta_rad
-            # 기구학 모델이 제공하는 손목 yaw 관절의 허용 하한과 상한을 가져옵니다.
-            lower, upper = self.model.limits["wrist_yaw_joint"]
-            # 상대 목표가 하드웨어/URDF 관절 한계 안에 있는지 확인합니다.
-            if not lower <= target <= upper:
-                # 제한을 벗어나는 회전 요청을 컨트롤러에 보내지 않습니다.
-                raise ValueError(f"relative yaw target {target:.6f} violates [{lower:.6f}, {upper:.6f}]")
-            # 현재 위치 벡터에서 손목 yaw 성분만 상대 목표로 바꿉니다.
-            current[index] = target
-            # 전체 관절 목록을 유지하는 실행 궤적 메시지를 만듭니다.
-            trajectory = JointTrajectory(joint_names=list(self.joint_names))
-            # 변경된 yaw와 나머지 현재 위치를 단일 목표점으로 지정합니다.
-            trajectory.points = [JointTrajectoryPoint(
-                positions=current, time_from_start=_duration(float(self.config["motion"]["lock_duration_s"]))) ]
-            # 목표를 컨트롤러에 실행하고 액션 성공 여부를 확인합니다.
-            response.message = self._send(trajectory, request.timeout_s)
-            # The result is intentionally feedback-derived, never an assumed delta.
-            # 피드백 갱신을 기다릴 최대 시간을 요청 제한 시간의 0.5초 이하로 정합니다.
-            deadline = time.monotonic() + min(0.5, request.timeout_s)
-            # 기존 기준값과 같은 피드백이 유지되는 동안 제한 시간 안에서 기다립니다.
-            while time.monotonic() < deadline and self.joint_state_sequence == baseline_sequence:
-                # JointState 콜백이 피드백을 갱신할 수 있도록 짧게 대기합니다.
-                time.sleep(0.01)
-            # 최신 피드백과 명령 전 기준값의 차이를 실제 회전량으로 계산합니다.
-            if self.joint_state_sequence == baseline_sequence:
-                raise TimeoutError("no post-lock /joint_states snapshot received")
-            actual = self._current()[index] - baseline
-            # 회전 성공과 피드백에서 측정한 상대 회전량을 응답에 기록합니다.
-            response.success, response.actual_delta_rad = True, actual
-            # 기준 yaw와 실제 변화량을 진단 로그에 남깁니다.
-            self.get_logger().info(f"wrist_yaw baseline={baseline:.6f}, actual_delta_rad={actual:.6f}")
-        # 입력 검증 또는 액션 실행에 실패한 경우의 공통 응답 처리입니다.
-        except Exception as exc:
-            # 실패 상태, 중립적인 실제 변화량, 오류 설명을 응답에 기록합니다.
-            response.success, response.actual_delta_rad, response.message = False, 0.0, str(exc)
-            # 상대 회전 서비스의 실패 원인을 ROS 로그에 남깁니다.
-            self.get_logger().error(f"rotate_wrist_yaw_relative failed: {exc}")
-        # 성공 또는 실패 내용이 채워진 응답을 반환합니다.
-        return response
 
 
 # ROS 2를 초기화하고 모션 실행 노드를 구동하는 프로그램 진입점입니다.

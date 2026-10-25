@@ -120,9 +120,12 @@ Sony joystick mapping (axes 1, 0, 4; buttons 4, 5):
 
 Translation axes are expressed in `base_actuator`, with `tcp_link` as the controlled
 point. Rotation increments are about the target TCP local axes. Release L1 once after entering
-the mode, then hold it to move. Releasing L1 zeros increments and discards pending
-collision requests; it holds the last approved joint goal. The robot may still
-finish the small previously approved motion. Joy timeout also requires rearming.
+the mode, then hold it to move. Releasing an engaged L1 zeros increments, discards
+pending checks and requests epoch-bound measured-position HOLD. Joy timeout
+(0.25 s) or malformed input does the same. The manager replaces outstanding
+command lead with its fresh measured position and invalidates the old epoch.
+To resume, explicitly re-enter TCP_IK, release L1, then press it again; reconnecting
+with L1 held cannot restart motion. See [tcp_deadman.md](tcp_deadman.md).
 
 Each candidate integrates from the last approved TCP target and solves IK using
 the previous accepted joint solution as seed. Defaults: 0.02 m/s, 0.15 rad/s, joint speed capped

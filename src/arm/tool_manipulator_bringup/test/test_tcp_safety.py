@@ -33,14 +33,14 @@ def node():
         status=dict(mode='tcp_ik', focus='arm', ready=True, transitioning=False, epoch='e'),
         status_time=10., state_time=10., joy_time=10., last_time=10.,
         measured=np.zeros(6), full_state=dict(zip(ARM_JOINTS, [0.]*6)),
-        deadman=True, rearmed=True, pending=None, entry_pending=None, failures=0,
+        deadman=True, deadman_engaged=False, rearmed=True, pending=None, entry_pending=None, failures=0,
         blocked=False, reason='', last_failure_reason='', last_failure_time=-float('inf'),
         last_ik_duration_ms=None, last_logged_state=None, twist=np.array([1., 0, 0, 0, 0, 0]),
         pub=Mock(), diag=Mock(), check=Mock(), cancel=Mock(), get_logger=Mock())
     n.model = n.stepper.model
     n.check.service_is_ready.return_value = True
     n.cancel.service_is_ready.return_value = True
-    for name in ('discard', 'assess_entry', 'fail', 'publish', 'safety_stop', 'submit_collision'):
+    for name in ('discard', 'assess_entry', 'fail', 'publish', 'safety_stop', 'submit_collision', 'deadman_stop'):
         setattr(n, name, getattr(TcpJoy, name).__get__(n))
     return n
 

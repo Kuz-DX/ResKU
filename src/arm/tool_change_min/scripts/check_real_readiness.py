@@ -40,8 +40,8 @@ def main():
         result = subprocess.run(
             [sys.executable, '-c',
              'from tool_change_min.srv import MoveNamedPose, LinearMoveToPose, '
-             'ExecuteTrajectory, RotateWristYaw\n'
-             'for cls in (MoveNamedPose, LinearMoveToPose, ExecuteTrajectory, RotateWristYaw):\n'
+             'ExecuteTrajectory\n'
+             'for cls in (MoveNamedPose, LinearMoveToPose, ExecuteTrajectory):\n'
              '    cls.__class__.__import_type_support__()'],
             cwd='/tmp', capture_output=True, text=True, timeout=15)
         if result.returncode:

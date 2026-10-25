@@ -9,8 +9,8 @@ Position waypoint k is ``p0 + (k/N)(pt-p0)`` and orientation follows the
 shortest SO(3) rotation; N is the larger position/rotation step count. Every
 waypoint must solve within the joint limits before the resulting multi-point
 JointTrajectory is sent to the controller.
-LOCK then snapshots the actual wrist yaw and commands ``baseline + pi/2`` in
-the positive (CCW) ROS joint direction; it is a relative action, not a pose.
+LOCK is reserved for the Arduino command/completion handshake. Until that
+interface is implemented, the stage fails closed without wrist motion or retreat.
 Every service/controller failure or timeout enters HOLD without retry or any
 speculative return motion.
 EE_ALIGN chooses the nearest bounded q_ref+n*pi EE angle and verifies actual
@@ -40,7 +40,7 @@ from std_msgs.msg import Int32, String
 # 정지 상태 설정 검증과 개발 단계별 정지 지점을 처리합니다.
 from tool_change_min.config import require_for_stop_state, stop_after_state, validate_request_config
 # 이 FSM이 호출하는 자세 이동, IK, 궤적 실행 서비스 형식입니다.
-from tool_change_min.srv import AlignEe, ExecuteTrajectory, LinearMoveToPose, MoveNamedPose, RotateWristYaw
+from tool_change_min.srv import AlignEe, ExecuteTrajectory, LinearMoveToPose, MoveNamedPose
 
 
 # 도구 장착 절차의 상태와 서비스 호출을 관리하는 ROS 2 노드입니다.
@@ -74,9 +74,6 @@ class ToolChangeFsm(Node):
         # 계획된 관절 궤적을 컨트롤러에 실행시키는 서비스 클라이언트를 만듭니다.
         self.execute = self.create_client(ExecuteTrajectory, "execute_trajectory",
                                          callback_group=self.client_group)
-        # 기준 관절 상태에서 손목 요 회전을 요청하는 서비스 클라이언트를 만듭니다.
-        self.rotate = self.create_client(RotateWristYaw, "rotate_wrist_yaw_relative",
-                                        callback_group=self.client_group)
         # 초기 상태를 토픽과 로그에 알립니다.
         self._publish("IDLE")
 
@@ -163,6 +160,10 @@ class ToolChangeFsm(Node):
         # 호출자가 현재 절차를 중단하도록 True를 반환합니다.
         return True
 
+    def _arduino_lock(self):
+        """Reserved interface; no motion until command/completion integration exists."""
+        raise RuntimeError('Arduino tool changer handshake is not implemented; no retreat permitted')
+
     # 도구 장착 절차의 모든 단계를 정해진 순서로 실행합니다.
     def _run(self, tool_id=1):
         # 어느 단계에서든 실패하면 아래 공통 예외 처리로 이동합니다.
@@ -194,12 +195,9 @@ class ToolChangeFsm(Node):
             self._cartesian_target(target.upper(), target, target)
             if self._pause_after("tool1_target", target):
                 return
-            # 목표 도달 후 실제 wrist-yaw 피드백을 baseline으로 CCW +90도 체결합니다.
+            # Never substitute arm motion or assumed success for Arduino completion.
             self._publish("LOCK")
-            lock = RotateWristYaw.Request()
-            lock.delta_rad = float(self.config["motion"]["yaw_delta_rad"])
-            lock.timeout_s = float(self.config["timeouts_s"]["lock"])
-            self._call(self.rotate, lock, lock.timeout_s)
+            self._arduino_lock()
             if self._pause_after("lock"):
                 return
             self._named("RETURN_DOCKING_WAIT", "docking_wait", "return_docking_wait")

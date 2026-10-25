@@ -87,8 +87,6 @@ def _required_paths(stop_after: str) -> list[str]:
                 "motion.ik_step_m",
                 "motion.ik_orientation_step_rad",
             ))
-        elif stage == "lock":
-            required.extend(("motion.yaw_delta_rad", "motion.lock_duration_s"))
     return required
 
 
@@ -97,6 +95,9 @@ def validate_request_config(data: dict[str, Any], tool_id: int = 1) -> None:
     if tool_id not in (0, 1):
         raise ValueError(f"unsupported tool ID: {tool_id}")
     stop_after = stop_after_state(data)
+    if stop_after in ('lock', 'return_docking_wait', 'return_home', 'done'):
+        raise ValueError('Arduino tool changer handshake is not implemented; '
+                         'development.stop_after_state must not advance beyond tool1_target')
     missing = []
     for path in _required_paths(stop_after):
         dotted_path = path.replace("tool1_", f"tool{tool_id}_")

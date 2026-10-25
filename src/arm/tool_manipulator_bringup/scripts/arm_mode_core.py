@@ -234,6 +234,21 @@ class ModeCore:
         self.goal, self.ee, self.command_time = list(positions), ee, now
         return True
 
+    def stop_tcp(self, epoch, now):
+        """Epoch-bound Deadman stop; replace remaining lead with measured HOLD."""
+        if self.mode != 'tcp_ik' or epoch != self.epoch or self.transitioning:
+            return False
+        if not self.ready or not self.fresh(now) or not self.valid(self.position):
+            self.fault('TCP deadman stop without healthy controller/feedback')
+            return True
+        self.request('hold', now)
+        # Like FAULT HOLD, stop the position controller following an old
+        # forward target. Do not ramp back from the outstanding command lead.
+        self.target = list(self.position)
+        self.goal = list(self.position)
+        self.reason = 'TCP deadman stop; explicit mode request required'
+        return True
+
     def path(self, epoch, execution_id, waypoints, now):
         if (self.mode != 'tool_auto' or epoch != self.epoch or self.transitioning or
                 self.focus != 'arm' or not self.ready or not self.fresh(now)):
@@ -298,7 +313,7 @@ class ModeCore:
                 self.mode = self.requested
                 self.transitioning = False
                 self.command_time = now
-                if self.mode != 'hold' or not self.reason.startswith('TCP entry'):
+                if self.mode != 'hold' or not self.reason.startswith(('TCP entry', 'TCP deadman')):
                     self.reason = ''
                 self.settled = 0
         elif self.mode == 'tool_auto' and self.execution_id is not None:
