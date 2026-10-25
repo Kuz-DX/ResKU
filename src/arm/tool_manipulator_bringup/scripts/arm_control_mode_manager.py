@@ -71,10 +71,16 @@ class ControlModeManager(Node):
         self.publish_status()
 
     def on_state(self, msg):
+        if (len(msg.name) != len(msg.position) or len(msg.name) != len(msg.velocity)
+                or len(set(msg.name)) != len(msg.name)):
+            self.core.fault('malformed joint feedback')
+            return
         p = dict(zip(msg.name, msg.position))
         v = dict(zip(msg.name, msg.velocity))
         if all(j in p and j in v for j in JOINTS):
             self.core.feedback([p[j] for j in JOINTS], [v[j] for j in JOINTS], time.monotonic())
+        else:
+            self.core.fault('incomplete arm joint feedback')
 
     def on_focus(self, msg):
         previous = self.core.focus

@@ -8,7 +8,7 @@ import pytest
 ARM = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ARM/'tool_change_min'))
 sys.path.insert(0, str(ARM/'tool_manipulator_bringup/scripts'))
-from tcp_joy_core import TcpStepper, joy_twist, LimitBlocked
+from tcp_joy_core import TcpStepper, joy_twist, LimitBlocked, TcpMetrics
 from tcp_joy import TcpJoy
 from tool_change_min.kinematics import ArmKinematics
 from manual_control_common import ArmChain
@@ -75,6 +75,7 @@ def fake_stepper():
     model.fk.return_value = np.eye(4)
     model.jacobian.return_value = np.diag([.2]*3+[1.]*3)
     model.solve.return_value = np.ones(6)*.001
+    model.pose_error.return_value = np.zeros(6)
     step = TcpStepper(model, [.12]*6)
     step.reset(np.zeros(6))
     return step
@@ -252,6 +253,7 @@ def test_deadman_release_discards_pending_checks():
 def test_repeated_failure_requests_hold_and_stops_heartbeat():
     node = Mock(failures=0, blocked=False, last_failure_reason='',
                 last_failure_time=-float('inf'))
+    node.metrics = TcpMetrics()
     for _ in range(5):
         TcpJoy.fail(node, 'collision service failed')
     assert node.blocked
@@ -284,6 +286,7 @@ def test_real_feedback_all_tcp_directions_obey_joint_speed(model, axis, sign):
 
 def test_wait_for_collision_server_keeps_hold_heartbeat_without_failures():
     node = Mock()
+    node.metrics = TcpMetrics()
     node.status = dict(mode='tcp_ik', focus='arm', ready=True,
                        transitioning=False, epoch='test')
     node.status_time = node.state_time = node.last_time = 10.

@@ -24,7 +24,7 @@ try:
     from tool_change_min.kinematics import ArmKinematics, ARM_JOINTS
 except ImportError:
     from arm_shared_kinematics import ArmKinematics, ARM_JOINTS
-from tcp_joy_core import TcpStepper, joy_twist, LimitBlocked
+from tcp_joy_core import TcpStepper, joy_twist, LimitBlocked, SafetyError, TcpMetrics
 
 
 class TcpJoy(Node):
@@ -63,6 +63,7 @@ class TcpJoy(Node):
         self.last_failure_reason = ''
         self.last_failure_time = -math.inf
         self.last_ik_duration_ms = None
+        self.metrics = TcpMetrics()
         self.last_logged_state = None
         self.last_time = time.monotonic()
         qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
@@ -139,20 +140,45 @@ class TcpJoy(Node):
 
     def on_status(self, msg):
         try:
-            self.status = json.loads(msg.data)
+            status = json.loads(msg.data)
+            if not isinstance(status, dict):
+                raise ValueError('manager status must be an object')
+            self.status = status
             self.status_time = time.monotonic()
         except ValueError:
             self.status = {}
 
     def on_state(self, msg):
-        if len(msg.name) != len(msg.position) or len(set(msg.name)) != len(msg.name):
-            self.state_time = -math.inf
-            return
         values = dict(zip(msg.name, msg.position))
-        if all(j in values for j in ARM_JOINTS) and np.all(np.isfinite(msg.position)):
-            self.measured = np.array([values[j] for j in ARM_JOINTS])
-            self.full_state = values
-            self.state_time = time.monotonic()
+        valid = (len(msg.name) == len(msg.position) and len(set(msg.name)) == len(msg.name)
+                 and all(j in values for j in ARM_JOINTS) and np.all(np.isfinite(msg.position)))
+        if not valid:
+            self.state_time = -math.inf
+            self.safety_stop('invalid or incomplete joint feedback')
+            return
+        self.measured = np.array([values[j] for j in ARM_JOINTS])
+        self.full_state = values
+        self.state_time = time.monotonic()
+
+    def safety_stop(self, reason, fault=True):
+        """Block immediately and use the manager's existing FAULT/HOLD gateway."""
+        self.discard()
+        if self.blocked:
+            return
+        self.blocked = True
+        self.rearmed = False
+        self.reason = ('FAULT requested: ' if fault else 'HOLD requested: ')+reason
+        self.last_failure_reason = reason
+        self.last_failure_time = time.monotonic()
+        self.metrics.counts['safety_stops'] += 1
+        self.metrics.failures[reason] += 1
+        if self.epoch is not None:
+            if fault:
+                self.pub.publish(String(data=json.dumps(dict(epoch=self.epoch, fault=True))))
+            elif self.cancel.service_is_ready():
+                self.cancel.call_async(Trigger.Request())
+        # No heartbeat after stopping. The manager also has independent
+        # feedback/controller watchdogs if a request cannot be delivered.
 
     def on_joy(self, msg):
         self.deadman, self.twist = joy_twist(msg.axes, msg.buttons)
@@ -167,6 +193,8 @@ class TcpJoy(Node):
         self.last_failure_reason = reason
         self.last_failure_time = time.monotonic()
         self.failures += 1
+        self.metrics.counts['general_failures'] += 1
+        self.metrics.failures[reason] += 1
         if self.failures >= 5:
             self.blocked = True
             self.reason = 'HOLD requested after five failures: '+reason
@@ -203,11 +231,14 @@ class TcpJoy(Node):
             req.robot_state.is_diff = True
             futures.append(self.check.call_async(req))
         self.pending = dict(q=q, pose=pose, futures=futures, started=time.monotonic(),
-                            measured=self.measured.copy(), epoch=self.epoch)
+                            measured=self.measured.copy(), epoch=self.epoch,
+                            full_state=dict(self.full_state))
 
     def tick(self):
+        callback_started = time.perf_counter()
         now = time.monotonic()
         dt, self.last_time = now-self.last_time, now
+        self.metrics.observe('interval', dt*1000.)
         s = self.status
         self.assess_entry(now)
         active = (now-self.status_time < .3 and s.get('mode') == 'tcp_ik' and
@@ -230,19 +261,13 @@ class TcpJoy(Node):
                 self.last_failure_time = -math.inf
                 self.stepper.q = self.stepper.pose = None
             if now-self.state_time >= .3 or self.measured is None:
-                self.fail('joint feedback stale')
+                self.safety_stop('joint feedback stale')
             elif not self.blocked:
                 try:
                     if self.stepper.q is None:
                         self.stepper.reset(self.measured)
                     if np.max(np.abs(self.stepper.q-self.measured)) > self.stepper.lead:
-                        self.blocked = True
-                        self.discard()
-                        self.reason = 'HOLD requested: feedback lead exceeded'
-                        self.last_failure_reason = 'feedback lead exceeded'
-                        self.last_failure_time = now
-                        if self.cancel.service_is_ready():
-                            self.cancel.call_async(Trigger.Request())
+                        self.safety_stop('feedback lead exceeded', fault=False)
                     elif not self.check.service_is_ready():
                         self.discard()
                         self.rearmed = False
@@ -256,7 +281,9 @@ class TcpJoy(Node):
                         self.fail('timer discontinuity')
                     elif self.pending:
                         p = self.pending
-                        if now-p['started'] > .15:
+                        if p['epoch'] != self.epoch:
+                            self.discard()
+                        elif now-p['started'] > .15:
                             self.fail('collision check timeout')
                         elif all(f.done() for f in p['futures']):
                             responses = [f.result() for f in p['futures']]
@@ -266,34 +293,46 @@ class TcpJoy(Node):
                                                 for r in invalid if r is not None
                                                 for c in r.contacts})
                                 detail = ', '.join(a+'<->'+b for a, b in pairs[:6])
-                                self.fail('self/environment collision' +
+                                self.safety_stop('self/environment collision' +
                                           (': '+detail if detail else ''))
                             elif np.max(np.abs(self.measured-p['measured'])) > .01:
                                 self.fail('feedback changed during collision check')
+                            elif (self.full_state.keys() != p['full_state'].keys() or
+                                  any(abs(v-p['full_state'][j]) > .001
+                                      for j, v in self.full_state.items() if j not in ARM_JOINTS)):
+                                self.fail('non-arm feedback changed during collision check')
                             elif np.max(np.abs(p['q']-self.measured)) > self.stepper.lead:
-                                self.fail('feedback lead exceeded')
+                                self.safety_stop('feedback lead exceeded', fault=False)
                             else:
                                 self.stepper.commit(p['q'], p['pose'])
                                 self.pending = None
                                 self.failures = 0
+                                self.metrics.counts['accepted_commands'] += 1
                                 self.reason = 'TCP incremental command accepted'
                     elif np.any(self.twist):
                         # No catch-up integration while IK/collision service is busy.
                         started = time.monotonic()
+                        self.metrics.counts['ik_attempts'] += 1
                         try:
                             q, pose = self.stepper.candidate(
                                 self.measured, self.twist, min(dt, .02))
                         finally:
                             self.last_ik_duration_ms = (time.monotonic()-started)*1000.
+                            self.metrics.observe('ik', self.last_ik_duration_ms)
+                            if self.stepper.last_jacobian_duration_ms is not None:
+                                self.metrics.observe('jacobian', self.stepper.last_jacobian_duration_ms)
                         self.submit_collision(q, pose, now)
                     self.publish()
                 except LimitBlocked as exc:
+                    self.metrics.counts['limit_blocked'] += 1
                     self.discard()
                     self.reason = str(exc)
                     # An infeasible jog direction is not a producer failure.
                     # Keep both the validated joint/pose target and any existing
                     # failure count; reversing the stick may produce a valid step.
                     self.publish()
+                except SafetyError as exc:
+                    self.safety_stop(str(exc), fault=exc.fault)
                 except (ValueError, RuntimeError, np.linalg.LinAlgError) as exc:
                     self.fail(str(exc))
                     self.publish()
@@ -302,6 +341,7 @@ class TcpJoy(Node):
             condition=self.stepper.condition if math.isfinite(self.stepper.condition) else None,
             singularity_scale=self.stepper.scale, velocity_scale=self.stepper.velocity_scale,
             ik_duration_ms=self.last_ik_duration_ms, ik_budget_ms=self.stepper.budget*1000.,
+            performance=self.metrics.snapshot(),
             last_failure=self.last_failure_reason,
             last_failure_age_sec=(now-self.last_failure_time
                                   if math.isfinite(self.last_failure_time) else None)))))
@@ -312,6 +352,7 @@ class TcpJoy(Node):
                 (self.reason, self.failures, self.deadman, self.rearmed,
                  s.get('mode', 'missing'), s.get('focus', 'missing')))
             self.last_logged_state = logged
+        self.metrics.observe('callback', (time.perf_counter()-callback_started)*1000.)
 
 
 def main():

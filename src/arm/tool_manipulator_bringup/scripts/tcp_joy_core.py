@@ -1,11 +1,41 @@
 """Incremental Cartesian teleoperation using tool_change_min's shared FK/IK."""
 import math
 import time
+from collections import Counter, deque
 import numpy as np
 
 
 class LimitBlocked(ValueError):
     """All bounded attempts hit a joint limit; keep the last accepted target."""
+
+
+class SafetyError(ValueError):
+    """Invalid feedback/command state: stop immediately, not after five IK failures."""
+    def __init__(self, reason, fault=True):
+        super().__init__(reason)
+        self.fault = fault
+
+
+class TcpMetrics:
+    """Bounded timing windows plus lifetime outcome/overrun counters."""
+    def __init__(self, window=512):
+        self.samples = {name: deque(maxlen=window) for name in ('ik', 'jacobian', 'callback', 'interval')}
+        self.counts = Counter()
+        self.failures = Counter()
+
+    def observe(self, name, milliseconds):
+        self.samples[name].append(float(milliseconds))
+        self.counts[name+'_samples'] += 1
+        if name in ('ik', 'callback', 'interval') and milliseconds > 20.:
+            self.counts[name+'_over_20ms'] += 1
+
+    def snapshot(self):
+        result = dict(counts=dict(self.counts), failures_by_reason=dict(self.failures))
+        for name, values in self.samples.items():
+            result[name+'_ms'] = (None if not values else dict(
+                window_samples=len(values), mean=float(np.mean(values)), max=max(values),
+                p95=float(np.percentile(values, 95)), p99=float(np.percentile(values, 99))))
+        return result
 
 
 def joy_twist(axes, buttons, deadzone=.12):
@@ -40,16 +70,18 @@ class TcpStepper:
         self.condition = math.inf
         self.scale = 0.
         self.velocity_scale = 1.
+        self.last_jacobian_duration_ms = None
 
     def reset(self, measured):
         if not self.model.within_limits(measured, self.margin):
-            raise ValueError('measured seed violates soft limit margin')
+            raise SafetyError('measured seed violates soft limit margin')
         self.q = np.asarray(measured).copy()
         self.pose = self.model.fk(self.q)
 
     def candidate(self, measured, twist, dt):
         """Propose base-frame translation and target-TCP-local rotation."""
         deadline = time.monotonic() + self.budget
+        self.last_jacobian_duration_ms = None
         try:
             from tool_change_min.kinematics import _rotation
         except ImportError:
@@ -57,8 +89,26 @@ class TcpStepper:
         if self.q is None or not 0 < dt <= .1:
             raise ValueError('uninitialized target or invalid timestep')
         if not self.model.within_limits(measured, self.margin):
-            raise ValueError('seed violates soft limits')
+            raise SafetyError('feedback violates soft limits')
+        if (np.asarray(self.q).shape != (6,) or not np.all(np.isfinite(self.q))
+                or not self.model.within_limits(self.q, self.margin)):
+            raise SafetyError('cached IK seed invalid')
+        twist = np.asarray(twist, dtype=float)
+        if twist.shape != (6,) or not np.all(np.isfinite(twist)):
+            raise SafetyError('invalid TCP increment')
+        if self.pose is None or self.pose.shape != (4, 4) or not np.all(np.isfinite(self.pose)):
+            raise SafetyError('cached TCP pose invalid')
+        seed_error = np.asarray(self.model.pose_error(self.q, self.pose))
+        if (seed_error.shape != (6,) or not np.all(np.isfinite(seed_error))
+                or np.linalg.norm(seed_error[:3]) >= 1e-5
+                or np.linalg.norm(seed_error[3:]) >= 1e-4):
+            raise SafetyError('cached seed/pose FK mismatch')
+        self.last_jacobian_duration_ms = None
+        jac_started = time.perf_counter()
         jac = self.model.jacobian(np.asarray(measured))
+        self.last_jacobian_duration_ms = (time.perf_counter()-jac_started)*1000.
+        if jac.shape != (6, 6) or not np.all(np.isfinite(jac)):
+            raise SafetyError('invalid Jacobian')
         # Characteristic length 0.2 m balances translational/rotational units.
         jac = jac.copy()
         jac[:3] /= .2
@@ -97,7 +147,7 @@ class TcpStepper:
                 # increment from that matching command state avoids repeatedly
                 # solving the accumulated TCP lead from lagging feedback.  The
                 # measured state is still enforced by the lead/limit checks.
-                solved = self.model.solve(target, self.q, self.margin,
+                solved = self.model.solve(target.copy(), self.q.copy(), self.margin,
                     max_iterations=self.iterations//attempts, max_time_s=remaining)
             except ValueError as exc:
                 error = str(exc)
@@ -107,15 +157,24 @@ class TcpStepper:
                 continue
             if time.monotonic() >= deadline:
                 raise ValueError('IK time budget exceeded')
-            if not np.all(np.isfinite(solved)) or not self.model.within_limits(solved, self.margin):
-                raise ValueError('invalid IK solution')
+            solved = np.asarray(solved, dtype=float)
+            if (solved.shape != (6,) or not np.all(np.isfinite(solved))
+                    or not self.model.within_limits(solved, self.margin)):
+                raise SafetyError('invalid IK solution')
+            residual = np.asarray(self.model.pose_error(solved, target))
+            if residual.shape != (6,) or not np.all(np.isfinite(residual)):
+                raise SafetyError('invalid FK residual')
+            if np.linalg.norm(residual[:3]) >= 1e-5 or np.linalg.norm(residual[3:]) >= 1e-4:
+                raise ValueError('IK FK residual exceeds tolerance')
+            if time.monotonic() >= deadline:
+                raise ValueError('IK time budget exceeded')
             ratio = float(np.max(np.abs(solved-self.q)/(self.speeds*dt)))
             if ratio > 1.+1e-9:
                 error = 'joint velocity limit'
                 self.velocity_scale *= min(.5, .9/ratio)
                 continue
             if np.max(np.abs(solved-measured)) > self.lead:
-                raise ValueError('joint feedback lead limit')
+                raise SafetyError('joint feedback lead limit', fault=False)
             return solved, target
         if limit_rejections == attempts:
             raise LimitBlocked('soft limit: increment blocked; reverse stick direction')
