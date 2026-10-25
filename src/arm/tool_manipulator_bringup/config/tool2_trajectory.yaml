@@ -1,0 +1,4 @@
+# Fill with capture_tool_trajectory.py; review before enabling execution.
+execution_enabled: false
+joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
+points: []
