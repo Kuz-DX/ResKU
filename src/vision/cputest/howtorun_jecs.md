@@ -129,6 +129,31 @@ ros2 launch vision person_detection_ov.launch.py \
   latency_mode:=stamp run_tag:=V0
 ```
 
+V0를 30초 이상 실행한 뒤 표의 `drive`, `arm`, `left`, `right` 행을 확인한다.
+워밍업이 끝난 각 5초 구간에서 네 카메라의 `proc_fps`가 모두 0보다 커야 하며,
+특정 카메라의 `max_gap`만 구간마다 계속 증가하면 안 된다. 기존 노드의 동일 조건
+측정값은 다음과 같다.
+
+| camera | 기존 `proc_fps` | 전체 처리량 중 비율 | drive 대비 비율 |
+|---|---:|---:|---:|
+| drive | 3.7 | 30.1% | 1.00 |
+| arm | 2.9 | 23.6% | 0.78 |
+| left | 2.8 | 22.8% | 0.76 |
+| right | 2.9 | 23.6% | 0.78 |
+
+절대 FPS는 장면과 CPU 상태에 따라 달라질 수 있으므로, 합계보다는 네 카메라가 모두
+처리되는지와 처리량 비율을 비교한다. V0 결과도 대략 drive 30%, 나머지 각 23% 안팎이면
+기존 노드와 비슷한 분배다. 한 번의 5초 표보다 여러 구간에서 이 경향이 유지되는지
+확인한다. CSV 요약은 측정을 끝낸 뒤 다음 명령으로 만든다.
+
+```bash
+LATEST_V0=$(ls -1t ~/perf_logs/*_V0.csv | head -n 1)
+python3 src/vision/cputest/plot_perf.py "$LATEST_V0" \
+  --out ~/perf_logs/V0_check.png --summary
+```
+
+출력된 카메라별 `proc_fps` 평균이 모두 0보다 큰지 확인하고, 위 기준값과 비교한다.
+
 ### V1 — OpenVINO LATENCY
 
 V0 대비 변경점: backend를 OpenVINO LATENCY로 변경.

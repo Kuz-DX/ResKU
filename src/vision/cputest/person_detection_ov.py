@@ -22,7 +22,11 @@ import numpy as np
 import rclpy
 from ament_index_python.packages import get_package_share_directory
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
-from rclpy.executors import MultiThreadedExecutor
+from rclpy.executors import (
+    ExternalShutdownException,
+    MultiThreadedExecutor,
+    SingleThreadedExecutor,
+)
 from rclpy.node import Node
 from rclpy.qos import (
     DurabilityPolicy,
@@ -227,6 +231,32 @@ class UltralyticsPersonDetector:
         return self.warmup_ms
 
 
+class CameraCounterNode(Node):
+    """Count source frames on an executor isolated from synchronous inference."""
+
+    def __init__(
+        self,
+        camera_topics: list[tuple[str, str, str, str]],
+        qos: QoSProfile,
+        count_frame: Callable[[str], None],
+    ) -> None:
+        super().__init__(
+            'person_detection_ov_camera_counter',
+            cli_args=[],
+            use_global_arguments=False,
+        )
+        self._counter_subscriptions: list[Any] = []
+        for camera, input_topic, _detections_topic, _output_topic in camera_topics:
+            self._counter_subscriptions.append(
+                self.create_subscription(
+                    CompressedImage,
+                    input_topic,
+                    lambda _message, name=camera: count_frame(name),
+                    qos,
+                )
+            )
+
+
 class ProcessMemory:
     """Low-overhead CPU and memory sampler with a procfs fallback."""
 
@@ -293,6 +323,14 @@ def _percentile(values: deque[float] | list[float], percentile: float) -> float:
     if not values:
         return 0.0
     return float(np.percentile(np.asarray(values, dtype=np.float64), percentile))
+
+
+def _spin_counter_executor(executor: SingleThreadedExecutor) -> None:
+    """Spin the isolated counter until ROS or the owning process shuts down."""
+    try:
+        executor.spin()
+    except ExternalShutdownException:
+        pass
 
 
 class PersonDetectionOVNode(Node):
@@ -413,15 +451,16 @@ class PersonDetectionOVNode(Node):
                     callback_group=self._callback_group,
                 )
             )
-            self._counter_subscriptions.append(
-                self.create_subscription(
-                    CompressedImage,
-                    input_topic,
-                    lambda _message, name=camera: self._count_camera_frame(name),
-                    self.qos,
-                    callback_group=self._counter_callback_group,
+            if self._separated:
+                self._counter_subscriptions.append(
+                    self.create_subscription(
+                        CompressedImage,
+                        input_topic,
+                        lambda _message, name=camera: self._count_camera_frame(name),
+                        self.qos,
+                        callback_group=self._counter_callback_group,
+                    )
                 )
-            )
 
         self._csv_file, self._csv_writer, self._csv_path, self._meta_path = self._open_logs(
             str(get('csv_dir')), str(get('run_tag'))
@@ -1186,10 +1225,30 @@ class PersonDetectionOVNode(Node):
 def main(args: list[str] | None = None) -> None:
     rclpy.init(args=args)
     node: PersonDetectionOVNode | None = None
-    executor: MultiThreadedExecutor | None = None
+    executor: MultiThreadedExecutor | SingleThreadedExecutor | None = None
+    counter_node: CameraCounterNode | None = None
+    counter_executor: SingleThreadedExecutor | None = None
+    counter_thread: threading.Thread | None = None
     try:
         node = PersonDetectionOVNode()
-        executor = MultiThreadedExecutor()
+        if node._separated:
+            executor = MultiThreadedExecutor()
+        else:
+            executor = SingleThreadedExecutor()
+            counter_node = CameraCounterNode(
+                node.camera_topics,
+                node.qos,
+                node._count_camera_frame,
+            )
+            counter_executor = SingleThreadedExecutor()
+            counter_executor.add_node(counter_node)
+            counter_thread = threading.Thread(
+                target=_spin_counter_executor,
+                args=(counter_executor,),
+                name='person-detection-camera-counter',
+                daemon=True,
+            )
+            counter_thread.start()
         executor.add_node(node)
         executor.spin()
     except KeyboardInterrupt:
@@ -1203,6 +1262,12 @@ def main(args: list[str] | None = None) -> None:
     finally:
         if executor is not None:
             executor.shutdown()
+        if counter_executor is not None:
+            counter_executor.shutdown()
+        if counter_thread is not None:
+            counter_thread.join()
+        if counter_node is not None:
+            counter_node.destroy_node()
         if node is not None:
             node.shutdown()
             node.destroy_node()
