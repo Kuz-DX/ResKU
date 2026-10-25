@@ -1,6 +1,6 @@
 # Arm Control Mode Manager
 
-`managed_control.launch.py` starts a separate mode-managed TCP stack, initially in
+`ik_manual.launch.py` starts the mode-managed IK/manual stack, initially in
 HOLD, using real hardware and an externally published `/joy` topic by default.
 It does not modify the legacy manual launch.
 Do not run both stacks together. The preflight refuses an existing arm controller
@@ -11,7 +11,7 @@ manager. This check is not a distributed lock against simultaneous launches.
 ```bash
 source /opt/ros/humble/setup.bash
 source ~/ResKU/install/setup.bash
-ros2 launch ~/ResKU/src/arm/tool_manipulator_bringup/launch/managed_control.launch.py
+ros2 launch ~/ResKU/src/arm/tool_manipulator_bringup/launch/ik_manual.launch.py
 ```
 
 The source launch invokes Python scripts directly. Existing installed dependencies
@@ -90,7 +90,7 @@ the new epoch. Manual additionally requires neutral controls.
 Start the managed stack with its TCP producer and MoveIt planning-scene service:
 
 ```bash
-ros2 launch ~/ResKU/src/arm/tool_manipulator_bringup/launch/managed_control.launch.py
+ros2 launch ~/ResKU/src/arm/tool_manipulator_bringup/launch/ik_manual.launch.py
 # Press Options once: drive -> arm automatically requests TCP_IK.
 ros2 topic echo /arm/control_status --once --full-length
 ros2 topic echo /arm/tcp_joy/status

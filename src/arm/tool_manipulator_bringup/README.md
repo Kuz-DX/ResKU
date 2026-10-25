@@ -9,6 +9,7 @@
 | 목적 | 실행 파일 | 모터 명령 | 시각화 |
 | --- | --- | --- | --- |
 | 조이스틱 수동 구동 | `manual.launch.py` | O | 선택 |
+| IK/Manual 통합 모드 | `ik_manual.launch.py` | O | X |
 | 실기 controller + MoveIt | `real_control.launch.py` | O | X |
 | mock MoveIt/RViz | `mock.launch.py` | mock만 | O |
 | 원격 PC의 `/joy` 발행 | `remote_joy.launch.py` | X | X |
@@ -32,11 +33,16 @@
 | 모드 | 실행 명령 | 활성 팔 controller |
 | --- | --- | --- |
 | Manual | `manual.launch.py` | `manual_position_controller` |
+| IK/Manual managed | `ik_manual.launch.py` | `manual_position_controller` |
 | trajectory/MoveIt | `real_control.launch.py` | `arm_controller` |
 
-두 launch는 같은 공통 base를 사용하지만 아직 실행 중 동적 모드 전환은 지원하지 않는다.
-반드시 기존 팔 launch를 완전히 종료한 뒤 다른 모드를 실행한다. 이후 TCP/IK와 Tool Auto
-모드도 이 공통 base 위에 추가하고, controller 전환은 별도 mode manager가 담당한다.
+세 launch는 같은 공통 base를 사용한다. `ik_manual.launch.py` 안에서는 Mode Manager가
+MANUAL/TCP_IK/TOOL_AUTO를 중재하지만, 다른 launch와의 동시 실행은 지원하지 않는다.
+반드시 기존 팔 launch를 완전히 종료한 뒤 다른 모드를 실행한다.
+
+```bash
+ros2 launch tool_manipulator_bringup ik_manual.launch.py
+```
 
 ## 수동 구동
 
@@ -174,13 +180,30 @@ ros2 run tool_manipulator_bringup set_current_zero.py \
 
 ## 유지 파일 기준
 
-`trajectory_diagnostics.py`와 관련 문서·테스트는 오늘 pull의 DXL 수동 구동 진단
+`trajectory_diagnostics.py`와 관련 문서·테스트는 DXL 수동 구동 진단
 기록이므로 실행 진입점은 아니어도 분석 자료로 유지한다.
 
-- `launch/`: `manual`, `real_control`, `mock`, `remote_joy`, `arm_drive_guard`
+- `launch/`: `manual`, `ik_manual`, `real_control`, `mock`, `remote_joy`, `arm_drive_guard`
 - `scripts/`: 실제 구동에 필요한 모듈과 읽기/검사/캘리브레이션 도구
 - `config/`: `hardware`, `manual_controllers`, `servo` 안전 margin, RViz 설정
 - `test/`: manual, named pose, 안전·영점·trajectory와 URDF 정적 검사
+
+과거 영점 기준의 `d/l` raw 상수를 현재 `hardware.yaml`로 변환하던 테스트는 제거했다.
+현재 기준 검증값이 필요하면 실제 자세를 다시 캡처하여 raw와 `/joint_states`를 함께
+기록하고, 당시 사용한 `hardware.yaml`을 명시한다. 기존 hardware 백업은 보정 이력
+확인용이므로 실행 설정은 아니지만 유지한다.
+
+## 현재 기준으로 남은 작업
+
+1. `manual.launch.py`가 사용하는 현재 `hardware.yaml` 상태에서 대표 수동 자세를
+   다시 캡처한다. 같은 시각의 raw 값과 `/joint_states` rad 값을 함께 저장한다.
+2. 재캡처 값으로 관절 제한·영점 변환 검증을 추가한다. 과거 raw 숫자를 현재 영점에
+   그대로 대입하거나 각도를 임의로 wrap하지 않는다.
+3. `ik_manual.launch.py real_hardware:=false`에서 시작 복귀, MANUAL/TCP_IK 전환,
+   Deadman과 충돌 거부를 Mock 검증한다.
+4. 별도 승인 후 실기에서 저속 TCP 이동을 검증한다. `manual.launch.py`와
+   `ik_manual.launch.py`는 동시에 실행하지 않는다.
+5. Tool Change에 사용할 PRE와 최종 TCP 자세는 위 보정이 확정된 뒤 YAML에 티칭한다.
 
 ROS 패키지를 다시 빌드하기 전까지 설치 공간에는 삭제한 예전 실행 파일이 남아 있을 수
 있다. 소스 기준 진입점은 이 README의 목록만 사용한다.

@@ -1,4 +1,4 @@
-"""Mode-managed TCP arm stack. Defaults to real hardware and external Joy."""
+"""Mode-managed IK/manual arm stack. Defaults to real hardware and external Joy."""
 import importlib.util
 from pathlib import Path
 import sys
