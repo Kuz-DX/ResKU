@@ -73,6 +73,24 @@ def requested_path(axes, buttons, previous, l2_axis=2, threshold=-.5, first_butt
     return (edges[0] if len(edges) == 1 else None), current
 
 
+def execution_plan(path, measured, tolerance=.03, max_delta=.10, approach_speed=.05):
+    """Prepend a bounded, timed approach when feedback is near the taught start."""
+    error = float(np.max(np.abs(np.asarray(measured)-path['start'])))
+    if error > max_delta:
+        raise ValueError(
+            'start mismatch: %.4f rad > %.4f rad automatic approach limit' %
+            (error, max_delta))
+    waypoints = list(path['waypoints'])
+    durations = list(path['durations'])
+    approach_duration = 0.
+    if error > tolerance:
+        approach_duration = max(.5, error/approach_speed)
+        waypoints.insert(0, path['start'])
+        durations.insert(0, approach_duration)
+    return dict(waypoints=waypoints, durations=durations,
+                total=path['total']+approach_duration, start_error=error)
+
+
 class ToolTrajectoryJoy(Node):
     def __init__(self):
         super().__init__('tool_trajectory_joy')
@@ -84,6 +102,8 @@ class ToolTrajectoryJoy(Node):
         directory = Path(str(param('trajectory_dir', '')))
         self.margin = float(param('limit_margin_rad', .02))
         self.start_tolerance = float(param('start_tolerance_rad', .03))
+        self.max_start_delta = float(param('max_start_delta_rad', .10))
+        self.approach_speed = float(param('start_approach_speed_rad_s', .05))
         self.collision_step = float(param('collision_step_rad', .005))
         self.collision_timeout = float(param('collision_timeout_sec', 10.))
         self.l2_axis = int(param('l2_axis', 2))
@@ -91,7 +111,8 @@ class ToolTrajectoryJoy(Node):
         # This controller's physical button 1 is reported as ROS Joy button 2.
         # Path 0 starts there; the parameter remains overridable per controller.
         self.first_button = int(param('first_path_button', 2))
-        if (not 0 < self.margin <= .1 or not 0 < self.start_tolerance <= .1
+        if (not 0 < self.margin <= .1 or not 0 < self.start_tolerance <= self.max_start_delta <= .25
+                or not 0 < self.approach_speed <= .12
                 or not 0 < self.collision_step <= .01 or not .1 < self.collision_timeout <= 60.
                 or self.l2_axis < 0 or self.first_button < 0):
             raise ValueError('invalid tool trajectory joystick parameters')
@@ -216,11 +237,10 @@ class ToolTrajectoryJoy(Node):
         now = time.monotonic()
         try:
             s = self.healthy_hold(now)
-            path = self.paths[path_id]
+            configured = self.paths[path_id]
             measured = np.asarray([self.full_state[j] for j in ARM_JOINTS])
-            error = float(np.max(np.abs(measured-path['start'])))
-            if error > self.start_tolerance:
-                raise ValueError(f'path {path_id} start mismatch: {error:.4f} rad > {self.start_tolerance:.4f}')
+            path = execution_plan(configured, measured, self.start_tolerance,
+                                  self.max_start_delta, self.approach_speed)
             if not self.collision.service_is_ready() or not self.mode.service_is_ready():
                 raise RuntimeError('tool mode or MoveIt collision service unavailable')
             self.path_id, self.path = path_id, path
@@ -244,7 +264,10 @@ class ToolTrajectoryJoy(Node):
                     self.requests.append(req)
             self.stage, self.started, self.request_index = 'checking', now, 0
             self.future = self.collision.call_async(self.requests[0])
-            self.report('checking', f'checking tool path {path_id} ({len(self.requests)} samples)')
+            approach = ('; approaching taught start from %.4f rad' % path['start_error']
+                        if path['start_error'] > self.start_tolerance else '')
+            self.report('checking',
+                        f'checking tool path {path_id} ({len(self.requests)} samples){approach}')
         except (ValueError, RuntimeError, KeyError) as exc:
             self.path_id = path_id
             self.report('blocked', str(exc))

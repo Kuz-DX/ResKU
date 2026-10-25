@@ -4,12 +4,13 @@ import sys
 from unittest.mock import Mock
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 import yaml
 
 SCRIPTS = Path(__file__).resolve().parents[1]/'scripts'
 sys.path.insert(0, str(SCRIPTS))
-from tool_trajectory_joy import load_path, requested_path
+from tool_trajectory_joy import execution_plan, load_path, requested_path
 
 
 def write_path(tmp_path, enabled=True, times=(0., 1., 3.)):
@@ -67,3 +68,20 @@ def test_report_uses_distinct_logger_calls_for_different_severities():
     ToolTrajectoryJoy.report(node, 'failed', 'failed')
     logger.info.assert_called_once_with('checking')
     logger.error.assert_called_once_with('failed')
+
+
+def test_nearby_start_gets_collision_checked_timed_approach():
+    path = dict(start=np.zeros(6), waypoints=[np.ones(6)*.1],
+                durations=[2.], total=2.)
+    plan = execution_plan(path, np.ones(6)*.07)
+    assert len(plan['waypoints']) == 2
+    np.testing.assert_array_equal(plan['waypoints'][0], path['start'])
+    assert plan['durations'] == pytest.approx([1.4, 2.])
+    assert plan['total'] == pytest.approx(3.4)
+
+
+def test_far_start_remains_blocked():
+    path = dict(start=np.zeros(6), waypoints=[np.ones(6)*.1],
+                durations=[2.], total=2.)
+    with pytest.raises(ValueError, match='automatic approach limit'):
+        execution_plan(path, np.ones(6)*.101)
