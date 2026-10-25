@@ -163,7 +163,8 @@ def ready_node():
                             [0., 1.48, 1.50, -1.55, 0., 0.])),
         status=dict(mode='hold', ready=True, startup_complete=True, focus='arm',
                     transitioning=False, epoch='hold-e'), status_time=1., state_time=1.,
-        check=Mock(), tool_mode=Mock(), tcp_mode=Mock(), tool_pub=Mock(), reason='')
+        check=Mock(), tool_mode=Mock(), tcp_mode=Mock(), tool_pub=Mock(), reason='',
+        deadman=True, joy_time=1.3, cancel=Mock())
     n.check.service_is_ready.return_value = True
     n.tool_mode.service_is_ready.return_value = True
     n.tcp_mode.service_is_ready.return_value = True
@@ -175,7 +176,8 @@ def ready_node():
 def test_tcp_ready_path_is_checked_before_managed_execution():
     n = ready_node()
     TcpJoy.drive_ready(n, 1.)
-    assert n.ready_state == 'checking' and len(n.ready_checks) > 1
+    assert n.ready_state == 'checking' and len(n.ready_checks) == 1
+    assert len(n.ready_requests) > 1
     n.tool_mode.call_async.assert_not_called()
     for future in n.ready_checks:
         future.done.return_value = True
@@ -183,6 +185,8 @@ def test_tcp_ready_path_is_checked_before_managed_execution():
     mode_future = Mock()
     n.tool_mode.call_async.return_value = mode_future
     TcpJoy.drive_ready(n, 1.1)
+    while n.ready_state == 'checking':
+        TcpJoy.drive_ready(n, 1.1)
     assert n.ready_state == 'request_tool'
     mode_future.done.return_value = True
     mode_future.result.return_value = SimpleNamespace(success=True)
@@ -208,3 +212,42 @@ def test_tcp_ready_collision_failure_never_requests_motion():
     assert not n.auto_entry_armed and n.ready_state == 'failed'
     n.tool_mode.call_async.assert_not_called()
     n.tool_pub.publish.assert_not_called()
+
+
+def test_tcp_ready_waits_for_one_response_and_times_out_without_motion():
+    n = ready_node()
+    n.check.call_async.return_value.done.return_value = False
+    TcpJoy.drive_ready(n, 1.)
+    TcpJoy.drive_ready(n, 1.1)
+    assert n.check.call_async.call_count == 1
+    n.status_time = n.state_time = 5.
+    TcpJoy.drive_ready(n, 5.)
+    assert n.ready_state == 'failed'
+    assert '0/' in n.reason
+    n.tool_mode.call_async.assert_not_called()
+    n.tool_pub.publish.assert_not_called()
+
+
+def test_tcp_ready_verified_path_requires_l1():
+    n = ready_node()
+    n.deadman = False
+    n.check.call_async.return_value.done.return_value = True
+    n.check.call_async.return_value.result.return_value = SimpleNamespace(valid=True)
+    TcpJoy.drive_ready(n, 1.)
+    for _ in range(len(n.ready_requests)+1):
+        TcpJoy.drive_ready(n, 1.1)
+    assert 'hold L1' in n.reason
+    n.tool_mode.call_async.assert_not_called()
+
+
+def test_tcp_ready_execution_cancels_on_stale_joystick():
+    n = ready_node()
+    n.ready_state = 'executing'
+    n.ready_execution_id = 'ready-test'
+    n.joy_time = 0.
+    n.status.update(mode='tool_auto')
+    TcpJoy.drive_ready(n, 1.)
+    payload = json.loads(n.tool_pub.publish.call_args.args[0].data)
+    assert payload['cancel'] is True
+    assert payload['execution_id'] == 'ready-test'
+    assert n.ready_state == 'failed'

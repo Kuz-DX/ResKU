@@ -199,8 +199,10 @@ class TcpJoy(Node):
             count = max(1, math.ceil(float(np.max(np.abs(self.ready_goal-self.measured))) /
                                      self.ready_step))
             self.ready_snapshot = self.measured.copy()
+            self.ready_full_state = dict(self.full_state)
             self.ready_started = now
             self.ready_checks = []
+            self.ready_requests = []
             for q in np.linspace(self.measured, self.ready_goal, count+1):
                 req = GetStateValidity.Request()
                 values = dict(self.full_state)
@@ -208,16 +210,23 @@ class TcpJoy(Node):
                 req.robot_state.joint_state.name = list(values)
                 req.robot_state.joint_state.position = list(values.values())
                 req.robot_state.is_diff = True
-                self.ready_checks.append(self.check.call_async(req))
+                self.ready_requests.append(req)
+            self.ready_checks.append(self.check.call_async(self.ready_requests[0]))
             self.ready_state = 'checking'
             self.reason = 'checking path to TCP ready'
             return
         if self.ready_state == 'checking':
-            if now-self.ready_started > self.ready_timeout:
+            if (self.full_state.keys() != self.ready_full_state.keys()
+                    or any(abs(v-self.ready_full_state[j]) > .001
+                           for j, v in self.full_state.items() if j not in ARM_JOINTS)):
+                self._fail_ready('non-arm feedback changed during TCP ready check; remain HOLD')
+                return
+            if (not all(f.done() for f in self.ready_checks)
+                    and now-self.ready_started > self.ready_timeout):
                 completed = sum(f.done() for f in self.ready_checks)
                 self._fail_ready(
                     'TCP ready collision check timeout (%d/%d complete); remain HOLD' %
-                    (completed, len(self.ready_checks)))
+                    (completed, len(self.ready_requests)))
                 return
             if np.max(np.abs(self.measured-self.ready_snapshot)) > .01:
                 self._fail_ready('feedback changed during TCP ready check; remain HOLD')
@@ -226,6 +235,16 @@ class TcpJoy(Node):
                 return
             if any(f.result() is None or not f.result().valid for f in self.ready_checks):
                 self._fail_ready('TCP ready path collision/state invalid; remain HOLD')
+                return
+            if len(self.ready_checks) < len(self.ready_requests):
+                self.reason = 'checking path to TCP ready (%d/%d complete)' % (
+                    len(self.ready_checks), len(self.ready_requests))
+                self.ready_checks.append(self.check.call_async(
+                    self.ready_requests[len(self.ready_checks)]))
+                self.ready_started = now
+                return
+            if not self.deadman or now-self.joy_time >= .25:
+                self.reason = 'TCP ready path verified; hold L1 to move'
                 return
             if not self.tool_mode.service_is_ready():
                 self._fail_ready('tool_auto mode service unavailable; remain HOLD')
@@ -246,6 +265,11 @@ class TcpJoy(Node):
         if self.ready_state == 'wait_tool':
             if s.get('mode') != 'tool_auto' or s.get('transitioning'):
                 return
+            if not self.deadman or now-self.joy_time >= .25:
+                self._fail_ready('L1 released before TCP ready motion; remain HOLD')
+                if self.cancel.service_is_ready():
+                    self.cancel.call_async(Trigger.Request())
+                return
             self.ready_execution_id = 'tcp-ready-'+uuid.uuid4().hex
             self.tool_pub.publish(String(data=json.dumps(dict(
                 epoch=s['epoch'], execution_id=self.ready_execution_id,
@@ -254,6 +278,11 @@ class TcpJoy(Node):
             self.reason = 'moving to TCP ready'
             return
         if self.ready_state == 'executing':
+            if not self.deadman or now-self.joy_time >= .25:
+                self.tool_pub.publish(String(data=json.dumps(dict(
+                    epoch=s['epoch'], execution_id=self.ready_execution_id, cancel=True))))
+                self._fail_ready('L1 released or joystick stale during TCP ready; remain HOLD')
+                return
             if (s.get('last_execution_id') == self.ready_execution_id and
                     s.get('last_execution_result') == 'succeeded' and s.get('mode') == 'hold'):
                 self.ready_state = 'await_entry'
@@ -331,12 +360,23 @@ class TcpJoy(Node):
         # feedback/controller watchdogs if a request cannot be delivered.
 
     def on_joy(self, msg):
+        was_pressed = self.deadman
         was_enabled = self.deadman_engaged or (self.deadman and self.rearmed)
         valid = (len(msg.axes) >= 5 and len(msg.buttons) >= 6
                  and np.all(np.isfinite(msg.axes))
                  and all(b in (0, 1) for b in msg.buttons))
         self.deadman, self.twist = joy_twist(msg.axes, msg.buttons)
         self.joy_time = time.monotonic()
+        if (not self.deadman and vars(self).get('ready_state') == 'executing'):
+            self.tool_pub.publish(String(data=json.dumps(dict(
+                epoch=self.status['epoch'], execution_id=self.ready_execution_id, cancel=True))))
+            self._fail_ready('L1 released during TCP ready; remain HOLD')
+        if (valid and self.deadman and not was_pressed
+                and vars(self).get('ready_enabled', False)
+                and self.status.get('mode') == 'hold'
+                and self.status.get('focus') == 'arm'):
+            self._reset_ready()
+            self.auto_entry_armed = True
         if not valid:
             self.deadman = False
             self.twist = np.zeros(6)

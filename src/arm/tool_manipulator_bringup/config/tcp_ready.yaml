@@ -9,9 +9,8 @@ tcp_ready:
   positions_rad: [0.0, 1.2, 1.2, -1.2, 0.0, 0.0]
   duration_sec: 10.0
   collision_step_rad: 0.005
-  # A 0.005 rad path from the recovered startup pose is typically 70+ calls
-  # to MoveIt's state-validity service.  Real hardware PCs can take several
-  # seconds to drain that queue; motion still starts only after every result.
+  # Timeout per sequential state-validity request (only one outstanding).
+  # All samples must pass before L1 can authorize the ready motion.
   collision_timeout_sec: 15.0
   evaluation_translation_m: 0.01
   evaluation_rotation_rad: 0.08726646259971647
