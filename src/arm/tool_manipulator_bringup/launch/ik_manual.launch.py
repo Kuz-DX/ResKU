@@ -17,6 +17,7 @@ def bringup(context):
     common = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(common)
     source_config = Path(__file__).resolve().parents[1]/'config/manual_controllers.yaml'
+    ready_config = source_config.parent/'tcp_ready.yaml'
     real = LaunchConfiguration('real_hardware').perform(context) == 'true'
     tcp_enabled = LaunchConfiguration('launch_tcp_joy').perform(context) == 'true'
     initial = LaunchConfiguration('mock_initial_positions_file').perform(context)
@@ -49,7 +50,8 @@ def bringup(context):
     tcp_nodes = []
     if LaunchConfiguration('launch_tcp_joy').perform(context) == 'true':
         tcp = Node(executable=sys.executable, arguments=[str(scripts/'tcp_joy.py')],
-                   parameters=[base.description, {'hardware_config': base.hardware_file}], output='screen')
+                   parameters=[base.description, {'hardware_config': base.hardware_file,
+                                                  'tcp_ready_yaml': str(ready_config)}], output='screen')
         # Planning scene service only: no execution ownership or controller actions.
         scene = Node(package='moveit_ros_move_group', executable='move_group',
                      parameters=[base.moveit_config.to_dict(), base.description,

@@ -1,11 +1,14 @@
-# Evaluated candidate only. Not loaded by launch or automatically executed.
-# Hardware acceleration bounds and a fresh measured approach remain unverified.
+# Managed TCP entry target. The live approach is sampled through MoveIt before
+# execution; failure keeps HOLD and never falls back to an unchecked move.
 tcp_ready:
-  execution_enabled: false
+  execution_enabled: true
   root_link: base_actuator
   controlled_link: tcp_link
   tool_id: 0
   joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
   positions_rad: [0.0, 1.2, 1.2, -1.2, 0.0, 0.0]
+  duration_sec: 10.0
+  collision_step_rad: 0.005
+  collision_timeout_sec: 3.0
   evaluation_translation_m: 0.01
   evaluation_rotation_rad: 0.08726646259971647

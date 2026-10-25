@@ -149,3 +149,61 @@ def test_focus_request_without_proof_is_rejected_without_auto_retry():
         node.core.tick(now, .02)
     assert not node.core.transitioning
     assert node.core.reason.startswith('TCP entry')
+
+
+def ready_node():
+    n = SimpleNamespace(
+        ready_enabled=True, auto_entry_armed=True, ready_state='idle',
+        ready_goal=np.array([0., 1.2, 1.2, -1.2, 0., 0.]), ready_duration=10.,
+        ready_step=.005, ready_timeout=3., ready_checks=[], ready_snapshot=None,
+        ready_started=None, ready_future=None, ready_execution_id=None,
+        ready_safe_at=None, measured=np.array([0., 1.48, 1.50, -1.55, 0., 0.]),
+        full_state=dict(zip(('base_joint', 'shoulder_joint', 'elbow_joint',
+                             'wrist_pitch_joint', 'wrist_roll_joint', 'wrist_yaw_joint'),
+                            [0., 1.48, 1.50, -1.55, 0., 0.])),
+        status=dict(mode='hold', ready=True, startup_complete=True, focus='arm',
+                    transitioning=False, epoch='hold-e'), status_time=1., state_time=1.,
+        check=Mock(), tool_mode=Mock(), tcp_mode=Mock(), tool_pub=Mock(), reason='')
+    n.check.service_is_ready.return_value = True
+    n.tool_mode.service_is_ready.return_value = True
+    n.tcp_mode.service_is_ready.return_value = True
+    n._reset_ready = lambda: TcpJoy._reset_ready(n)
+    return n
+
+
+def test_tcp_ready_path_is_checked_before_managed_execution():
+    n = ready_node()
+    TcpJoy.drive_ready(n, 1.)
+    assert n.ready_state == 'checking' and len(n.ready_checks) > 1
+    n.tool_mode.call_async.assert_not_called()
+    for future in n.ready_checks:
+        future.done.return_value = True
+        future.result.return_value = SimpleNamespace(valid=True)
+    mode_future = Mock()
+    n.tool_mode.call_async.return_value = mode_future
+    TcpJoy.drive_ready(n, 1.1)
+    assert n.ready_state == 'request_tool'
+    mode_future.done.return_value = True
+    mode_future.result.return_value = SimpleNamespace(success=True)
+    TcpJoy.drive_ready(n, 1.2)
+    n.status.update(mode='tool_auto', epoch='tool-e')
+    n.status_time = n.state_time = 1.3
+    TcpJoy.drive_ready(n, 1.3)
+    payload = json.loads(n.tool_pub.publish.call_args.args[0].data)
+    assert payload['epoch'] == 'tool-e'
+    assert payload['waypoints'] == [n.ready_goal.tolist()]
+    assert payload['durations'] == [10.]
+    assert n.ready_state == 'executing'
+
+
+def test_tcp_ready_collision_failure_never_requests_motion():
+    n = ready_node()
+    TcpJoy.drive_ready(n, 1.)
+    for future in n.ready_checks:
+        future.done.return_value = True
+        future.result.return_value = SimpleNamespace(valid=True)
+    n.ready_checks[-1].result.return_value = SimpleNamespace(valid=False)
+    TcpJoy.drive_ready(n, 1.1)
+    assert not n.auto_entry_armed
+    n.tool_mode.call_async.assert_not_called()
+    n.tool_pub.publish.assert_not_called()

@@ -1,9 +1,10 @@
 # TCP ready candidate and entry policy
 
-Evaluated 2026-10-25; no ROS package build or hardware commands. Candidate values
-are in `config/tcp_ready.yaml`. They are not loaded by launch, and
-`execution_enabled: false` is deliberately informational: no movement endpoint
-exists in this change. Recovery remains separate and unchanged.
+Evaluated 2026-10-25; candidate values are in `config/tcp_ready.yaml`.
+`ik_manual.launch.py` loads this file. After startup recovery and an explicit
+drive-to-arm focus edge, the TCP producer samples the live joint-space approach,
+requires every MoveIt state-validity response to pass, and executes the target
+through Mode Manager `tool_auto` ownership. Recovery remains separate.
 
 Candidate A is `[0, 1.2, 1.2, -1.2, 0, 0]` rad in base, shoulder, elbow,
 wrist-pitch, wrist-roll, wrist-yaw order. This is a tested candidate, not an
@@ -44,10 +45,10 @@ joint speed 0.06696 rad/s (below the existing 0.12 rad/s cap) and acceleration
 0.02062 rad/s^2. Hardware acceleration bounds are absent and MoveIt acceleration
 limits are disabled, so acceleration compliance and real-current-state access
 remain UNVERIFIED. The current gateway also does not track this quintic timing.
-No executable path is produced. Before implementing an explicit tcp_ready move:
-obtain hardware acceleration bounds, use fresh full feedback, validate the actual
-tool/environment and full approach, apply bounded trajectory timing, retain
-cancel/FAULT and ownership checks, and require an explicit movement request.
+The executable path uses a configured 10-second synchronized segment. It retains
+fresh-feedback, focus, controller, cancellation and ownership checks, but hardware
+acceleration bounds remain unavailable. The live MoveIt scene and actual tool must
+therefore be correct; passing sampled checks is not continuous swept-volume proof.
 
 ## Entry without moving to tcp_ready
 
@@ -67,7 +68,9 @@ The manager requires the matching epoch, proof age <0.5 s and arm feedback withi
 0.001 rad of the assessed snapshot. A failed/missing/stale assessment rejects the
 request, retains HOLD and reports why. The same checks run at transition completion.
 An explicitly accepted transition carries its proof to the new epoch; unrelated
-cancels and faults invalidate it. No rejection triggers a ready-pose movement.
+cancels and faults invalidate it. A margin/condition rejection after the explicit
+focus edge triggers at most one checked ready move. Collision, feedback, service or
+execution failure remains HOLD/FAULT and never retries automatically.
 
 The private `/arm/tcp_joy/entry_status` JSON String contains `epoch`, `safe`,
 `reason`, `positions`. It is an internal trusted-producer protocol, not an access

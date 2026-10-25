@@ -106,9 +106,12 @@ TCP mock startup defaults to `config/tcp_mock_initial_positions.yaml`, a
 nonsingular pose near manual home. An explicit `mock_initial_positions_file`
 overrides it. Real hardware continues to start from measured feedback.
 With `launch_tcp_joy:=true`, an Options drive-to-arm edge automatically requests
-TCP_IK after recovery and controller readiness. Options back to drive requests
-HOLD. Cancel, command timeout, and fault do not automatically restart while focus
-stays on arm; toggle to drive and back to arm, or call the mode service explicitly.
+TCP_IK after recovery and controller readiness. If the recovery pose lacks TCP
+entry margin, `tcp_joy` collision-checks the configured `tcp_ready` joint line,
+requests TOOL_AUTO ownership, executes it once, verifies the stopped endpoint and
+then requests TCP_IK. Options back to drive requests HOLD. Collision/check/service/
+execution failure, cancel, command timeout, and fault do not automatically retry
+while focus stays on arm; inspect first, then toggle drive and back to arm.
 
 Sony joystick mapping (axes 1, 0, 4; buttons 4, 5):
 

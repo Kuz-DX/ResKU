@@ -5,6 +5,7 @@ import math
 from pathlib import Path
 import sys
 import time
+import uuid
 
 # Source launch support without building; installed packages use their normal import.
 source = Path(__file__).resolve().parents[2]/'tool_change_min'
@@ -44,11 +45,36 @@ class TcpJoy(Node):
             margin=float(param('limit_margin_rad', .02)), lead=float(param('max_lead_rad', .08)),
             iterations=int(param('ik_iterations', 30)), budget=float(param('ik_budget_sec', .030)))
         self.pub = self.create_publisher(String, '/arm/input/tcp_ik', 1)
+        self.tool_pub = self.create_publisher(String, '/arm/input/tool_auto', 1)
         self.diag = self.create_publisher(String, '/arm/tcp_joy/status', 1)
         self.entry_pub = self.create_publisher(String, '/arm/tcp_joy/entry_status', 1)
         self.entry_pending = None
         self.check = self.create_client(GetStateValidity, '/check_state_validity')
         self.cancel = self.create_client(Trigger, '/arm/cancel')
+        self.tool_mode = self.create_client(Trigger, '/arm/set_mode/tool_auto')
+        self.tcp_mode = self.create_client(Trigger, '/arm/set_mode/tcp_ik')
+        ready_path = Path(param('tcp_ready_yaml', ''))
+        ready_data = yaml.safe_load(ready_path.read_text())['tcp_ready'] if ready_path.is_file() else {}
+        self.ready_enabled = ready_data.get('execution_enabled') is True
+        self.ready_goal = np.asarray(ready_data.get('positions_rad', []), dtype=float)
+        self.ready_duration = float(ready_data.get('duration_sec', 10.))
+        self.ready_step = float(ready_data.get('collision_step_rad', .005))
+        self.ready_timeout = float(ready_data.get('collision_timeout_sec', 3.))
+        if self.ready_enabled and (self.ready_goal.shape != (len(ARM_JOINTS),)
+                or not np.all(np.isfinite(self.ready_goal))
+                or not self.model.within_limits(self.ready_goal, .101)
+                or not 0 < self.ready_duration < 120. or not 0 < self.ready_step <= .01
+                or not .1 < self.ready_timeout <= 10.):
+            raise ValueError('invalid executable tcp_ready configuration')
+        self.ready_state = 'idle'
+        self.ready_checks = []
+        self.ready_snapshot = None
+        self.ready_started = None
+        self.ready_future = None
+        self.ready_execution_id = None
+        self.ready_safe_at = None
+        self.auto_entry_armed = False
+        self.last_focus = None
         self.status, self.epoch = {}, None
         self.status_time = self.state_time = self.joy_time = -math.inf
         self.measured = None
@@ -96,6 +122,9 @@ class TcpJoy(Node):
         def report(safe, reason, q):
             self.entry_pub.publish(String(data=json.dumps(dict(
                 epoch=s.get('epoch'), safe=safe, reason=reason, positions=q.tolist()))))
+            if safe and self.auto_entry_armed and self.ready_state in ('idle', 'await_entry'):
+                self.ready_state = 'await_entry'
+                self.ready_safe_at = now
 
         q = self.measured.copy()
         try:
@@ -139,6 +168,109 @@ class TcpJoy(Node):
             self.entry_pending = None
             report(False, str(exc), q)
 
+    def _reset_ready(self):
+        for future in self.ready_checks:
+            if not future.done():
+                future.cancel()
+        self.ready_state, self.ready_checks = 'idle', []
+        self.ready_snapshot = self.ready_started = self.ready_future = None
+        self.ready_execution_id = self.ready_safe_at = None
+
+    def drive_ready(self, now):
+        """Collision-check and execute one explicit-focus TCP-ready entry."""
+        s = self.status
+        if not self.ready_enabled or not self.auto_entry_armed:
+            return
+        if (now-self.status_time >= .3 or now-self.state_time >= .3 or self.measured is None
+                or not s.get('ready') or not s.get('startup_complete') or s.get('focus') != 'arm'):
+            return
+        if self.ready_state == 'idle':
+            if s.get('mode') != 'hold' or s.get('transitioning') or not self.check.service_is_ready():
+                return
+            count = max(1, math.ceil(float(np.max(np.abs(self.ready_goal-self.measured))) /
+                                     self.ready_step))
+            self.ready_snapshot = self.measured.copy()
+            self.ready_started = now
+            self.ready_checks = []
+            for q in np.linspace(self.measured, self.ready_goal, count+1):
+                req = GetStateValidity.Request()
+                values = dict(self.full_state)
+                values.update(zip(ARM_JOINTS, map(float, q)))
+                req.robot_state.joint_state.name = list(values)
+                req.robot_state.joint_state.position = list(values.values())
+                req.robot_state.is_diff = True
+                self.ready_checks.append(self.check.call_async(req))
+            self.ready_state = 'checking'
+            self.reason = 'checking path to TCP ready'
+            return
+        if self.ready_state == 'checking':
+            if now-self.ready_started > self.ready_timeout:
+                self._reset_ready(); self.auto_entry_armed = False
+                self.reason = 'TCP ready collision check timeout; remain HOLD'
+                return
+            if np.max(np.abs(self.measured-self.ready_snapshot)) > .01:
+                self._reset_ready(); self.auto_entry_armed = False
+                self.reason = 'feedback changed during TCP ready check; remain HOLD'
+                return
+            if not all(f.done() for f in self.ready_checks):
+                return
+            if any(f.result() is None or not f.result().valid for f in self.ready_checks):
+                self._reset_ready(); self.auto_entry_armed = False
+                self.reason = 'TCP ready path collision/state invalid; remain HOLD'
+                return
+            if not self.tool_mode.service_is_ready():
+                self._reset_ready(); self.auto_entry_armed = False
+                self.reason = 'tool_auto mode service unavailable; remain HOLD'
+                return
+            self.ready_future = self.tool_mode.call_async(Trigger.Request())
+            self.ready_state = 'request_tool'
+            self.reason = 'requesting managed TCP ready motion'
+            return
+        if self.ready_state == 'request_tool':
+            if not self.ready_future.done():
+                return
+            result = self.ready_future.result()
+            if result is None or not result.success:
+                self._reset_ready(); self.auto_entry_armed = False
+                self.reason = 'tool_auto request rejected; remain HOLD'
+                return
+            self.ready_state = 'wait_tool'
+            return
+        if self.ready_state == 'wait_tool':
+            if s.get('mode') != 'tool_auto' or s.get('transitioning'):
+                return
+            self.ready_execution_id = 'tcp-ready-'+uuid.uuid4().hex
+            self.tool_pub.publish(String(data=json.dumps(dict(
+                epoch=s['epoch'], execution_id=self.ready_execution_id,
+                waypoints=[self.ready_goal.tolist()], durations=[self.ready_duration]))))
+            self.ready_state = 'executing'
+            self.reason = 'moving to TCP ready'
+            return
+        if self.ready_state == 'executing':
+            if (s.get('last_execution_id') == self.ready_execution_id and
+                    s.get('last_execution_result') == 'succeeded' and s.get('mode') == 'hold'):
+                self.ready_state = 'await_entry'
+                self.ready_safe_at = None
+                self.reason = 'TCP ready reached; verifying entry'
+            elif s.get('mode') == 'fault' or (s.get('last_execution_id') == self.ready_execution_id
+                                              and s.get('last_execution_result') == 'aborted'):
+                self.auto_entry_armed = False
+                self.reason = 'TCP ready execution failed; inspect arm'
+            return
+        if self.ready_state == 'await_entry' and self.ready_safe_at is not None:
+            # Allow the manager subscription to consume the published proof first.
+            if now-self.ready_safe_at < .1 or not self.tcp_mode.service_is_ready():
+                return
+            self.ready_future = self.tcp_mode.call_async(Trigger.Request())
+            self.ready_state = 'request_tcp'
+            self.reason = 'requesting TCP_IK after verified TCP ready'
+            return
+        if self.ready_state == 'request_tcp' and self.ready_future.done():
+            result = self.ready_future.result()
+            self.auto_entry_armed = False
+            self.reason = ('TCP_IK transition requested' if result is not None and result.success
+                           else 'TCP_IK request rejected after TCP ready; remain HOLD')
+
     def on_status(self, msg):
         try:
             status = json.loads(msg.data)
@@ -146,6 +278,14 @@ class TcpJoy(Node):
                 raise ValueError('manager status must be an object')
             self.status = status
             self.status_time = time.monotonic()
+            focus = status.get('focus')
+            if focus == 'arm' and self.last_focus != 'arm':
+                self._reset_ready()
+                self.auto_entry_armed = True
+            elif focus != 'arm':
+                self._reset_ready()
+                self.auto_entry_armed = False
+            self.last_focus = focus
         except ValueError:
             self.status = {}
 
@@ -273,6 +413,8 @@ class TcpJoy(Node):
         self.metrics.observe('interval', dt*1000.)
         s = self.status
         self.assess_entry(now)
+        if getattr(self, 'ready_enabled', False):
+            self.drive_ready(now)
         active = (now-self.status_time < .3 and s.get('mode') == 'tcp_ik' and
                   s.get('focus') == 'arm' and s.get('ready') and not s.get('transitioning'))
         if not active:
