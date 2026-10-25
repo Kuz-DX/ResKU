@@ -36,6 +36,33 @@ def active_core():
     return c
 
 
+def test_wrist_modifier_moves_only_wrist_and_skips_ik():
+    n = node()
+    msg = joy(True)
+    msg.buttons[5] = 1
+    msg.axes[0], msg.axes[3] = 1., -1.
+    send(n, msg)
+    tick(n)
+    n.model.solve.assert_not_called()
+    assert n.pending is not None
+    np.testing.assert_array_equal(n.pending['q'][:4], np.zeros(4))
+    assert n.pending['q'][4] > 0 and n.pending['q'][5] < 0
+    # Proposed command remains uncommitted until collision results arrive.
+    np.testing.assert_array_equal(n.stepper.q, n.measured)
+    send(n, joy(True), 10.03)
+    assert n.pending is None and n.stepper.q is None
+
+
+def test_translation_keeps_simultaneous_x_and_z_input():
+    n = node()
+    msg = joy(True, 1.)
+    msg.axes[4] = 1.
+    send(n, msg)
+    assert n.twist[0] > 0 and n.twist[2] > 0
+    np.testing.assert_array_equal(n.twist[3:], np.zeros(3))
+    assert np.linalg.norm(n.twist[:3]) <= 1.000001
+
+
 def test_release_cancels_pending_and_repress_solves_from_measured_pose():
     n = node()
     future = Mock()

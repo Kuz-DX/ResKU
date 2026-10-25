@@ -78,6 +78,21 @@ class TcpStepper:
         self.q = np.asarray(measured).copy()
         self.pose = self.model.fk(self.q)
 
+    def wrist_candidate(self, measured, direction, dt):
+        """Direct roll/yaw proposal; caller must collision-check before commit."""
+        direction = np.asarray(direction, dtype=float)
+        if direction.shape != (2,) or not np.all(np.isfinite(direction)) or not 0 < dt <= .1:
+            raise ValueError('invalid wrist increment')
+        if self.q is None or not self.model.within_limits(measured, self.margin):
+            raise SafetyError('wrist feedback violates soft limits')
+        q = self.q.copy()
+        q[4:6] += np.clip(direction, -1., 1.) * self.speeds[4:6] * dt
+        if not self.model.within_limits(q, self.margin):
+            raise LimitBlocked('wrist joint limit')
+        if np.max(np.abs(q-measured)) > self.lead:
+            raise LimitBlocked('wrist feedback lead limit')
+        return q, self.model.fk(q)
+
     def candidate(self, measured, twist, dt):
         """Propose base-frame translation and target-TCP-local rotation."""
         deadline = time.monotonic() + self.budget

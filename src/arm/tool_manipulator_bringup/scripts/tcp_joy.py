@@ -240,6 +240,19 @@ class TcpJoy(TcpMotionWorkflow, Node):
                  and np.all(np.isfinite(msg.axes))
                  and all(b in (0, 1) for b in msg.buttons))
         self.deadman, self.twist = joy_twist(msg.axes, msg.buttons)
+        wrist_mode = valid and bool(msg.buttons[5])
+        if wrist_mode != vars(self).get('wrist_mode', False):
+            self.discard()
+            self.stepper.q = self.stepper.pose = None
+        self.wrist_mode = wrist_mode
+        if wrist_mode:
+            self.twist = np.zeros(6)
+            if self.deadman:
+                # Left horizontal: roll; right horizontal: yaw.
+                for joint, axis in ((4, 0), (5, 3)):
+                    value = float(np.clip(msg.axes[axis], -1., 1.))
+                    self.twist[joint] = (0. if abs(value) <= .12 else
+                        math.copysign((abs(value)-.12)/.88, value))
         self.joy_time = time.monotonic()
         home = valid and bool(msg.buttons[3])
         if (home and not vars(self).get('previous_home', False)
@@ -443,6 +456,10 @@ class TcpJoy(TcpMotionWorkflow, Node):
                                 self.failures = 0
                                 self.metrics.counts['accepted_commands'] += 1
                                 self.reason = 'TCP incremental command accepted'
+                    elif np.any(self.twist) and vars(self).get('wrist_mode', False):
+                        q, pose = self.stepper.wrist_candidate(
+                            self.measured, self.twist[4:6], min(dt, .02))
+                        self.submit_collision(q, pose, now)
                     elif np.any(self.twist):
                         # No catch-up integration while IK/collision service is busy.
                         started = time.monotonic()
