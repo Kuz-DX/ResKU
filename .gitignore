@@ -51,6 +51,8 @@ runs/
 *.pth
 *.pt
 *.bin
+# 사람 탐지 OpenVINO 배포 모델은 각 장비의 ~/models에서 로컬 관리한다.
+src/vision/models/person_480_openvino_model/
 # API 키/시크릿은 환경변수로만 전달한다. 나중에 로컬 파일로 관리하게 될
 # 경우를 대비한 방어적 규칙.
 .env
