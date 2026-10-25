@@ -17,6 +17,7 @@ install(PROGRAMS scripts/manual.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/managed_manual.py scripts/arm_control_mode_manager.py DESTINATION lib/${PROJECT_NAME})
 install(FILES scripts/arm_mode_core.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/tcp_joy.py DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS scripts/evaluate_tcp_ready.py DESTINATION lib/${PROJECT_NAME})
 install(FILES scripts/tcp_joy_core.py DESTINATION lib/${PROJECT_NAME})
 # Shared source, copied at install to avoid a bringup <-> tool_change_min dependency cycle.
 install(FILES ../tool_change_min/tool_change_min/kinematics.py

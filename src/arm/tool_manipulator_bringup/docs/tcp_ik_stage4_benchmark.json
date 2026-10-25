@@ -1,0 +1,54 @@
+{
+  "scope": "offline IK, simulated 0.3 feedback response, collision not timed",
+  "paced": true,
+  "configured_period_ms": 20,
+  "ik_budget_ms": 30.0,
+  "attempts": 1200,
+  "outcomes": {
+    "accepted": 1200
+  },
+  "errors": {},
+  "general_failure_rate": 0.0,
+  "computation_over_20ms": 0,
+  "ik_ms": {
+    "samples": 1200,
+    "mean": 3.8506083791683445,
+    "max": 6.600114000093527,
+    "p95": 5.172321950044534,
+    "p99": 5.791682520032282
+  },
+  "jacobian_call_ms": {
+    "samples": 2498,
+    "mean": 0.7050654535635013,
+    "max": 1.6625450000447017,
+    "p95": 1.033006000068326,
+    "p99": 1.1902015100190515
+  },
+  "all_jacobians_per_candidate_ms": {
+    "samples": 1200,
+    "mean": 1.4677112525013551,
+    "max": 2.791583000089304,
+    "p95": 2.0903873000406747,
+    "p99": 2.4309958298726997
+  },
+  "interval_ms": {
+    "samples": 1199,
+    "mean": 20.000185455379448,
+    "max": 20.217820999960168,
+    "p95": 20.091978199911864,
+    "p99": 20.140416899866977
+  },
+  "cpu_count": 16,
+  "host_load_average_start": [
+    0.666015625,
+    1.015625,
+    0.99462890625
+  ],
+  "host_load_average_end": [
+    0.66015625,
+    0.9833984375,
+    0.9853515625
+  ],
+  "process_cpu_seconds": 4.716198950000001,
+  "wall_seconds": 23.984951463000016
+}

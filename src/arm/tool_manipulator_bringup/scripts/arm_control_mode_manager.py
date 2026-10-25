@@ -36,6 +36,7 @@ class ControlModeManager(Node):
         config = yaml.safe_load(path.read_text())
         speeds = [min(.12, float(config['joints'][j]['velocity_limit_rad_s'])/2) for j in JOINTS]
         self.core = ModeCore([limits[j] for j in JOINTS], speeds, startup_recovery_enabled=True)
+        self.core.tcp_entry_required = True
         self.ee = self.create_publisher(Float64MultiArray, '/ee_velocity_controller/commands', 1)
         self.position = self.create_publisher(Float64MultiArray, '/manual_position_controller/commands', 1)
         qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
@@ -46,6 +47,7 @@ class ControlModeManager(Node):
         self.create_subscription(String, '/control/active_target', self.on_focus, qos)
         self.hardware_fault = False
         self.create_subscription(String, '/control/hardware_fault', self.on_fault, qos)
+        self.create_subscription(String, '/arm/tcp_joy/entry_status', self.on_tcp_entry, 1)
         for source in ('manual', 'tcp_ik', 'tool_auto'):
             self.create_subscription(String, '/arm/input/'+source,
                                      lambda msg, source=source: self.on_command(source, msg), 1)
@@ -69,10 +71,16 @@ class ControlModeManager(Node):
         self.publish_status()
 
     def on_state(self, msg):
+        if (len(msg.name) != len(msg.position) or len(msg.name) != len(msg.velocity)
+                or len(set(msg.name)) != len(msg.name)):
+            self.core.fault('malformed joint feedback')
+            return
         p = dict(zip(msg.name, msg.position))
         v = dict(zip(msg.name, msg.velocity))
         if all(j in p and j in v for j in JOINTS):
             self.core.feedback([p[j] for j in JOINTS], [v[j] for j in JOINTS], time.monotonic())
+        else:
+            self.core.fault('incomplete arm joint feedback')
 
     def on_focus(self, msg):
         previous = self.core.focus
@@ -85,6 +93,18 @@ class ControlModeManager(Node):
         if msg.data != 'arm' and self.core.mode != 'fault' and self.core.startup_complete:
             self.core.request('hold', time.monotonic())
 
+    def on_tcp_entry(self, msg):
+        try:
+            data = json.loads(msg.data)
+            if data['epoch'] != self.core.epoch:
+                return
+            if (type(data['safe']) is not bool or not self.core.valid(data['positions'])
+                    or not isinstance(data['reason'], str)):
+                raise ValueError('invalid TCP entry assessment')
+            self.core.tcp_entry = dict(data, time=time.monotonic())
+        except (ValueError, TypeError, KeyError):
+            self.core.tcp_entry = None
+
     def activate_pending_focus(self, now):
         c = self.core
         if not self.focus_activation_pending:
@@ -94,7 +114,10 @@ class ControlModeManager(Node):
             return
         if (c.focus == 'arm' and c.mode == 'hold' and not c.transitioning and
                 c.ready and c.startup_complete and c.fresh(now)):
-            c.request(self.focus_arm_mode, now)
+            try:
+                c.request(self.focus_arm_mode, now)
+            except ValueError as exc:
+                c.reason = str(exc)
             self.focus_activation_pending = False
 
     def on_fault(self, msg):
@@ -228,7 +251,9 @@ class ControlModeManager(Node):
         elif c.transitioning:
             blocker = c.reason
         elif c.mode == 'hold':
-            if self.focus_activation_pending and self.focus_arm_mode:
+            if c.reason:
+                blocker = c.reason
+            elif self.focus_activation_pending and self.focus_arm_mode:
                 blocker = 'HOLD: activating '+self.focus_arm_mode
             elif self.focus_arm_mode:
                 blocker = ('HOLD: toggle drive -> arm or request /arm/set_mode/' +

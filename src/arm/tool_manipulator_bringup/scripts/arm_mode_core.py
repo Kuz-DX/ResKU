@@ -43,6 +43,26 @@ class ModeCore:
         self.startup_timeout = 60.
         self.startup_stall_timeout = 15.
         self.startup_progress_epsilon = .0005
+        self.tcp_entry_required = False
+        self.tcp_entry = None
+
+    def tcp_entry_blocker(self, now):
+        if not self.tcp_entry_required:
+            return ''
+        proof = self.tcp_entry
+        if proof is None or proof['epoch'] != self.epoch or not 0 <= now-proof['time'] < .5:
+            return 'TCP entry assessment missing/stale; remain HOLD'
+        if not proof['safe']:
+            return proof['reason']
+        if not self.fresh(now) or not self.valid(proof['positions']):
+            return 'TCP entry feedback invalid'
+        if any(min(v-lo, hi-v) < .1 for v, (lo, hi) in zip(self.position, self.limits)):
+            return 'TCP entry requires 0.10 rad joint margin; request tcp_ready assessment'
+        if max(abs(a-b) for a, b in zip(self.position, proof['positions'])) > .001:
+            return 'TCP entry feedback changed; recheck required'
+        if max(map(abs, self.velocity)) > .02:
+            return 'TCP entry requires stopped feedback'
+        return ''
 
     def feedback_allowed(self, position):
         if self.startup_enabled and not self.startup_complete:
@@ -179,7 +199,15 @@ class ModeCore:
             raise ValueError('startup recovery must complete before mode requests')
         if mode != 'hold' and (self.focus != 'arm' or not self.ready or not self.fresh(now)):
             raise ValueError('arm focus, active controller and fresh feedback required')
+        if mode == 'tcp_ik':
+            blocker = self.tcp_entry_blocker(now)
+            if blocker:
+                self.request('hold', now)
+                self.reason = blocker
+                raise ValueError(blocker)
         self.invalidate()
+        if mode == 'tcp_ik' and self.tcp_entry is not None:
+            self.tcp_entry = dict(self.tcp_entry, epoch=self.epoch)
         self.mode, self.requested = 'hold', mode
         self.transitioning = True
         self.started = now
@@ -261,10 +289,17 @@ class ModeCore:
             if now-self.started > 15.:
                 self.fault('transition stop timeout')
             elif self.settled >= 5:
+                if self.requested == 'tcp_ik':
+                    blocker = self.tcp_entry_blocker(now)
+                    if blocker:
+                        self.request('hold', now)
+                        self.reason = blocker
+                        return list(self.target)
                 self.mode = self.requested
                 self.transitioning = False
                 self.command_time = now
-                self.reason = ''
+                if self.mode != 'hold' or not self.reason.startswith('TCP entry'):
+                    self.reason = ''
                 self.settled = 0
         elif self.mode == 'tool_auto' and self.execution_id is not None:
             if now-self.started > 120.:
