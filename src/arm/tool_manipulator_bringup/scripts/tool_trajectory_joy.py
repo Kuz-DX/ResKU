@@ -433,23 +433,34 @@ class ToolTrajectoryJoy(Node):
         return {joint: abs(self.full_state[joint]-value)
                 for joint, value in self.snapshot.items()}
 
+    def snapshot_tolerances(self, validation=False):
+        tolerances = dict(zip(ARM_JOINTS, TCP_ENTRY_TOLERANCE))
+        # ee_joint is a separate DYNAMIXEL velocity axis and is not commanded
+        # by a six-joint arm path.  Its stopped feedback has the same encoder
+        # hunting seen on the arm DYNAMIXEL axes, so do not apply the 0.001-rad
+        # RMD fallback to it.
+        tolerances['ee_joint'] = .02
+        if validation:
+            for joint in ARM_JOINTS[1:4]:
+                tolerances[joint] = self.validation_rmd_drift
+        return tolerances
+
     def unchanged(self, validation=False):
         delta = ToolTrajectoryJoy.snapshot_delta(self)
         if delta is None:
             return False
-        tolerances = dict(zip(ARM_JOINTS, TCP_ENTRY_TOLERANCE))
-        if validation:
-            for joint in ARM_JOINTS[1:4]:
-                tolerances[joint] = self.validation_rmd_drift
+        tolerances = ToolTrajectoryJoy.snapshot_tolerances(self, validation)
         return all(change <= tolerances.get(joint, .001)
                    for joint, change in delta.items())
 
-    def snapshot_change_reason(self):
+    def snapshot_change_reason(self, validation=False):
         delta = ToolTrajectoryJoy.snapshot_delta(self)
         if not delta:
             return 'joint feedback unavailable or joint set changed'
-        joint = max(delta, key=delta.get)
-        return f'largest change {joint}={delta[joint]:.6f} rad'
+        tolerances = ToolTrajectoryJoy.snapshot_tolerances(self, validation)
+        joint = max(delta, key=lambda name: delta[name]/tolerances.get(name, .001))
+        return (f'largest normalized change {joint}={delta[joint]:.6f} rad '
+                f'(limit {tolerances.get(joint, .001):.6f})')
 
     def tick(self):
         if self.stage == 'idle':
@@ -492,7 +503,7 @@ class ToolTrajectoryJoy(Node):
                     raise RuntimeError('arm ownership changed during entry planning')
                 if not self.unchanged(validation=True):
                     raise RuntimeError('robot moved during entry planning; '
-                                       + self.snapshot_change_reason())
+                                       + self.snapshot_change_reason(validation=True))
                 if now-self.started > self.planning_timeout+1.:
                     raise TimeoutError('MoveIt entry planning timed out')
                 if not self.future.done():
@@ -516,7 +527,7 @@ class ToolTrajectoryJoy(Node):
                 if not self.unchanged(validation=True):
                     raise RuntimeError(
                         'robot state changed beyond stopped-feedback tolerance during '
-                        'path validation; '+self.snapshot_change_reason())
+                        'path validation; '+self.snapshot_change_reason(validation=True))
                 if now-self.started > self.collision_timeout:
                     raise TimeoutError('tool path collision check timed out')
                 if not self.future.done():
@@ -550,7 +561,7 @@ class ToolTrajectoryJoy(Node):
                     return
                 if not self.unchanged(validation=True):
                     raise RuntimeError('robot moved before path execution; '
-                                       + self.snapshot_change_reason())
+                                       + self.snapshot_change_reason(validation=True))
                 self.execution_id = 'tool-path-'+uuid.uuid4().hex
                 self.publisher.publish(String(data=json.dumps(dict(
                     epoch=s['epoch'], execution_id=self.execution_id,
