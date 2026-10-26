@@ -238,6 +238,10 @@ class AprilTagCompressedNode(Node):
         self.get_logger().info(
             f'Camera info: {self.camera_info_topic}'
         )
+        self.get_logger().info(
+            'Detector pose estimate: '
+            f'{"enabled" if self.estimate_tag_pose else "disabled"}'
+        )
 
     def camera_info_callback(self, msg):
         fx = float(msg.k[0])
