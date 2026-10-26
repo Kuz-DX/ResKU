@@ -1938,10 +1938,24 @@ void DynamixelHardware::SyncJointCommandWithStates()
           it_commands.interface_name_vec.end(),
           pos_cmd_name);
         if (cmd_it == it_commands.interface_name_vec.end()) {
-          RCLCPP_WARN_STREAM(
-            logger_,
-            "No position interface found in command interfaces for joint '" <<
-              it_commands.name << "'. Skipping sync!");
+          // ee_joint is intentionally velocity-controlled. Copying measured
+          // velocity into its command would continue motion after a torque
+          // transition, so synchronize non-position joints to a zero command.
+          auto velocity_it = std::find(
+            it_commands.interface_name_vec.begin(),
+            it_commands.interface_name_vec.end(),
+            hardware_interface::HW_IF_VELOCITY);
+          if (velocity_it != it_commands.interface_name_vec.end()) {
+            const size_t velocity_idx = std::distance(
+              it_commands.interface_name_vec.begin(), velocity_it);
+            *it_commands.value_ptr_vec.at(velocity_idx) = 0.0;
+            RCLCPP_INFO_STREAM(
+              logger_, "Sync velocity command to zero (joint: " << it_commands.name << ")");
+          } else {
+            RCLCPP_WARN_STREAM(
+              logger_, "No supported command interface found for joint '" <<
+                it_commands.name << "'. Skipping sync!");
+          }
           continue;
         }
         size_t cmd_idx = std::distance(it_commands.interface_name_vec.begin(), cmd_it);
