@@ -434,8 +434,8 @@ class VisualLandmarkNode(Node):
         return {'id': lid, 'order': order, 'dir': ldir, 'x': mission.x, 'y': mission.y,
                 'yaw': mission.yaw, 's_along_path': self.odometer.s,
                 'extrinsic_ok': extrinsic is not None, 'camera_info_ok': ci is not None,
-                'localization_ready': mission_camera is not None and image_base is not None and ci is not None
-                and valid_transform(mission_camera) and valid_transform(image_base)}
+                'localization_ready': bool(mission_camera is not None and image_base is not None and ci is not None
+                and valid_transform(mission_camera) and valid_transform(image_base))}
 
 
 def main(args=None):

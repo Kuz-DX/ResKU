@@ -12,7 +12,7 @@ setup(
     data_files=[
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
-        ('share/' + package_name, ['package.xml']),
+        ('share/' + package_name, ['package.xml', 'VPR_VIRTUAL_TEST.md']),
         (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
         (os.path.join('share', package_name, 'config'), glob('config/*.rviz')),
     ],
@@ -33,6 +33,9 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            'vpr_localizer_probe = manual_return_sim.vpr_localizer_probe:main',
+            'vpr_scheduler_probe = manual_return_sim.vpr_scheduler_probe:main',
+            'virtual_vpr_rig = manual_return_sim.vpr_rig:main',
             'sim_rmd_x8_hardware = manual_return_sim.sim_rmd_x8_hardware:main',
             'sim_debug_viz = manual_return_sim.sim_debug_viz:main',
             'keyboard_teleop = manual_return_sim.keyboard_teleop:main',

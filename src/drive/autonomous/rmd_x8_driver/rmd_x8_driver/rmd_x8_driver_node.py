@@ -206,16 +206,9 @@ class RmdX8DriverNode(Node):
         self.declare_parameter("odom_frame_id", "odom")
         self.declare_parameter("base_frame_id", "base_link")
         self.declare_parameter("publish_odom_tf", False)  # normally False: robot_localization publishes odom->base_link
-        # [수정] 이 노드가 (크래시/kill -9 포함 어떤 이유로든) 새 명령을 더
-        # 이상 못 보내는 상태가 되면, 모터가 하드웨어 레벨에서 스스로 멈추게
-        # 하는 마지막 방어선. 0xA2 등 새 제어 프레임이 이 시간(ms) 안에 안
-        # 오면 모터가 알아서 정지한다 -- 지금까지 코드 주석에 "RMD-X8은 500ms
-        # 하트비트로 알아서 멈춘다"고 적혀 있었지만 실제로 이 설정을 모터에
-        # 걸어준 적이 한 번도 없었다(이 프로토콜 모듈에 0xB3 커맨드 자체가
-        # 없었음, arm 쪽 rmd_sdk에는 있는데 여기만 빠짐) -- 노드가 죽었는데도
-        # 로봇이 계속 움직인 사고의 유력한 원인. 0으로 주면 이 기능 자체가
-        # 꺼지니 절대 0으로 두지 말 것.
-        self.declare_parameter("comm_timeout_protection_ms", 500)
+        # External robot stop is provided by the deployment. Explicitly send
+        # B3=0 at startup/reconnect to clear any previous motor watchdog.
+        self.declare_parameter("comm_timeout_protection_ms", 0)
         # [manual+return 통합] can_driver_node에서 이관 -- USB-CAN 어댑터(gs_usb)가
         # 물리적으로 잠깐 빠졌다 붙는 사고가 manual 조종 중 실기에서 확인된 적이
         # 있다(can_driver_node._attempt_reconnect() 주석 참고). 이 노드가 이제
@@ -427,19 +420,14 @@ class RmdX8DriverNode(Node):
     # startup safety configuration
     # ------------------------------------------------------------------ #
     def _configure_comm_timeout_protection(self):
-        """0xB3로 통신두절 보호시간을 설정하고, readback(reply echo)으로 모터가
-        실제로 그 값을 적용했는지 검증한다. 이 노드가 죽거나(kill -9 포함)
-        CAN 자체가 끊겨서 더 이상 명령을 못 보내는 상황에서, 모터가 하드웨어
-        레벨에서 스스로 멈추게 하는 유일한 방어선 -- destroy_node()의 정지
-        프레임 전송은 정상 종료 경로에서만 동작하므로 이것만으론 부족하다."""
+        """Apply and verify the requested motor timeout; zero explicitly disables it."""
         timeout_ms = self.comm_timeout_protection_ms
-        if timeout_ms <= 0:
-            self.get_logger().warn(
-                "comm_timeout_protection_ms<=0 -- 모터 하드웨어 통신두절 보호가 "
-                "비활성화된 채로 실행됩니다. 노드가 죽으면 모터가 마지막 명령을 "
-                "계속 유지할 수 있습니다 (권장하지 않음)."
-            )
-            return
+        if timeout_ms < 0:
+            raise ValueError("comm_timeout_protection_ms must be >= 0")
+        # Require a fresh response, including after reconnect. An old non-None
+        # acknowledgement must not make a new disable request look successful.
+        for channel in self.channels:
+            channel.apply_comm_timeout_ack(None)
 
         data = proto.build_set_timeout_command(timeout_ms)
         for channel in self.channels:
@@ -466,7 +454,7 @@ class RmdX8DriverNode(Node):
             if confirmed is None:
                 self.get_logger().error(
                     f"[{channel.name}] comm_timeout_protection 설정 응답(readback)을 "
-                    f"못 받았습니다 -- 모터 하드웨어 통신두절 보호가 실제로 걸렸는지 "
+                    f"못 받았습니다 -- 요청한 통신두절 보호 설정이 실제로 적용됐는지 "
                     f"확인 불가. CAN 배선/모터 전원을 확인하세요."
                 )
             elif confirmed != timeout_ms:
@@ -474,6 +462,9 @@ class RmdX8DriverNode(Node):
                     f"[{channel.name}] comm_timeout_protection 설정값 불일치: "
                     f"요청={timeout_ms}ms, 모터 응답={confirmed}ms."
                 )
+            elif confirmed == 0:
+                self.get_logger().info(
+                    f"[{channel.name}] comm_timeout_protection 해제 확인됨: 0ms")
             else:
                 self.get_logger().info(
                     f"[{channel.name}] comm_timeout_protection 확인됨: {confirmed}ms "
@@ -517,7 +508,7 @@ class RmdX8DriverNode(Node):
                 v, w = self._desired_v, self._desired_w
                 if age_s > self.cmd_vel_timeout:
                     # Safety: no recent cmd_vel -> command zero speed rather than
-                    # relying solely on the drive's own 500ms heartbeat cutoff.
+                    # stopping CAN transmission when the upper-level command expires.
                     v, w = 0.0, 0.0
 
         v_left, v_right = self._skid_steer_inverse(v, w)

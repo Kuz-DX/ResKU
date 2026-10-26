@@ -1,5 +1,7 @@
 # Back-to-Base 주행 + VPR 실행 명령 (2026-10-27)
 
+CAN 없는 RViz 가상 영상 검증: [VPR_VIRTUAL_TEST.md](../manual_return_sim/VPR_VIRTUAL_TEST.md).
+
 팔 IK/Manual + 원격 조이스틱은 1-A 절부터 실행한다.
 Auto 재개 없이 정지 MANUAL에서 VPR만 시험: [STATIONARY_VPR_DEBUG.md](STATIONARY_VPR_DEBUG.md). 기본 OFF인 임시 debug 기능.
 

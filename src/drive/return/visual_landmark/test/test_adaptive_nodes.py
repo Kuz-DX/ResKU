@@ -153,3 +153,19 @@ def test_auto_resume_requests_check_with_cooldown_and_no_distance_reset():
     assert n.watch.distance == 2.
     Scheduler.tick(n)
     assert len(requests) == 1
+
+
+def test_real_capture_info_is_json_serializable(tmp_path):
+    from geometry_msgs.msg import TransformStamped
+    from return_navigation.se2 import Pose2D
+    tf=TransformStamped();tf.transform.rotation.w=1.
+    od=Odometry();od.header.frame_id='odom';od.header.stamp.sec=10;od.pose.pose.orientation.w=1.
+    image=CompressedImage();image.header.frame_id='rear';image.header.stamp.sec=10;image.format='jpeg'
+    node=NS(_ensure_mission_dir=lambda:str(tmp_path),_next_order=0,_odom=od,_origin=Pose2D(),
+            _camera_info=None,_lookup_extrinsic=lambda *a:{},base_frame='base_link',
+            tf_buffer=NS(lookup_transform=lambda *a:tf),odometer=NS(s=0.),capture_mode='stop',
+            _now=lambda:10.,_odom_arrival=10.)
+    ci=CameraInfo();ci.header.frame_id='rear';node._camera_info=ci
+    info=Capture._save_landmark(node,image)
+    assert type(info['localization_ready']) is bool
+    assert json.loads(json.dumps(info))['localization_ready'] is True
