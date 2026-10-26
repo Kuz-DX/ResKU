@@ -48,7 +48,7 @@ class VisualLocalizationNode(Node):
             'base_frame': 'base_link', 'odom_frame': 'odom',
             'max_correction_m': 3.0, 'max_correction_yaw_rad': 0.7,
             'candidate_radius_m': 12.0, 'processing_period_s': 1.0,
-            'apply_correction': False, 'lock_pose_guard': True, 'expected_lock_pose_file': '',
+            'publish_debug_matches': False, 'apply_correction': False, 'lock_pose_guard': True, 'expected_lock_pose_file': '',
             'lock_translation_tolerance_m': 0.02, 'lock_rotation_tolerance_rad': 0.035,
             'agreement_translation_m': 0.25, 'agreement_yaw_rad': 0.1,
             'agreement_max_interval_s': 2.5, 'ambiguity_ratio': 0.85,
@@ -70,12 +70,14 @@ class VisualLocalizationNode(Node):
         for name in ['correction_min_translation_m', 'correction_min_yaw_rad']:
             if not math.isfinite(self.p(name)) or self.p(name) < 0:
                 raise ValueError('invalid correction deadband')
+        self.debug_enabled = bool(self.p('publish_debug_matches'))
         self.check = None
         self.check_frames = 0
         self.check_expansion = 0
         self.route_progress = None
         self.cached_arcs = None
         self.lock_pose = None
+        self.reference_images = {}
         self.reference_meta = {}
         self.route = []
         self.last_reference_arc = None
@@ -94,6 +96,7 @@ class VisualLocalizationNode(Node):
         latched = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
                              durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.pub = self.create_publisher(PoseStamped, '/visual_landmark/correction', 10)
+        self.debug_pub = self.create_publisher(CompressedImage, '/visual_landmark/debug/matches/compressed', 1)
         self.status = self.create_publisher(String, '/visual_landmark/localization_event', 10)
         self.create_subscription(RoutePath, '/return_path', self.on_route, latched)
         self.create_subscription(Pose, '/mission/origin_pose', self.on_origin, latched)
@@ -187,6 +190,7 @@ class VisualLocalizationNode(Node):
             self.check = None
             if msg.data in RECORDING_STATES and self.state not in RECORDING_STATES:
                 self.landmarks.clear()
+                getattr(self, 'reference_images', {}).clear()
                 self.correction = None
                 self.lock_pose = None
                 self.reference_meta.clear()
@@ -205,6 +209,7 @@ class VisualLocalizationNode(Node):
             self.route_progress = None
             self.cached_arcs = None
             self.landmarks.clear()
+            getattr(self, 'reference_images', {}).clear()
             self.correction = None
             self.pending = None
             self.lock_pose = None
@@ -263,12 +268,42 @@ class VisualLocalizationNode(Node):
             self.landmarks[meta['id']] = (
                 (points, descriptors, np.array(ci['k']).reshape(3, 3), np.array(ci['d'])),
                 np.array(meta['mission_camera_transform'], dtype=float))
+            if getattr(self, 'debug_enabled', False):
+                self.reference_images[meta['id']] = image
             self.reference_meta[meta['id']] = meta
             self.cached_arcs = None
             self.event('reference_loaded', id=meta['id'], features=len(points),
                        x=float(meta['mission_pose']['x']), y=float(meta['mission_pose']['y']))
         except (ValueError, KeyError, OSError, cv2.error, TypeError) as exc:
             self.event('reference_rejected', reason=str(exc))
+
+    def publish_matches(self, lid, image, current, debug, diagnostics, header):
+        # Only render actual matcher correspondences; never rerun SIFT/PnP.
+        reference = self.reference_images.get(lid)
+        if reference is None:
+            return
+        h = max(reference.shape[0], image.shape[0])
+        w = reference.shape[1]
+        canvas = np.zeros((h, w+image.shape[1], 3), np.uint8)
+        canvas[:reference.shape[0], :w] = cv2.cvtColor(reference, cv2.COLOR_GRAY2BGR)
+        canvas[:image.shape[0], w:] = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+        for x, y in current[0]:
+            cv2.circle(canvas, (int(x)+w, int(y)), 2, (255, 180, 0), 1)
+        for cp, rp in debug.get('pairs', [])[:150]:
+            cv2.line(canvas, tuple(map(int, rp)), (int(cp[0])+w, int(cp[1])), (0, 150, 220), 1)
+        pairs = debug.get('depth_pairs', [])
+        for i in debug.get('inlier_indices', [])[:150]:
+            cp, rp = pairs[i]
+            cv2.line(canvas, tuple(map(int, rp)), (int(cp[0])+w, int(cp[1])), (0, 255, 0), 1)
+        label = f"rear ref {lid} | front current | pairs={diagnostics.get('mutual_ratio_matches', 0)} inliers={diagnostics.get('inliers', 0)}"
+        cv2.rectangle(canvas, (0, 0), (canvas.shape[1], 65), (0, 0, 0), -1)
+        cv2.putText(canvas, label, (10, 23), cv2.FONT_HERSHEY_SIMPLEX, .5, (255,255,255), 1)
+        cv2.putText(canvas, f"FRAME ONLY: {diagnostics.get('reject_reason') or 'PnP passed'} | final validation: see status", (10, 49), cv2.FONT_HERSHEY_SIMPLEX, .5, (255,255,255), 1)
+        msg = CompressedImage()
+        msg.header = header
+        msg.format = 'jpeg'
+        msg.data = cv2.imencode('.jpg', canvas, [cv2.IMWRITE_JPEG_QUALITY, 75])[1].tobytes()
+        self.debug_pub.publish(msg)
 
     def on_pair(self, color, depth):
         started = time.perf_counter()
@@ -349,7 +384,13 @@ class VisualLocalizationNode(Node):
                 if np.linalg.norm((prior @ oc)[:2, 3] - mc[:2, 3]) > self.p('candidate_radius_m'):
                     continue
                 diagnostics = {'id': lid}
-                result = match(reference, current, z, k, d, options=self.match_options, diagnostics=diagnostics)
+                debug = {} if getattr(self, 'debug_enabled', False) and self.debug_pub.get_subscription_count() else None
+                result = match(reference, current, z, k, d, options=self.match_options, diagnostics=diagnostics, debug=debug)
+                if debug is not None:
+                    try:
+                        self.publish_matches(lid, image, current, debug, diagnostics, color.header)
+                    except Exception as exc:
+                        self.get_logger().warning(f'Debug image failed: {exc}')
                 attempts.append(diagnostics)
                 if result is None:
                     continue

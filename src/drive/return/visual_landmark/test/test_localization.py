@@ -66,8 +66,12 @@ def test_rgbd_matching_recovers_metric_tilt_and_rejects_invalid_depth():
     descriptors = rng.normal(size=(len(keep), 128)).astype(np.float32)
     current = (cp[keep].astype(np.float32), descriptors)
     reference = (uv[keep].astype(np.float32), descriptors.copy(), k, None)
-    result = match(reference, current, depth, k, None)
+    debug = {}
+    result = match(reference, current, depth, k, None, debug=debug)
     assert result is not None
+    assert len(debug['pairs']) == len(keep)
+    assert len(debug['inlier_indices']) == result[1]
+    assert all(0 <= i < len(debug['depth_pairs']) for i in debug['inlier_indices'])
     np.testing.assert_allclose(result[0], expected, atol=0.001)
     assert match(reference, current, depth*0, k, None) is None
     assert match(reference, (cp[keep], None), depth, k, None) is None

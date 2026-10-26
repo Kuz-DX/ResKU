@@ -1,5 +1,7 @@
 # 장착 카메라 관찰 시험 준비 (2026-10-26)
 
+전체 구동 명령 모음: [VPR_RUN_COMMANDS.md](VPR_RUN_COMMANDS.md) (로봇/노트북별 터미널, Manual→Auto 시험, 기록·종료).
+
 ## 이번 PC에서 실제 확인한 상태
 
 - 후방 Alcorlink USB 카메라 → `/dev/v4l/by-id/usb-Alcorlink_Corp._USB_2.0_Camera-video-index0`.
@@ -118,3 +120,114 @@ ros2 launch vision rear_vpr_trial.launch.py
 별도로 필요하다. 후방만 준비돼도 전후방 VPR 전체가 준비된 것은 아니다.
 `visual_apply_correction=false`, `enable_landmark_recovery=false`를 유지하고,
 이 TF로 새 mission/랜드마크를 기록한 뒤 known-offset 관찰 시험을 수행한다.
+
+## 로봇 PC: Record → 복귀 → Manual → Auto VPR 시각화 시험
+
+이 절차는 로봇 PC에서 실행한다. 노트북 뷰어는 로봇과 ROS_DOMAIN_ID,
+RMW 및 네트워크 discovery가 맞아야 원격 토픽을 볼 수 있다.
+현재 노트북에서 로봇 PC 센서/TF 수신을 확인한 상태는 아니다.
+
+### 빌드와 센서
+
+```bash
+source /opt/ros/humble/setup.bash
+colcon build --packages-select vision visual_landmark return_navigation drive_cmd_mux robot_bringup
+source install/setup.bash
+ros2 pkg prefix realsense2_camera
+rs-enumerate-devices
+```
+
+실제 D455 시리얼을 다음 ACTUAL_D455_SERIAL 자리에 넣는다. 기존 후방 및
+RealSense driver가 있으면 먼저 종료하거나 start_rear/start_arm을 false로 지정한다.
+기존 rear optical TF와 trial TF를 중복 발행하지 않는다.
+
+```bash
+ros2 launch vision vpr_observation.launch.py \
+  rear_launch:=rear_vpr_trial.launch.py \
+  start_arm:=true arm_serial_no:=_ACTUAL_D455_SERIAL \
+  start_visual_nodes:=false start_viewer:=true
+```
+
+위 launch는 센서·후방 초기 TF·읽기 전용 뷰어만 켠다.
+전방은 D455 자체 color CameraInfo/내부 TF를 사용한다. 차체→팔→카메라 장착
+TF와 joint_states는 실제 로봇에서 별도로 제공해야 한다. D435i LOCK 파일을
+D455에 재사용하지 않는다. 후방 trial TF는 27mm/약 3도/roll=0의 초기 근사다.
+
+### 실차 주행 스택
+
+이미 실행 중인 manual_return_bringup은 중복 실행하지 말고 아래 옵션을 포함해
+재시작한다. 이 명령은 모터/주행 스택을 시작한다.
+
+```bash
+ros2 launch robot_bringup manual_return_bringup.launch.py \
+  enable_auto_keyframes:=true enable_visual_localization:=true \
+  enable_adaptive_visual_check:=true \
+  visual_check_on_return_start:=true visual_check_on_auto_resume:=true \
+  visual_debug_matches:=true \
+  visual_apply_correction:=false enable_landmark_recovery:=false
+```
+
+실제 장착에 맞는 measured LOCK 행렬이 있으면
+`visual_expected_lock_pose_file:=/absolute/path/d455_lock.yaml`도 지정한다.
+관찰 모드에서 파일을 생략하면 처음 처리된 TF가 LOCK 기준으로 고정되므로,
+첫 검사 전에 팔을 실제 LOCK 자세에 둔다. 이것은 측정된 extrinsic을 대신하지 않는다.
+
+```bash
+ros2 run visual_landmark vpr_preflight --seconds 5 --output /tmp/vpr_trial_preflight.json
+```
+
+`ready_for_observation=true`와 전후방 영상/CameraInfo/depth/TF를 확인한 뒤
+새 mission의 Record를 시작한다. preflight 통과도 실제 측정 정확도의 증명은 아니다.
+reference_loaded가 나오는지 확인하고 기존 UI로 복귀를 시작한다.
+
+### 화면과 시험 순서
+
+- Rear live / Front live: 실제 영상. 수신이 끊기면 마지막 프레임의 경과 시간이 증가한다.
+- Matches: 왼쪽은 저장된 후방 reference, 오른쪽은 현재 전방 영상.
+  청색 점은 현재 SIFT 특징점, 황색 선은 mutual ratio 매칭,
+  녹색 선은 그 중 유효 depth 대응점의 PnP RANSAC inlier다.
+  모든 후보를 기존 방식으로 검증하며, 화면은 마지막 처리 후보일 수 있다.
+- VPR status: mission, capture, scheduler, localization과 마지막 결과.
+  녹색 선만으로 성공이 아니다. `validated`는 두 프레임·기하 검증 통과,
+  `localized`와 `correction_applied=true`는 실제 보정 발행이다.
+  영상 시각화는 구독자가 있을 때만 만들며 idle SIFT/PnP는 추가하지 않는다.
+
+1. 새 Record로 배경 특징이 충분한 구간을 주행하고 reference_loaded를 확인한다.
+2. 복귀 Auto에서 첫 check_requested와 Matches/validated를 확인한다.
+3. Manual로 전환하고 낮은 속도로 위치/방향을 바꾼 뒤 Auto로 재개한다.
+4. FOLLOW_RETURN_PATH에 들어간 뒤 `trigger=auto_resume` 요청을 확인한다.
+   fresh odom이 필요하고 진행 중 요청은 하나만 허용하며 기존 retry cooldown을 지킨다.
+5. `validated`의 planar_correction, 실제 차체 위치/각도를 비교한다.
+   no_match/rejected/timeout이면 직전 보정을 유지하고 ordinary return이 계속된다.
+6. Manual→Auto 전환을 반복한다. 새 Record를 누르면 새 mission이 되므로
+   이 시험 도중 Record를 다시 누르지 않는다.
+
+정상적으로 odom에 반영된 수동 우회는 추정 drift가 아니다. 큰 visual 보정이
+안 나오는 것이 정상일 수 있다. 바닥 기준 표시/독립 위치 측정으로 실제 오차와
+추정치를 비교한다. odom이나 TF를 임의 reset해서 시험하지 않는다.
+첫 단계는 apply_correction=false여서 실제 경로를 VPR로 수정하지 않는다.
+관찰과 TF/LOCK 검증 후 같은 시험을 true로 반복해야 실제 보정 효과를 확인할 수 있다.
+
+### 시험 기록
+
+별도 터미널에서 Record 시작 전에 실행하고 종료 시 Ctrl+C로 마무리한다.
+매 실행마다 새 출력 디렉터리를 사용한다.
+
+```bash
+ros2 bag record -o "adaptive_vpr_trial_$(date +%Y%m%d_%H%M%S)" \
+ /mission/return/state /mission/origin_pose /return_path \
+ /wheel/odom /odometry/filtered /odometry/diagnostics /imu/gyro/z_corrected \
+ /visual_landmark/event /visual_landmark/check_request \
+ /visual_landmark/scheduler_event /visual_landmark/localization_event \
+ /visual_landmark/route_progress /visual_landmark/correction \
+ /visual_landmark/debug/matches/compressed \
+ /rear/camera/image_raw/compressed /rear/camera/camera_info \
+ /arm/camera/color/image_raw/compressed /arm/camera/color/camera_info \
+ /arm/camera/aligned_depth_to_color/image_raw /tf /tf_static /joint_states \
+ /cmd_vel_return_path
+```
+
+뷰어만 별도로 켜려면 `ros2 run visual_landmark vpr_viewer`.
+Q는 뷰어만 종료하며 주행을 정지시키지 않는다.
+영상 저장·시각화는 CPU/디스크 부하를 늘린다. processing latency와 stale/deadline
+거부가 증가하면 실제 로봇에서 영상 부하를 낮추고 다시 측정한다.

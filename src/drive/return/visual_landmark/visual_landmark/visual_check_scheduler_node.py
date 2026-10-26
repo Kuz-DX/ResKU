@@ -21,7 +21,7 @@ class VisualCheckScheduler(Node):
                         enable_slip_early_trigger=True, slip_wz_deadband_radps=.15,
                         slip_score_trigger=.35, slip_score_decay=.02,
                         wheel_timeout_s=.5, gyro_timeout_s=.5, diagnostics_timeout_s=2.,
-                        odom_timeout_s=.5, visual_check_on_return_start=False)
+                        odom_timeout_s=.5, visual_check_on_return_start=False, visual_check_on_auto_resume=False)
         for n, v in defaults.items():
             self.declare_parameter(n, v)
         self.p = lambda n: self.get_parameter(n).value
@@ -69,12 +69,25 @@ class VisualCheckScheduler(Node):
         if key != self.origin:
             self.cancel()
             self.watch.reset()
+            self.start_check = False
+            self.resume_check_armed = False
             self.origin = key
 
     def on_state(self, msg):
         if msg.data in RETURN and self.state not in RETURN:
             self.watch.reset()
             self.start_check = bool(self.p('visual_check_on_return_start'))
+            self.start_trigger = 'return_start'
+        if msg.data == 'RETURN_MANUAL':
+            self.resume_check_armed = True
+        if (msg.data == 'FOLLOW_RETURN_PATH' and getattr(self, 'resume_check_armed', False)):
+            if self.p('visual_check_on_auto_resume'):
+                self.start_check = True
+                self.start_trigger = 'auto_resume'
+            self.resume_check_armed = False
+        if msg.data not in RETURN:
+            self.start_check = False
+            self.resume_check_armed = False
         if msg.data != 'FOLLOW_RETURN_PATH':
             self.cancel()
         if msg.data not in RETURN:
@@ -140,11 +153,12 @@ class VisualCheckScheduler(Node):
             return
         trigger = self.watch.due(now, self.p('enable_slip_early_trigger'))
         if self.start_check and self.watch.pending is None and now >= self.watch.next_try:
-            trigger = 'manual/debug'
+            trigger = getattr(self, 'start_trigger', 'manual/debug')
         if trigger:
             token = uuid.uuid4().hex
             self.watch.start(token, now)
             self.start_check = False
+            self.start_trigger = 'manual/debug'
             data = dict(active=True, request=token, trigger=trigger, requested_at=now,
                         timeout_s=self.p('visual_check_timeout_s'),
                         distance_since_last_valid_visual=self.watch.distance, slip_score=self.watch.score,

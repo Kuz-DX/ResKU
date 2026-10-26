@@ -19,7 +19,7 @@ from return_navigation.se2 import Pose2D
 def scheduler():
     values=dict(enable_adaptive_visual_check=True, enable_slip_early_trigger=True,
                 wheel_timeout_s=.5, gyro_timeout_s=.5, diagnostics_timeout_s=2.,
-                odom_timeout_s=.5, visual_check_timeout_s=5., visual_check_on_return_start=False)
+                odom_timeout_s=.5, visual_check_timeout_s=5., visual_check_on_return_start=False, visual_check_on_auto_resume=False)
     req, events = [], []
     node=NS(watch=CheckWatchdog(), state='FOLLOW_RETURN_PATH', origin=None,
             now=lambda:10., p=lambda n:values[n], start_check=False,
@@ -139,3 +139,17 @@ def test_capture_new_mission_resets_auto_but_ready_state_preserves_it(monkeypatc
     Capture._on_state(n,String(data='IDLE'))
     Capture._on_state(n,String(data='MANUAL_RECORDING'))
     assert n.auto_policy.anchor is None and n._next_order==0 and n._mission_dir is None
+
+
+def test_auto_resume_requests_check_with_cooldown_and_no_distance_reset():
+    n, p, requests, _ = scheduler()
+    p['visual_check_on_auto_resume'] = True
+    n.watch.distance = 2.
+    Scheduler.on_state(n, String(data='RETURN_MANUAL'))
+    Scheduler.on_state(n, String(data='RETURN_RESUME_STOP'))
+    Scheduler.on_state(n, String(data='FOLLOW_RETURN_PATH'))
+    Scheduler.tick(n)
+    assert requests[-1]['trigger'] == 'auto_resume'
+    assert n.watch.distance == 2.
+    Scheduler.tick(n)
+    assert len(requests) == 1

@@ -19,6 +19,8 @@ def generate_launch_description():
     arg = LaunchConfiguration
     defaults = dict(
         device='/dev/v4l/by-id/usb-Alcorlink_Corp._USB_2.0_Camera-video-index0',
+        rear_launch='apc850_rear.launch.py', start_viewer='false',
+        debug_matches='false', check_on_auto_resume='false',
         start_rear='true', start_arm='false', start_visual_nodes='true',
         camera_info_url='package://vision/config/camera/calibration/apc850_rear_preview_trial_1280x720.yaml',
         arm_config=str(share/'config/camera/vpr_front_d455.yaml'),
@@ -32,11 +34,10 @@ def generate_launch_description():
 
     nodes = [OpaqueFunction(function=validate_front),
         IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(str(share/'launch/apc850_rear.launch.py')),
+            PythonLaunchDescriptionSource([str(share/'launch')+'/', arg('rear_launch')]),
             condition=IfCondition(arg('start_rear')),
             launch_arguments=dict(device=arg('device'), camera_info_url=arg('camera_info_url'),
-                                  width='1280', height='720', fps='15.0',
-                                  publish_extrinsic='false').items()),
+                                  width='1280', height='720', fps='15.0').items()),
         Node(package='realsense2_camera', executable='realsense2_camera_node',
              namespace='arm', name='camera', condition=IfCondition(arg('start_arm')),
              parameters=[arg('arm_config'), {'serial_no': ParameterValue(arg('arm_serial_no'), value_type=str)}], output='screen'),
@@ -45,12 +46,16 @@ def generate_launch_description():
              parameters=[dict(enable_auto_keyframes=True, capture_mode='stop')], output='screen'),
         Node(package='visual_landmark', executable='visual_localization_node',
              condition=IfCondition(arg('start_visual_nodes')),
-             parameters=[dict(enable_adaptive_visual_check=True, apply_correction=False,
+             parameters=[dict(publish_debug_matches=ParameterValue(arg('debug_matches'), value_type=bool),
+                              enable_adaptive_visual_check=True, apply_correction=False,
                               lock_pose_guard=True, expected_lock_pose_file=arg('expected_lock_pose_file'))],
              output='screen'),
         Node(package='visual_landmark', executable='visual_check_scheduler_node',
              condition=IfCondition(arg('start_visual_nodes')),
-             parameters=[dict(enable_adaptive_visual_check=True, enable_slip_early_trigger=False)],
+             parameters=[dict(visual_check_on_auto_resume=ParameterValue(arg('check_on_auto_resume'), value_type=bool),
+                              enable_adaptive_visual_check=True, enable_slip_early_trigger=False)],
              output='screen'),
     ]
+    nodes.append(Node(package='visual_landmark', executable='vpr_viewer',
+                      condition=IfCondition(arg('start_viewer')), output='screen'))
     return LaunchDescription(declarations+nodes)

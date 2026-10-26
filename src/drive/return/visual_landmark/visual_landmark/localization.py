@@ -62,7 +62,7 @@ def features(image):
     return np.asarray([k.pt for k in keypoints], dtype=np.float32).reshape(-1, 2), descriptors
 
 
-def estimate_pose(points3d, pixels, k, distortion, min_inliers=20, options=None, diagnostics=None):
+def estimate_pose(points3d, pixels, k, distortion, min_inliers=20, options=None, diagnostics=None, debug=None):
     """Return reference_camera <- current_camera and geometric quality, or None."""
     options = options or MatchOptions(min_inliers=min_inliers)
     min_inliers = options.min_inliers
@@ -79,6 +79,8 @@ def estimate_pose(points3d, pixels, k, distortion, min_inliers=20, options=None,
     ok, r, t, indices = cv2.solvePnPRansac(
         xyz, uv, k, distortion, iterationsCount=300, reprojectionError=options.ransac_px,
         confidence=0.999, flags=cv2.SOLVEPNP_EPNP)
+    if debug is not None and indices is not None:
+        debug['inlier_indices'] = indices.ravel().tolist()
     diagnostics['pnp_s'] = time.perf_counter()-pnp_started
     diagnostics['reject_reason'] = 'pnp_inliers'
     if indices is not None:
@@ -107,7 +109,7 @@ def estimate_pose(points3d, pixels, k, distortion, min_inliers=20, options=None,
     return result, len(idx), error
 
 
-def _match(reference, current, depth, current_k, current_d, options=None, diagnostics=None):
+def _match(reference, current, depth, current_k, current_d, options=None, diagnostics=None, debug=None):
     options = options or MatchOptions()
     diagnostics = {} if diagnostics is None else diagnostics
     rp, rd, rk, distortion = reference
@@ -124,6 +126,9 @@ def _match(reference, current, depth, current_k, current_d, options=None, diagno
     pairs = [(a.queryIdx, a.trainIdx) for pair in forward if len(pair) == 2
              for a, b in [pair] if a.distance < options.ratio_test*b.distance and back.get(a.trainIdx) == a.queryIdx]
     diagnostics['mutual_ratio_matches'] = len(pairs)
+    if debug is not None:
+        debug['pairs'] = [(cp[ci].tolist(), rp[ri].tolist()) for ci, ri in pairs]
+        debug['depth_pairs'] = []
     xyz, pixels = [], []
     for ci, ri in pairs:
         u, v = cp[ci]
@@ -139,15 +144,17 @@ def _match(reference, current, depth, current_k, current_d, options=None, diagno
         ray = cv2.undistortPoints(np.array([[[u, v]]], np.float64), current_k, current_d)[0, 0]
         xyz.append([ray[0]*z, ray[1]*z, z])
         pixels.append(rp[ri])
-    return estimate_pose(xyz, pixels, rk, distortion, options=options, diagnostics=diagnostics)
+        if debug is not None:
+            debug['depth_pairs'].append((cp[ci].tolist(), rp[ri].tolist()))
+    return estimate_pose(xyz, pixels, rk, distortion, options=options, diagnostics=diagnostics, debug=debug)
 
 
-def match(reference, current, depth, current_k, current_d, options=None, diagnostics=None):
+def match(reference, current, depth, current_k, current_d, options=None, diagnostics=None, debug=None):
     """Time bounded candidate work without changing geometric acceptance gates."""
     diagnostics = {} if diagnostics is None else diagnostics
     started = time.perf_counter()
     try:
-        return _match(reference, current, depth, current_k, current_d, options, diagnostics)
+        return _match(reference, current, depth, current_k, current_d, options, diagnostics, debug)
     finally:
         diagnostics['candidate_total_s'] = time.perf_counter()-started
         diagnostics['matching_and_depth_s'] = max(0., diagnostics['candidate_total_s']-diagnostics.get('pnp_s', 0.))
