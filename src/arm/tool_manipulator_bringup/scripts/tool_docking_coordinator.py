@@ -13,7 +13,7 @@ from rclpy.qos import qos_profile_sensor_data
 from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo
 from sensor_msgs.msg import Joy
-from std_msgs.msg import Bool, String
+from std_msgs.msg import String
 from std_srvs.srv import Trigger
 from tf2_ros import Buffer, TransformException, TransformListener
 
@@ -37,10 +37,6 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         self.feedback_sequence = 0
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
-        # Arduino Bool pulse contract.  desired=True is emitted as True->False;
-        # desired=False is emitted as False->True so the input returns idle.
-        self.docking_command = self.create_publisher(Bool, '/arm/docking', 10)
-        self.create_subscription(Bool, '/arm/docked', self.on_docked, 10)
         self.create_subscription(CameraInfo, self.declare_parameter(
             'docking_camera_info_topic', '/arm/camera/color/camera_info').value,
             self.on_camera, qos_profile_sensor_data)
@@ -57,9 +53,6 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         super().reset()
         self.active = False
         self.docking_started = None
-        self.docked_state = None
-        self.docked_feedback_sequence = 0
-        self.command_feedback_sequence = None
         self.expected_docked = None
         self.actuation_deadline = None
         self.observation = None
@@ -137,7 +130,8 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             self.stable = 0
 
     def begin(self, path_id, planned_path=None):
-        if planned_path is None and path_id in self.settings:
+        if (planned_path is None and self.requested_docked_state is None
+                and path_id in self.settings):
             self.active = True
             self.cfg = self.settings[path_id]
             self.docking_started = None
@@ -167,15 +161,6 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             self.fail('operator cancelled docking/path')
             response.success, response.message = True, 'cancel requested; no automatic retreat'
         return response
-
-    def on_docked(self, msg):
-        self.docked_state = bool(msg.data)
-        self.docked_feedback_sequence += 1
-
-    def send_docking_pulse(self, desired):
-        """Publish the requested edge and immediately restore the opposite idle level."""
-        self.docking_command.publish(Bool(data=desired))
-        self.docking_command.publish(Bool(data=not desired))
 
     def path_completed(self):
         if not self.active:

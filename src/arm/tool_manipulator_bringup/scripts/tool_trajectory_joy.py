@@ -18,7 +18,7 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from sensor_msgs.msg import Joy, JointState
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
 from std_srvs.srv import Trigger
 from moveit_msgs.msg import Constraints, JointConstraint, MotionPlanRequest, MoveItErrorCodes
 from moveit_msgs.srv import GetMotionPlan, GetStateValidity
@@ -85,12 +85,23 @@ def execution_plan(path, measured, tolerance=.03, max_delta=.10, approach_speed=
     waypoints = list(path['waypoints'])
     durations = list(path['durations'])
     approach_duration = 0.
-    if error > tolerance:
+    if error > tolerance or not waypoints:
         approach_duration = max(.5, error/approach_speed)
         waypoints.insert(0, path['start'])
         durations.insert(0, approach_duration)
     return dict(waypoints=waypoints, durations=durations,
                 total=path['total']+approach_duration, start_error=error)
+
+
+def nearest_path_suffix(path, measured):
+    """Keep the taught direction, starting at the point nearest current feedback."""
+    points = [np.asarray(path['start'], dtype=float), *path['waypoints']]
+    measured = np.asarray(measured, dtype=float)
+    index = min(range(len(points)),
+                key=lambda i: float(np.max(np.abs(points[i]-measured))))
+    durations = list(path['durations'][index:])
+    return dict(start=points[index], waypoints=points[index+1:], durations=durations,
+                total=sum(durations), entry_index=index)
 
 
 def planned_entry(path, trajectory, measured, minimum_duration=.02):
@@ -175,6 +186,22 @@ class ToolTrajectoryJoy(Node):
         self.create_subscription(String, '/arm/control_status', self.on_status, qos)
         self.create_subscription(JointState, '/joint_states', self.on_state, 1)
         self.create_subscription(Joy, '/joy', self.on_joy, 1)
+        self.docking_command = self.create_publisher(Bool, '/arm/docking', 10)
+        self.create_subscription(Bool, '/arm/docked', self.on_docked, 10)
+        self.ui_held = {(path_id, desired): False for path_id in range(3)
+                        for desired in (False, True)}
+        for path_id in range(3):
+            self.create_subscription(
+                Bool, f'/arm/tool{path_id}_docking',
+                lambda msg, p=path_id: self.on_ui_request(msg, p, True), 10)
+            self.create_subscription(
+                Bool, f'/arm/tool{path_id}_release',
+                lambda msg, p=path_id: self.on_ui_request(msg, p, False), 10)
+        self.docked_state = None
+        self.docked_feedback_sequence = 0
+        self.actuation_timeout = float(param('docking_feedback_timeout_sec', 10.))
+        if not .5 <= self.actuation_timeout <= 60.:
+            raise ValueError('docking_feedback_timeout_sec must be in [0.5, 60]')
         self.create_timer(.02, self.tick)
         self.status, self.status_time = {}, -math.inf
         self.full_state, self.state_time = None, -math.inf
@@ -190,6 +217,11 @@ class ToolTrajectoryJoy(Node):
         self.request_index = 0
         self.started = None
         self.execution_id = None
+        self.entry_path = None
+        self.requested_docked_state = None
+        self.use_nearest_entry = False
+        self.command_feedback_sequence = None
+        self.actuation_deadline = None
 
     def report(self, state, reason):
         self.diagnostics.publish(String(data=json.dumps(dict(
@@ -235,9 +267,21 @@ class ToolTrajectoryJoy(Node):
             self.l2_threshold, self.first_button)
         if request is None:
             return
+        self.request_path(request)
+
+    def on_ui_request(self, msg, path_id, desired_docked):
+        key = (path_id, desired_docked)
+        rising = bool(msg.data) and not self.ui_held[key]
+        self.ui_held[key] = bool(msg.data)
+        if rising:
+            self.request_path(path_id, desired_docked, nearest_entry=True)
+
+    def request_path(self, request, desired_docked=None, nearest_entry=False):
         if self.stage != 'idle':
             self.report('ignored', 'tool trajectory request ignored while another path is active')
             return
+        self.requested_docked_state = desired_docked
+        self.use_nearest_entry = nearest_entry
         if request not in self.paths:
             self.path_id = request
             self.report('blocked', f'tool path {request} is not execution-enabled')
@@ -282,11 +326,14 @@ class ToolTrajectoryJoy(Node):
             s = self.healthy_hold(now)
             measured = np.asarray([self.full_state[j] for j in ARM_JOINTS])
             if planned_path is None:
-                error = float(np.max(np.abs(measured-self.paths[path_id]['start'])))
+                source_path = (nearest_path_suffix(self.paths[path_id], measured)
+                               if self.use_nearest_entry else self.paths[path_id])
+                self.entry_path = source_path
+                error = float(np.max(np.abs(measured-source_path['start'])))
                 if error > self.max_start_delta:
-                    self.request_entry_plan(path_id, measured, error, s)
+                    self.request_entry_plan(path_id, source_path, measured, error, s)
                     return
-                path = execution_plan(self.paths[path_id], measured, self.start_tolerance,
+                path = execution_plan(source_path, measured, self.start_tolerance,
                                       self.max_start_delta, self.approach_speed)
             else:
                 path = planned_path
@@ -321,7 +368,7 @@ class ToolTrajectoryJoy(Node):
             self.path_id = path_id
             self.begin_failed(str(exc))
 
-    def request_entry_plan(self, path_id, measured, error, status):
+    def request_entry_plan(self, path_id, path, measured, error, status):
         if not self.planner.service_is_ready():
             raise RuntimeError('MoveIt entry planner unavailable')
         request = MotionPlanRequest()
@@ -334,7 +381,7 @@ class ToolTrajectoryJoy(Node):
         request.start_state.joint_state.position = list(self.full_state.values())
         request.start_state.is_diff = True
         goal = Constraints()
-        for name, position in zip(ARM_JOINTS, self.paths[path_id]['start']):
+        for name, position in zip(ARM_JOINTS, path['start']):
             goal.joint_constraints.append(JointConstraint(
                 joint_name=name, position=float(position),
                 tolerance_above=.005, tolerance_below=.005, weight=1.))
@@ -352,8 +399,28 @@ class ToolTrajectoryJoy(Node):
         self.reset()
 
     def path_completed(self):
+        if self.requested_docked_state is not None:
+            if (self.docking_command.get_subscription_count() == 0
+                    or self.count_publishers('/arm/docked') == 0):
+                raise RuntimeError('Arduino command/status connection unavailable')
+            self.snapshot = dict(self.full_state)
+            self.command_feedback_sequence = self.docked_feedback_sequence
+            self.actuation_deadline = time.monotonic()+self.actuation_timeout
+            self.send_docking_pulse(self.requested_docked_state)
+            self.stage = 'wait_docked'
+            action = 'dock' if self.requested_docked_state else 'release'
+            self.report('actuating', f'Arduino {action} pulse sent; waiting for /arm/docked')
+            return
         self.report('completed', f'tool path {self.path_id} completed; HOLD')
         self.reset()
+
+    def on_docked(self, msg):
+        self.docked_state = bool(msg.data)
+        self.docked_feedback_sequence += 1
+
+    def send_docking_pulse(self, desired):
+        self.docking_command.publish(Bool(data=desired))
+        self.docking_command.publish(Bool(data=not desired))
 
     def unchanged(self):
         if self.full_state is None or self.full_state.keys() != self.snapshot.keys():
@@ -367,6 +434,18 @@ class ToolTrajectoryJoy(Node):
             return
         now = time.monotonic()
         try:
+            if self.stage == 'wait_docked':
+                self.healthy_hold(now)
+                if not self.unchanged():
+                    raise RuntimeError('arm departed final docking-preparation pose')
+                if now >= self.actuation_deadline:
+                    raise TimeoutError('Arduino docking completion timeout')
+                if (self.docked_feedback_sequence > self.command_feedback_sequence
+                        and self.docked_state == self.requested_docked_state):
+                    state = 'docked' if self.requested_docked_state else 'released'
+                    self.report(state, f'Arduino {state} state confirmed; remain HOLD')
+                    self.reset()
+                return
             if self.stage == 'request_hold':
                 if not self.future.done():
                     if now-self.started > 3.:
@@ -402,7 +481,7 @@ class ToolTrajectoryJoy(Node):
                             result.motion_plan_response.error_code.val)
                     raise RuntimeError(f'MoveIt entry planning failed ({code})')
                 path_id = self.path_id
-                plan = planned_entry(self.paths[path_id],
+                plan = planned_entry(self.entry_path,
                                      result.motion_plan_response.trajectory.joint_trajectory,
                                      [self.snapshot[j] for j in ARM_JOINTS])
                 self.begin(path_id, plan)

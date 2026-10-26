@@ -10,7 +10,8 @@ import yaml
 
 SCRIPTS = Path(__file__).resolve().parents[1]/'scripts'
 sys.path.insert(0, str(SCRIPTS))
-from tool_trajectory_joy import execution_plan, load_path, planned_entry, requested_path
+from tool_trajectory_joy import (execution_plan, load_path, nearest_path_suffix,
+                                 planned_entry, requested_path)
 
 
 def write_path(tmp_path, enabled=True, times=(0., 1., 3.)):
@@ -60,6 +61,27 @@ def test_simultaneous_path_buttons_are_ignored():
     assert request is None and held == [True, True, False]
 
 
+def test_ui_request_uses_one_rising_edge_and_nearest_entry():
+    node = SimpleNamespace(ui_held={(0, True): False}, request_path=Mock())
+    from tool_trajectory_joy import ToolTrajectoryJoy
+    ToolTrajectoryJoy.on_ui_request(node, SimpleNamespace(data=True), 0, True)
+    ToolTrajectoryJoy.on_ui_request(node, SimpleNamespace(data=True), 0, True)
+    ToolTrajectoryJoy.on_ui_request(node, SimpleNamespace(data=False), 0, True)
+    ToolTrajectoryJoy.on_ui_request(node, SimpleNamespace(data=True), 0, True)
+    assert node.request_path.call_count == 2
+    node.request_path.assert_called_with(0, True, nearest_entry=True)
+
+
+def test_docking_trigger_is_immediately_returned_to_opposite_level():
+    node = SimpleNamespace(docking_command=Mock())
+    from tool_trajectory_joy import ToolTrajectoryJoy
+    ToolTrajectoryJoy.send_docking_pulse(node, True)
+    assert [call.args[0].data for call in node.docking_command.publish.call_args_list] == [True, False]
+    node.docking_command.reset_mock()
+    ToolTrajectoryJoy.send_docking_pulse(node, False)
+    assert [call.args[0].data for call in node.docking_command.publish.call_args_list] == [False, True]
+
+
 def test_report_uses_distinct_logger_calls_for_different_severities():
     node = SimpleNamespace(diagnostics=Mock(), path_id=0, get_logger=Mock())
     logger = node.get_logger.return_value
@@ -85,6 +107,27 @@ def test_far_start_remains_blocked():
                 durations=[2.], total=2.)
     with pytest.raises(ValueError, match='automatic approach limit'):
         execution_plan(path, np.ones(6)*.101)
+
+
+def test_nearest_entry_keeps_only_forward_suffix():
+    path = dict(start=np.zeros(6),
+                waypoints=[np.ones(6), np.ones(6)*2, np.ones(6)*3],
+                durations=[1., 2., 3.], total=6.)
+    result = nearest_path_suffix(path, np.ones(6)*1.8)
+    assert result['entry_index'] == 2
+    np.testing.assert_array_equal(result['start'], np.ones(6)*2)
+    assert [q.tolist() for q in result['waypoints']] == [[3.]*6]
+    assert result['durations'] == [3.]
+    assert result['total'] == 3.
+
+
+def test_nearest_final_point_still_creates_safe_hold_target():
+    path = dict(start=np.zeros(6), waypoints=[np.ones(6)], durations=[2.], total=2.)
+    suffix = nearest_path_suffix(path, np.ones(6))
+    plan = execution_plan(suffix, np.ones(6))
+    assert len(plan['waypoints']) == 1
+    np.testing.assert_array_equal(plan['waypoints'][0], np.ones(6))
+    assert plan['durations'] == [.5]
 
 
 def test_moveit_entry_plan_is_prefixed_to_taught_path():
