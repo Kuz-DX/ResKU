@@ -151,9 +151,16 @@ ros2 run tf2_ros tf2_echo odom base_link
 영상/CameraInfo/depth/TF를 확인한다. false이면 JSON reason을 해결한 뒤 Record한다.
 노트북에서도 ros2 topic list로 같은 토픽이 보이는지 확인한다.
 
-## 6. 로봇 PC 터미널 F: 시험 rosbag
+## 6. 선택: 로봇 PC 터미널 F에서 시험 rosbag
 
-Record 버튼보다 먼저 시작한다. 종료는 Ctrl+C.
+rosbag은 선택 사항이다. 생략해도 경로 Record·VPR·시각화·복귀는 동작한다.
+문제 발생 후 영상/TF/결과를 재확인하려면 기록한다.
+사용할 때만 Record 버튼보다 먼저 시작한다. 종료는 Ctrl+C.
+
+첫 줄의 `$(date +%Y%m%d_%H%M%S)`는 현재 시각을 저장 폴더 이름에 넣는
+정상적인 Bash 구문이다. 예: `vpr_trial_20261027_143025`.
+`date` 뒤 공백과 `+`를 유지한다. 고정 이름을 원하면
+`ros2 bag record -o vpr_trial_01`로 바꾸되 기존 폴더와 겹치지 않게 한다.
 
 ```bash
 ros2 bag record -o "vpr_trial_$(date +%Y%m%d_%H%M%S)" \
