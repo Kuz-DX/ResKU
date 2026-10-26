@@ -63,21 +63,38 @@ ros2 launch tool_manipulator_bringup manual.launch.py launch_rviz:=true
 
 ### 실기, 시각화 없음
 
+잭스의 작업공간(`~/dolbotZ`)에서 매뉴얼을 실행하는 터미널은 ROS domain을 99로 맞춘다.
+`hardware_config`를 생략하면 이 터미널에서 source한 패키지의
+`config/hardware.yaml`을 자동으로 사용한다.
+
 ```bash
-ros2 launch tool_manipulator_bringup manual.launch.py \
-  real_hardware:=true \
-  hardware_config:=$HOME/ResKU/src/arm/tool_manipulator_bringup/config/hardware.yaml
+cd ~/dolbotZ
+export ROS_DOMAIN_ID=99
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+ros2 launch tool_manipulator_bringup manual.launch.py real_hardware:=true
 ```
 
 실기에서는 `hardware.yaml` 사전 검사를 통과해야 하며, 시작 시 RMD 3축을 각 소프트
 리밋 안쪽 2도로 저속 복귀한다. 수동 경로는 충돌 검사를 하지 않는다. 다른 hardware
 launch나 읽기 전용 bridge와 동시에 실행하지 않는다.
 
-로봇이 아닌 조이스틱 연결 PC에서 `/joy`만 발행하려면 두 PC의 ROS domain을 맞춘 뒤
-다음을 실행한다. 이때 로봇 PC의 `manual.launch.py`에는 `launch_joy:=false`를 준다.
+로봇이 아닌 조이스틱 연결 PC에서 `/joy`만 발행하려면 두 PC의 ROS domain을 99로
+맞추고 `ROS_LOCALHOST_ONLY=0`을 설정한다. 이때 잭스의 `manual.launch.py`에는
+`launch_joy:=false`를 준다. 각 PC의 실행 터미널에서 설정한다.
 
 ```bash
+# 조이스틱 연결 PC
+export ROS_DOMAIN_ID=99
+export ROS_LOCALHOST_ONLY=0
 ros2 launch tool_manipulator_bringup remote_joy.launch.py joy_dev:=/dev/input/js0
+
+# 잭스
+cd ~/dolbotZ
+export ROS_DOMAIN_ID=99
+export ROS_LOCALHOST_ONLY=0
+source /opt/ros/humble/setup.bash
+source install/setup.bash
 ros2 launch tool_manipulator_bringup manual.launch.py \
   real_hardware:=true launch_joy:=false
 ```
