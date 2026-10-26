@@ -3,6 +3,7 @@
 Only landmarks captured in this process's current mission are loaded. No implicit
 selection of historical missions. Failed matches leave the previous correction.
 """
+import math
 import json
 from pathlib import Path
 import time
@@ -25,6 +26,7 @@ from sensor_msgs.msg import CameraInfo, CompressedImage, Image
 from std_msgs.msg import String
 from tf2_ros import Buffer, TransformListener
 
+from visual_landmark.adaptive import candidate_window, reference_arcs
 from visual_landmark.calibration import camera_model
 from visual_landmark.localization import MatchOptions, features, match, planar, transform, valid_transform, pose_fields
 
@@ -51,6 +53,9 @@ class VisualLocalizationNode(Node):
             'agreement_translation_m': 0.25, 'agreement_yaw_rad': 0.1,
             'agreement_max_interval_s': 2.5, 'ambiguity_ratio': 0.85,
             'route_backtrack_m': 2.0,
+            'enable_adaptive_visual_check': True, 'max_visual_candidates': 3,
+            'visual_check_timeout_s': 5., 'visual_check_max_frames': 4,
+            'correction_min_translation_m': .03, 'correction_min_yaw_rad': .01,
         }.items():
             self.declare_parameter(name, value)
         self.p = lambda n: self.get_parameter(n).value
@@ -58,6 +63,18 @@ class VisualLocalizationNode(Node):
         for key, value in vars(defaults).items():
             self.declare_parameter('match.'+key, value)
         self.match_options = MatchOptions(**{key: self.p('match.'+key) for key in vars(defaults)})
+        if not 1 <= int(self.p('max_visual_candidates')) <= 7:
+            raise ValueError('max_visual_candidates must be between 1 and 7')
+        if self.p('visual_check_max_frames') < 2 or self.p('visual_check_timeout_s') <= 0:
+            raise ValueError('check needs at least two frames and positive timeout')
+        for name in ['correction_min_translation_m', 'correction_min_yaw_rad']:
+            if not math.isfinite(self.p(name)) or self.p(name) < 0:
+                raise ValueError('invalid correction deadband')
+        self.check = None
+        self.check_frames = 0
+        self.check_expansion = 0
+        self.route_progress = None
+        self.cached_arcs = None
         self.lock_pose = None
         self.reference_meta = {}
         self.route = []
@@ -92,10 +109,47 @@ class VisualLocalizationNode(Node):
         self.sync = message_filters.ApproximateTimeSynchronizer(
             [self.color_sub, self.depth_sub], queue_size=5, slop=0.04)
         self.sync.registerCallback(self.on_pair)
+        self.create_subscription(String, '/visual_landmark/check_request', self.on_check_request, 10)
+        self.create_subscription(String, '/visual_landmark/route_progress', self.on_progress, 1)
+        self.create_timer(.1, self.check_timeout)
 
     def on_route(self, msg):
         self.route = [Pose2D.from_ros_pose(p.pose) for p in msg.poses]
         self.last_reference_arc = None
+        self.route_progress = None
+        self.cached_arcs = None
+
+    def on_progress(self, msg):
+        try:
+            data = json.loads(msg.data)
+            if math.isfinite(float(data['arc'])) and int(data['stamp_ns']) > 0:
+                self.route_progress = (float(data['arc']), int(data['stamp_ns']))
+        except (ValueError, TypeError, KeyError):
+            pass
+
+    def on_check_request(self, msg):
+        try:
+            data = json.loads(msg.data)
+            if data.get('active') is False:
+                if self.check and self.check['request'] == data.get('request'):
+                    self.check = None
+                    self.pending = None
+                return
+            now = self.get_clock().now().nanoseconds*1e-9
+            if (not data.get('request') or self.check is not None or self.state != 'FOLLOW_RETURN_PATH'
+                    or not 0 <= now-float(data['requested_at']) <= .5):
+                return
+            self.check = dict(data, deadline=now+min(float(data.get('timeout_s', 5.)), self.p('visual_check_timeout_s')))
+            self.check_frames, self.check_expansion = 0, 0
+            self.pending = None
+            self.last = -float('inf')
+            self.event('check_started', trigger=data.get('trigger'))
+        except (ValueError, KeyError, TypeError):
+            return
+
+    def check_timeout(self):
+        if self.check and self.get_clock().now().nanoseconds*1e-9 >= self.check['deadline']:
+            self.event('skipped', reason='check timeout', check_complete=True)
 
     def check_lock_pose(self, current):
         if not bool(self.p('lock_pose_guard')):
@@ -130,11 +184,14 @@ class VisualLocalizationNode(Node):
     def on_state(self, msg):
         if msg.data != self.state:
             self.pending = None
+            self.check = None
             if msg.data in RECORDING_STATES and self.state not in RECORDING_STATES:
                 self.landmarks.clear()
                 self.correction = None
                 self.lock_pose = None
                 self.reference_meta.clear()
+                self.cached_arcs = None
+                self.route_progress = None
                 self.route = []
                 self.last_reference_arc = None
         self.state = msg.data
@@ -144,6 +201,9 @@ class VisualLocalizationNode(Node):
         value = planar(transform([p.x, p.y, p.z], [q.x, q.y, q.z, q.w]))
         if self.origin is None or not np.allclose(value, self.origin, atol=1e-9):
             self.origin = value
+            self.check = None
+            self.route_progress = None
+            self.cached_arcs = None
             self.landmarks.clear()
             self.correction = None
             self.pending = None
@@ -152,7 +212,20 @@ class VisualLocalizationNode(Node):
             self.last_reference_arc = None
 
     def event(self, kind, **fields):
+        check = getattr(self, 'check', None)
+        if check:
+            fields.setdefault('check_request', check['request'])
+            fields.setdefault('trigger', check.get('trigger'))
+            if kind in {'validated', 'localized'}:
+                fields['check_complete'] = True
+            elif kind in {'no_match', 'rejected'}:
+                self.check_expansion = 2
+                self.pending = None
+                fields.setdefault('check_complete', self.check_frames >= self.p('visual_check_max_frames'))
         self.status.publish(String(data=json.dumps({'event': kind, **fields})))
+        if check and fields.get('check_complete'):
+            self.check = None
+            self.pending = None
 
     def on_landmark(self, msg):
         try:
@@ -176,13 +249,22 @@ class VisualLocalizationNode(Node):
             camera_model(ci['width'], ci['height'], ci['k'], ci['d'], ci['distortion_model'], image.shape)
             if not valid_transform(meta['mission_camera_transform']):
                 raise ValueError('invalid reference camera transform')
-            points, descriptors = features(image)
+            cache = directory / 'features.npz'
+            if cache.is_file():
+                with np.load(cache, allow_pickle=False) as stored:
+                    points, descriptors = stored['points'], stored['descriptors']
+                if (points.ndim != 2 or points.shape[1] != 2 or descriptors.shape != (len(points), 128)
+                        or not np.all(np.isfinite(points)) or not np.all(np.isfinite(descriptors))):
+                    raise ValueError('invalid cached reference SIFT')
+            else:
+                points, descriptors = features(image)
             if descriptors is None or len(points) < 20:
                 raise ValueError('reference has fewer than 20 usable features')
             self.landmarks[meta['id']] = (
                 (points, descriptors, np.array(ci['k']).reshape(3, 3), np.array(ci['d'])),
                 np.array(meta['mission_camera_transform'], dtype=float))
             self.reference_meta[meta['id']] = meta
+            self.cached_arcs = None
             self.event('reference_loaded', id=meta['id'], features=len(points),
                        x=float(meta['mission_pose']['x']), y=float(meta['mission_pose']['y']))
         except (ValueError, KeyError, OSError, cv2.error, TypeError) as exc:
@@ -193,11 +275,22 @@ class VisualLocalizationNode(Node):
         now = self.get_clock().now()
         if self.state not in {'FOLLOW_RETURN_PATH', 'RETURN_MANUAL', 'RETURN_RESUME_STOP', 'RETURN_INTERVENTION', 'RETURN_LANDMARK_SEARCH'} or self.origin is None or not self.landmarks or self.info is None:
             return
+        adaptive = bool(self.p('enable_adaptive_visual_check'))
+        if adaptive and self.state != 'RETURN_LANDMARK_SEARCH' and self.check is None:
+            return  # No decode/SIFT/matching/PnP while normal odometry return runs.
+        if self.check:
+            self.check_timeout()
+            if self.check is None:
+                return
         if now.nanoseconds*1e-9 - self.last < self.p('processing_period_s'):
             return
         self.last = now.nanoseconds*1e-9
+        if self.check:
+            self.check_frames += 1
         try:
             stamp = Time.from_msg(color.header.stamp)
+            if self.check and stamp.nanoseconds*1e-9 < self.check.get('requested_at', 0.):
+                raise ValueError('image predates check request')
             if stamp.nanoseconds <= 0:
                 raise ValueError('zero image timestamp')
             if abs((now-stamp).nanoseconds*1e-9) > 0.5:
@@ -226,21 +319,35 @@ class VisualLocalizationNode(Node):
                 raise ValueError('invalid current camera/base TF')
             self.check_lock_pose(bc)
             self.event('frame', stamp_ns=stamp.nanoseconds)
+            sift_started = time.perf_counter()
             current = features(image)
+            sift_time = time.perf_counter()-sift_started
             prior = self.correction if self.correction is not None else np.linalg.inv(self.origin)
             ranked = []
             attempts = []
-            for lid, (reference, mc) in self.landmarks.items():
+            if self.state == 'RETURN_LANDMARK_SEARCH' and self.search is not None:
+                selected = [(self.search.get('id'), None)] if self.search.get('id') in self.landmarks else []
+            else:
+                progress = getattr(self, 'route_progress', None)
+                if (not adaptive and (len(self.route) < 2 or progress is None)):
+                    selected = sorted(((lid, None) for lid in self.landmarks),
+                        key=lambda item: np.linalg.norm((prior @ oc)[:2, 3]-self.landmarks[item[0]][1][:2, 3]))[:max(1, min(7, self.p('max_visual_candidates')))]
+                elif (len(self.route) < 2 or progress is None
+                        or not 0 <= (now.nanoseconds-progress[1])*1e-9 <= .5):
+                    raise ValueError('fresh controller route progress required')
+                else:
+                    if self.cached_arcs is None:
+                        self.cached_arcs = reference_arcs(self.route, self.reference_meta)
+                    selected = candidate_window(self.cached_arcs, progress[0], self.last_reference_arc,
+                    self.p('route_backtrack_m'), self.p('max_visual_candidates'),
+                    getattr(self, 'check_expansion', 0))
+            self.event('candidates', candidate_ids=[lid for lid, _ in selected], current_sift_s=sift_time)
+            for lid, arc in selected:
+                reference, mc = self.landmarks[lid]
                 if self.state == 'RETURN_LANDMARK_SEARCH' and self.search is not None and lid != self.search.get('id'):
                     continue
                 if np.linalg.norm((prior @ oc)[:2, 3] - mc[:2, 3]) > self.p('candidate_radius_m'):
                     continue
-                arc = None
-                if self.route:
-                    meta_pose = self.reference_meta[lid]['mission_pose']
-                    arc, _ = project_route(self.route, Pose2D(meta_pose['x'], meta_pose['y']))
-                    if self.last_reference_arc is not None and arc < self.last_reference_arc-self.p('route_backtrack_m'):
-                        continue
                 diagnostics = {'id': lid}
                 result = match(reference, current, z, k, d, options=self.match_options, diagnostics=diagnostics)
                 attempts.append(diagnostics)
@@ -261,7 +368,7 @@ class VisualLocalizationNode(Node):
             ranked.sort(key=lambda item: item[:2], reverse=True)
             if not ranked:
                 self.pending = None
-                self.event('no_match', attempts=attempts, current_features=len(current[0]),
+                self.event('no_match', attempts=attempts, current_features=len(current[0]), current_sift_s=sift_time,
                            processing_latency_s=time.perf_counter()-started)
                 return
             best = ranked[0]
@@ -290,20 +397,25 @@ class VisualLocalizationNode(Node):
             # Processing can be slow; never publish an old-frame result into live control.
             if (self.get_clock().now()-stamp).nanoseconds*1e-9 > 1.5:
                 raise ValueError('localization processing too slow')
-            if bool(self.p('apply_correction')):
+            if self.check and self.get_clock().now().nanoseconds*1e-9 >= self.check['deadline']:
+                raise ValueError('check deadline exceeded before commit')
+            meaningful = (diagnostics['correction_step_m'] >= self.p('correction_min_translation_m')
+                          or diagnostics['correction_step_yaw'] >= self.p('correction_min_yaw_rad'))
+            apply = bool(self.p('apply_correction')) and (meaningful or self.state == 'RETURN_LANDMARK_SEARCH')
+            self.last_reference_arc = arc  # A validated anchor counts even in deadband/observation mode.
+            if apply:
                 self.correction = correction
-                self.last_reference_arc = arc
             msg = PoseStamped()
             msg.header.stamp = color.header.stamp
             msg.header.frame_id = 'mission'
             msg.pose.position.x, msg.pose.position.y = map(float, correction[:2, 3])
             yaw = np.arctan2(correction[1, 0], correction[0, 0])
             msg.pose.orientation.z, msg.pose.orientation.w = float(np.sin(yaw/2)), float(np.cos(yaw/2))
-            if bool(self.p('apply_correction')):
+            if apply:
                 self.pub.publish(msg)
-            self.event('localized' if bool(self.p('apply_correction')) else 'validated', id=lid, inliers=best[0], reprojection_rmse=-neg_error,
+            self.event('localized' if apply else 'validated', attempts=attempts, id=lid, inliers=best[0], reprojection_rmse=-neg_error,
                        diagnostics=diagnostics, relative_pose=pose_fields(relative),
-                       planar_correction=pose_fields(correction), correction_applied=bool(self.p('apply_correction')),
+                       planar_correction=pose_fields(correction), correction_applied=apply, correction_deadband=not meaningful, current_sift_s=sift_time, candidate_count=len(attempts),
                        current_camera_tf=bc.tolist(), reference_camera_tf=self.landmarks[lid][1].tolist(),
                        reference_model=self.reference_meta[lid]['camera_info']['distortion_model'], current_model=ci.distortion_model,
                        reference_resolution=[self.reference_meta[lid]['camera_info']['width'], self.reference_meta[lid]['camera_info']['height']],

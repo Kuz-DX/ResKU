@@ -187,6 +187,7 @@ class ReturnPathFollowerNode(Node):
         self.create_subscription(String, '/mission/return/resume_request', self._on_resume_request, 10)
         self.create_subscription(String, '/visual_landmark/localization_event', self._on_localization_event, 10)
         self.missed_pub = self.create_publisher(String, '/visual_landmark/missed', 10)
+        self.visual_progress_pub = self.create_publisher(String, '/visual_landmark/route_progress', 1)
         self.resume_pub = self.create_publisher(String, '/mission/return/resume_result', 10)
         self.create_timer(self.control_period, self._tick)
 
@@ -320,6 +321,12 @@ class ReturnPathFollowerNode(Node):
         hi = corner_idx if corner_idx is not None else len(self._path) - 1
         nearest_idx = self._nearest_index(current, max(self._floor, self._progress_index-1), hi)
         self._progress_index = max(self._progress_index, nearest_idx)
+        if hasattr(self, 'visual_progress_pub'):
+            from return_navigation.recovery import project_route
+            arc, _ = project_route(self._path, current, max(self._floor, self._progress_index-1), hi)
+            self.visual_progress_pub.publish(String(data=json.dumps(dict(
+                arc=arc, stamp_ns=self.get_clock().now().nanoseconds))))
+
 
         lid = self._landmark_hold
         if lid is None and bool(self.get_parameter('enable_landmark_recovery').value):

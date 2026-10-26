@@ -2,11 +2,14 @@
 
 APC850/D435i 실차 설치·보정·A/B 평가·검증 절차는
 [HARDWARE_VALIDATION.md](HARDWARE_VALIDATION.md)를 먼저 참고한다.
-**현재 기본은 stop 촬영, 보정 관찰만 수행(`visual_apply_correction=false`),
+**현재 기본은 자동 moving 키프레임 + 요청 시에만 VPR, 수동 버튼은 stop 촬영, 보정 관찰만 수행(`visual_apply_correction=false`),
 자동 누락 정지/회전 탐색 비활성(`enable_landmark_recovery=false`)이다.**
 관찰 모드는 일반 복귀 컨트롤러나 모터를 비활성화하는 설정이 아니다.
 실제 측정 K/D·rear optical TF와 팔/차체의 `base_link` 이름 충돌 해결 전에는
 실차 준비가 완료됐다고 간주하지 않는다.
+
+Adaptive Visual Correction 구조·파라미터·실차 검증 명령은
+[ADAPTIVE_VISUAL.md](ADAPTIVE_VISUAL.md)를 참고한다.
 
 This package records outbound landmark RGB keyframes and localizes the returning
 robot with the arm Intel D435i's RGB and aligned depth. No lidar, learned-model
@@ -73,7 +76,7 @@ camera in its home pose. Measure both extrinsics: equal height/angles do not
 remove the front/rear translation or 180-degree yaw difference.
 
 Once a rear camera is available, pass its topics with `rear_image_topic` and
-`rear_camera_info_topic`. Press D-pad up during manual route recording (MANUAL_RECORDING or
+`rear_camera_info_topic`. Automatic keyframes are enabled during outbound recording; manual capture is still available. Press D-pad up during manual route recording (MANUAL_RECORDING or
 WAIT_RETURN_COMMAND) to capture a landmark. WAIT_RETURN_COMMAND means enough
 route points exist to accept a return request; it does not end manual driving
 or route/landmark recording. IDLE and return states do not permit capture. Stop mode is preferred for initial validation. `meta.yaml` schema 2
@@ -97,9 +100,11 @@ Arrange the arm/viewpoint appropriately or use a stationary bench sequence.
 Only references captured during the current running mission are used. Start the
 localization node before recording; restarting it loses its in-memory reference
 set. References remain archived under `~/.ros/visual_landmarks`, but historical
-missions are deliberately not automatically selected. Feature extraction occurs
-once when each reference is loaded. Candidate search scans landmarks within
-12 m of the corrected odometry prior, at most once per second. This is local
+missions are deliberately not automatically selected. Reference features are computed once at automatic capture and cached, or once at
+manual/legacy reference load. Normal return performs no current SIFT/matching/PnP
+until a distance watchdog or healthy wheel/gyro disagreement requests a check.
+Primary candidates are bounded to 3 using fresh controller route progress, with
+a bounded +2 expansion after failure; the 12m spatial gate is retained. This is local
 relocalization anchored to the recorded route, not worldwide place search.
 Recorded landmark coordinates inherit outbound odometry error; they constrain
 additional return drift, not absolute surveyed position.
@@ -168,7 +173,8 @@ ros2 topic echo /mission/return/control_status --qos-durability transient_local
   새로운 `/return_path`를 발행하거나 처음부터 180도 회전을 반복하지 않는다.
   최초 정지/회전 중 Manual로 바꿨다면 경로를 준비해 보존하고, Auto 재개 시
   경로 방향으로 정렬한다.
-- 수동 작업 중에도 유효한 랜드마크가 보이면 시각 보정할 수 있다. 이는 경로
+- 기본 adaptive 모드는 수동 작업 중 새 Visual Check를 시작하지 않는다.
+  명시적으로 켠 legacy periodic 모드에서는 유효한 랜드마크가 보이면 시각 보정할 수 있다. 이는 경로
   기록이나 자동 운전 권한을 활성화하지 않는다.
 - 정지·회전·추종 중 긴급정지는 기존 `/emergency_stop` 동작을 우선한다.
 

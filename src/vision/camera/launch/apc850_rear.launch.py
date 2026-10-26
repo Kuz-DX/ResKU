@@ -43,7 +43,7 @@ def configure(context):
     actions.append(Node(
         package='usb_cam', executable='usb_cam_node_exe',
         namespace='rear/camera', name='apc850_rear', output='screen',
-        parameters=[{'video_device': device, 'image_width': width, 'image_height': height,
+        parameters=[{'video_device': str(Path(device).resolve()), 'image_width': width, 'image_height': height,
                      'framerate': fps, 'pixel_format': value('pixel_format'),
                      'io_method': 'mmap', 'brightness': -1,
                      'camera_name': 'apc850_rear', 'frame_id': value('frame_id'),
@@ -65,10 +65,10 @@ def generate_launch_description():
     defaults = {'width': '1280', 'height': '720', 'fps': '15.0',
                 'pixel_format': 'mjpeg2rgb', 'frame_id': 'rear_camera_optical_frame',
                 'camera_info_url': '', 'publish_extrinsic': 'false', 'parent_frame': 'base_link',
-                # Vehicle base_link <- optical origin, metres. User measured
-                # y/z for both rear and locked arm cameras. x and optical RPY
-                # remain unknown: keep TF opt-in and require those arguments.
-                'x': '', 'y': '0.0', 'z': '0.650674',
+                # Housing-back measurements are recorded separately; they do
+                # not establish optical-origin translation. Require all optical
+                # coordinates explicitly before publishing a TF.
+                'x': '', 'y': '', 'z': '',
                 'roll': '', 'pitch': '', 'yaw': ''}
     arguments.extend(DeclareLaunchArgument(k, default_value=v) for k, v in defaults.items())
     return LaunchDescription(arguments+[OpaqueFunction(function=configure)])

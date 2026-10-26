@@ -1,11 +1,33 @@
-# Measurement record only, NOT ROS node parameters or a complete TF.
-# Translation: vehicle base_link <- camera optical origin, metres.
-# null means unmeasured; never substitute zero for null.
-# Front measurements apply only at the intended arm LOCK pose.
+# Measurement record only, NOT ROS parameters or a complete optical TF.
+# 2026-10-25: user clarified that the measured point is camera housing BACK.
+# Coordinates relative to vehicle base_link, metres. y=0 carried from prior report.
+# The particular back-face point and its offset to RGB optical origin need verification.
+# Front measurements apply only to the measured arm LOCK pose.
 parent_frame: base_link
+measurement_date: '2026-10-25'
+measurement_reference: camera_housing_back
 rear_apc850:
-  translation_m: {x: null, y: 0.0, z: 0.650674}
+  housing_reference_point: back_face_center
+  mounting_observation:
+    looking_direction: vehicle_rear
+    downward_tilt_deg_approx: 3.0
+    horizontal_yaw_aligned_reported: true
+    roll_deg: null
+  translation_m: {x: -0.316627, y: 0.0, z: 0.650674}
   rotation_rpy_rad: {roll: null, pitch: null, yaw: null}
+  lens_offset_report_20261026:
+    back_to_lens_distance_m_approx: 0.027
+    trial_translation_m: {x: -0.343627, y: 0.0, z: 0.650674}
+    assumptions: rearward_offset_zero_lateral_and_vertical_components
+    status: approximate_lens_surface_not_verified_optical_origin
+  optical_translation_m: {x: null, y: null, z: null}
 front_d435i_lock:
   translation_m: {x: 0.152853, y: 0.0, z: 0.650674}
   rotation_rpy_rad: {roll: null, pitch: null, yaw: null}
+  optical_translation_m: {x: null, y: null, z: null}
+
+# Front replacement planned 2026-10-26. Old housing/LOCK measurements are not a D455 extrinsic.
+front_d455_planned:
+  translation_m: {x: null, y: null, z: null}
+  rotation_rpy_rad: {roll: null, pitch: null, yaw: null}
+  optical_translation_m: {x: null, y: null, z: null}
