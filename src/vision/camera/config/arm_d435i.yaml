@@ -5,6 +5,12 @@
     camera_name: "arm_camera"
     initial_reset: false
 
+    # The driver publishes arm_camera_cam_link as its depth/base origin.
+    # tool_manipulator.urdf.xacro connects the physical mounting-centre
+    # cam_link to that driver root with the D435 nominal mechanical offset.
+    base_frame_id: "cam_link"
+    publish_tf: true
+
     enable_color: true
     enable_depth: true
     enable_infra1: false

@@ -216,6 +216,7 @@ class AprilTagDockingMeasurement(Node):
         self.finished = False
         self.raw_positions: list[np.ndarray] = []
         self.pnp_positions: list[np.ndarray] = []
+        self.pnp_quaternions: list[np.ndarray] = []
         self.position_deltas: list[np.ndarray] = []
         self.reference_errors: list[np.ndarray] = []
         self.reprojection_errors: list[float] = []
@@ -352,6 +353,7 @@ class AprilTagDockingMeasurement(Node):
                 quaternion = _quaternion_from_matrix(rotation)
                 self.pnp_frames += 1
                 self.pnp_positions.append(translation)
+                self.pnp_quaternions.append(quaternion)
                 self.reprojection_errors.append(rmse)
                 row.update({
                     "pnp_success": 1,
@@ -402,6 +404,16 @@ class AprilTagDockingMeasurement(Node):
         if self.finished:
             return
         self.finished = True
+        pnp_quaternion_mean = (
+            None if not self.pnp_quaternions
+            else _quaternion_mean(self.pnp_quaternions).tolist())
+        pnp_orientation_deviation = []
+        if pnp_quaternion_mean is not None:
+            mean = np.asarray(pnp_quaternion_mean, dtype=float)
+            pnp_orientation_deviation = [
+                2.0 * math.acos(float(np.clip(abs(np.dot(value, mean)), 0.0, 1.0)))
+                for value in self.pnp_quaternions
+            ]
         quaternion_mean = (
             None if not self.tag_target_quaternions
             else _quaternion_mean(self.tag_target_quaternions).tolist())
@@ -425,6 +437,9 @@ class AprilTagDockingMeasurement(Node):
             "camera_info": self.camera_info,
             "raw_position_camera_m": _stats(self.raw_positions),
             "corner_pnp_position_camera_m": _stats(self.pnp_positions),
+            "corner_pnp_orientation_xyzw_mean": pnp_quaternion_mean,
+            "corner_pnp_orientation_deviation_rad": _scalar_stats(
+                pnp_orientation_deviation),
             "corner_pnp_minus_raw_m": _stats(self.position_deltas),
             "corner_pnp_minus_reference_m": _stats(self.reference_errors),
             "reprojection_rmse_px": _scalar_stats(self.reprojection_errors),

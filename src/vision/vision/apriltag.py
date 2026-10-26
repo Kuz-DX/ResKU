@@ -65,6 +65,14 @@ class AprilTagCompressedNode(Node):
             True
         )
 
+        # The docking stack recomputes pose from refined corners and full
+        # CameraInfo.  Allow pupil_apriltags' optional planar pose optimizer to
+        # be disabled when its ambiguous-minimum diagnostics are undesirable.
+        self.declare_parameter(
+            'estimate_tag_pose',
+            True
+        )
+
         # Autonomous tool docking uses only tag 0 (gripper) and tag 1 (drill).
         # Tags with ID 2 or greater are intentionally ignored.
         self.declare_parameter(
@@ -134,6 +142,12 @@ class AprilTagCompressedNode(Node):
 
         self.subpixel_refine = (
             self.get_parameter('subpixel_refine')
+            .get_parameter_value()
+            .bool_value
+        )
+
+        self.estimate_tag_pose = (
+            self.get_parameter('estimate_tag_pose')
             .get_parameter_value()
             .bool_value
         )
@@ -397,7 +411,7 @@ class AprilTagCompressedNode(Node):
         # ------------------------------------------------------------
         height, width = gray.shape[:2]
         camera_params = self.camera_params_for_image(width, height)
-        estimate_pose = camera_params is not None
+        estimate_pose = self.estimate_tag_pose and camera_params is not None
 
         detections = self.detector.detect(
             gray,

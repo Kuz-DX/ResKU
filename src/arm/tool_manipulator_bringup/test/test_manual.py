@@ -450,6 +450,22 @@ def test_measured_stop_pose_camera_world_transform_regression():
     ], atol=1e-7)
 
 
+def test_d435_mount_centre_to_driver_depth_origin():
+    """Keep the physical bolt centre distinct from the driver's depth root."""
+    import xacro
+    import xml.etree.ElementTree as ET
+    path = Path(__file__).resolve().parents[2] / 'tool_manipulator_description/urdf/tool_manipulator.urdf.xacro'
+    root = ET.fromstring(xacro.process_file(str(path)).toxml())
+    joint = next(j for j in root.findall('joint')
+                 if j.get('name') == 'cam_link_to_realsense_base')
+    assert joint.find('parent').get('link') == 'cam_link'
+    assert joint.find('child').get('link') == 'arm_camera_cam_link'
+    np.testing.assert_allclose(
+        [float(value) for value in joint.find('origin').get('xyz').split()],
+        [.0106, .0175, .0125], atol=1e-12)
+    assert joint.find('origin').get('rpy') == '0 0 0'
+
+
 @pytest.mark.parametrize('direction', [-1., 1.])
 def test_rmd_storage_pose_no_longer_freezes_all_axes_at_first_boundary(resku_chain, direction):
     node = storage_pose_harness()

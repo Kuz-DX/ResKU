@@ -21,6 +21,13 @@
   <xacro:arg name="arm_world_y" default="0.0"/>
   <xacro:arg name="arm_world_z" default="0.235"/>
   <xacro:arg name="imu_height_from_ground" default="0.115"/>
+  <!-- D435 mounting-centre -> depth/base origin, in the camera body axes
+       X forward, Y left, Z up.  Nominal values follow the official D435
+       description: 14.9 - 0.1 - 4.2 = 10.6 mm forward, 17.5 mm left,
+       and half the 25 mm enclosure height. -->
+  <xacro:arg name="camera_depth_from_mount_x" default="0.0106"/>
+  <xacro:arg name="camera_depth_from_mount_y" default="0.0175"/>
+  <xacro:arg name="camera_depth_from_mount_z" default="0.0125"/>
   <xacro:include filename="tools/tool_1_gripper.xacro"/>
   <xacro:property name="selected_tool_id" value="$(arg tool_id)"/>
   <xacro:include filename="tools/tool_2.xacro"/>
@@ -671,9 +678,10 @@
     <limit effort="8.4" velocity="5.035177"/>
   </joint>
 
-  <!-- RealSense D435 origin in the wrist-yaw frame:
+  <!-- Physical D435 mounting/bolt centre in the wrist-yaw frame:
        (X=0, Y=+94.768, Z=+59.46) mm.  Since tcp_link is at wrist-yaw
-       Z=+78.36 mm with the same orientation, the TCP-relative Z is -18.9 mm. -->
+       Z=+78.36 mm with the same orientation, the TCP-relative Z is -18.9 mm.
+       cam_link axes are X forward, Y left, Z up. -->
 
   <link name="cam_link">
 
@@ -693,6 +701,17 @@
     <origin
         xyz="0 0.094768 -0.018900"
         rpy="${-pi/2} ${-pi/2} 0"/>
+  </joint>
+
+  <!-- realsense2_camera prefixes camera_name=arm_camera to base_frame_id,
+       producing arm_camera_cam_link.  The driver uses that root as the depth
+       sensor origin, so it is offset from the physical mounting centre. -->
+  <link name="arm_camera_cam_link"/>
+  <joint name="cam_link_to_realsense_base" type="fixed">
+    <parent link="cam_link"/>
+    <child link="arm_camera_cam_link"/>
+    <origin xyz="$(arg camera_depth_from_mount_x) $(arg camera_depth_from_mount_y) $(arg camera_depth_from_mount_z)"
+            rpy="0 0 0"/>
   </joint>
 
   <!-- The common arm ends at tcp_link; the selected tool is downstream. -->
