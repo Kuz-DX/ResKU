@@ -7,6 +7,7 @@ import math
 import json
 from pathlib import Path
 import time
+import uuid
 
 import cv2
 import message_filters
@@ -19,11 +20,11 @@ from rclpy.duration import Duration
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, qos_profile_sensor_data
 from rclpy.time import Time
-from nav_msgs.msg import Path as RoutePath
+from nav_msgs.msg import Odometry, Path as RoutePath
 from return_navigation.recovery import project_route
 from return_navigation.se2 import Pose2D
 from sensor_msgs.msg import CameraInfo, CompressedImage, Image
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
 from tf2_ros import Buffer, TransformListener
 
 from visual_landmark.adaptive import candidate_window, reference_arcs
@@ -48,6 +49,7 @@ class VisualLocalizationNode(Node):
             'base_frame': 'base_link', 'odom_frame': 'odom',
             'max_correction_m': 3.0, 'max_correction_yaw_rad': 0.7,
             'candidate_radius_m': 12.0, 'processing_period_s': 1.0,
+            'enable_stationary_vpr_debug': False,
             'publish_debug_matches': False, 'apply_correction': False, 'lock_pose_guard': True, 'expected_lock_pose_file': '',
             'lock_translation_tolerance_m': 0.02, 'lock_rotation_tolerance_rad': 0.035,
             'agreement_translation_m': 0.25, 'agreement_yaw_rad': 0.1,
@@ -70,6 +72,9 @@ class VisualLocalizationNode(Node):
         for name in ['correction_min_translation_m', 'correction_min_yaw_rad']:
             if not math.isfinite(self.p(name)) or self.p(name) < 0:
                 raise ValueError('invalid correction deadband')
+        self.stationary_debug_enabled = bool(self.p('enable_stationary_vpr_debug'))
+        self.debug_odom = None
+        self.last_auto_progress = None
         self.debug_enabled = bool(self.p('publish_debug_matches'))
         self.check = None
         self.check_frames = 0
@@ -114,12 +119,16 @@ class VisualLocalizationNode(Node):
         self.sync.registerCallback(self.on_pair)
         self.create_subscription(String, '/visual_landmark/check_request', self.on_check_request, 10)
         self.create_subscription(String, '/visual_landmark/route_progress', self.on_progress, 1)
+        if self.stationary_debug_enabled:
+            self.create_subscription(Bool, '/visual_landmark/debug_check', self.on_debug_check, 10)
+            self.create_subscription(Odometry, '/odometry/filtered', self.on_debug_odom, qos_profile_sensor_data)
         self.create_timer(.1, self.check_timeout)
 
     def on_route(self, msg):
         self.route = [Pose2D.from_ros_pose(p.pose) for p in msg.poses]
         self.last_reference_arc = None
         self.route_progress = None
+        self.last_auto_progress = None
         self.cached_arcs = None
 
     def on_progress(self, msg):
@@ -127,8 +136,58 @@ class VisualLocalizationNode(Node):
             data = json.loads(msg.data)
             if math.isfinite(float(data['arc'])) and int(data['stamp_ns']) > 0:
                 self.route_progress = (float(data['arc']), int(data['stamp_ns']))
+                if self.state == 'FOLLOW_RETURN_PATH':
+                    self.last_auto_progress = self.route_progress
         except (ValueError, TypeError, KeyError):
             pass
+
+    def on_debug_odom(self, msg):
+        now = self.get_clock().now().nanoseconds*1e-9
+        self.debug_odom = (msg.header.stamp.sec+msg.header.stamp.nanosec*1e-9,
+                           now, msg.twist.twist.linear.x, msg.twist.twist.angular.z)
+
+    def stationary_debug_reason(self):
+        if self.state != 'RETURN_MANUAL':
+            return 'stationary_debug_requires_RETURN_MANUAL'
+        if self.p('apply_correction'):
+            return 'stationary_debug_requires_observation_only'
+        sample = self.debug_odom
+        if sample is None:
+            return 'stationary_debug_no_odometry'
+        stamp, arrival, vx, wz = sample
+        now = self.get_clock().now().nanoseconds*1e-9
+        if (not all(math.isfinite(v) for v in sample)
+                or not 0 <= now-stamp <= .5 or not 0 <= now-arrival <= .5):
+            return 'stationary_debug_stale_or_invalid_odometry'
+        # Same default stop thresholds as return_state_machine; no motion output.
+        if abs(vx) > .03 or abs(wz) > .03:
+            return 'stationary_debug_robot_moving'
+        return None
+
+    def on_debug_check(self, msg):
+        if not self.stationary_debug_enabled or not msg.data:
+            return
+        reason = ('stationary_debug_busy' if self.check is not None
+                  else self.stationary_debug_reason())
+        if not reason and (self.origin is None or not self.landmarks or self.info is None):
+            reason = 'stationary_debug_missing_origin_references_or_camera_info'
+        if not reason and (len(self.route) < 2 or self.last_auto_progress is None):
+            reason = 'stationary_debug_missing_auto_route_progress'
+        if reason:
+            # A duplicate trigger must not terminate/mutate the existing check.
+            self.status.publish(String(data=json.dumps(dict(event='debug_check_rejected',
+                trigger='stationary_debug', reason=reason))))
+            return
+        now = self.get_clock().now().nanoseconds*1e-9
+        self.check = dict(request=uuid.uuid4().hex, trigger='stationary_debug',
+                          stationary_debug=True, requested_at=now,
+                          route_arc=self.last_auto_progress[0],
+                          deadline=now+self.p('visual_check_timeout_s'))
+        self.check_frames, self.check_expansion = 0, 0
+        self.pending = None
+        self.pending_stamp = None
+        self.last = -float('inf')
+        self.event('check_started', route_arc=self.check['route_arc'])
 
     def on_check_request(self, msg):
         try:
@@ -138,11 +197,12 @@ class VisualLocalizationNode(Node):
                     self.check = None
                     self.pending = None
                 return
+            data.pop('stationary_debug', None)
             now = self.get_clock().now().nanoseconds*1e-9
             if (not data.get('request') or self.check is not None or self.state != 'FOLLOW_RETURN_PATH'
                     or not 0 <= now-float(data['requested_at']) <= .5):
                 return
-            self.check = dict(data, deadline=now+min(float(data.get('timeout_s', 5.)), self.p('visual_check_timeout_s')))
+            self.check = dict(data, stationary_debug=False, deadline=now+min(float(data.get('timeout_s', 5.)), self.p('visual_check_timeout_s')))
             self.check_frames, self.check_expansion = 0, 0
             self.pending = None
             self.last = -float('inf')
@@ -151,6 +211,11 @@ class VisualLocalizationNode(Node):
             return
 
     def check_timeout(self):
+        if self.check and self.check.get('stationary_debug'):
+            reason = self.stationary_debug_reason()
+            if reason:
+                self.event('rejected', reason=reason, check_complete=True)
+                return
         if self.check and self.get_clock().now().nanoseconds*1e-9 >= self.check['deadline']:
             self.event('skipped', reason='check timeout', check_complete=True)
 
@@ -196,6 +261,7 @@ class VisualLocalizationNode(Node):
                 self.reference_meta.clear()
                 self.cached_arcs = None
                 self.route_progress = None
+                self.last_auto_progress = None
                 self.route = []
                 self.last_reference_arc = None
         self.state = msg.data
@@ -207,6 +273,7 @@ class VisualLocalizationNode(Node):
             self.origin = value
             self.check = None
             self.route_progress = None
+            self.last_auto_progress = None
             self.cached_arcs = None
             self.landmarks.clear()
             getattr(self, 'reference_images', {}).clear()
@@ -310,6 +377,10 @@ class VisualLocalizationNode(Node):
         now = self.get_clock().now()
         if self.state not in {'FOLLOW_RETURN_PATH', 'RETURN_MANUAL', 'RETURN_RESUME_STOP', 'RETURN_INTERVENTION', 'RETURN_LANDMARK_SEARCH'} or self.origin is None or not self.landmarks or self.info is None:
             return
+        stationary_debug = bool(self.check and self.check.get('stationary_debug'))
+        if (getattr(self, 'stationary_debug_enabled', False)
+                and self.state == 'RETURN_MANUAL' and not stationary_debug):
+            return
         adaptive = bool(self.p('enable_adaptive_visual_check'))
         if adaptive and self.state != 'RETURN_LANDMARK_SEARCH' and self.check is None:
             return  # No decode/SIFT/matching/PnP while normal odometry return runs.
@@ -363,7 +434,8 @@ class VisualLocalizationNode(Node):
             if self.state == 'RETURN_LANDMARK_SEARCH' and self.search is not None:
                 selected = [(self.search.get('id'), None)] if self.search.get('id') in self.landmarks else []
             else:
-                progress = getattr(self, 'route_progress', None)
+                progress = ((self.check['route_arc'], now.nanoseconds) if stationary_debug
+                            else getattr(self, 'route_progress', None))
                 if (not adaptive and (len(self.route) < 2 or progress is None)):
                     selected = sorted(((lid, None) for lid in self.landmarks),
                         key=lambda item: np.linalg.norm((prior @ oc)[:2, 3]-self.landmarks[item[0]][1][:2, 3]))[:max(1, min(7, self.p('max_visual_candidates')))]
@@ -407,6 +479,9 @@ class VisualLocalizationNode(Node):
                 else:
                     diagnostics['reject_reason'] = 'correction_step_limit'
             ranked.sort(key=lambda item: item[:2], reverse=True)
+            if stationary_debug:
+                self.event('debug_frame_result', attempts=attempts, current_features=len(current[0]),
+                           current_sift_s=sift_time)
             if not ranked:
                 self.pending = None
                 self.event('no_match', attempts=attempts, current_features=len(current[0]), current_sift_s=sift_time,
@@ -440,10 +515,16 @@ class VisualLocalizationNode(Node):
                 raise ValueError('localization processing too slow')
             if self.check and self.get_clock().now().nanoseconds*1e-9 >= self.check['deadline']:
                 raise ValueError('check deadline exceeded before commit')
+            if stationary_debug:
+                reason = self.stationary_debug_reason()
+                if reason:
+                    self.event('rejected', reason=reason, check_complete=True)
+                    return
             meaningful = (diagnostics['correction_step_m'] >= self.p('correction_min_translation_m')
                           or diagnostics['correction_step_yaw'] >= self.p('correction_min_yaw_rad'))
-            apply = bool(self.p('apply_correction')) and (meaningful or self.state == 'RETURN_LANDMARK_SEARCH')
-            self.last_reference_arc = arc  # A validated anchor counts even in deadband/observation mode.
+            apply = not stationary_debug and bool(self.p('apply_correction')) and (meaningful or self.state == 'RETURN_LANDMARK_SEARCH')
+            if not stationary_debug:
+                self.last_reference_arc = arc  # Debug must not change production route anchors.
             if apply:
                 self.correction = correction
             msg = PoseStamped()

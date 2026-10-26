@@ -41,6 +41,13 @@ class Viewer(Node):
             data = json.loads(msg.data)
             summary = {k: data[k] for k in ('event', 'id', 'trigger', 'reason', 'inliers',
                 'correction_applied', 'correction_step_m', 'correction_step_yaw', 'planar_correction') if k in data}
+            if data.get('trigger') == 'stationary_debug':
+                metrics = ('reference_features', 'current_features', 'mutual_ratio_matches',
+                           'pnp_points', 'inliers', 'inlier_ratio', 'reprojection_rmse', 'reject_reason')
+                attempts = data.get('attempts', [])
+                if attempts:
+                    self.lines['debug metrics'] = json.dumps([{k: a.get(k, 'not_run') for k in ('id',)+metrics}
+                                                              for a in attempts], ensure_ascii=True)
             self.lines[key] = json.dumps(summary, ensure_ascii=True)
             if key == 'localization' and data.get('event') in {'validated', 'localized', 'no_match', 'rejected'}:
                 self.lines['last result'] = self.lines[key]
@@ -49,7 +56,7 @@ class Viewer(Node):
 
     def show(self):
         now = time.monotonic()
-        panel = np.zeros((400, 1200, 3), np.uint8)
+        panel = np.zeros((650, 1200, 3), np.uint8)
         lines = ['VPR trial | Q closes viewer only | green=PnP inlier, amber=descriptor match',
                  'Match image is one candidate/frame; only validated/localized means two-frame validation.']
         for key in ('Rear live', 'Front live', 'Matches'):

@@ -8,7 +8,7 @@ setup(
     packages=find_packages(exclude=['test']),
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
-        ('share/' + package_name, ['package.xml', 'README.md', 'HARDWARE_VALIDATION.md', 'CAMERA_VPR_TODO.md', 'ADAPTIVE_VISUAL.md', 'MOUNTED_CAMERA_SETUP.md', 'REAR_EXTRINSIC_CHECKERBOARD.md', 'VPR_RUN_COMMANDS.md']),
+        ('share/' + package_name, ['package.xml', 'README.md', 'HARDWARE_VALIDATION.md', 'CAMERA_VPR_TODO.md', 'ADAPTIVE_VISUAL.md', 'MOUNTED_CAMERA_SETUP.md', 'REAR_EXTRINSIC_CHECKERBOARD.md', 'VPR_RUN_COMMANDS.md', 'STATIONARY_VPR_DEBUG.md']),
     ],
     install_requires=['setuptools'],
     zip_safe=True,

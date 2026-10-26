@@ -14,3 +14,6 @@ Right_MTX,cd ~/ResKU && sr && si && python3 ~/ResKU/util/ros_compressed_to_rtsp.
 Arm_TF,"python3 ~/ResKU/util/terminal_launcher/remote_shell.py --setup 'cd ~/ResKU && sr && si' --command 'ros2 launch tool_manipulator_bringup real_control.launch.py hardware_config:=""${HOME}/ResKU/src/arm/tool_manipulator_bringup/config/hardware.yaml""'"
 AprilTag,python3 ~/ResKU/util/terminal_launcher/remote_shell.py --setup 'cd ~/ResKU && sr && si' --command 'ros2 run vision apriltag --ros-args -p tag_size_cm:=2.0 -p centers_topic:=/arm/apriltag/centers'
 Arm_Launch,python3 ~/ResKU/util/terminal_launcher/remote_shell.py --setup 'cd ~/ResKU && sr && si' --command 'ros2 launch src/arm/tool_change_min/launch/tool1_attach.launch.py poses_yaml:=src/arm/tool_change_min/config/poses.yaml hardware_yaml:=src/arm/tool_manipulator_bringup/config/hardware.yaml'
+Arm_IK_Manual,python3 ~/ResKU/util/terminal_launcher/remote_shell.py --setup 'cd ~/ResKU && sr && si' --command 'ros2 launch tool_manipulator_bringup ik_manual.launch.py real_hardware:=true launch_joy:=false'
+Arm_Remote_Joy,cd ~/ResKU && sr && si && ros2 launch tool_manipulator_bringup remote_joy.launch.py
+VPR_Shared_Joy,cd ~/ResKU && sr && si && ros2 launch manual_joy_control manual_control.launch.py launch_joy:=false

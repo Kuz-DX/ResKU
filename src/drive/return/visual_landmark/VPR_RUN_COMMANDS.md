@@ -1,5 +1,8 @@
 # Back-to-Base 주행 + VPR 실행 명령 (2026-10-27)
 
+팔 IK/Manual + 원격 조이스틱은 1-A 절부터 실행한다.
+Auto 재개 없이 정지 MANUAL에서 VPR만 시험: [STATIONARY_VPR_DEBUG.md](STATIONARY_VPR_DEBUG.md). 기본 OFF인 임시 debug 기능.
+
 로봇 PC에서 카메라·주행·기록을 실행하고 노트북에서 조이스틱·뷰어를 실행한다.
 워크스페이스를 각 PC에 최신 상태로 준비한다. 아래 ~/ResKU는 실제 경로로 바꾼다.
 ROS_DOMAIN_ID는 양쪽 모두 99로 예시를 통일했다. 기존 로봇이 다른 도메인을 쓰면
@@ -20,7 +23,7 @@ export ROS_LOCALHOST_ONLY=0
 ```bash
 cd ~/ResKU
 source /opt/ros/humble/setup.bash
-colcon build --packages-up-to robot_bringup vision visual_landmark manual_joy_control
+colcon build --packages-up-to robot_bringup vision visual_landmark manual_joy_control tool_manipulator_bringup
 source install/setup.bash
 ```
 
@@ -43,6 +46,43 @@ sudo ip link set can_drive up
 
 IMU는 launch 기본 /dev/ttyACM0이다. 실제 장치가 다르면 3번 명령에
 `imu_port:=/dev/serial/by-id/실제장치`를 추가한다.
+
+## 1-A. 로봇 PC: 팔 IK/Manual 제어와 카메라 LOCK
+
+주행 전에 팔 제어를 켜고 전방 카메라를 사용할 LOCK 자세로 고정한다.
+현재 저장소의 원격 조이스틱 launch 이름은 `remote_joy.launch.py`다.
+사용자가 부른 `remote.launch.py` 파일은 현재 main에는 없다.
+
+팔 하드웨어 기본 설정은 CAN `can_arm`, Dynamixel `/dev/ttyUSB0`이다.
+실제 장치/보정된 hardware.yaml을 확인한다. can_arm이 DOWN이고 기존 팔 driver가 없으면:
+
+```bash
+sudo ip link set can_arm type can bitrate 1000000
+sudo ip link set can_arm up
+```
+
+로봇 PC의 별도 터미널에서:
+
+```bash
+ros2 launch tool_manipulator_bringup ik_manual.launch.py \
+  real_hardware:=true launch_joy:=false
+```
+
+별도 실기 설정 파일을 쓰면 `hardware_config:=/absolute/path/hardware.yaml`을 추가한다.
+이 launch는 실기 팔 제어를 실행한다. 기존 real_control/manual/tool1_attach 등
+다른 팔 controller bringup은 동시에 실행하지 않는다.
+terminal_launcher의 기존 `Arm_TF`(real_control)와 `Arm_Launch`도 이 구성에서는 실행하지 않는다.
+
+노트북(실제 조이스틱이 연결된 PC)의 별도 터미널에서:
+
+```bash
+ros2 launch tool_manipulator_bringup remote_joy.launch.py
+```
+
+기존 팔 조작 방식으로 전방 카메라를 LOCK 자세에 놓고 그 자세를 유지한 뒤
+Record/복귀 시험을 시작한다. launch 자체가 특정 LOCK 자세로 자동 이동한다는 뜻은 아니다.
+이 `/joy`를 주행도 공유하므로 아래 주행 launch의 joy_node는 반드시 끈다.
+팔 제어 실행 후에도 차체→팔 장착 TF가 올바른지는 5번 preflight로 별도 확인한다.
 
 ## 2. 로봇 PC 터미널 A: 전후방 카메라
 
@@ -108,12 +148,12 @@ ON은 보정 추정치를 controller 좌표에 적용한다. 자동 yaw 검색�
 각 터미널에서 0번 환경을 적용한다.
 
 ```bash
-# C: 기존 joy_node가 없다면
-ros2 launch manual_joy_control manual_control.launch.py
+# C: 위 remote_joy의 /joy를 공유
+ros2 launch manual_joy_control manual_control.launch.py launch_joy:=false
 ```
 
-팔 bringup 등이 이미 같은 /joy를 발행하면 `launch_joy:=false`를 추가한다.
-조이스틱 명령 경로를 이중 실행하지 않는다.
+위 구성에서는 remote_joy만 joy_node를 실행한다. remote_joy를 사용하지 않고
+주행만 실행하는 경우에만 launch_joy:=true로 한다. 조이스틱 발행자를 이중 실행하지 않는다.
 
 ```bash
 # D: 전후방 영상 + 실제 특징점 매칭 + 검증 결과
