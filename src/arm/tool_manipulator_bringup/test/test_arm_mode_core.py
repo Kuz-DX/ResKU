@@ -100,7 +100,8 @@ def test_tool_path_command_never_runs_far_ahead_of_feedback():
         now = .1+i*.02
         c.feedback([0.]*6, [0.]*6, now)
         c.tick(now, .02)
-    assert max(c.target) <= c.path_feedback_lead+1e-12
+    assert all(target <= lead+1e-12
+               for target, lead in zip(c.target, c.path_feedback_leads))
     assert c.mode == 'tool_auto'
 
 
@@ -114,6 +115,25 @@ def test_tool_path_following_error_aborts_to_reusable_hold_not_global_fault():
     assert c.last_execution_id == 'bad'
     assert c.last_execution_result == 'aborted'
     assert c.target == c.goal == [0.]*6
+
+
+def test_loaded_shoulder_can_use_tighter_path_limits():
+    c = ModeCore([(-2., 2.)]*6, [.12]*6,
+                 path_speeds=[.08, .04, .06, .06, .08, .08],
+                 path_accelerations=[.08, .03, .06, .06, .08, .08],
+                 path_feedback_leads=[.04, .015, .025, .025, .04, .04])
+    assert c.path_speed_limits[1] == .04
+    assert c.path_accelerations[1] == .03
+    assert c.path_feedback_leads[1] == .015
+
+
+def test_outward_motion_near_soft_limit_faults_before_crossing_limit():
+    c = ModeCore([(-2., 2.)]*6, [.12]*6,
+                 joint_names=['base', 'shoulder', 'elbow', 'pitch', 'roll', 'yaw'])
+    c.feedback([0., 1.96, 0., 0., 0., 0.], [0., .03, 0., 0., 0., 0.], 0.)
+    assert c.mode == 'fault'
+    assert 'shoulder' in c.reason
+    assert 'moving outward near soft limit' in c.reason
 
 
 def test_path_continues_through_intermediate_waypoint_without_stopping():

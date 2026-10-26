@@ -12,7 +12,8 @@ TCP_ENTRY_TOLERANCE = (.02, .001, .001, .001, .02, .02)
 
 class ModeCore:
     def __init__(self, limits, speeds, startup_recovery_enabled=False, path_accelerations=None,
-                 tcp_accelerations=None, joint_names=None):
+                 tcp_accelerations=None, joint_names=None, path_speeds=None,
+                 path_feedback_leads=None):
         self.limits, self.speeds = limits, speeds
         self.joint_names = (list(joint_names) if joint_names is not None else
                             [f'joint_{index}' for index in range(len(speeds))])
@@ -23,6 +24,12 @@ class ModeCore:
         if (len(self.path_accelerations) != len(speeds)
                 or not all(math.isfinite(a) and 0 < a <= 2. for a in self.path_accelerations)):
             raise ValueError('invalid path acceleration limits')
+        self.path_speed_limits = (list(path_speeds) if path_speeds is not None
+                                  else list(speeds))
+        if (len(self.path_speed_limits) != len(speeds)
+                or not all(math.isfinite(v) and 0 < v <= s
+                           for v, s in zip(self.path_speed_limits, speeds))):
+            raise ValueError('invalid path speed limits')
         self.tcp_accelerations = (list(tcp_accelerations) if tcp_accelerations is not None
                                   else [0.25]*len(speeds))
         if (len(self.tcp_accelerations) != len(speeds)
@@ -50,7 +57,14 @@ class ModeCore:
         self.path_velocity = [0.]*len(speeds)
         # A waypoint clock must never run the command far ahead of loaded
         # hardware.  Keep command lead small and let measured feedback pace it.
-        self.path_feedback_lead = 0.05
+        self.path_feedback_leads = (list(path_feedback_leads)
+                                    if path_feedback_leads is not None
+                                    else [0.05]*len(speeds))
+        if (len(self.path_feedback_leads) != len(speeds)
+                or not all(math.isfinite(v) and 0.005 <= v <= 0.05
+                           for v in self.path_feedback_leads)):
+            raise ValueError('invalid path feedback leads')
+        self.path_stall_timeout = 2.0
         self.path_progress_time = None
         self.path_best_error = math.inf
         self.last_execution_id = None
@@ -196,6 +210,15 @@ class ModeCore:
         if len(velocity) != len(position) or not all(map(math.isfinite, velocity)):
             self.fault('invalid joint velocity: missing or nonfinite values')
             return
+        for index, (value, speed, (lower, upper)) in enumerate(
+                zip(position, velocity, self.limits)):
+            if ((value > upper-.05 and speed > .02)
+                    or (value < lower+.05 and speed < -.02)):
+                self.fault(
+                    'joint moving outward near soft limit: %s position=%.6f '
+                    'velocity=%.6f allowed=[%.6f, %.6f]' %
+                    (self.joint_names[index], value, speed, lower, upper))
+                return
         if (not self.fresh(now) or self.entry_anchor is None
                 or max(map(abs, velocity)) > .02
                 or any(abs(a-b) > tol for a, b, tol in
@@ -220,7 +243,7 @@ class ModeCore:
         self.command_time = -math.inf
         self.settled = 0
         self.path_durations = []
-        self.path_speeds = list(self.speeds)
+        self.path_speeds = list(self.path_speed_limits)
         self.path_velocity = [0.]*len(self.speeds)
         self.path_progress_time = None
         self.path_best_error = math.inf
@@ -355,12 +378,12 @@ class ModeCore:
         self.goal = self.queue.pop(0)
         duration = self.path_durations.pop(0)
         if duration is None:
-            self.path_speeds = list(self.speeds)
+            self.path_speeds = list(self.path_speed_limits)
         else:
             # Preserve synchronized joint-line geometry, extending time if
             # necessary instead of speeding past any existing joint bound.
             duration = max(duration, max(abs(b-a)/s for a, b, s in
-                                         zip(self.target, self.goal, self.speeds)))
+                                         zip(self.target, self.goal, self.path_speed_limits)))
             self.path_speeds = [abs(b-a)/duration for a, b in zip(self.target, self.goal)]
         self.path_progress_time = self.started
         self.path_best_error = math.inf
@@ -410,8 +433,8 @@ class ModeCore:
             # and acceleration profile while preventing a slow/stalled motor
             # from accumulating a large following error.
             measured = self.position[index]
-            result[-1] = max(measured-self.path_feedback_lead,
-                             min(measured+self.path_feedback_lead, result[-1]))
+            lead = self.path_feedback_leads[index]
+            result[-1] = max(measured-lead, min(measured+lead, result[-1]))
         return result
 
     def _tcp_step(self, goal, dt):
@@ -510,7 +533,8 @@ class ModeCore:
                 self.path_progress_time = now
             if now-self.started > 120.:
                 self.abort_path_to_hold('waypoint timeout; path aborted to HOLD', now)
-            elif self.path_progress_time is not None and now-self.path_progress_time > 10.:
+            elif (self.path_progress_time is not None
+                  and now-self.path_progress_time > self.path_stall_timeout):
                 index = max(range(len(self.position)),
                             key=lambda i: abs(self.goal[i]-self.position[i]))
                 self.abort_path_to_hold(

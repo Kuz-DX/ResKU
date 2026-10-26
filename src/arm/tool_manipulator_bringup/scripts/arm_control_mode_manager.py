@@ -37,15 +37,19 @@ class ControlModeManager(Node):
         speeds = [min(.12, float(config['joints'][j]['velocity_limit_rad_s'])/2) for j in JOINTS]
         # Tool paths use a conservative command acceleration; manual/TCP keep
         # their existing direct bounded response.
-        path_accelerations = [float(self.declare_parameter(
-            'tool_path_acceleration_rad_s2', .10).value)]*len(JOINTS)
+        # Loaded shoulder motion is deliberately much gentler than the distal
+        # printed links. Order matches JOINTS.
+        path_speeds = [.08, .04, .06, .06, .08, .08]
+        path_accelerations = [.08, .03, .06, .06, .08, .08]
+        path_feedback_leads = [.04, .015, .025, .025, .04, .04]
         tcp_accelerations = [float(self.declare_parameter(
             'tcp_acceleration_rad_s2', .25).value)]*len(JOINTS)
         self.core = ModeCore([limits[j] for j in JOINTS], speeds,
                              startup_recovery_enabled=True,
                              path_accelerations=path_accelerations,
                              tcp_accelerations=tcp_accelerations,
-                             joint_names=JOINTS)
+                             joint_names=JOINTS, path_speeds=path_speeds,
+                             path_feedback_leads=path_feedback_leads)
         self.core.tcp_entry_required = True
         self.ee = self.create_publisher(Float64MultiArray, '/ee_velocity_controller/commands', 1)
         self.position = self.create_publisher(Float64MultiArray, '/manual_position_controller/commands', 1)
