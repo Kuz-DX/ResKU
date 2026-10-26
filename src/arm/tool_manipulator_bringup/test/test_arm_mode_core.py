@@ -93,6 +93,29 @@ def test_following_error_identifies_joint_and_values():
     assert 'measured=0.000000' in c.reason
 
 
+def test_tool_path_command_never_runs_far_ahead_of_feedback():
+    c = ready('tool_auto')
+    assert c.path(c.epoch, 'loaded', [[.5]*6], .1, durations=[1.])
+    for i in range(1, 100):
+        now = .1+i*.02
+        c.feedback([0.]*6, [0.]*6, now)
+        c.tick(now, .02)
+    assert max(c.target) <= c.path_feedback_lead+1e-12
+    assert c.mode == 'tool_auto'
+
+
+def test_tool_path_following_error_aborts_to_reusable_hold_not_global_fault():
+    c = ready('tool_auto')
+    assert c.path(c.epoch, 'bad', [[.2]*6], .1)
+    c.target = [.16]*6
+    c.feedback([0.]*6, [0.]*6, .12)
+    c.tick(.12, .02)
+    assert c.mode == c.requested == 'hold'
+    assert c.last_execution_id == 'bad'
+    assert c.last_execution_result == 'aborted'
+    assert c.target == c.goal == [0.]*6
+
+
 def test_path_continues_through_intermediate_waypoint_without_stopping():
     c = ready('tool_auto')
     c.path(c.epoch, 'run1', [[.01]*6, [.02]*6], .1)

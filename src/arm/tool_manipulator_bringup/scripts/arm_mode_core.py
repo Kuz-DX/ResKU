@@ -48,6 +48,11 @@ class ModeCore:
         self.path_durations = []
         self.path_speeds = list(speeds)
         self.path_velocity = [0.]*len(speeds)
+        # A waypoint clock must never run the command far ahead of loaded
+        # hardware.  Keep command lead small and let measured feedback pace it.
+        self.path_feedback_lead = 0.05
+        self.path_progress_time = None
+        self.path_best_error = math.inf
         self.last_execution_id = None
         self.last_execution_result = None
         self.started = 0.
@@ -217,6 +222,20 @@ class ModeCore:
         self.path_durations = []
         self.path_speeds = list(self.speeds)
         self.path_velocity = [0.]*len(self.speeds)
+        self.path_progress_time = None
+        self.path_best_error = math.inf
+
+    def abort_path_to_hold(self, reason, now):
+        """Abort only managed path ownership; healthy stopped hardware remains reusable."""
+        self.invalidate()
+        if self.position is None or not self.fresh(now):
+            self.fault(reason+'; feedback unavailable')
+            return
+        self.target = list(self.position)
+        self.goal = list(self.position)
+        self.mode = self.requested = 'hold'
+        self.transitioning = False
+        self.reason = reason
 
     def fault(self, reason):
         self.invalidate()
@@ -328,6 +347,8 @@ class ModeCore:
         self.path_velocity = [0.]*len(self.speeds)
         self._next_waypoint()
         self.started = now
+        self.path_progress_time = now
+        self.path_best_error = math.inf
         return True
 
     def _next_waypoint(self):
@@ -341,6 +362,8 @@ class ModeCore:
             duration = max(duration, max(abs(b-a)/s for a, b, s in
                                          zip(self.target, self.goal, self.speeds)))
             self.path_speeds = [abs(b-a)/duration for a, b in zip(self.target, self.goal)]
+        self.path_progress_time = self.started
+        self.path_best_error = math.inf
 
     def cancel_path(self, epoch, execution_id, now):
         if (self.mode != 'tool_auto' or epoch != self.epoch
@@ -355,9 +378,9 @@ class ModeCore:
         """Acceleration-bounded path command; brake only for the final goal."""
         result = []
         final_segment = not self.queue
-        for position, target, speed, velocity, acceleration in zip(
+        for index, (position, target, speed, velocity, acceleration) in enumerate(zip(
                 self.target, goal, self.path_speeds, self.path_velocity,
-                self.path_accelerations):
+                self.path_accelerations)):
             distance = target-position
             if abs(distance) < 1e-12:
                 next_velocity = 0. if final_segment else velocity
@@ -383,6 +406,12 @@ class ModeCore:
             else:
                 result.append(position+step)
                 self.path_velocity[len(result)-1] = next_velocity
+            # Feedback-paced command envelope. This preserves the taught path
+            # and acceleration profile while preventing a slow/stalled motor
+            # from accumulating a large following error.
+            measured = self.position[index]
+            result[-1] = max(measured-self.path_feedback_lead,
+                             min(measured+self.path_feedback_lead, result[-1]))
         return result
 
     def _tcp_step(self, goal, dt):
@@ -433,9 +462,13 @@ class ModeCore:
         following = [abs(a-b) for a, b in zip(self.target, self.position)]
         if max(following) > .15:
             index = max(range(len(following)), key=following.__getitem__)
-            self.fault('following error: %s target=%.6f measured=%.6f error=%.6f rad' %
-                       (self.joint_names[index], self.target[index], self.position[index],
-                        following[index]))
+            reason = ('following error: %s target=%.6f measured=%.6f error=%.6f rad' %
+                      (self.joint_names[index], self.target[index], self.position[index],
+                       following[index]))
+            if self.mode == 'tool_auto' and self.execution_id is not None:
+                self.abort_path_to_hold(reason, now)
+            else:
+                self.fault(reason)
         if self.mode == 'fault':
             # Capture one hold target, rather than following drifting feedback.
             if self.goal is None:
@@ -471,8 +504,20 @@ class ModeCore:
                     self.reason = ''
                 self.settled = 0
         elif self.mode == 'tool_auto' and self.execution_id is not None:
+            error = max(abs(a-b) for a, b in zip(self.position, self.goal))
+            if error < self.path_best_error-.001:
+                self.path_best_error = error
+                self.path_progress_time = now
             if now-self.started > 120.:
-                self.fault('waypoint timeout')
+                self.abort_path_to_hold('waypoint timeout; path aborted to HOLD', now)
+            elif self.path_progress_time is not None and now-self.path_progress_time > 10.:
+                index = max(range(len(self.position)),
+                            key=lambda i: abs(self.goal[i]-self.position[i]))
+                self.abort_path_to_hold(
+                    'waypoint stalled: %s goal=%.6f measured=%.6f error=%.6f rad; '
+                    'inspect motor current/protection' %
+                    (self.joint_names[index], self.goal[index], self.position[index],
+                     abs(self.goal[index]-self.position[index])), now)
             # Intermediate trajectory samples describe one continuous motion,
             # not individual stop goals. Advance as soon as the command ramp
             # reaches each sample; require measured standstill only at the
@@ -482,6 +527,7 @@ class ModeCore:
                   max(abs(a-b) for a, b in zip(self.target, self.goal)) < 1e-6):
                 self._next_waypoint()
                 self.started, self.settled = now, 0
+                self.path_progress_time = now
             elif not self.queue and self.settled >= 5:
                 completed = self.execution_id
                 self.request('hold', now)

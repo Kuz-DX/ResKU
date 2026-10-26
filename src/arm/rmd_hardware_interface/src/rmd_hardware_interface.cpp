@@ -745,6 +745,26 @@ namespace rmd_hardware_interface {
             safe_position_command_ = measured_position;
           }
 
+          // A managed path abort replaces the outstanding target with the
+          // current measured position.  Once current is below the release
+          // threshold, treat that explicit neutral HOLD as acknowledgement of
+          // the protection event and re-arm future motion.  Previously the
+          // latch could only be cleared by a reverse command or process
+          // restart, even after the arm had safely returned to HOLD.
+          constexpr double hold_acknowledgement_tolerance_rad {0.01};
+          if (current_limit_latched_ &&
+              std::abs(position_error) <= hold_acknowledgement_tolerance_rad &&
+              std::isfinite(measured_current) &&
+              measured_current <= current_release_threshold_) {
+            current_limit_latched_ = false;
+            blocked_motion_direction_ = 0;
+            overcurrent_duration_ = std::chrono::milliseconds(0);
+            safe_position_command_ = measured_position;
+            RCLCPP_INFO(getLogger(),
+              "Current protection re-armed by measured HOLD (current %.3f A).",
+              measured_current);
+          }
+
           // A command away from the collision is always allowed and clears the latch.
           if ((current_limit_active_ || current_limit_latched_) && blocked_motion_direction_ != 0 &&
               requested_direction != 0 && requested_direction != blocked_motion_direction_) {
