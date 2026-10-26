@@ -11,13 +11,20 @@ TCP_ENTRY_TOLERANCE = (.02, .001, .001, .001, .02, .02)
 
 
 class ModeCore:
-    def __init__(self, limits, speeds, startup_recovery_enabled=False, path_accelerations=None):
+    def __init__(self, limits, speeds, startup_recovery_enabled=False, path_accelerations=None,
+                 tcp_accelerations=None):
         self.limits, self.speeds = limits, speeds
         self.path_accelerations = (list(path_accelerations) if path_accelerations is not None
                                    else [0.25]*len(speeds))
         if (len(self.path_accelerations) != len(speeds)
                 or not all(math.isfinite(a) and 0 < a <= 2. for a in self.path_accelerations)):
             raise ValueError('invalid path acceleration limits')
+        self.tcp_accelerations = (list(tcp_accelerations) if tcp_accelerations is not None
+                                  else [0.25]*len(speeds))
+        if (len(self.tcp_accelerations) != len(speeds)
+                or not all(math.isfinite(a) and 0 < a <= 2. for a in self.tcp_accelerations)):
+            raise ValueError('invalid TCP acceleration limits')
+        self.tcp_velocity = [0.]*len(speeds)
         self.mode = 'hold'
         self.requested = 'hold'
         self.transitioning = False
@@ -276,6 +283,7 @@ class ModeCore:
             return True
         self.target = list(self.position)
         self.goal = list(self.position)
+        self.tcp_velocity = [0.]*len(self.speeds)
         self.command_time = now
         self.reason = 'TCP paused; press L1 to resume from measured pose'
         return True
@@ -292,6 +300,7 @@ class ModeCore:
         # forward target. Do not ramp back from the outstanding command lead.
         self.target = list(self.position)
         self.goal = list(self.position)
+        self.tcp_velocity = [0.]*len(self.speeds)
         self.reason = 'TCP deadman stop; explicit mode request required'
         return True
 
@@ -372,6 +381,30 @@ class ModeCore:
                 self.path_velocity[len(result)-1] = next_velocity
         return result
 
+    def _tcp_step(self, goal, dt):
+        """Acceleration-bound streamed IK goals without dropping input packets."""
+        result = []
+        for index, (position, target, speed, velocity, acceleration) in enumerate(zip(
+                self.target, goal, self.speeds, self.tcp_velocity,
+                self.tcp_accelerations)):
+            distance = target-position
+            if abs(distance) < 1e-12:
+                self.tcp_velocity[index] = 0.
+                result.append(target)
+                continue
+            braking_speed = math.sqrt(2.*acceleration*abs(distance))
+            desired_velocity = math.copysign(min(speed, braking_speed), distance)
+            change = acceleration*dt
+            next_velocity = velocity+max(-change, min(change, desired_velocity-velocity))
+            step = .5*(velocity+next_velocity)*dt
+            if step*distance <= 0 or abs(step) >= abs(distance):
+                result.append(target)
+                self.tcp_velocity[index] = 0.
+            else:
+                result.append(position+step)
+                self.tcp_velocity[index] = next_velocity
+        return result
+
     def tick(self, now, dt):
         if self.target is None:
             return None
@@ -403,7 +436,10 @@ class ModeCore:
         step = min(max(dt, 0.), .04)
         if self.mode == 'tool_auto' and self.execution_id:
             self.target = self._tool_path_step(goal, step)
+        elif self.mode == 'tcp_ik':
+            self.target = self._tcp_step(goal, step)
         else:
+            self.tcp_velocity = [0.]*len(self.speeds)
             self.target = [a+max(-s*step, min(s*step,b-a))
                            for a,b,s in zip(self.target, goal, self.speeds)]
         stopped = (max(map(abs, self.velocity)) <= .02 and

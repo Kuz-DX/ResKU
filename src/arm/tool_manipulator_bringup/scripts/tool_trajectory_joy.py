@@ -163,7 +163,9 @@ class ToolTrajectoryJoy(Node):
         self.planning_timeout = float(param('entry_planning_timeout_sec', 8.))
         self.planning_attempts = int(param('entry_planning_attempts', 3))
         self.planning_velocity_scale = float(param('entry_planning_velocity_scale', .08))
-        self.planning_acceleration_scale = float(param('entry_planning_acceleration_scale', .08))
+        # joint_limits.yaml already carries the conservative physical command
+        # acceleration.  Do not multiply it by the former 0.08 factor again.
+        self.planning_acceleration_scale = float(param('entry_planning_acceleration_scale', 1.))
         self.l2_axis = int(param('l2_axis', 2))
         self.l2_threshold = float(param('l2_pressed_below', -.5))
         # This controller's physical button 1 is reported as ROS Joy button 2.
@@ -176,7 +178,7 @@ class ToolTrajectoryJoy(Node):
                 or not .1 < self.collision_timeout <= 60.
                 or not .5 <= self.planning_timeout <= 30. or not 1 <= self.planning_attempts <= 10
                 or not 0 < self.planning_velocity_scale <= .2
-                or not 0 < self.planning_acceleration_scale <= .2
+                or not 0 < self.planning_acceleration_scale <= 1.
                 or self.l2_axis < 0 or self.first_button < 0):
             raise ValueError('invalid tool trajectory joystick parameters')
         self.paths = {}

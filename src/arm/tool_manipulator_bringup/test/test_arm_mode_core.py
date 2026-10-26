@@ -133,6 +133,33 @@ def test_tool_path_command_acceleration_and_final_braking_are_bounded():
     assert c.target[0] == pytest.approx(.2)
 
 
+def test_tcp_full_input_is_acceleration_bounded_without_packet_dropping():
+    c = ready('tcp_ik')
+    c.tcp_accelerations = [.25]*6
+    velocities = []
+    previous = c.target[0]
+    for i in range(1, 60):
+        now = .1+i*.02
+        c.feedback(list(c.target), list(c.tcp_velocity), now)
+        assert c.command('tcp_ik', c.epoch, [.08]*6, 0., now)
+        current = c.tick(now, .02)[0]
+        velocities.append((current-previous)/.02)
+        previous = current
+        if current == pytest.approx(.08):
+            break
+    assert velocities[0] == pytest.approx(.5*.25*.02)
+    assert max(abs(b-a) for a, b in zip(velocities, velocities[1:])) <= .25*.02+1e-9
+    assert velocities[-1] < max(velocities)
+    assert c.target[0] == pytest.approx(.08)
+
+
+def test_tcp_pause_immediately_discards_stream_velocity():
+    c = ready('tcp_ik')
+    c.tcp_velocity = [.1]*6
+    assert c.pause_tcp(c.epoch, .11)
+    assert c.tcp_velocity == [0.]*6
+
+
 def test_focus_and_controller_gates():
     c = ready()
     c.focus = 'drive'
