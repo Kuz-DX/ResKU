@@ -206,9 +206,8 @@ class RmdX8DriverNode(Node):
         self.declare_parameter("odom_frame_id", "odom")
         self.declare_parameter("base_frame_id", "base_link")
         self.declare_parameter("publish_odom_tf", False)  # normally False: robot_localization publishes odom->base_link
-        # External robot stop is provided by the deployment. Explicitly send
-        # B3=0 at startup/reconnect to clear any previous motor watchdog.
-        self.declare_parameter("comm_timeout_protection_ms", 0)
+        # Keep the motor watchdog while running; clear it on orderly shutdown.
+        self.declare_parameter("comm_timeout_protection_ms", 500)
         # [manual+return 통합] can_driver_node에서 이관 -- USB-CAN 어댑터(gs_usb)가
         # 물리적으로 잠깐 빠졌다 붙는 사고가 manual 조종 중 실기에서 확인된 적이
         # 있다(can_driver_node._attempt_reconnect() 주석 참고). 이 노드가 이제
@@ -315,7 +314,9 @@ class RmdX8DriverNode(Node):
 
         self._status1_poll_counter = 0
 
+        self._closing = False
         self.control_timer = self.create_timer(self.control_period, self._control_loop)
+        self.context.on_shutdown(self._prepare_motor_shutdown)
 
         self.get_logger().info(
             f"rmd_x8_driver_node started: can={can_interface}, "
@@ -419,9 +420,10 @@ class RmdX8DriverNode(Node):
     # ------------------------------------------------------------------ #
     # startup safety configuration
     # ------------------------------------------------------------------ #
-    def _configure_comm_timeout_protection(self):
+    def _configure_comm_timeout_protection(self, timeout_ms=None):
         """Apply and verify the requested motor timeout; zero explicitly disables it."""
-        timeout_ms = self.comm_timeout_protection_ms
+        if timeout_ms is None:
+            timeout_ms = self.comm_timeout_protection_ms
         if timeout_ms < 0:
             raise ValueError("comm_timeout_protection_ms must be >= 0")
         # Require a fresh response, including after reconnect. An old non-None
@@ -435,7 +437,7 @@ class RmdX8DriverNode(Node):
                 arbitration_id=proto.motor_send_id(channel.can_id),
                 data=data, is_extended_id=False)
             try:
-                self.bus.send(message)
+                self.bus.send(message, timeout=0.05)
             except can.CanError as exc:
                 self.get_logger().error(
                     f"[{channel.name}] comm_timeout_protection_ms 설정 프레임 전송 실패: {exc}")
@@ -445,7 +447,7 @@ class RmdX8DriverNode(Node):
         # 안이라 rclpy 실행기가 아직 안 돌고 있어도 상관없음).
         deadline = time.monotonic() + 0.5
         while time.monotonic() < deadline:
-            if all(ch.snapshot()["comm_timeout_confirmed_ms"] is not None for ch in self.channels):
+            if all(ch.snapshot()["comm_timeout_confirmed_ms"] == timeout_ms for ch in self.channels):
                 break
             time.sleep(0.02)
 
@@ -490,6 +492,8 @@ class RmdX8DriverNode(Node):
     # main control loop
     # ------------------------------------------------------------------ #
     def _control_loop(self):
+        if getattr(self, '_closing', False):
+            return
         now = self.get_clock().now()
         with self._cmd_lock:
             safety_age_s = (
@@ -729,24 +733,50 @@ class RmdX8DriverNode(Node):
             diag.status.append(status)
         self.diag_pub.publish(diag)
 
+    def _prepare_motor_shutdown(self):
+        """Stop first, then clear the timeout while CAN RX is still available."""
+        if getattr(self, '_closing', False):
+            return
+        self._closing = True
+        try:
+            self.control_timer.cancel()
+        except Exception:
+            pass
+        if self.bus is None:
+            return
+
+        def stop_frames():
+            for data in (proto.build_speed_command(0), proto.build_stop_command()):
+                for ch in self.channels:
+                    try:
+                        self.bus.send(can.Message(
+                            arbitration_id=proto.motor_send_id(ch.can_id),
+                            data=data, is_extended_id=False), timeout=0.05)
+                    except Exception as exc:
+                        self.get_logger().error(f'[{ch.name}] shutdown stop send failed: {exc}')
+
+        stop_frames()
+        try:
+            # Like the arm lifecycle, do not leave a running watchdog armed
+            # after a deliberate shutdown. This is not a motor fault reset.
+            self._configure_comm_timeout_protection(timeout_ms=0)
+        except Exception as exc:
+            self.get_logger().error(f'Watchdog clear during shutdown failed: {exc}')
+        finally:
+            stop_frames()
+
     def destroy_node(self):
-        # best-effort: stop motors before shutting down the node
+        self._prepare_motor_shutdown()
+        if self._notifier is not None:
+            try:
+                self._notifier.stop()
+            except Exception:
+                pass
         if self.bus is not None:
             try:
-                for ch in self.channels:
-                    data = proto.build_stop_command()
-                    msg = can.Message(arbitration_id=proto.motor_send_id(ch.can_id),
-                                       data=data, is_extended_id=False)
-                    self.bus.send(msg)
-            except Exception:  # noqa: BLE001
-                pass
-        try:
-            if self._notifier is not None:
-                self._notifier.stop()
-            if self.bus is not None:
                 self.bus.shutdown()
-        except Exception:  # noqa: BLE001
-            pass
+            except Exception:
+                pass
         super().destroy_node()
 
 
@@ -755,11 +785,11 @@ def main(args=None):
     node = RmdX8DriverNode()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, rclpy.executors.ExternalShutdownException):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        rclpy.try_shutdown()
 
 
 if __name__ == "__main__":
