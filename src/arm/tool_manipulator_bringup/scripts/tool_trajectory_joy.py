@@ -234,14 +234,14 @@ class ToolTrajectoryJoy(Node):
             raise RuntimeError('fresh stopped HOLD with arm focus is required')
         return s
 
-    def begin(self, path_id):
+    def begin(self, path_id, planned_path=None):
         now = time.monotonic()
         try:
             s = self.healthy_hold(now)
-            configured = self.paths[path_id]
             measured = np.asarray([self.full_state[j] for j in ARM_JOINTS])
-            path = execution_plan(configured, measured, self.start_tolerance,
-                                  self.max_start_delta, self.approach_speed)
+            path = (execution_plan(self.paths[path_id], measured, self.start_tolerance,
+                                   self.max_start_delta, self.approach_speed)
+                    if planned_path is None else planned_path)
             if not self.collision.service_is_ready() or not self.mode.service_is_ready():
                 raise RuntimeError('tool mode or MoveIt collision service unavailable')
             self.path_id, self.path = path_id, path
@@ -271,8 +271,15 @@ class ToolTrajectoryJoy(Node):
                         f'checking tool path {path_id} ({len(self.requests)} samples){approach}')
         except (ValueError, RuntimeError, KeyError) as exc:
             self.path_id = path_id
-            self.report('blocked', str(exc))
-            self.reset()
+            self.begin_failed(str(exc))
+
+    def begin_failed(self, reason):
+        self.report('blocked', reason)
+        self.reset()
+
+    def path_completed(self):
+        self.report('completed', f'tool path {self.path_id} completed; HOLD')
+        self.reset()
 
     def unchanged(self):
         if self.full_state is None or self.full_state.keys() != self.snapshot.keys():
@@ -360,9 +367,7 @@ class ToolTrajectoryJoy(Node):
                     if s.get('last_execution_result') != 'succeeded':
                         raise RuntimeError('managed tool path aborted')
                     if s.get('mode') == 'hold' and not s.get('transitioning'):
-                        path_id = self.path_id
-                        self.report('completed', f'tool path {path_id} completed; HOLD')
-                        self.reset()
+                        self.path_completed()
                         return
                 elif s.get('mode') != 'tool_auto':
                     raise RuntimeError('tool path ownership lost')

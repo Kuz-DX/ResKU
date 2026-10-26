@@ -1,8 +1,7 @@
 # Tool Manipulator Bringup
 
-팔의 실기·모의 구동, 조이스틱 수동 구동, 설정 점검과 캘리브레이션 도구만 모아 둔
-패키지다. 미완성 tool-change, AprilTag 도킹, 기록 경로 자동 재생, 설계 실험용 코드는
-제거했다.
+팔의 실기·모의 구동, 조이스틱 수동 구동, 설정 점검과 캘리브레이션 도구를 모아 둔
+패키지다. Managed 경로 재생과 선택적으로 활성화하는 AprilTag 도킹 실행기를 제공한다.
 
 ## 남긴 실행 경로
 
@@ -43,6 +42,82 @@ MANUAL/TCP_IK/TOOL_AUTO를 중재하지만, 다른 launch와의 동시 실행은
 ```bash
 # 빌드 전에는 소스 launch를 직접 지정한다.
 ros2 launch src/arm/tool_manipulator_bringup/launch/ik_manual.launch.py
+```
+
+## 선택 기능: L2 경로 이후 AprilTag 도킹
+
+기존 실행 명령과 L2 경로 0/1/2 재생은 그대로 유지한다.
+`enable_tool_docking:=false`가 기본이며, 이 경우 기존 `tool_trajectory_joy.py`를
+실행한다. 옵션을 켜면 `tool_docking_coordinator.py` 하나로 교체한다. 두 실행기를
+동시에 띄우지 않는다. 새 실행기도 `tool_docking.yaml`에서 `enabled: false`인
+경로는 기존 방식으로 재생하고 HOLD로 끝낸다.
+
+도킹을 활성화한 경로의 순서는 다음과 같다.
+
+```text
+L2 + 경로 선택 → 기존 관절 경로 검증/재생 → 실제 완료 및 HOLD
+  → 태그 획득 → coarse 목표 → fine 목표 → dock 목표
+  → 서로 다른 영상/관절 피드백에서 정렬·정지 연속 확인
+  → LOCK 1회 → 같은 UUID의 LOCKED 확인 → HOLD 유지
+```
+
+정렬은 매번 `검출 → 제한된 TCP 보정 → IK → 관절 경로 충돌 검사 → 실행 → 재검출`로
+진행한다. 기존 Mode Manager만 모터 명령을 발행한다. 세 단계는 모두 태그 기준 TCP의
+6D 목표이며, coarse/fine은 삽입 전 여유 공간, dock은 최종 삽입 위치로 직접 측정해
+정한다. 경로 YAML의 마지막 점도 **접촉 전, 태그가 보이는 위치**여야 한다.
+이미 삽입까지 포함한 경로 뒤에 도킹을 그대로 덧붙이지 않는다.
+
+`config/tool_docking.yaml`의 경로 0 템플릿부터 다음 값을 채운다.
+
+- 실제 `tag_id`, 검은 정사각형의 실측 `tag_size_m`.
+- `stages`의 coarse/fine/dock 각각 `xyz_m`와 `xyzw`.
+  이는 `T_tag_tcp`이며 카메라 좌표나 base 좌표가 아니다. quaternion 순서는 x/y/z/w.
+- Arduino와 확인한 `lock_timeout_s`. 최초 정렬 검증은 `lock_enabled: false`로 수행한다.
+- 기구에 맞는 위치/각도/속도 허용값과 보정 범위. 제공된 값은 실기 검증값이 아니다.
+
+필수값을 채운 후 경로 0만 `enabled: true`로 설정한다. 경로 1/2는 비활성으로 두면
+기존 동작을 유지하며, 추후 경로 0 설정 전체를 복사하고 각 도구의 실측값을 넣는다.
+경로 번호와 tag ID가 같다고 가정하지 않는다.
+
+```bash
+# 아래 프레임 이름은 실제 보정된 카메라 optical frame으로 교체한다.
+ros2 launch src/arm/tool_manipulator_bringup/launch/ik_manual.launch.py \
+  enable_tool_docking:=true \
+  docking_camera_frame:=YOUR_CALIBRATED_OPTICAL_FRAME
+```
+
+카메라/검출기는 별도로 실행한다. 입력은 현재 vision의
+`/arm/apriltag/centers` (`std_msgs/String`, stamp/frame_id/detections/corners_px 포함)와
+`/arm/camera/color/camera_info`다. `CameraInfo`와 영상의 optical frame이 일치하고,
+영상 시각의 `base_actuator ← optical frame` TF가 있어야 한다. 저장소의 측정 도구
+`tool_change_min/scripts/measure_apriltag_docking.py`와 같은 코너 순서로 PnP를 계산한다.
+태그 획득 후 검출 유실, 낮은 품질, 오래된 영상, TF 누락, 관절 피드백 유실, 소유권 변경,
+보정 한계 초과, 충돌 검사/IK 실패는 중단 사유다. 마지막 검출값으로 계속 접근하지 않는다.
+
+체결은 `/tool_changer/command` (`std_msgs/String`)에
+`{"id":"UUID","command":"LOCK"}`를 한 번 보내고 `/tool_changer/status`의
+`{"id":"동일 UUID","state":"LOCKED"}`를 기다린다. 다른 ID, 중복/반대 응답은
+완료로 인정하지 않는다. 대기 중 위치 이탈·timeout·취소는 같은 ID의 STOP과 팔 정지 요청을
+보내며 자동 재시도/후퇴를 하지 않는다. 명령 QoS는 reliable/volatile이다.
+Arduino 펌웨어/브리지는 별도로 이 계약을 구현해야 한다. 시각적 도킹 판정은 물리적인
+접촉/삽입 센서 확인을 대신하지 않으며, 실제 체결 완료는 Arduino 응답으로 구분한다.
+
+```bash
+ros2 service call /arm/tool_docking/cancel std_srvs/srv/Trigger '{}'
+ros2 topic echo /arm/tool_trajectory/status
+```
+
+도킹 노드는 전용 취소 서비스와 기존 `/arm/cancel`에 의한 모드/epoch 변경을 감시한다.
+도킹 노드 종료 시 launch도 종료한다. 프로세스 강제 종료/통신 단절에서 Arduino의 동작을
+정지시키는 자체 watchdog은 펌웨어에 필요하다. 성공 시에도 자동 후퇴하지 않고 HOLD를 유지한다.
+
+오프라인 검증(ROS 패키지 빌드 및 실기 구동 없음):
+
+```bash
+source /opt/ros/humble/setup.bash
+PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider \
+  src/arm/tool_manipulator_bringup/test/test_tool_docking.py \
+  src/arm/tool_manipulator_bringup/test/test_tool_trajectory_joy.py
 ```
 
 ## 수동 구동

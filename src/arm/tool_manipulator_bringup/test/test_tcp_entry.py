@@ -201,9 +201,10 @@ def ready_node():
     n = SimpleNamespace(
         ready_enabled=True, auto_entry_armed=True, ready_state='idle',
         ready_goal=np.array([0., 1.2, 1.2, -1.2, 0., 0.]), ready_duration=10.,
-        ready_step=.005, ready_timeout=3., ready_max_delta=.5, entry_retry_count=0,
+        ready_step=.005, ready_timeout=3., ready_max_delta=.5, home_max_delta=1.,
+        entry_retry_count=0,
         ready_checks=[], ready_snapshot=None,
-        ready_started=None, ready_future=None, ready_execution_id=None,
+        ready_started=1., ready_future=None, ready_execution_id=None,
         ready_safe_at=None, measured=np.array([0., 1.48, 1.50, -1.55, 0., 0.]),
         full_state=dict(zip(('base_joint', 'shoulder_joint', 'elbow_joint',
                              'wrist_pitch_joint', 'wrist_roll_joint', 'wrist_yaw_joint'),
@@ -362,3 +363,62 @@ def test_home_executes_without_l1_and_does_not_cancel_on_release():
     TcpJoy.drive_ready(n, 1.1)
     assert n.ready_state == 'executing'
     n.tool_pub.publish.assert_not_called()
+
+
+def test_explicit_home_uses_separate_larger_distance_limit():
+    n = ready_node()
+    n.returning_home = True
+    n.ready_goal = n.measured.copy()
+    n.ready_goal[1] -= .6
+    n.check.call_async.return_value.done.return_value = False
+    TcpJoy.drive_ready(n, 1.)
+    assert n.ready_state == 'checking'
+    assert n.auto_entry_armed
+
+
+def test_accepted_tcp_request_waits_for_actual_mode_and_recovers_on_rejection():
+    n = ready_node()
+    n.ready_state = 'request_tcp'
+    n.ready_request_epoch = 'hold-e'
+    n.ready_future = Mock()
+    n.ready_future.result.return_value = SimpleNamespace(success=True)
+    TcpJoy.drive_ready(n, 1.)
+    assert n.ready_state == 'wait_tcp' and n.auto_entry_armed
+    n.status.update(epoch='new', mode='hold', transitioning=False,
+                    reason='TCP entry waiting for 0.20 sec stable feedback')
+    TcpJoy.drive_ready(n, 1.1)
+    assert n.ready_state == 'failed' and not n.auto_entry_armed
+
+
+def test_tcp_transition_only_finishes_when_mode_is_confirmed():
+    n = ready_node()
+    n.ready_state = 'wait_tcp'
+    n.ready_request_epoch = 'hold-e'
+    n.status.update(mode='tcp_ik', transitioning=False)
+    TcpJoy.drive_ready(n, 1.1)
+    assert n.ready_state == 'idle' and not n.auto_entry_armed
+
+
+def test_tcp_transition_timeout_is_retryable():
+    n = ready_node()
+    n.ready_state = 'request_tcp'
+    n.ready_future = Mock()
+    n.ready_future.done.return_value = False
+    TcpJoy.drive_ready(n, 4.1)
+    assert n.ready_state == 'failed'
+
+
+@pytest.mark.parametrize('mode,pressed,twist,retry', [
+    ('hold', False, 0., True), ('hold', True, 0., False),
+    ('hold', False, 1., False), ('fault', False, 0., False),
+    ('tool_auto', False, 0., False)])
+def test_failed_ready_retries_only_on_fresh_neutral_l1_in_hold(mode, pressed, twist, retry):
+    n = ready_node()
+    n.ready_state = 'failed'
+    n.auto_entry_armed = False
+    n.default_ready_goal = n.ready_goal.copy()
+    n.status['mode'] = mode
+    n.twist = np.ones(6)*twist
+    TcpJoy.retry_ready(n, True, pressed, False, 1.1)
+    assert n.auto_entry_armed is retry
+    assert n.ready_state == ('idle' if retry else 'failed')

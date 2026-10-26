@@ -53,10 +53,17 @@ def bringup(context):
         tcp = Node(executable=sys.executable, arguments=[str(scripts/'tcp_joy.py')],
                    parameters=[base.description, {'hardware_config': base.hardware_file,
                                                   'tcp_ready_yaml': str(ready_config)}], output='screen')
+        docking = LaunchConfiguration('enable_tool_docking').perform(context) == 'true'
+        docking_parameters = ({
+            'docking_config': LaunchConfiguration('docking_config').perform(context),
+            'docking_camera_frame': LaunchConfiguration('docking_camera_frame').perform(context),
+        } if docking else {})
         tool_paths = Node(executable=sys.executable,
-                          arguments=[str(scripts/'tool_trajectory_joy.py')],
+                          arguments=[str(scripts/('tool_docking_coordinator.py' if docking
+                                                  else 'tool_trajectory_joy.py'))],
                           parameters=[base.description, {'hardware_config': base.hardware_file,
-                                                        'trajectory_dir': str(trajectory_dir)}],
+                                                        'trajectory_dir': str(trajectory_dir),
+                                                        **docking_parameters}],
                           output='screen')
         # Planning scene service only: no execution ownership or controller actions.
         scene = Node(package='moveit_ros_move_group', executable='move_group',
@@ -64,6 +71,10 @@ def bringup(context):
                                  {'allow_trajectory_execution': False,
                                   'publish_robot_description_semantic': True}], output='screen')
         tcp_nodes = [tcp, tool_paths, scene]
+        if docking:
+            # Losing the docking watchdog must stop the managed stack as well.
+            ready.append(RegisterEventHandler(OnProcessExit(target_action=tool_paths, on_exit=[
+                EmitEvent(event=Shutdown(reason='docking coordinator exited'))])))
         ready.extend(tcp_nodes)
     if LaunchConfiguration('launch_joy').perform(context) == 'true':
         ready.append(Node(package='joy', executable='joy_node', parameters=[{'autorepeat_rate': 50.}]))
@@ -87,5 +98,8 @@ def generate_launch_description():
         DeclareLaunchArgument('launch_joy', default_value='false', choices=['true', 'false']),
         DeclareLaunchArgument('mock_initial_positions_file', default_value=''),
         DeclareLaunchArgument('launch_tcp_joy', default_value='true', choices=['true', 'false']),
+        DeclareLaunchArgument('enable_tool_docking', default_value='false', choices=['true', 'false']),
+        DeclareLaunchArgument('docking_config', default_value=str(hardware_default.parent/'tool_docking.yaml')),
+        DeclareLaunchArgument('docking_camera_frame', default_value=''),
         OpaqueFunction(function=bringup),
     ])

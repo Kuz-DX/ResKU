@@ -1,0 +1,38 @@
+# Opt-in only. Existing L2 paths remain unchanged until launch AND path are enabled.
+# Before enabling, teach the stored trajectory to end BEFORE contact, with tag visible.
+# All xyz/xyzw values are TCP poses in the TAG frame (metres, quaternion x y z w).
+# Never substitute camera pixel centre or raw camera depth for a calibrated 6D pose.
+tools:
+  0:
+    enabled: false
+    tag_id: null                   # physical tag ID; not necessarily path ID
+    tag_size_m: null               # measured black square edge length
+    lock_enabled: false
+    lock_timeout_s: null           # establish with actual Arduino firmware
+    stages:
+      - {name: coarse, xyz_m: null, xyzw: null}
+      - {name: fine, xyz_m: null, xyzw: null}
+      - {name: dock, xyz_m: null, xyzw: null}
+    # Conservative starting limits, NOT measured docking accuracy guarantees.
+    tag_max_age_s: 0.25
+    min_decision_margin: 40.0
+    max_reprojection_px: 1.5
+    position_tolerance_m: 0.002
+    angle_tolerance_rad: 0.02
+    step_m: 0.002
+    step_rad: 0.01
+    max_position_error_m: 0.05
+    max_angle_error_rad: 0.25
+    joint_step_rad: 0.03
+    joint_speed_rad_s: 0.025
+    linear_speed_m_s: 0.005
+    angular_speed_rad_s: 0.05
+    stopped_speed_rad_s: 0.01
+    joint_tolerance_rad: 0.005
+    stable_samples: 5
+    acquire_timeout_s: 10.0
+    sequence_timeout_s: 180.0
+  1:
+    enabled: false
+  2:
+    enabled: false

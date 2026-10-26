@@ -14,6 +14,23 @@ except ImportError:
 
 
 class TcpMotionWorkflow:
+    def retry_ready(self, valid, was_pressed, home, now):
+        """A fresh neutral L1 press retries validation, never bypasses it."""
+        s = self.status
+        if (valid and self.deadman and not was_pressed and not home
+                and vars(self).get('ready_enabled', False)
+                and self.ready_state in ('failed', 'idle', 'await_entry')
+                and not vars(self).get('returning_home', False)
+                and s.get('mode') == 'hold' and not s.get('transitioning')
+                and s.get('focus') == 'arm' and s.get('ready')
+                and s.get('startup_complete') and now-self.status_time < .3
+                and now-self.state_time < .3 and not np.any(self.twist)):
+            self._reset_ready()
+            self.ready_goal = self.default_ready_goal.copy()
+            self.entry_retry_count = 0
+            self.auto_entry_armed = True
+            self.reason = 'L1 requested fresh TCP entry/ready validation'
+
     def _reset_ready(self):
         for future in self.ready_checks:
             if not future.done():
@@ -36,6 +53,10 @@ class TcpMotionWorkflow:
         s = self.status
         if not self.ready_enabled or not self.auto_entry_armed:
             return
+        if self.ready_state in ('request_tcp', 'wait_tcp'):
+            if now-self.ready_started > 3.:
+                self._fail_ready('TCP transition timed out; release and press L1 to retry')
+                return
         if (now-self.status_time >= .3 or now-self.state_time >= .3 or self.measured is None
                 or not s.get('ready') or not s.get('startup_complete') or s.get('focus') != 'arm'):
             return
@@ -46,10 +67,13 @@ class TcpMotionWorkflow:
                 self.reason = 'waiting for MoveIt collision service before TCP ready'
                 return
             delta = float(np.max(np.abs(self.ready_goal-self.measured)))
-            if delta > self.ready_max_delta:
+            limit = (self.home_max_delta if vars(self).get('returning_home', False)
+                     else self.ready_max_delta)
+            if delta > limit:
                 self._fail_ready(
-                    'TCP ready automatic move blocked: %.3f rad exceeds %.3f rad limit' %
-                    (delta, self.ready_max_delta))
+                    '%s move blocked: %.3f rad exceeds %.3f rad limit' %
+                    ('manual Stop_pose' if vars(self).get('returning_home', False)
+                     else 'TCP ready automatic', delta, limit))
                 return
             count = max(1, math.ceil(float(np.max(np.abs(self.ready_goal-self.measured))) /
                                      self.ready_step))
@@ -159,15 +183,18 @@ class TcpMotionWorkflow:
             if now-self.ready_safe_at < .1 or not self.tcp_mode.service_is_ready():
                 return
             self.ready_future = self.tcp_mode.call_async(Trigger.Request())
+            self.ready_started = now
+            self.ready_request_epoch = s.get('epoch')
             self.ready_state = 'request_tcp'
             self.reason = 'requesting TCP_IK after verified TCP ready'
             return
         if self.ready_state == 'request_tcp' and self.ready_future.done():
             result = self.ready_future.result()
-            self.auto_entry_armed = False
             if result is not None and result.success:
-                self.reason = 'TCP_IK transition requested'
+                self.ready_state = 'wait_tcp'
+                self.reason = 'waiting for confirmed TCP_IK mode'
             else:
+                self.auto_entry_armed = False
                 detail = getattr(result, 'message', '') if result is not None else ''
                 if detail in ('TCP entry feedback changed; recheck required',
                               'TCP entry waiting for 0.20 sec stable feedback',
@@ -186,5 +213,15 @@ class TcpMotionWorkflow:
                 else:
                     self.ready_state = 'failed'
                     self.reason = 'TCP_IK request rejected: '+detail
+            return
+        if self.ready_state == 'wait_tcp':
+            if s.get('mode') == 'tcp_ik' and not s.get('transitioning'):
+                self.ready_state = 'idle'
+                self.auto_entry_armed = False
+                self.reason = 'TCP_IK confirmed; release L1 to rearm'
+            elif (s.get('epoch') != self.ready_request_epoch
+                  and not s.get('transitioning')):
+                self._fail_ready('TCP transition did not complete: '+s.get('reason', '')+
+                                 '; release and press L1 to retry')
 
 

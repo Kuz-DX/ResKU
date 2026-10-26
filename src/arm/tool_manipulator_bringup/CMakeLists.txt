@@ -20,6 +20,10 @@ install(PROGRAMS scripts/managed_manual.py scripts/arm_control_mode_manager.py D
 install(FILES scripts/arm_mode_core.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/tcp_joy.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/tool_trajectory_joy.py DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS scripts/tool_docking_coordinator.py DESTINATION lib/${PROJECT_NAME})
+install(FILES scripts/tool_docking_core.py DESTINATION lib/${PROJECT_NAME})
+install(FILES ../tool_change_min/tool_change_min/changer_protocol.py
+  DESTINATION lib/${PROJECT_NAME} RENAME arm_changer_protocol.py)
 install(PROGRAMS scripts/evaluate_tcp_ready.py DESTINATION lib/${PROJECT_NAME})
 install(FILES scripts/tcp_joy_core.py DESTINATION lib/${PROJECT_NAME})
 install(FILES scripts/tcp_motion_workflow.py DESTINATION lib/${PROJECT_NAME})
