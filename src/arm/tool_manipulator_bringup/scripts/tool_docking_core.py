@@ -109,7 +109,7 @@ def load_settings(filename):
                       linear_speed_m_s=(0, .02), angular_speed_rad_s=(0, .1),
                       stopped_speed_rad_s=(0, .02), joint_tolerance_rad=(0, .02),
                       acquire_timeout_s=(0, 30), sequence_timeout_s=(0, 600),
-                      lock_timeout_s=(0, 120))
+                      actuation_timeout_s=(0, 120))
         for name, (low, high) in limits.items():
             value = item.get(name)
             if (type(value) not in (int, float) or not math.isfinite(value)
@@ -117,8 +117,10 @@ def load_settings(filename):
                 raise ValueError(f'tool {tool_id}: {name} must be in ({low}, {high}]')
         if type(item.get('stable_samples')) is not int or not 3 <= item['stable_samples'] <= 100:
             raise ValueError('stable_samples must be 3..100 distinct observations')
-        if type(item.get('lock_enabled')) is not bool:
-            raise ValueError('explicit lock_enabled required')
+        if type(item.get('actuation_enabled')) is not bool:
+            raise ValueError('explicit actuation_enabled required')
+        if type(item.get('desired_docked')) is not bool:
+            raise ValueError('explicit desired_docked state required')
         stages = item.get('stages')
         if not isinstance(stages, list) or len(stages) != 3:
             raise ValueError('three tag-relative stages required: coarse, fine, dock')

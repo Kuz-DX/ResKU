@@ -11,8 +11,13 @@ TCP_ENTRY_TOLERANCE = (.02, .001, .001, .001, .02, .02)
 
 
 class ModeCore:
-    def __init__(self, limits, speeds, startup_recovery_enabled=False):
+    def __init__(self, limits, speeds, startup_recovery_enabled=False, path_accelerations=None):
         self.limits, self.speeds = limits, speeds
+        self.path_accelerations = (list(path_accelerations) if path_accelerations is not None
+                                   else [0.25]*len(speeds))
+        if (len(self.path_accelerations) != len(speeds)
+                or not all(math.isfinite(a) and 0 < a <= 2. for a in self.path_accelerations)):
+            raise ValueError('invalid path acceleration limits')
         self.mode = 'hold'
         self.requested = 'hold'
         self.transitioning = False
@@ -31,6 +36,7 @@ class ModeCore:
         self.execution_id = None
         self.path_durations = []
         self.path_speeds = list(speeds)
+        self.path_velocity = [0.]*len(speeds)
         self.last_execution_id = None
         self.last_execution_result = None
         self.started = 0.
@@ -199,6 +205,7 @@ class ModeCore:
         self.settled = 0
         self.path_durations = []
         self.path_speeds = list(self.speeds)
+        self.path_velocity = [0.]*len(self.speeds)
 
     def fault(self, reason):
         self.invalidate()
@@ -305,6 +312,7 @@ class ModeCore:
         self.queue = [list(p) for p in waypoints]
         self.path_durations = list(durations) if durations is not None else [None]*len(waypoints)
         self.execution_id = execution_id
+        self.path_velocity = [0.]*len(self.speeds)
         self._next_waypoint()
         self.started = now
         return True
@@ -329,6 +337,40 @@ class ModeCore:
         if self.fresh(now):
             self.target = self.goal = list(self.position)
         return True
+
+    def _tool_path_step(self, goal, dt):
+        """Acceleration-bounded path command; brake only for the final goal."""
+        result = []
+        final_segment = not self.queue
+        for position, target, speed, velocity, acceleration in zip(
+                self.target, goal, self.path_speeds, self.path_velocity,
+                self.path_accelerations):
+            distance = target-position
+            if abs(distance) < 1e-12:
+                next_velocity = 0. if final_segment else velocity
+                result.append(target)
+                self.path_velocity[len(result)-1] = next_velocity
+                continue
+            desired_speed = speed
+            if final_segment:
+                # v^2 <= 2*a*d guarantees enough distance to stop at the goal.
+                # One control-period margin compensates the discrete velocity
+                # slew so the final sample is not reached by a velocity jump.
+                desired_speed = min(desired_speed, max(0.,
+                    math.sqrt(2.*acceleration*abs(distance))-acceleration*dt))
+            desired_velocity = math.copysign(desired_speed, distance)
+            change = acceleration*dt
+            next_velocity = velocity+max(-change, min(change, desired_velocity-velocity))
+            step = .5*(velocity+next_velocity)*dt
+            if abs(step) >= abs(distance) or step*distance <= 0:
+                result.append(target)
+                # Preserve velocity through an intermediate sample. At the final
+                # goal the measured-settle gate still requires actual standstill.
+                self.path_velocity[len(result)-1] = 0. if final_segment else next_velocity
+            else:
+                result.append(position+step)
+                self.path_velocity[len(result)-1] = next_velocity
+        return result
 
     def tick(self, now, dt):
         if self.target is None:
@@ -359,9 +401,11 @@ class ModeCore:
                 self.goal = list(self.position)
         goal = self.goal if self.goal is not None else self.target
         step = min(max(dt, 0.), .04)
-        speeds = self.path_speeds if self.mode == 'tool_auto' and self.execution_id else self.speeds
-        self.target = [a+max(-s*step, min(s*step,b-a))
-                       for a,b,s in zip(self.target, goal, speeds)]
+        if self.mode == 'tool_auto' and self.execution_id:
+            self.target = self._tool_path_step(goal, step)
+        else:
+            self.target = [a+max(-s*step, min(s*step,b-a))
+                           for a,b,s in zip(self.target, goal, self.speeds)]
         stopped = (max(map(abs, self.velocity)) <= .02 and
                    max(abs(a-b) for a,b in zip(self.position, goal)) <= .01 and
                    max(abs(a-b) for a,b in zip(self.target, goal)) < 1e-6)
@@ -385,14 +429,19 @@ class ModeCore:
         elif self.mode == 'tool_auto' and self.execution_id is not None:
             if now-self.started > 120.:
                 self.fault('waypoint timeout')
-            elif self.settled >= 5:
-                if self.queue:
-                    self._next_waypoint()
-                    self.started, self.settled = now, 0
-                else:
-                    completed = self.execution_id
-                    self.request('hold', now)
-                    self.last_execution_id = completed
-                    self.last_execution_result = 'succeeded'
-                    self.reason = 'path completed'
+            # Intermediate trajectory samples describe one continuous motion,
+            # not individual stop goals. Advance as soon as the command ramp
+            # reaches each sample; require measured standstill only at the
+            # final waypoint. Waiting for five stopped feedback cycles at every
+            # MoveIt sample caused repeated stop/start chatter.
+            elif (self.queue and
+                  max(abs(a-b) for a, b in zip(self.target, self.goal)) < 1e-6):
+                self._next_waypoint()
+                self.started, self.settled = now, 0
+            elif not self.queue and self.settled >= 5:
+                completed = self.execution_id
+                self.request('hold', now)
+                self.last_execution_id = completed
+                self.last_execution_result = 'succeeded'
+                self.reason = 'path completed'
         return list(self.target)

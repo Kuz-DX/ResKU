@@ -10,7 +10,7 @@ import yaml
 
 SCRIPTS = Path(__file__).resolve().parents[1]/'scripts'
 sys.path.insert(0, str(SCRIPTS))
-from tool_trajectory_joy import execution_plan, load_path, requested_path
+from tool_trajectory_joy import execution_plan, load_path, planned_entry, requested_path
 
 
 def write_path(tmp_path, enabled=True, times=(0., 1., 3.)):
@@ -85,6 +85,38 @@ def test_far_start_remains_blocked():
                 durations=[2.], total=2.)
     with pytest.raises(ValueError, match='automatic approach limit'):
         execution_plan(path, np.ones(6)*.101)
+
+
+def test_moveit_entry_plan_is_prefixed_to_taught_path():
+    names = ['wrist_yaw_joint', 'base_joint', 'shoulder_joint',
+             'elbow_joint', 'wrist_pitch_joint', 'wrist_roll_joint']
+    def point(positions, sec, nanosec=0):
+        return SimpleNamespace(positions=positions,
+                               time_from_start=SimpleNamespace(sec=sec, nanosec=nanosec))
+    # Positions follow the deliberately shuffled trajectory joint order.
+    trajectory = SimpleNamespace(joint_names=names, points=[
+        point([.1, .1, .1, .1, .1, .1], 1),
+        point([0., 0., 0., 0., 0., 0.], 2),
+    ])
+    path = dict(start=np.zeros(6), waypoints=[np.ones(6)*.2],
+                durations=[3.], total=3.)
+    result = planned_entry(path, trajectory, np.ones(6)*.2)
+    assert [q.tolist() for q in result['waypoints']] == [
+        [.1]*6, [0.]*6, [.2]*6]
+    assert result['durations'] == pytest.approx([1., 1., 3.])
+    assert result['total'] == pytest.approx(5.)
+
+
+def test_moveit_entry_must_reach_taught_start():
+    trajectory = SimpleNamespace(joint_names=list(
+        ['base_joint', 'shoulder_joint', 'elbow_joint',
+         'wrist_pitch_joint', 'wrist_roll_joint', 'wrist_yaw_joint']), points=[
+            SimpleNamespace(positions=[.02]*6,
+                            time_from_start=SimpleNamespace(sec=1, nanosec=0))])
+    path = dict(start=np.zeros(6), waypoints=[np.ones(6)*.2],
+                durations=[3.], total=3.)
+    with pytest.raises(ValueError, match='did not reach'):
+        planned_entry(path, trajectory, np.ones(6)*.2)
 
 
 def test_path_snapshot_accepts_dxl_hunt_but_keeps_rmd_tight():

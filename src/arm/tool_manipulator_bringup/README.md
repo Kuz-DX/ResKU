@@ -53,7 +53,7 @@ ros2 launch src/arm/tool_manipulator_bringup/launch/ik_manual.launch.py
 경로는 기존 방식으로 재생하고 HOLD로 끝낸다.
 
 `enable_tool_docking:=true`만 지정하면 활성 경로의 저장 궤적 이후 태그와 목표 오차를
-`preview` 상태로 출력하지만 보정 이동이나 LOCK은 실행하지 않는다. 실측·preview 검증까지
+`preview` 상태로 출력하지만 보정 이동이나 Arduino 구동은 실행하지 않는다. 실측·preview 검증까지
 통과한 뒤에만 `enable_docking_motion:=true`를 추가해 실제 보정을 별도로 무장한다.
 
 도킹을 활성화한 경로의 순서는 다음과 같다.
@@ -62,7 +62,7 @@ ros2 launch src/arm/tool_manipulator_bringup/launch/ik_manual.launch.py
 L2 + 경로 선택 → 기존 관절 경로 검증/재생 → 실제 완료 및 HOLD
   → 태그 획득 → coarse 목표 → fine 목표 → dock 목표
   → 서로 다른 영상/관절 피드백에서 정렬·정지 연속 확인
-  → LOCK 1회 → 같은 UUID의 LOCKED 확인 → HOLD 유지
+  → `/arm/docking` Bool 펄스 → 새 `/arm/docked` 완료 상태 확인 → HOLD 유지
 ```
 
 정렬은 매번 `검출 → 제한된 TCP 보정 → IK → 관절 경로 충돌 검사 → 실행 → 재검출`로
@@ -76,7 +76,9 @@ L2 + 경로 선택 → 기존 관절 경로 검증/재생 → 실제 완료 및 
 - 실제 `tag_id`, 검은 정사각형의 실측 `tag_size_m`.
 - `stages`의 coarse/fine/dock 각각 `xyz_m`와 `xyzw`.
   이는 `T_tag_tcp`이며 카메라 좌표나 base 좌표가 아니다. quaternion 순서는 x/y/z/w.
-- Arduino와 확인한 `lock_timeout_s`. 최초 정렬 검증은 `lock_enabled: false`로 수행한다.
+- Arduino와 확인한 `actuation_timeout_s`. 최초 정렬 검증은
+  `actuation_enabled: false`로 수행한다.
+- `desired_docked: true`는 체결, `false`는 해지 경로다.
 - 기구에 맞는 위치/각도/속도 허용값과 보정 범위. 제공된 값은 실기 검증값이 아니다.
 
 필수값을 채운 후 경로 0만 `enabled: true`로 설정한다. 경로 1/2는 비활성으로 두면
@@ -98,13 +100,14 @@ ros2 launch src/arm/tool_manipulator_bringup/launch/ik_manual.launch.py \
 태그 획득 후 검출 유실, 낮은 품질, 오래된 영상, TF 누락, 관절 피드백 유실, 소유권 변경,
 보정 한계 초과, 충돌 검사/IK 실패는 중단 사유다. 마지막 검출값으로 계속 접근하지 않는다.
 
-체결은 `/tool_changer/command` (`std_msgs/String`)에
-`{"id":"UUID","command":"LOCK"}`를 한 번 보내고 `/tool_changer/status`의
-`{"id":"동일 UUID","state":"LOCKED"}`를 기다린다. 다른 ID, 중복/반대 응답은
-완료로 인정하지 않는다. 대기 중 위치 이탈·timeout·취소는 같은 ID의 STOP과 팔 정지 요청을
-보내며 자동 재시도/후퇴를 하지 않는다. 명령 QoS는 reliable/volatile이다.
-Arduino 펌웨어/브리지는 별도로 이 계약을 구현해야 한다. 시각적 도킹 판정은 물리적인
-접촉/삽입 센서 확인을 대신하지 않으며, 실제 체결 완료는 Arduino 응답으로 구분한다.
+Arduino 명령과 완료 상태는 `std_msgs/Bool`을 사용한다. 체결은 `/arm/docking`에
+`true` 후 즉시 `false`, 해지는 `false` 후 즉시 `true`를 발행하는 트리거 펄스다.
+`/arm/docked`의 명령 이후 새 피드백이 체결 시 `true`, 해지 시 `false`가 되어야 완료로
+인정한다. 명령 전에 남아 있던 동일 상태나 반대 상태는 완료로 인정하지 않는다. 대기 중
+위치 이탈·timeout·취소는 팔을 정지시키며 자동 재시도나 반대 펄스, 자동 후퇴를 하지 않는다.
+Bool 계약에는 STOP 명령이 없으므로 통신 단절과 비상 정지는 Arduino 자체 watchdog이
+담당해야 한다. 시각적 도킹 판정은 물리적인 접촉/삽입 센서 확인을 대신하지 않으며,
+실제 완료는 `/arm/docked` 피드백으로 구분한다.
 
 ```bash
 ros2 service call /arm/tool_docking/cancel std_srvs/srv/Trigger '{}'
@@ -116,7 +119,8 @@ ros2 topic echo /arm/tool_trajectory/status
 정지시키는 자체 watchdog은 펌웨어에 필요하다. 성공 시에도 자동 후퇴하지 않고 HOLD를 유지한다.
 도킹이 활성화된 경로는 L2를 deadman으로 사용한다. 저장 경로 재생부터 정렬·체결까지 L2를
 계속 눌러야 하며, L2를 놓거나 `/joy`가 0.3초 이상 끊기면 취소하고 자동 후퇴하지 않는다.
-`lock_enabled: true`인 경로는 시작 시점부터 Arduino command subscriber와 status publisher가
+`actuation_enabled: true`인 경로는 시작 시점부터 `/arm/docking` subscriber와
+`/arm/docked` publisher가
 모두 보여야 한다.
 
 오프라인 검증(ROS 패키지 빌드 및 실기 구동 없음):

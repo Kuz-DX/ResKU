@@ -7,8 +7,9 @@ tools:
     enabled: false
     tag_id: null                   # physical tag ID; not necessarily path ID
     tag_size_m: null               # measured black square edge length
-    lock_enabled: false
-    lock_timeout_s: null           # establish with actual Arduino firmware
+    actuation_enabled: false
+    desired_docked: true           # true=attach pulse, false=release pulse
+    actuation_timeout_s: null      # establish with actual Arduino firmware
     stages:
       - {name: coarse, xyz_m: null, xyzw: null}
       - {name: fine, xyz_m: null, xyzw: null}

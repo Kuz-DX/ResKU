@@ -35,7 +35,13 @@ class ControlModeManager(Node):
         limits = load_soft_limits(path, JOINTS)
         config = yaml.safe_load(path.read_text())
         speeds = [min(.12, float(config['joints'][j]['velocity_limit_rad_s'])/2) for j in JOINTS]
-        self.core = ModeCore([limits[j] for j in JOINTS], speeds, startup_recovery_enabled=True)
+        # Tool paths use a conservative command acceleration; manual/TCP keep
+        # their existing direct bounded response.
+        path_accelerations = [float(self.declare_parameter(
+            'tool_path_acceleration_rad_s2', .25).value)]*len(JOINTS)
+        self.core = ModeCore([limits[j] for j in JOINTS], speeds,
+                             startup_recovery_enabled=True,
+                             path_accelerations=path_accelerations)
         self.core.tcp_entry_required = True
         self.ee = self.create_publisher(Float64MultiArray, '/ee_velocity_controller/commands', 1)
         self.position = self.create_publisher(Float64MultiArray, '/manual_position_controller/commands', 1)

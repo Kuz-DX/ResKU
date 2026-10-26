@@ -79,19 +79,58 @@ def test_limits_and_feedback_lead_are_enforced():
             c.command('manual', c.epoch, target, 0., .1)
 
 
-def test_path_waits_for_measured_settlement_before_next_waypoint():
+def test_path_continues_through_intermediate_waypoint_without_stopping():
     c = ready('tool_auto')
     c.path(c.epoch, 'run1', [[.01]*6, [.02]*6], .1)
-    for i in range(1, 11):
+    for i in range(1, 20):
         now = .1+i*.02
         c.feedback([0.]*6, [.03]*6, now)
         c.tick(now, .02)
-    assert len(c.queue) == 1
+        if not c.queue:
+            break
+    assert c.queue == [] and c.goal == [.02]*6
+    assert c.execution_id == 'run1'
+    # The command crosses the intermediate sample with non-zero velocity.
+    assert all(v > 0. for v in c.path_velocity)
+
+
+def test_path_requires_measured_settlement_only_at_final_waypoint():
+    c = ready('tool_auto')
+    c.path(c.epoch, 'run1', [[.01]*6, [.02]*6], .1)
+    for i in range(1, 80):
+        now = .1+i*.02
+        c.feedback([0.]*6, [.03]*6, now)
+        c.tick(now, .02)
+        if c.target == [.02]*6:
+            break
+    assert c.execution_id == 'run1'
     for i in range(1, 6):
         now = .3+i*.02
-        c.feedback([.01]*6, [0.]*6, now)
+        c.feedback([.02]*6, [0.]*6, now)
         c.tick(now, .02)
-    assert c.queue == [] and c.goal == [.02]*6
+    assert c.execution_id is None
+    assert c.last_execution_id == 'run1'
+    assert c.last_execution_result == 'succeeded'
+
+
+def test_tool_path_command_acceleration_and_final_braking_are_bounded():
+    c = ready('tool_auto')
+    c.path_accelerations = [.2]*6
+    c.path(c.epoch, 'smooth', [[.2]*6], .1, durations=[2.])
+    velocities = []
+    previous = c.target[0]
+    for i in range(1, 201):
+        now = .1+i*.02
+        c.feedback([c.target[0]]*6, [c.path_velocity[0]]*6, now)
+        current = c.tick(now, .02)[0]
+        velocities.append((current-previous)/.02)
+        previous = current
+        if current == pytest.approx(.2):
+            break
+    assert max(abs(b-a) for a, b in zip(velocities, velocities[1:])) <= .2*.02+1e-9
+    assert velocities[0] == pytest.approx(.5*.2*.02)
+    assert velocities[-1] < max(velocities)
+    assert c.target[0] == pytest.approx(.2)
 
 
 def test_focus_and_controller_gates():

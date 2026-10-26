@@ -13,16 +13,12 @@ from rclpy.qos import qos_profile_sensor_data
 from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo
 from sensor_msgs.msg import Joy
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
 from std_srvs.srv import Trigger
 from tf2_ros import Buffer, TransformException, TransformListener
 
 from tool_trajectory_joy import ToolTrajectoryJoy, ARM_JOINTS
 from tool_docking_core import load_settings, transform, pose_errors, bounded_target, tag_pose
-try:
-    from tool_change_min.changer_protocol import ChangerTransaction
-except ImportError:
-    from arm_changer_protocol import ChangerTransaction
 
 
 class ToolDockingCoordinator(ToolTrajectoryJoy):
@@ -41,8 +37,10 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         self.feedback_sequence = 0
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
-        self.changer = self.create_publisher(String, '/tool_changer/command', 10)
-        self.create_subscription(String, '/tool_changer/status', self.on_changer, 10)
+        # Arduino Bool pulse contract.  desired=True is emitted as True->False;
+        # desired=False is emitted as False->True so the input returns idle.
+        self.docking_command = self.create_publisher(Bool, '/arm/docking', 10)
+        self.create_subscription(Bool, '/arm/docked', self.on_docked, 10)
         self.create_subscription(CameraInfo, self.declare_parameter(
             'docking_camera_info_topic', '/arm/camera/color/camera_info').value,
             self.on_camera, qos_profile_sensor_data)
@@ -59,7 +57,11 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         super().reset()
         self.active = False
         self.docking_started = None
-        self.transaction = None
+        self.docked_state = None
+        self.docked_feedback_sequence = 0
+        self.command_feedback_sequence = None
+        self.expected_docked = None
+        self.actuation_deadline = None
         self.observation = None
         self.last_image_stamp = -1
         self.dock_stage = 0
@@ -139,9 +141,9 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             self.active = True
             self.cfg = self.settings[path_id]
             self.docking_started = None
-            if (self.cfg['lock_enabled']
-                    and (self.changer.get_subscription_count() == 0
-                         or self.count_publishers('/tool_changer/status') == 0)):
+            if (self.cfg['actuation_enabled']
+                    and (self.docking_command.get_subscription_count() == 0
+                         or self.count_publishers('/arm/docked') == 0)):
                 self.fail('Arduino command/status connection unavailable before docking')
                 return
         super().begin(path_id, planned_path)
@@ -154,10 +156,6 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
 
     def fail(self, reason):
         if self.active:
-            if self.transaction is not None:
-                stop = self.transaction.abort(reason)
-                if stop is not None:
-                    self.changer.publish(String(data=stop))
             if self.cancel.service_is_ready():
                 self.cancel.call_async(Trigger.Request())
         super().fail(reason)
@@ -170,12 +168,14 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             response.success, response.message = True, 'cancel requested; no automatic retreat'
         return response
 
-    def on_changer(self, msg):
-        if self.transaction is not None:
-            try:
-                self.transaction.receive(msg.data, time.monotonic())
-            except RuntimeError as exc:
-                self.fail(str(exc))
+    def on_docked(self, msg):
+        self.docked_state = bool(msg.data)
+        self.docked_feedback_sequence += 1
+
+    def send_docking_pulse(self, desired):
+        """Publish the requested edge and immediately restore the opposite idle level."""
+        self.docking_command.publish(Bool(data=desired))
+        self.docking_command.publish(Bool(data=not desired))
 
     def path_completed(self):
         if not self.active:
@@ -233,7 +233,7 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                 else:
                     # Tag loss also cancels a correction while it is being checked/executed.
                     self.fresh_observation(now)
-                if self.stage in ('dock_observe', 'dock_lock'):
+                if self.stage in ('dock_observe', 'dock_actuate'):
                     self.observe(now)
                     return
             super().tick()
@@ -249,12 +249,16 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         stopped = np.max(np.abs(self.velocity)) <= self.cfg['stopped_speed_rad_s']
         aligned = (distance <= self.cfg['position_tolerance_m']
                    and angle <= self.cfg['angle_tolerance_rad'])
-        if self.stage == 'dock_lock':
+        if self.stage == 'dock_actuate':
             if (not stopped or not aligned
                     or np.max(np.abs(q-self.lock_goal)) > self.cfg['joint_tolerance_rad']):
-                raise RuntimeError('arm departed measured docking pose during LOCK')
-            if self.transaction.check(now):
-                self.report('locked', 'Arduino LOCKED confirmed; remain HOLD (no automatic retreat)')
+                raise RuntimeError('arm departed measured docking pose during Arduino actuation')
+            if now >= self.actuation_deadline:
+                raise RuntimeError('Arduino docking completion timeout')
+            if (self.docked_feedback_sequence > self.command_feedback_sequence
+                    and self.docked_state == self.expected_docked):
+                state = 'docked' if self.expected_docked else 'released'
+                self.report(state, f'Arduino {state} state confirmed; remain HOLD')
                 self.reset()
             return
         if (stamp <= self.observe_after_ns or stamp == self.observed_image
@@ -283,17 +287,20 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                 self.observe_after_ns = self.get_clock().now().nanoseconds
                 self.report('aligning', f'confirmed alignment; advance to stage {self.dock_stage}')
                 return
-            if not self.cfg['lock_enabled']:
-                self.report('docked', 'visual docking settled; LOCK disabled; remain HOLD')
+            if not self.cfg['actuation_enabled']:
+                self.report('docked', 'visual docking settled; Arduino actuation disabled; remain HOLD')
                 self.reset()
                 return
-            if self.changer.get_subscription_count() == 0:
+            if self.docking_command.get_subscription_count() == 0:
                 raise RuntimeError('Arduino command subscriber unavailable')
             self.lock_goal = q.copy()
-            self.transaction = ChangerTransaction('LOCK', self.cfg['lock_timeout_s'], now)
-            self.changer.publish(String(data=self.transaction.request()))
-            self.stage = 'dock_lock'
-            self.report('locking', 'LOCK sent once; waiting for matching LOCKED')
+            self.expected_docked = self.cfg['desired_docked']
+            self.command_feedback_sequence = self.docked_feedback_sequence
+            self.actuation_deadline = now+self.cfg['actuation_timeout_s']
+            self.send_docking_pulse(self.expected_docked)
+            self.stage = 'dock_actuate'
+            action = 'dock' if self.expected_docked else 'release'
+            self.report('actuating', f'Arduino {action} pulse sent; waiting for /arm/docked')
             return
         self.stable = 0
         increment = bounded_target(current, target, self.cfg['step_m'], self.cfg['step_rad'])

@@ -43,8 +43,11 @@ The manager alone publishes `/manual_position_controller/commands` and
 `/ee_velocity_controller/commands`. All modes share the position controller:
 MANUAL and TCP_IK supply joint targets; TOOL_AUTO supplies joint waypoints.
 Targets are ramped at at most min(0.12 rad/s, half hardware speed).
-These are velocity-bounded position ramps, not acceleration-limited planned paths.
-There is no collision planning in this gateway.
+Manual and TCP commands remain velocity-bounded position ramps. TOOL_AUTO adds
+a conservative command-acceleration limit, crosses intermediate trajectory
+samples without stopping, and brakes at the final goal. Collision planning is
+performed by the external MoveIt entry planner; the gateway retains ownership
+and following-error enforcement.
 
 `managed_manual.py` reuses joystick mapping and neutral rearming but does not
 activate/deactivate controllers. TCP IK solvers and tool planners are external

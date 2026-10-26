@@ -15,14 +15,14 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'scripts'))
 from tool_docking_core import load_settings, transform, bounded_target, pose_errors, tag_pose
-from tool_docking_coordinator import ToolDockingCoordinator, ChangerTransaction
+from tool_docking_coordinator import ToolDockingCoordinator
 from tool_trajectory_joy import ToolTrajectoryJoy, ARM_JOINTS
 
 
 def settings(tmp_path):
     data = yaml.safe_load((ROOT/'config/tool_docking.yaml').read_text())
     raw = data['tools'][0]
-    raw.update(enabled=True, tag_id=7, tag_size_m=.04, lock_timeout_s=5.)
+    raw.update(enabled=True, tag_id=7, tag_size_m=.04, actuation_timeout_s=5.)
     for stage in raw['stages']:
         stage.update(xyz_m=[0., 0., 0.], xyzw=[0., 0., 0., 1.])
     path = tmp_path/'docking.yaml'
@@ -36,15 +36,17 @@ def node(tmp_path):
         cfg=cfg, active=True, path_id=0, stage='dock_observe', dock_stage=0,
         full_state=dict.fromkeys(ARM_JOINTS, 0.), velocity=np.zeros(6),
         feedback_sequence=1, observed_feedback=-1, observed_image=-1,
-        observe_after_ns=0, stable=0, transaction=None, lock_goal=None,
+        observe_after_ns=0, stable=0, lock_goal=None, docked_state=None,
+        docked_feedback_sequence=0, command_feedback_sequence=None,
+        expected_docked=None, actuation_deadline=None,
         last_joy_time=1., deadman_timeout=.3, deadman_held=True,
         motion_enabled=True, last_preview_report=-math.inf,
         model=Mock(), report=Mock(), reset=Mock(), begin=Mock(), fail=Mock(),
-        changer=Mock(), get_clock=Mock(), margin=.02,
+        docking_command=Mock(), get_clock=Mock(), margin=.02,
         observation=(1, 0., np.eye(4)))
     result.get_clock.return_value.now.return_value.nanoseconds = 0
     result.model.fk.return_value = np.eye(4)
-    result.changer.get_subscription_count.return_value = 1
+    result.docking_command.get_subscription_count.return_value = 1
     result.fresh_observation = lambda now: (result.observation[0], result.observation[2])
     instance = ToolDockingCoordinator.__new__(ToolDockingCoordinator)
     instance.__dict__.update(vars(result))
@@ -118,28 +120,40 @@ def test_duplicate_images_or_feedback_never_count_as_stability(tmp_path):
         ToolDockingCoordinator.observe(n, 1.)
     assert n.stable == 1
     assert n.dock_stage == 0
-    n.changer.publish.assert_not_called()
+    n.docking_command.publish.assert_not_called()
 
 
-def test_three_stages_then_single_lock_and_matching_response(tmp_path):
+def test_three_stages_then_attach_pulse_and_fresh_docked_response(tmp_path):
     n = node(tmp_path)
-    n.cfg['lock_enabled'] = True
+    n.cfg['actuation_enabled'] = True
     for _ in range(n.cfg['stable_samples']*3-1):
         sample(n)
-        n.changer.publish.assert_not_called()
+        n.docking_command.publish.assert_not_called()
     sample(n)
-    assert n.stage == 'dock_lock'
-    command = json.loads(n.changer.publish.call_args.args[0].data)
-    assert command['command'] == 'LOCK'
-    for msg in [dict(id='old', state='LOCKED'), dict(id=command['id'], state='UNLOCKED')]:
-        n.transaction.receive(json.dumps(msg), 1.1)
-        ToolDockingCoordinator.observe(n, 1.1)
-        n.reset.assert_not_called()
-    n.transaction.receive(json.dumps(dict(id=command['id'], state='LOCKED')), 1.2)
+    assert n.stage == 'dock_actuate'
+    assert [call.args[0].data for call in n.docking_command.publish.call_args_list] == [True, False]
+    # A pre-command matching state is not completion; a fresh opposite state is not either.
+    ToolDockingCoordinator.observe(n, 1.1)
+    n.reset.assert_not_called()
+    ToolDockingCoordinator.on_docked(n, SimpleNamespace(data=False))
+    ToolDockingCoordinator.observe(n, 1.1)
+    n.reset.assert_not_called()
+    ToolDockingCoordinator.on_docked(n, SimpleNamespace(data=True))
     ToolDockingCoordinator.observe(n, 1.2)
     n.reset.assert_called_once()
-    n.changer.publish.assert_called_once()
+    assert n.docking_command.publish.call_count == 2
     n.begin.assert_not_called()  # no speculative retreat
+
+
+def test_release_uses_false_then_true_pulse_and_waits_for_false(tmp_path):
+    n = node(tmp_path)
+    n.cfg.update(actuation_enabled=True, desired_docked=False)
+    for _ in range(n.cfg['stable_samples']*3):
+        sample(n)
+    assert [call.args[0].data for call in n.docking_command.publish.call_args_list] == [False, True]
+    ToolDockingCoordinator.on_docked(n, SimpleNamespace(data=False))
+    ToolDockingCoordinator.observe(n, 1.1)
+    n.reset.assert_called_once()
 
 
 def test_docking_only_never_sends_lock(tmp_path):
@@ -147,7 +161,7 @@ def test_docking_only_never_sends_lock(tmp_path):
     for _ in range(n.cfg['stable_samples']*3):
         sample(n)
     n.reset.assert_called_once()
-    n.changer.publish.assert_not_called()
+    n.docking_command.publish.assert_not_called()
 
 
 @pytest.mark.parametrize('speed', [.011, .1])
@@ -157,7 +171,7 @@ def test_moving_feedback_cannot_confirm_docking(tmp_path, speed):
     for _ in range(20):
         sample(n)
     assert n.stable == 0
-    n.changer.publish.assert_not_called()
+    n.docking_command.publish.assert_not_called()
 
 
 def test_correction_uses_existing_collision_checked_execution(tmp_path):
@@ -170,7 +184,7 @@ def test_correction_uses_existing_collision_checked_execution(tmp_path):
     path_id, plan = n.begin.call_args.args
     assert path_id == 0 and len(plan['waypoints']) == 1
     assert plan['durations'][0] >= .5
-    n.changer.publish.assert_not_called()
+    n.docking_command.publish.assert_not_called()
 
 
 def test_preview_reports_error_without_motion_or_lock(tmp_path):
@@ -181,7 +195,7 @@ def test_preview_reports_error_without_motion_or_lock(tmp_path):
     n.report.assert_called_once()
     assert n.report.call_args.args[0] == 'preview'
     n.begin.assert_not_called()
-    n.changer.publish.assert_not_called()
+    n.docking_command.publish.assert_not_called()
 
 
 def test_excessive_ik_joint_step_is_rejected(tmp_path):
@@ -195,10 +209,13 @@ def test_excessive_ik_joint_step_is_rejected(tmp_path):
 
 def test_departure_during_lock_is_failure_even_after_ack(tmp_path):
     n = node(tmp_path)
-    n.stage = 'dock_lock'
+    n.stage = 'dock_actuate'
     n.lock_goal = np.zeros(6)
-    n.transaction = ChangerTransaction('LOCK', 5, 0)
-    n.transaction.receive(json.dumps(dict(id=n.transaction.id, state='LOCKED')), 1.)
+    n.expected_docked = True
+    n.command_feedback_sequence = 0
+    n.docked_feedback_sequence = 1
+    n.docked_state = True
+    n.actuation_deadline = 5.
     n.velocity[:] = .1
     with pytest.raises(RuntimeError, match='departed'):
         ToolDockingCoordinator.observe(n, 1.)
@@ -213,19 +230,15 @@ def test_tag_timeout_is_checked_using_image_and_arrival_time(tmp_path):
         ToolDockingCoordinator.fresh_observation(n, 1.1)
 
 
-def test_failure_sends_original_id_stop_and_cancel(tmp_path):
+def test_failure_cancels_arm_without_sending_an_opposite_actuation(tmp_path):
     n = node(tmp_path)
-    n.transaction = ChangerTransaction('LOCK', 5., 0.)
     n.cancel = Mock()
     n.cancel.service_is_ready.return_value = True
     with patch.object(ToolTrajectoryJoy, 'fail') as parent:
         ToolDockingCoordinator.fail(n, 'cancelled')
         parent.assert_called_once_with('cancelled')
-    assert json.loads(n.changer.publish.call_args.args[0].data) == dict(
-        id=n.transaction.id, command='STOP')
+    n.docking_command.publish.assert_not_called()
     n.cancel.call_async.assert_called_once()
-    n.transaction.receive(json.dumps(dict(id=n.transaction.id, state='LOCKED')), 1.)
-    assert not n.transaction.complete
 
 
 def test_non_docking_path_completion_keeps_old_behavior(tmp_path):
@@ -234,7 +247,7 @@ def test_non_docking_path_completion_keeps_old_behavior(tmp_path):
     with patch.object(ToolTrajectoryJoy, 'path_completed') as parent:
         ToolDockingCoordinator.path_completed(n)
         parent.assert_called_once()
-    n.changer.publish.assert_not_called()
+    n.docking_command.publish.assert_not_called()
 
 
 def test_missing_tag_cancels_in_flight_correction_before_parent_tick(tmp_path):
@@ -268,11 +281,14 @@ def test_released_deadman_blocks_alignment(tmp_path):
         ToolDockingCoordinator.guard(n, 1.)
 
 
-def test_lock_timeout_cannot_report_success(tmp_path):
+def test_actuation_timeout_cannot_report_success(tmp_path):
     n = node(tmp_path)
-    n.stage = 'dock_lock'
+    n.stage = 'dock_actuate'
     n.lock_goal = np.zeros(6)
-    n.transaction = ChangerTransaction('LOCK', 2., 0.)
+    n.expected_docked = True
+    n.command_feedback_sequence = 0
+    n.docked_feedback_sequence = 0
+    n.actuation_deadline = 2.
     with pytest.raises(RuntimeError, match='timeout'):
         ToolDockingCoordinator.observe(n, 3.)
     n.reset.assert_not_called()
@@ -296,7 +312,7 @@ def test_legacy_executor_completion_enters_docking_only_after_confirmed_hold(tmp
     assert n.stage == 'dock_acquire'
     assert n.hold_epoch == 'hold-epoch'
     assert n.execution_id is None
-    n.changer.publish.assert_not_called()
+    n.docking_command.publish.assert_not_called()
 
 
 @pytest.mark.parametrize('enabled,script', [('false','tool_trajectory_joy.py'),

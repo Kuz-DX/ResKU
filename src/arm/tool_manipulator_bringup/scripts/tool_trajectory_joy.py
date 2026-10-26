@@ -20,7 +20,8 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from sensor_msgs.msg import Joy, JointState
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
-from moveit_msgs.srv import GetStateValidity
+from moveit_msgs.msg import Constraints, JointConstraint, MotionPlanRequest, MoveItErrorCodes
+from moveit_msgs.srv import GetMotionPlan, GetStateValidity
 try:
     from tool_change_min.kinematics import ArmKinematics, ARM_JOINTS
 except ImportError:
@@ -92,6 +93,39 @@ def execution_plan(path, measured, tolerance=.03, max_delta=.10, approach_speed=
                 total=path['total']+approach_duration, start_error=error)
 
 
+def planned_entry(path, trajectory, measured, minimum_duration=.02):
+    """Convert a MoveIt joint trajectory into a managed path prefix."""
+    names = list(trajectory.joint_names)
+    if len(names) != len(set(names)) or any(name not in names for name in ARM_JOINTS):
+        raise ValueError('MoveIt entry plan has invalid joint names')
+    indices = [names.index(name) for name in ARM_JOINTS]
+    waypoints, durations = [], []
+    previous = np.asarray(measured, dtype=float)
+    previous_time = 0.
+    for point in trajectory.points:
+        if len(point.positions) != len(names):
+            raise ValueError('MoveIt entry plan has invalid positions')
+        current = np.asarray([point.positions[i] for i in indices], dtype=float)
+        stamp = float(point.time_from_start.sec) + float(point.time_from_start.nanosec)*1e-9
+        if not np.all(np.isfinite(current)) or not math.isfinite(stamp) or stamp < previous_time:
+            raise ValueError('MoveIt entry plan has invalid timing')
+        if float(np.max(np.abs(current-previous))) > 1e-9:
+            waypoints.append(current)
+            durations.append(max(minimum_duration, stamp-previous_time))
+            previous = current
+        previous_time = stamp
+    if not waypoints:
+        raise ValueError('MoveIt entry plan is empty')
+    if float(np.max(np.abs(waypoints[-1]-path['start']))) > .01:
+        raise ValueError('MoveIt entry plan did not reach the taught start')
+    waypoints[-1] = np.asarray(path['start'], dtype=float)
+    waypoints.extend(path['waypoints'])
+    durations.extend(path['durations'])
+    return dict(waypoints=waypoints, durations=durations,
+                total=sum(durations), start_error=float(np.max(
+                    np.abs(np.asarray(measured)-path['start']))))
+
+
 class ToolTrajectoryJoy(Node):
     def __init__(self):
         super().__init__('tool_trajectory_joy')
@@ -107,6 +141,10 @@ class ToolTrajectoryJoy(Node):
         self.approach_speed = float(param('start_approach_speed_rad_s', .05))
         self.collision_step = float(param('collision_step_rad', .005))
         self.collision_timeout = float(param('collision_timeout_sec', 10.))
+        self.planning_timeout = float(param('entry_planning_timeout_sec', 8.))
+        self.planning_attempts = int(param('entry_planning_attempts', 3))
+        self.planning_velocity_scale = float(param('entry_planning_velocity_scale', .08))
+        self.planning_acceleration_scale = float(param('entry_planning_acceleration_scale', .08))
         self.l2_axis = int(param('l2_axis', 2))
         self.l2_threshold = float(param('l2_pressed_below', -.5))
         # This controller's physical button 1 is reported as ROS Joy button 2.
@@ -115,6 +153,9 @@ class ToolTrajectoryJoy(Node):
         if (not 0 < self.margin <= .1 or not 0 < self.start_tolerance <= self.max_start_delta <= .25
                 or not 0 < self.approach_speed <= .12
                 or not 0 < self.collision_step <= .01 or not .1 < self.collision_timeout <= 60.
+                or not .5 <= self.planning_timeout <= 30. or not 1 <= self.planning_attempts <= 10
+                or not 0 < self.planning_velocity_scale <= .2
+                or not 0 < self.planning_acceleration_scale <= .2
                 or self.l2_axis < 0 or self.first_button < 0):
             raise ValueError('invalid tool trajectory joystick parameters')
         self.paths = {}
@@ -128,6 +169,7 @@ class ToolTrajectoryJoy(Node):
         self.mode = self.create_client(Trigger, '/arm/set_mode/tool_auto')
         self.cancel = self.create_client(Trigger, '/arm/cancel')
         self.collision = self.create_client(GetStateValidity, '/check_state_validity')
+        self.planner = self.create_client(GetMotionPlan, '/plan_kinematic_path')
         qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
                          durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.create_subscription(String, '/arm/control_status', self.on_status, qos)
@@ -239,9 +281,15 @@ class ToolTrajectoryJoy(Node):
         try:
             s = self.healthy_hold(now)
             measured = np.asarray([self.full_state[j] for j in ARM_JOINTS])
-            path = (execution_plan(self.paths[path_id], measured, self.start_tolerance,
-                                   self.max_start_delta, self.approach_speed)
-                    if planned_path is None else planned_path)
+            if planned_path is None:
+                error = float(np.max(np.abs(measured-self.paths[path_id]['start'])))
+                if error > self.max_start_delta:
+                    self.request_entry_plan(path_id, measured, error, s)
+                    return
+                path = execution_plan(self.paths[path_id], measured, self.start_tolerance,
+                                      self.max_start_delta, self.approach_speed)
+            else:
+                path = planned_path
             if not self.collision.service_is_ready() or not self.mode.service_is_ready():
                 raise RuntimeError('tool mode or MoveIt collision service unavailable')
             self.path_id, self.path = path_id, path
@@ -272,6 +320,32 @@ class ToolTrajectoryJoy(Node):
         except (ValueError, RuntimeError, KeyError) as exc:
             self.path_id = path_id
             self.begin_failed(str(exc))
+
+    def request_entry_plan(self, path_id, measured, error, status):
+        if not self.planner.service_is_ready():
+            raise RuntimeError('MoveIt entry planner unavailable')
+        request = MotionPlanRequest()
+        request.group_name = 'arm'
+        request.num_planning_attempts = self.planning_attempts
+        request.allowed_planning_time = self.planning_timeout
+        request.max_velocity_scaling_factor = self.planning_velocity_scale
+        request.max_acceleration_scaling_factor = self.planning_acceleration_scale
+        request.start_state.joint_state.name = list(self.full_state)
+        request.start_state.joint_state.position = list(self.full_state.values())
+        request.start_state.is_diff = True
+        goal = Constraints()
+        for name, position in zip(ARM_JOINTS, self.paths[path_id]['start']):
+            goal.joint_constraints.append(JointConstraint(
+                joint_name=name, position=float(position),
+                tolerance_above=.005, tolerance_below=.005, weight=1.))
+        request.goal_constraints = [goal]
+        self.path_id = path_id
+        self.snapshot = dict(self.full_state)
+        self.original_epoch = status['epoch']
+        self.future = self.planner.call_async(GetMotionPlan.Request(motion_plan_request=request))
+        self.stage, self.started = 'planning_entry', time.monotonic()
+        self.report('planning',
+                    f'planning collision-free entry to tool path {path_id} from {error:.4f} rad')
 
     def begin_failed(self, reason):
         self.report('blocked', reason)
@@ -310,6 +384,28 @@ class ToolTrajectoryJoy(Node):
                     return
                 if now-self.started > 3.:
                     raise TimeoutError('arm did not reach HOLD')
+                return
+            if self.stage == 'planning_entry':
+                s = self.healthy_hold(now)
+                if s.get('epoch') != self.original_epoch:
+                    raise RuntimeError('arm ownership changed during entry planning')
+                if not self.unchanged():
+                    raise RuntimeError('robot moved during entry planning')
+                if now-self.started > self.planning_timeout+1.:
+                    raise TimeoutError('MoveIt entry planning timed out')
+                if not self.future.done():
+                    return
+                result = self.future.result()
+                if (result is None or
+                        result.motion_plan_response.error_code.val != MoveItErrorCodes.SUCCESS):
+                    code = ('none' if result is None else
+                            result.motion_plan_response.error_code.val)
+                    raise RuntimeError(f'MoveIt entry planning failed ({code})')
+                path_id = self.path_id
+                plan = planned_entry(self.paths[path_id],
+                                     result.motion_plan_response.trajectory.joint_trajectory,
+                                     [self.snapshot[j] for j in ARM_JOINTS])
+                self.begin(path_id, plan)
                 return
             if self.stage == 'checking':
                 s = self.healthy_hold(now)

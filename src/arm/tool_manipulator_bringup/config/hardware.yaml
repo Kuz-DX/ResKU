@@ -8,7 +8,9 @@ buses:
     mixed_ttl_rs485: true
     feedback_mode: individual_read
     command_mode: sync_write
-    position_diagnostics: true
+    # Diagnostic register reads disturb the shared U2D2 control cadence; keep
+    # disabled during normal motion and enable only for supervised diagnosis.
+    position_diagnostics: false
     position_diagnostics_period_ms: 1000
   rmd_can:
     interface: can_arm
