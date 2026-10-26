@@ -12,8 +12,12 @@ TCP_ENTRY_TOLERANCE = (.02, .001, .001, .001, .02, .02)
 
 class ModeCore:
     def __init__(self, limits, speeds, startup_recovery_enabled=False, path_accelerations=None,
-                 tcp_accelerations=None):
+                 tcp_accelerations=None, joint_names=None):
         self.limits, self.speeds = limits, speeds
+        self.joint_names = (list(joint_names) if joint_names is not None else
+                            [f'joint_{index}' for index in range(len(speeds))])
+        if len(self.joint_names) != len(speeds) or len(set(self.joint_names)) != len(speeds):
+            raise ValueError('invalid joint names')
         self.path_accelerations = (list(path_accelerations) if path_accelerations is not None
                                    else [0.25]*len(speeds))
         if (len(self.path_accelerations) != len(speeds)
@@ -426,8 +430,12 @@ class ModeCore:
         if self.mode in ('manual', 'tcp_ik') and now-self.command_time > .3:
             self.request('hold', now)
             self.reason = 'command timeout'
-        if max(abs(a-b) for a,b in zip(self.target, self.position)) > .15:
-            self.fault('following error')
+        following = [abs(a-b) for a, b in zip(self.target, self.position)]
+        if max(following) > .15:
+            index = max(range(len(following)), key=following.__getitem__)
+            self.fault('following error: %s target=%.6f measured=%.6f error=%.6f rad' %
+                       (self.joint_names[index], self.target[index], self.position[index],
+                        following[index]))
         if self.mode == 'fault':
             # Capture one hold target, rather than following drifting feedback.
             if self.goal is None:

@@ -1,10 +1,10 @@
 # joint_limits.yaml allows the dynamics properties specified in the URDF to be overwritten or augmented as needed
 
-# Velocity limits remain hardware-specific.  Acceleration uses the same
-# conservative 0.25 rad/s^2 bound enforced by arm_control_mode_manager for
-# tool paths.  The arm housings are 3D-printed, but measured link inertias are
-# unavailable, so this is an initial software-validated limit rather than a
-# torque/inertia-derived maximum.
+# Velocity limits remain hardware-specific.  Acceleration uses a conservative
+# 0.25 rad/s^2 upper bound; tool entry requests scale it to 0.10 rad/s^2 and the
+# runtime path limiter enforces the same 0.10 rad/s^2.  The arm housings are
+# 3D-printed, but measured link inertias are unavailable, so this is an initial
+# software-validated limit rather than a torque/inertia-derived maximum.
 default_velocity_scaling_factor: 0.1
 default_acceleration_scaling_factor: 1.0
 

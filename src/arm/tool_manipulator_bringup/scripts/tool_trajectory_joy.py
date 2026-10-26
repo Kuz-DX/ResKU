@@ -163,9 +163,9 @@ class ToolTrajectoryJoy(Node):
         self.planning_timeout = float(param('entry_planning_timeout_sec', 8.))
         self.planning_attempts = int(param('entry_planning_attempts', 3))
         self.planning_velocity_scale = float(param('entry_planning_velocity_scale', .08))
-        # joint_limits.yaml already carries the conservative physical command
-        # acceleration.  Do not multiply it by the former 0.08 factor again.
-        self.planning_acceleration_scale = float(param('entry_planning_acceleration_scale', 1.))
+        # 0.25 rad/s^2 from joint_limits.yaml * 0.4 = 0.10 rad/s^2.  Keep the
+        # MoveIt entry plan aligned with the loaded-arm runtime path limiter.
+        self.planning_acceleration_scale = float(param('entry_planning_acceleration_scale', .4))
         self.l2_axis = int(param('l2_axis', 2))
         self.l2_threshold = float(param('l2_pressed_below', -.5))
         # This controller's physical button 1 is reported as ROS Joy button 2.

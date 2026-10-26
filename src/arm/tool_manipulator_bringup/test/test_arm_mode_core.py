@@ -79,6 +79,20 @@ def test_limits_and_feedback_lead_are_enforced():
             c.command('manual', c.epoch, target, 0., .1)
 
 
+def test_following_error_identifies_joint_and_values():
+    names = ['base', 'shoulder', 'elbow', 'pitch', 'roll', 'yaw']
+    c = ModeCore([(-2., 2.)]*6, [.12]*6, joint_names=names)
+    c.ready = True
+    c.focus = 'arm'
+    c.feedback([0.]*6, [0.]*6, 0.)
+    c.target = c.goal = [0., .16, 0., 0., 0., 0.]
+    c.tick(.02, .02)
+    assert c.mode == 'fault'
+    assert 'shoulder' in c.reason
+    assert 'target=0.160000' in c.reason
+    assert 'measured=0.000000' in c.reason
+
+
 def test_path_continues_through_intermediate_waypoint_without_stopping():
     c = ready('tool_auto')
     c.path(c.epoch, 'run1', [[.01]*6, [.02]*6], .1)
