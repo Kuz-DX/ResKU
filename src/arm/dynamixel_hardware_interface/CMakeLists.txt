@@ -38,15 +38,17 @@ add_library(
   src/dynamixel/dynamixel.cpp
 )
 
+# Some ros2_control imported targets expose /usr/include in their interface.
+# Treating that path as an explicit SYSTEM include moves it ahead of GCC's
+# implicit C headers and breaks libstdc++ headers that use #include_next.
+set_property(TARGET ${PROJECT_NAME} PROPERTY NO_SYSTEM_FROM_IMPORTED ON)
+
 target_include_directories(
   ${PROJECT_NAME}
   PUBLIC
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
   ${dynamixel_sdk_INCLUDE_DIRS}
-  ${hardware_interface_INCLUDE_DIRS}
-  ${realtime_tools_INCLUDE_DIRS}
-  ${rclcpp_lifecycle_INCLUDE_DIRS}
 )
 
 target_link_libraries(${PROJECT_NAME}
