@@ -172,3 +172,15 @@ def test_path_snapshot_accepts_dxl_hunt_but_keeps_rmd_tight():
     assert ToolTrajectoryJoy.unchanged(node)
     node.full_state['shoulder_joint'] = .0011
     assert not ToolTrajectoryJoy.unchanged(node)
+
+
+def test_path_validation_allows_only_one_collision_step_of_rmd_drift():
+    names = ['base_joint', 'shoulder_joint', 'elbow_joint',
+             'wrist_pitch_joint', 'wrist_roll_joint', 'wrist_yaw_joint']
+    node = SimpleNamespace(snapshot=dict.fromkeys(names, 0.),
+                           full_state=dict.fromkeys(names, 0.),
+                           validation_rmd_drift=.005)
+    node.full_state['shoulder_joint'] = .0049
+    assert ToolTrajectoryJoy.unchanged(node, validation=True)
+    node.full_state['shoulder_joint'] = .0051
+    assert not ToolTrajectoryJoy.unchanged(node, validation=True)

@@ -151,6 +151,7 @@ class ToolTrajectoryJoy(Node):
         self.max_start_delta = float(param('max_start_delta_rad', .10))
         self.approach_speed = float(param('start_approach_speed_rad_s', .05))
         self.collision_step = float(param('collision_step_rad', .005))
+        self.validation_rmd_drift = float(param('validation_rmd_drift_rad', .005))
         self.collision_timeout = float(param('collision_timeout_sec', 10.))
         self.planning_timeout = float(param('entry_planning_timeout_sec', 8.))
         self.planning_attempts = int(param('entry_planning_attempts', 3))
@@ -163,7 +164,9 @@ class ToolTrajectoryJoy(Node):
         self.first_button = int(param('first_path_button', 2))
         if (not 0 < self.margin <= .1 or not 0 < self.start_tolerance <= self.max_start_delta <= .25
                 or not 0 < self.approach_speed <= .12
-                or not 0 < self.collision_step <= .01 or not .1 < self.collision_timeout <= 60.
+                or not 0 < self.collision_step <= .01
+                or not .001 <= self.validation_rmd_drift <= self.collision_step
+                or not .1 < self.collision_timeout <= 60.
                 or not .5 <= self.planning_timeout <= 30. or not 1 <= self.planning_attempts <= 10
                 or not 0 < self.planning_velocity_scale <= .2
                 or not 0 < self.planning_acceleration_scale <= .2
@@ -422,12 +425,31 @@ class ToolTrajectoryJoy(Node):
         self.docking_command.publish(Bool(data=desired))
         self.docking_command.publish(Bool(data=not desired))
 
-    def unchanged(self):
-        if self.full_state is None or self.full_state.keys() != self.snapshot.keys():
+    def snapshot_delta(self):
+        if self.full_state is None or self.snapshot is None:
+            return None
+        if self.full_state.keys() != self.snapshot.keys():
+            return None
+        return {joint: abs(self.full_state[joint]-value)
+                for joint, value in self.snapshot.items()}
+
+    def unchanged(self, validation=False):
+        delta = ToolTrajectoryJoy.snapshot_delta(self)
+        if delta is None:
             return False
         tolerances = dict(zip(ARM_JOINTS, TCP_ENTRY_TOLERANCE))
-        return all(abs(self.full_state[j]-v) <= tolerances.get(j, .001)
-                   for j, v in self.snapshot.items())
+        if validation:
+            for joint in ARM_JOINTS[1:4]:
+                tolerances[joint] = self.validation_rmd_drift
+        return all(change <= tolerances.get(joint, .001)
+                   for joint, change in delta.items())
+
+    def snapshot_change_reason(self):
+        delta = ToolTrajectoryJoy.snapshot_delta(self)
+        if not delta:
+            return 'joint feedback unavailable or joint set changed'
+        joint = max(delta, key=delta.get)
+        return f'largest change {joint}={delta[joint]:.6f} rad'
 
     def tick(self):
         if self.stage == 'idle':
@@ -468,8 +490,9 @@ class ToolTrajectoryJoy(Node):
                 s = self.healthy_hold(now)
                 if s.get('epoch') != self.original_epoch:
                     raise RuntimeError('arm ownership changed during entry planning')
-                if not self.unchanged():
-                    raise RuntimeError('robot moved during entry planning')
+                if not self.unchanged(validation=True):
+                    raise RuntimeError('robot moved during entry planning; '
+                                       + self.snapshot_change_reason())
                 if now-self.started > self.planning_timeout+1.:
                     raise TimeoutError('MoveIt entry planning timed out')
                 if not self.future.done():
@@ -490,8 +513,10 @@ class ToolTrajectoryJoy(Node):
                 s = self.healthy_hold(now)
                 if s.get('epoch') != self.original_epoch:
                     raise RuntimeError('arm ownership changed during path validation')
-                if not self.unchanged():
-                    raise RuntimeError('robot state changed beyond stopped-feedback tolerance during path validation')
+                if not self.unchanged(validation=True):
+                    raise RuntimeError(
+                        'robot state changed beyond stopped-feedback tolerance during '
+                        'path validation; '+self.snapshot_change_reason())
                 if now-self.started > self.collision_timeout:
                     raise TimeoutError('tool path collision check timed out')
                 if not self.future.done():
@@ -523,8 +548,9 @@ class ToolTrajectoryJoy(Node):
                     if now-self.started > self.collision_timeout:
                         raise TimeoutError('tool_auto transition timed out')
                     return
-                if not self.unchanged():
-                    raise RuntimeError('robot moved before path execution')
+                if not self.unchanged(validation=True):
+                    raise RuntimeError('robot moved before path execution; '
+                                       + self.snapshot_change_reason())
                 self.execution_id = 'tool-path-'+uuid.uuid4().hex
                 self.publisher.publish(String(data=json.dumps(dict(
                     epoch=s['epoch'], execution_id=self.execution_id,
