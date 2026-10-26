@@ -235,6 +235,7 @@ namespace rmd_hardware_interface {
     position_interface_running_.store(false);
     velocity_interface_running_.store(false);
     effort_interface_running_.store(false);
+    release_motor_requested_.store(false);
     async_position_state_.store(std::numeric_limits<double>::quiet_NaN());
     stop_async_thread_.store(false);
     if (!startAsyncThread(cycle_time_)) {
@@ -548,16 +549,30 @@ namespace rmd_hardware_interface {
         blocked_motion_direction_ = 0;
         overcurrent_duration_ = std::chrono::milliseconds(0);
         position_command_valid_.store(true);
+        release_motor_requested_.store(false);
         position_interface_running_.store(true);
         RCLCPP_INFO(getLogger(),
           "Starting position interface at measured position %.6f rad.", measured_position);
       } else if (start_interface == info_.joints.at(0).name + "/" + hardware_interface::HW_IF_VELOCITY) {
+        release_motor_requested_.store(false);
         velocity_interface_running_.store(true);
         RCLCPP_INFO(getLogger(), "Starting velocity interface...");
       } else if (start_interface == info_.joints.at(0).name + "/" + hardware_interface::HW_IF_EFFORT) {
+        release_motor_requested_.store(false);
         effort_interface_running_.store(true);
         RCLCPP_INFO(getLogger(), "Starting effort interface...");
       }
+    }
+
+    // With no claimed command interface the component remains active so its
+    // feedback thread can keep publishing state, but the motor must not retain
+    // the last position setpoint. This is the hand-guided teaching/read mode.
+    if (!position_interface_running_.load() && !velocity_interface_running_.load() &&
+        !effort_interface_running_.load() && actuator_interface_) {
+      position_command_valid_.store(false);
+      release_motor_requested_.store(true);
+      RCLCPP_WARN(getLogger(),
+        "All command interfaces stopped: queued motor release; feedback remains active.");
     }
 
     return hardware_interface::return_type::OK;
@@ -710,6 +725,10 @@ namespace rmd_hardware_interface {
       auto const now {std::chrono::steady_clock::now()};
       auto const wakeup_time {now + cycle_time};
       try {
+      if (release_motor_requested_.exchange(false)) {
+        actuator_interface_->stopMotor();
+        RCLCPP_WARN(getLogger(), "Motor released; entering feedback-only mode.");
+      }
       if (position_interface_running_ && position_command_valid_.load()) {
         double const requested_command {async_position_command_.load()};
         if (std::isfinite(requested_command)) {

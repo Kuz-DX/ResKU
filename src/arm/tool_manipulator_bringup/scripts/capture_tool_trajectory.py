@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-ㅈ"""Print current joints on terminal Enter. No saving and no motor commands."""
+"""Print current joints on terminal Enter. No saving and no motor commands."""
 import argparse
 import math
 import select

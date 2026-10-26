@@ -325,6 +325,7 @@ namespace rmd_hardware_interface {
       std::atomic<bool> position_interface_running_;
       std::atomic<bool> velocity_interface_running_;
       std::atomic<bool> effort_interface_running_;
+      std::atomic<bool> release_motor_requested_;
       rclcpp::Node::SharedPtr fault_node_;
       rclcpp::Publisher<std_msgs::msg::String>::SharedPtr fault_publisher_;
 

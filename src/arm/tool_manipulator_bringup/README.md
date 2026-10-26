@@ -237,6 +237,23 @@ bash ~/ResKU/utils/move_to_pose.sh home --duration 8.0
 
 이 절의 도구는 별도 언급이 없는 한 모터 명령을 보내지 않는다.
 
+### 손으로 경로 티칭
+
+팔을 중력 낙하하지 않도록 물리적으로 받친 다음 모든 명령 컨트롤러를 내리고,
+Dynamixel 토크와 RMD 구동을 해제한다. `joint_state_broadcaster`는 유지되어
+다이나믹셀 4축과 RMD 3축의 위치를 계속 읽는다.
+
+```bash
+ros2 run tool_manipulator_bringup enter_teach_mode.py --yes
+ros2 run tool_manipulator_bringup capture_tool_trajectory.py
+```
+
+두 번째 명령에서 Enter를 누를 때마다 `time_from_start_sec`와 6축
+`positions_rad`가 출력된다. 출력값을 검토해 `config/tool0_trajectory.yaml` 등의
+`points`에 저장한다. 읽기모드는 의도적으로 자동 복귀하지 않는다. 다시 구동하려면
+현재 launch를 완전히 종료하고 팔을 지지한 상태에서 재시작한다. 실행 중 개별 torque
+서비스로 다시 켜면 이전 명령이 재사용될 수 있으므로 금지한다.
+
 ### 설정 검사
 
 ```bash
