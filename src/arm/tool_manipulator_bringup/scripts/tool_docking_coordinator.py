@@ -12,6 +12,7 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.qos import qos_profile_sensor_data
 from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo
+from sensor_msgs.msg import Joy
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
 from tf2_ros import Buffer, TransformException, TransformListener
@@ -31,6 +32,8 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         # Must match the inherited ArmKinematics root, not an arbitrary TF frame.
         self.base_frame = 'base_actuator'
         self.camera_frame = self.declare_parameter('docking_camera_frame', '').value
+        self.motion_enabled = bool(self.declare_parameter(
+            'docking_motion_enabled', False).value)
         if self.settings and not self.camera_frame:
             raise ValueError('docking_camera_frame must name the calibrated optical frame')
         self.camera = None
@@ -45,6 +48,10 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             self.on_camera, qos_profile_sensor_data)
         self.create_subscription(String, self.declare_parameter(
             'docking_centers_topic', '/arm/apriltag/centers').value, self.on_tag, 1)
+        self.deadman_timeout = float(self.declare_parameter(
+            'docking_deadman_timeout_s', 0.3).value)
+        if not 0.1 <= self.deadman_timeout <= 1.0:
+            raise ValueError('docking_deadman_timeout_s must be in [0.1, 1.0]')
         self.create_service(Trigger, '/arm/tool_docking/cancel', self.on_cancel)
         self.get_logger().info(f'Optional docking paths: {sorted(self.settings)}')
 
@@ -61,6 +68,18 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         self.observed_feedback = -1
         self.hold_epoch = None
         self.lock_goal = None
+        self.last_base_tag = None
+        self.last_joy_time = -math.inf
+        self.deadman_held = False
+        self.last_preview_report = -math.inf
+
+    def on_joy(self, msg: Joy):
+        self.last_joy_time = time.monotonic()
+        self.deadman_held = (
+            len(msg.axes) > self.l2_axis
+            and math.isfinite(msg.axes[self.l2_axis])
+            and msg.axes[self.l2_axis] < self.l2_threshold)
+        super().on_joy(msg)
 
     def on_state(self, msg):
         super().on_state(msg)
@@ -99,9 +118,16 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                 raise ValueError('expected exactly one matching tag')
             camera_tag = tag_pose(detections[0], *self.camera, self.cfg)
             tf = self.tf_buffer.lookup_transform(
-                self.base_frame, self.camera_frame, stamp, timeout=Duration(seconds=0.)).transform
+                self.base_frame, self.camera_frame, stamp,
+                timeout=Duration(seconds=self.cfg['tf_timeout_s'])).transform
             p, q = tf.translation, tf.rotation
             base_tag = transform([p.x, p.y, p.z], [q.x, q.y, q.z, q.w]) @ camera_tag
+            if self.last_base_tag is not None:
+                jump, turn = pose_errors(self.last_base_tag, base_tag)
+                if (jump > self.cfg['max_tag_position_jump_m']
+                        or turn > self.cfg['max_tag_angle_jump_rad']):
+                    raise ValueError('tag pose discontinuity rejected')
+            self.last_base_tag = base_tag
             self.observation = (stamp_ns, time.monotonic(), base_tag)
         except (ValueError, TypeError, KeyError, IndexError, OverflowError,
                 TransformException, cv2.error):
@@ -113,6 +139,11 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             self.active = True
             self.cfg = self.settings[path_id]
             self.docking_started = None
+            if (self.cfg['lock_enabled']
+                    and (self.changer.get_subscription_count() == 0
+                         or self.count_publishers('/tool_changer/status') == 0)):
+                self.fail('Arduino command/status connection unavailable before docking')
+                return
         super().begin(path_id, planned_path)
 
     def begin_failed(self, reason):
@@ -172,6 +203,8 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         return stamp, base_tag
 
     def guard(self, now):
+        if now-self.last_joy_time >= self.deadman_timeout or not self.deadman_held:
+            raise RuntimeError('docking deadman released or joystick stream stale')
         if now-self.docking_started > self.cfg['sequence_timeout_s']:
             raise RuntimeError('docking sequence timeout')
         s = self.status
@@ -233,6 +266,13 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             return
         if distance > self.cfg['max_position_error_m'] or angle > self.cfg['max_angle_error_rad']:
             raise RuntimeError('tag target beyond permitted correction envelope')
+        if not self.motion_enabled:
+            if now-self.last_preview_report >= 1.0:
+                self.last_preview_report = now
+                self.report('preview',
+                            f'stage {self.dock_stage}: position_error={distance:.6f}m, '
+                            f'angle_error={angle:.6f}rad; alignment motion disarmed')
+            return
         if aligned:
             self.stable += 1
             if self.stable < self.cfg['stable_samples']:

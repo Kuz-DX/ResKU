@@ -1,6 +1,7 @@
 """Offline contract tests: no ROS graph, controller, or hardware is started."""
 import importlib.util
 import json
+import math
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -36,6 +37,8 @@ def node(tmp_path):
         full_state=dict.fromkeys(ARM_JOINTS, 0.), velocity=np.zeros(6),
         feedback_sequence=1, observed_feedback=-1, observed_image=-1,
         observe_after_ns=0, stable=0, transaction=None, lock_goal=None,
+        last_joy_time=1., deadman_timeout=.3, deadman_held=True,
+        motion_enabled=True, last_preview_report=-math.inf,
         model=Mock(), report=Mock(), reset=Mock(), begin=Mock(), fail=Mock(),
         changer=Mock(), get_clock=Mock(), margin=.02,
         observation=(1, 0., np.eye(4)))
@@ -94,6 +97,17 @@ def test_real_pnp_recovers_synthetic_tag(tmp_path):
     np.testing.assert_allclose(pose[:3,:3], cv2.Rodrigues(rotation)[0], atol=1e-7)
     detection['hamming'] = 1
     with pytest.raises(ValueError, match='quality'):
+        tag_pose(detection, k, np.zeros(5), cfg)
+
+
+def test_pnp_rejects_tag_that_is_too_small_for_docking(tmp_path):
+    cfg = settings(tmp_path)
+    detection = dict(
+        hamming=0, decision_margin=100,
+        corners_px=[dict(u=u, v=v) for u, v in
+                    [(319, 241), (321, 241), (321, 239), (319, 239)]])
+    k = np.array([[600., 0, 320], [0, 600., 240], [0, 0, 1]])
+    with pytest.raises(ValueError, match='too small'):
         tag_pose(detection, k, np.zeros(5), cfg)
 
 
@@ -156,6 +170,17 @@ def test_correction_uses_existing_collision_checked_execution(tmp_path):
     path_id, plan = n.begin.call_args.args
     assert path_id == 0 and len(plan['waypoints']) == 1
     assert plan['durations'][0] >= .5
+    n.changer.publish.assert_not_called()
+
+
+def test_preview_reports_error_without_motion_or_lock(tmp_path):
+    n = node(tmp_path)
+    n.motion_enabled = False
+    n.cfg['targets'][0][:3, 3] = [.01, 0., 0.]
+    sample(n)
+    n.report.assert_called_once()
+    assert n.report.call_args.args[0] == 'preview'
+    n.begin.assert_not_called()
     n.changer.publish.assert_not_called()
 
 
@@ -235,6 +260,14 @@ def test_external_cancel_epoch_blocks_further_alignment(tmp_path):
         ToolDockingCoordinator.guard(n, 1.)
 
 
+def test_released_deadman_blocks_alignment(tmp_path):
+    n = node(tmp_path)
+    n.docking_started = 0.
+    n.deadman_held = False
+    with pytest.raises(RuntimeError, match='deadman'):
+        ToolDockingCoordinator.guard(n, 1.)
+
+
 def test_lock_timeout_cannot_report_success(tmp_path):
     n = node(tmp_path)
     n.stage = 'dock_lock'
@@ -274,7 +307,8 @@ def test_launch_selects_exactly_one_path_input_owner(enabled, script):
     spec.loader.exec_module(launch)
     values = dict(real_hardware='false', launch_tcp_joy='true', mock_initial_positions_file='',
                   hardware_config='hardware.yaml', launch_joy='false',
-                  enable_tool_docking=enabled, docking_config='dock.yaml', docking_camera_frame='optical')
+                      enable_tool_docking=enabled, enable_docking_motion='false',
+                      docking_config='dock.yaml', docking_camera_frame='optical')
     base = SimpleNamespace(hardware_file='hardware.yaml', description={}, spawner=Mock(),
                            moveit_config=Mock(), state_publisher=Mock(), control_node=Mock())
     common = SimpleNamespace(build_arm_base=Mock(return_value=base))

@@ -17,6 +17,13 @@ tools:
     tag_max_age_s: 0.25
     min_decision_margin: 40.0
     max_reprojection_px: 1.5
+    min_tag_edge_px: 30.0
+    # Reject near-equal IPPE planar solutions instead of allowing pose flips.
+    min_pnp_solution_gap_px: 0.05
+    tf_timeout_s: 0.10
+    # The physical rack tag is stationary in base coordinates.
+    max_tag_position_jump_m: 0.005
+    max_tag_angle_jump_rad: 0.05
     position_tolerance_m: 0.002
     angle_tolerance_rad: 0.02
     step_m: 0.002

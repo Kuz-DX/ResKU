@@ -52,6 +52,10 @@ ros2 launch src/arm/tool_manipulator_bringup/launch/ik_manual.launch.py
 동시에 띄우지 않는다. 새 실행기도 `tool_docking.yaml`에서 `enabled: false`인
 경로는 기존 방식으로 재생하고 HOLD로 끝낸다.
 
+`enable_tool_docking:=true`만 지정하면 활성 경로의 저장 궤적 이후 태그와 목표 오차를
+`preview` 상태로 출력하지만 보정 이동이나 LOCK은 실행하지 않는다. 실측·preview 검증까지
+통과한 뒤에만 `enable_docking_motion:=true`를 추가해 실제 보정을 별도로 무장한다.
+
 도킹을 활성화한 경로의 순서는 다음과 같다.
 
 ```text
@@ -110,6 +114,10 @@ ros2 topic echo /arm/tool_trajectory/status
 도킹 노드는 전용 취소 서비스와 기존 `/arm/cancel`에 의한 모드/epoch 변경을 감시한다.
 도킹 노드 종료 시 launch도 종료한다. 프로세스 강제 종료/통신 단절에서 Arduino의 동작을
 정지시키는 자체 watchdog은 펌웨어에 필요하다. 성공 시에도 자동 후퇴하지 않고 HOLD를 유지한다.
+도킹이 활성화된 경로는 L2를 deadman으로 사용한다. 저장 경로 재생부터 정렬·체결까지 L2를
+계속 눌러야 하며, L2를 놓거나 `/joy`가 0.3초 이상 끊기면 취소하고 자동 후퇴하지 않는다.
+`lock_enabled: true`인 경로는 시작 시점부터 Arduino command subscriber와 status publisher가
+모두 보여야 한다.
 
 오프라인 검증(ROS 패키지 빌드 및 실기 구동 없음):
 

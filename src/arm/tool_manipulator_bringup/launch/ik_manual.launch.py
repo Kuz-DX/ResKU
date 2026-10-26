@@ -57,6 +57,8 @@ def bringup(context):
         docking_parameters = ({
             'docking_config': LaunchConfiguration('docking_config').perform(context),
             'docking_camera_frame': LaunchConfiguration('docking_camera_frame').perform(context),
+            'docking_motion_enabled': (
+                LaunchConfiguration('enable_docking_motion').perform(context) == 'true'),
         } if docking else {})
         tool_paths = Node(executable=sys.executable,
                           arguments=[str(scripts/('tool_docking_coordinator.py' if docking
@@ -99,6 +101,7 @@ def generate_launch_description():
         DeclareLaunchArgument('mock_initial_positions_file', default_value=''),
         DeclareLaunchArgument('launch_tcp_joy', default_value='true', choices=['true', 'false']),
         DeclareLaunchArgument('enable_tool_docking', default_value='false', choices=['true', 'false']),
+        DeclareLaunchArgument('enable_docking_motion', default_value='false', choices=['true', 'false']),
         DeclareLaunchArgument('docking_config', default_value=str(hardware_default.parent/'tool_docking.yaml')),
         DeclareLaunchArgument('docking_camera_frame', default_value=''),
         OpaqueFunction(function=bringup),

@@ -45,19 +45,38 @@ def tag_pose(detection, camera_matrix, distortion, settings):
     pixels = np.asarray([[p['u'], p['v']] for p in detection['corners_px']], dtype=float)
     if pixels.shape != (4, 2) or not np.all(np.isfinite(pixels)):
         raise ValueError('invalid tag corners')
+    edges = np.linalg.norm(pixels-np.roll(pixels, -1, axis=0), axis=1)
+    if np.min(edges) < settings['min_tag_edge_px']:
+        raise ValueError('tag image is too small for docking')
     half = settings['tag_size_m']/2
     square = np.asarray([[-half, half, 0], [half, half, 0],
                          [half, -half, 0], [-half, -half, 0]], dtype=float)
-    ok, rotation, translation = cv2.solvePnP(
+    result = cv2.solvePnPGeneric(
         square, pixels, camera_matrix, distortion, flags=cv2.SOLVEPNP_IPPE_SQUARE)
-    if not ok or not np.all(np.isfinite(translation)) or not np.all(np.isfinite(rotation)):
+    ok, rotations, translations = result[:3]
+    if not ok:
         raise ValueError('invalid tag pose')
-    if translation[2, 0] <= 0:
-        raise ValueError('tag behind camera')
-    projected = cv2.projectPoints(square, rotation, translation, camera_matrix, distortion)[0]
-    residual = pixels-projected.reshape(4, 2)
-    if np.sqrt(np.mean(np.sum(residual**2, axis=1))) > settings['max_reprojection_px']:
+    candidates = []
+    for rotation, translation in zip(rotations, translations):
+        rotation = np.asarray(rotation, dtype=float).reshape(3, 1)
+        translation = np.asarray(translation, dtype=float).reshape(3, 1)
+        if (not np.all(np.isfinite(translation)) or not np.all(np.isfinite(rotation))
+                or translation[2, 0] <= 0):
+            continue
+        projected = cv2.projectPoints(
+            square, rotation, translation, camera_matrix, distortion)[0]
+        residual = pixels-projected.reshape(4, 2)
+        rmse = float(np.sqrt(np.mean(np.sum(residual**2, axis=1))))
+        candidates.append((rmse, rotation, translation))
+    if not candidates:
+        raise ValueError('tag behind camera or invalid PnP candidates')
+    candidates.sort(key=lambda candidate: candidate[0])
+    error, rotation, translation = candidates[0]
+    if error > settings['max_reprojection_px']:
         raise ValueError('tag reprojection error too large')
+    if (len(candidates) > 1
+            and candidates[1][0]-error < settings['min_pnp_solution_gap_px']):
+        raise ValueError('ambiguous planar tag pose')
     result = np.eye(4)
     result[:3, :3], result[:3, 3] = cv2.Rodrigues(rotation)[0], translation.reshape(3)
     return result
@@ -80,6 +99,9 @@ def load_settings(filename):
         # Physical transforms and timing are deliberately mandatory.
         limits = dict(tag_size_m=(0, 1), tag_max_age_s=(0, .5),
                       min_decision_margin=(0, 1000), max_reprojection_px=(0, 5),
+                      min_tag_edge_px=(5, 1000), min_pnp_solution_gap_px=(0, 5),
+                      tf_timeout_s=(0, .5), max_tag_position_jump_m=(0, .05),
+                      max_tag_angle_jump_rad=(0, .5),
                       position_tolerance_m=(0, .01), angle_tolerance_rad=(0, .1),
                       step_m=(0, .01), step_rad=(0, .05),
                       max_position_error_m=(0, .25), max_angle_error_rad=(0, .5),
