@@ -17,6 +17,7 @@ install(PROGRAMS scripts/read_hardware_safety_params.py DESTINATION lib/${PROJEC
 install(PROGRAMS scripts/move_to_named_pose.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/arm_drive_guard.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/manual.py DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS scripts/manual_collision.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/managed_manual.py scripts/arm_control_mode_manager.py DESTINATION lib/${PROJECT_NAME})
 install(FILES scripts/arm_mode_core.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/tcp_joy.py DESTINATION lib/${PROJECT_NAME})

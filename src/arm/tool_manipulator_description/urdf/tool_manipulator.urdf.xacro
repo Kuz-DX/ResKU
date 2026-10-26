@@ -21,6 +21,12 @@
   <xacro:arg name="arm_world_y" default="0.0"/>
   <xacro:arg name="arm_world_z" default="0.235"/>
   <xacro:arg name="imu_height_from_ground" default="0.115"/>
+  <!-- Wheel radius in rmd_x8_params.yaml; with the wheel on the ground,
+       its axle centre is this height above ground. -->
+  <xacro:arg name="wheel_axle_height_from_ground" default="0.1125"/>
+  <xacro:property name="wheel_axle_z" value="$(arg wheel_axle_height_from_ground)"/>
+  <xacro:property name="imu_z" value="$(arg imu_height_from_ground)"/>
+  <xacro:property name="chassis_mount_z_m" value="$(arg chassis_mount_z)"/>
   <!-- D435 mounting-centre -> depth/base origin, in the camera body axes
        X forward, Y left, Z up.  Nominal values follow the official D435
        description: 14.9 - 0.1 - 4.2 = 10.6 mm forward, 17.5 mm left,
@@ -127,16 +133,30 @@
     <origin xyz="$(arg chassis_mount_x) $(arg chassis_mount_y) $(arg chassis_mount_z)" rpy="0 0 0"/>
   </joint>
 
-  <!-- Circuit-box centre in base_actuator coordinates:
-       (-161.6 - 28 - 170, 0, 36) mm = (-359.6, 0, 36) mm.
-       Top is 137 + 300 = 437 mm above ground; box height 102 mm gives centre z=386 mm ground, or 36 mm from base. -->
+  <!-- Circuit-box footprint from the eight measured points, in millimetres
+       relative to the chassis centre: CAD X points right and CAD Y points
+       forward. URDF X points forward and URDF Y points left, so
+       (X_URDF, Y_URDF) = (Y_CAD, -X_CAD).
+       The points specify the top at wheel-axle-centre Z=372 mm. Keep the
+       previous 102 mm box height until a bottom-face measurement is available.
+       The three boxes fill the rear bar and side arms, leaving the central
+       140 x 120 mm opening empty. -->
   <link name="circuit_box">
-    <visual><geometry><box size="0.340 0.280 0.102"/></geometry><material name="circuit_box_orange"/></visual>
-    <collision><geometry><box size="0.340 0.280 0.102"/></geometry></collision>
+    <!-- CAD X +/-170, Y -274.097..-114.097 mm: rear bar. -->
+    <visual><origin xyz="-0.060 0 0"/><geometry><box size="0.160 0.340 0.102"/></geometry><material name="circuit_box_orange"/></visual>
+    <collision><origin xyz="-0.060 0 0"/><geometry><box size="0.160 0.340 0.102"/></geometry></collision>
+    <!-- CAD X -170..-70, Y -114.097..5.903 mm: left side. -->
+    <visual><origin xyz="0.080 0.120 0"/><geometry><box size="0.120 0.100 0.102"/></geometry><material name="circuit_box_orange"/></visual>
+    <collision><origin xyz="0.080 0.120 0"/><geometry><box size="0.120 0.100 0.102"/></geometry></collision>
+    <!-- CAD X 70..170, Y -114.097..5.903 mm: right side. -->
+    <visual><origin xyz="0.080 -0.120 0"/><geometry><box size="0.120 0.100 0.102"/></geometry><material name="circuit_box_orange"/></visual>
+    <collision><origin xyz="0.080 -0.120 0"/><geometry><box size="0.120 0.100 0.102"/></geometry></collision>
   </link>
-  <joint name="base_actuator_to_circuit_box" type="fixed">
-    <parent link="base_actuator"/><child link="circuit_box"/>
-    <origin xyz="-0.3596 0 0.036" rpy="0 0 0"/>
+  <joint name="chassis_to_circuit_box" type="fixed">
+    <parent link="chassis"/><child link="circuit_box"/>
+    <!-- X/Y use the chassis centre. Z uses the wheel axle: box centre is
+         axle height + (372 - 102/2) mm, then converted to chassis Z. -->
+    <origin xyz="-0.134097 0 ${float(wheel_axle_z) + 0.321 - float(imu_z) - float(chassis_mount_z_m)}" rpy="0 0 0"/>
   </joint>
 
   <!-- Robot-arm reference: base height is 350 mm above ground, therefore 235 mm above the IMU/world at ground z=115 mm. -->

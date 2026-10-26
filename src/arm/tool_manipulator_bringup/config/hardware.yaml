@@ -152,7 +152,7 @@ joints:
     # Gripper pinion zero: measured raw 1992 = q 0 rad. Keep this aligned
     # with tool_1_gripper.xacro; changing it displaces both mimic racks.
     zero_raw: 1992
-    velocity_limit_rad_s: 0.24
+    velocity_limit_rad_s: 0.48
     current_limit_ma: 6877.92
     current_limit_raw: 2047
     velocity_limit_raw: 20

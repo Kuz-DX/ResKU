@@ -157,7 +157,7 @@ class ManualController(Node):
             'ee_velocity_command_topic': '/ee_velocity_controller/commands',
             'joint_state_topic': '/joint_states', 'publish_rate_hz': 50.,
             'linear_speed_mps': 0.03, 'joint_speed_rad_s': 0.12, 'damping': 0.05,
-            'ee_velocity_rad_s': 0.12,  # 이거 바꾸면 ee_joint 회전 속도 바뀜
+            'ee_velocity_rad_s': 0.36,  # 이거 바꾸면 ee_joint 회전 속도 바뀜 (0.12->0.36으로 3배 상승, 10/26 21:20)
             'joy_timeout_sec': 0.25, 'joint_state_timeout_sec': 0.5,
             'max_target_lead_rad': 0.10, 'limit_margin_rad': 0.02, 'deadzone': 0.12,
             'forward_axis': 4, 'invert_forward': True,

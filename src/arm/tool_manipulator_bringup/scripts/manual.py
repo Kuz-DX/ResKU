@@ -39,6 +39,7 @@ def position_limit_violations(positions, lower, upper):
 
 class Manual(ManualController):
     node_name = 'manual'
+    collision_guarded = False
     # Legacy Servo-mode on_timer gates only the joint at a directional limit.
     # Keep the same DLS velocity coupling, but do not freeze all three RMDs
     # because one position target reaches its boundary or lead budget.
@@ -101,12 +102,13 @@ class Manual(ManualController):
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE,
                          durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.create_subscription(String, '/control/hardware_fault', self.on_hardware_fault, qos)
+        collision_notice = ('Collision checking required. ' if self.collision_guarded else 'No collision checking. ')
         if self.params['startup_recovery_enabled']:
-            self.get_logger().warning('No collision checking. Automatic startup RMD recovery to 2-degree inset; '
+            self.get_logger().warning(collision_notice + 'Automatic startup RMD recovery to 2-degree inset; '
                                       'manual input stays disabled until recovery completes. '
                                       'No automatic home or grasp.')
         else:
-            self.get_logger().warning('No collision checking. Automatic startup recovery is disabled.')
+            self.get_logger().warning(collision_notice + 'Automatic startup recovery is disabled.')
 
     def now_seconds(self):
         # Watchdogs must continue to expire if ROS /clock stalls or jumps.
@@ -196,10 +198,9 @@ class Manual(ManualController):
         goal = np.array(STOP_POSE_RAD)
         candidate = self.target + np.clip(goal-self.target, -self.speeds*dt, self.speeds*dt)
         allowed = np.abs(candidate-self.measured()) <= self.params['max_target_lead_rad']
-        self.target = np.where(allowed, candidate, self.target)
+        candidate = np.where(allowed, candidate, self.target)
         self.status = 'aligning Stop_pose'
-        self.publish_ee_velocity(0.)
-        self.hold()
+        self.apply_motion(candidate, 0., 'stop_pose', dt, goal=goal)
         if (np.allclose(self.target, goal, atol=1e-9, rtol=0.) and
                 np.max(np.abs(self.measured()-goal)) <= .005):
             self.stop_pose_active = False
@@ -428,8 +429,9 @@ class Manual(ManualController):
         candidate = self.target.copy()
         candidate[1:4] += np.clip(self.startup_goal[1:4]-self.target[1:4], -step, step)
         if np.max(np.abs(candidate[1:4]-measured[1:4])) <= self.params['max_target_lead_rad']:
-            self.target = candidate
-        self.hold()
+            self.apply_motion(candidate, 0., 'startup', dt, goal=self.startup_goal)
+        else:
+            self.hold()
         if (np.allclose(self.target[1:4], self.startup_goal[1:4], atol=1e-9, rtol=0.) and
                 self.valid_measured(now) and
                 np.max(np.abs(measured[1:4]-self.startup_goal[1:4])) <= .005):
@@ -439,6 +441,12 @@ class Manual(ManualController):
             self.status = 'startup RMD recovery verified'
             self.get_logger().info('Startup RMD recovery verified from joint feedback; '
                                    'normal manual input is now available. Options selects arm.')
+
+    def apply_motion(self, candidate, ee_velocity, source, dt, goal=None):
+        """Direct path used by the managed producer; main manual overrides the gate."""
+        self.target = candidate
+        self.publish_ee_velocity(ee_velocity)
+        self.hold()
 
     def hold(self):
         # Only publish after explicit initialization; never send a default zero.
@@ -464,6 +472,7 @@ class Manual(ManualController):
         measured = [self.positions.get(n) for n in JOINTS]
         target = None if self.target is None else self.target.tolist()
         data = dict(monotonic_sec=self.now_seconds(), dt_sec=dt, joints=JOINTS,
+                    collision=getattr(self, 'collision_status', None),
                     status=self.status, phase=self.phase, focus=self.focus, fault=self.fault,
                     activation_blockers=getattr(self, 'activation_blockers', []),
                     position_limit_violations=position_limit_violations(self.positions, self.lower, self.upper),
@@ -558,9 +567,7 @@ class Manual(ManualController):
                     self.rmd_lead_blocked_joints.extend(JOINTS[indexes] if self.pitch_vertical_active else [JOINTS[index]])
             if dt > 0:
                 self.rmd_applied_velocity = (candidate[1:4]-self.target[1:4])/dt
-            self.target = candidate
-            self.publish_ee_velocity(self.ee_velocity())
-            self.hold()
+            self.apply_motion(candidate, self.ee_velocity(), 'operator', dt)
         self.emit_diagnostics(elapsed)
 
     def shutdown_controller(self):
@@ -582,7 +589,7 @@ def check_exclusive():
             rclpy.spin_once(node, timeout_sec=.1)
         conflicts = set(node.get_node_names()) & {
             'controller_manager', 'manual_controller', 'manual_controller_sep',
-            'manual', 'servo_node', 'joint_joy_teleop', 'tcp_joy_teleop'}
+            'manual', 'collision_scene', 'servo_node', 'joint_joy_teleop', 'tcp_joy_teleop'}
         if conflicts:
             node.get_logger().error('Stop the existing arm stack first: ' + ', '.join(sorted(conflicts)))
             return 1
@@ -591,7 +598,7 @@ def check_exclusive():
         node.destroy_node()
 
 
-def main():
+def main(node_type=Manual):
     # Keep ROS context alive through the bounded hold/deactivation cleanup.
     from rclpy.signals import SignalHandlerOptions
     import signal
@@ -604,7 +611,7 @@ def main():
     try:
         if '--check-exclusive' in sys.argv:
             return check_exclusive()
-        node = Manual()
+        node = node_type()
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
