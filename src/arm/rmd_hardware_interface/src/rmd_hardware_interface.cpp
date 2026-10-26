@@ -726,8 +726,12 @@ namespace rmd_hardware_interface {
       auto const wakeup_time {now + cycle_time};
       try {
       if (release_motor_requested_.exchange(false)) {
-        actuator_interface_->stopMotor();
-        RCLCPP_WARN(getLogger(), "Motor released; entering feedback-only mode.");
+        // STOP_MOTOR (0x81) only stops the active closed-loop command and may
+        // retain holding torque. SHUTDOWN_MOTOR (0x80) turns motor output off,
+        // which is required for hand-guided teaching while status reads remain.
+        actuator_interface_->shutdownMotor();
+        RCLCPP_WARN(getLogger(),
+          "Motor output shut down; entering feedback-only teaching mode.");
       }
       if (position_interface_running_ && position_command_valid_.load()) {
         double const requested_command {async_position_command_.load()};
