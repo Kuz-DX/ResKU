@@ -64,12 +64,12 @@ URDF는 소스에 연결되어 있지만, 별도 구동 PC에서는 설치 URDF�
 
 ### 공통 환경 설정
 
-각 터미널에서 먼저 환경을 설정한다. 아래 ROS 경로는 현재 작업공간
-배치(`/home/kuzdx/ResKU`) 기준이다:
+각 터미널에서 먼저 환경을 설정한다. 저장소는 사용자 홈의 `~/ResKU`에
+배치한 것을 기준으로 하며 사용자 이름을 경로에 고정하지 않는다:
 
 ```bash
-source ../../../opt/ros/humble/setup.bash
-source install/setup.bash
+source /opt/ros/humble/setup.bash
+source ~/ResKU/install/setup.bash
 ```
 
 ### 터미널 1 — 실기 컨트롤러

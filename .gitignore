@@ -10,6 +10,7 @@ __pycache__/
 build/
 install/
 log/
+symlink_install_manifest.txt
 
 # Local robot-arm diagnosis: reports, scripts, and captured runtime evidence.
 debug_report/

@@ -3,7 +3,7 @@
 리포 전체에서 쓰는 학습된 모델 가중치를 한곳에 모아둔다. 예전에는 리포
 루트와 `runs/segment/`에 흩어져 있었고, `arm_pickup.py`의 `model_path`
 기본값이 절대경로로 하드코딩되어 있다가 사용자/머신이 바뀌면서 깨진 전례가
-있다(`/home/j/dolbotZ/...` -> `/home/jecs/dolbotZ/...`, 커밋 `6056cf8`).
+있다(사용자별 절대경로 제거, 커밋 `6056cf8`).
 이제 모든 노드가 `dolbotz.utils.paths.get_models_dir()`로 이 디렉토리를
 실행 환경과 무관하게 찾는다.
 

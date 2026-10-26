@@ -82,7 +82,7 @@ ros2 launch rosbridge_server rosbridge_websocket_launch.xml
 ## 모니터링 PC — UI
 
 ```bash
-cd /home/kuzdx/DolbotZ-Center
+cd ~/DolbotZ-Center
 python3 -m http.server 8080
 xdg-open http://localhost:8080/index-compressed.html
 ```

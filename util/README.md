@@ -32,7 +32,7 @@ gst-inspect-1.0 appsrc jpegdec x264enc h264parse rtspclientsink
 ### 1. MediaMTX
 
 ```bash
-cd /home/kuzdx/DolbotZ-Center/deploy
+cd ~/DolbotZ-Center/deploy
 sudo docker compose up -d
 ```
 
@@ -69,7 +69,7 @@ ros2 topic info -v /side/left/image_raw/compressed
 
 ```bash
 source /opt/ros/humble/setup.bash
-python3 /home/kuzdx/dolbotZ/util/ros_compressed_to_rtsp.py --ros-args \
+python3 ~/ResKU/util/ros_compressed_to_rtsp.py --ros-args \
   -r __node:=left_camera_rtsp_bridge \
   -p image_topic:=/side/left/image_raw/compressed \
   -p rtsp_url:=rtsp://127.0.0.1:8554/sub1 \
@@ -80,7 +80,7 @@ python3 /home/kuzdx/dolbotZ/util/ros_compressed_to_rtsp.py --ros-args \
 
 ```bash
 source /opt/ros/humble/setup.bash
-python3 /home/kuzdx/dolbotZ/util/ros_compressed_to_rtsp.py --ros-args \
+python3 ~/ResKU/util/ros_compressed_to_rtsp.py --ros-args \
   -r __node:=right_camera_rtsp_bridge \
   -p image_topic:=/side/right/image_raw/compressed \
   -p rtsp_url:=rtsp://127.0.0.1:8554/sub2 \
@@ -93,7 +93,7 @@ python3 /home/kuzdx/dolbotZ/util/ros_compressed_to_rtsp.py --ros-args \
 ## 확인
 
 ```bash
-sudo docker compose -f /home/kuzdx/DolbotZ-Center/deploy/docker-compose.yml logs \
+sudo docker compose -f ~/DolbotZ-Center/deploy/docker-compose.yml logs \
   --tail=100 mediamtx
 curl -fsS http://127.0.0.1:8888/sub1/index.m3u8 | head
 ```

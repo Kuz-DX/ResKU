@@ -15,7 +15,7 @@
 `/arm/camera/color/image_raw/compressed`이다. 카메라 노드는 별도로 실행해야 한다.
 
 ```bash
-source /home/shu/ResKU/install/setup.bash
+source ~/ResKU/install/setup.bash
 ros2 launch vision person_detection.launch.py
 ```
 
@@ -142,7 +142,7 @@ return_path_follower_node 전부 포함:
 launch에 포함되지 않는다 -- 전복 위험이 없는 운용 환경으로 판단해 의도적으로
 뺐다(제거 이유/재추가 방법은 manual_return_bringup.launch.py 상단 주석 참고).
 ```bash
-source /home/shu/ResKU/install/setup.bash
+source ~/ResKU/install/setup.bash
 ros2 launch robot_bringup manual_return_bringup.launch.py
 ```
 
@@ -150,7 +150,7 @@ ros2 launch robot_bringup manual_return_bringup.launch.py
 (출력: `/motor_speed_cmd_manual`, dps, Twist 변환은 drive_cmd_mux_node가 담당.
 RETURN 트리거: `/path/return`, 구 `/mission/return/trigger`):
 ```bash
-source /home/shu/ResKU/install/setup.bash
+source ~/ResKU/install/setup.bash
 ros2 launch manual_joy_control manual_control.launch.py
 ```
 
@@ -165,23 +165,23 @@ bash src/drive/autonomous/robot_bringup/scripts/record_manual_drive.sh
 ## 확인용 (선택)
 
 ### 터미널 3 - 조이스틱 raw 입력 확인
-source /home/shu/ResKU/install/setup.bash
+source ~/ResKU/install/setup.bash
 ros2 topic echo /joy
  
 
 ### 터미널 4 - manual/최종 모터 명령 확인
-source /home/shu/ResKU/install/setup.bash
+source ~/ResKU/install/setup.bash
 ros2 topic echo /motor_speed_cmd_manual   # manual_joy_control_node 출력 (dps)
 ros2 topic echo /cmd_vel                  # drive_cmd_mux_node 최종 출력(Twist) -> rmd_x8_driver_node
 
 ### 터미널 4-1 - 복귀 미션 상태/경로 확인
-source /home/shu/ResKU/install/setup.bash
+source ~/ResKU/install/setup.bash
 ros2 topic echo /mission/return/state    # IDLE/MANUAL_RECORDING/.../FINISHED
 ros2 topic echo /recorded_path           # manual 주행 중 계속 쌓이는 기록 경로
 ros2 topic echo /return_path             # RETURN 트리거 후 1회 발행되는 복귀 경로
 
 ### 터미널 5 - drive/arm 중 조이스틱이 지금 어디에 반응 중인지 확인
-source /home/shu/ResKU/install/setup.bash
+source ~/ResKU/install/setup.bash
 ros2 topic echo /control/active_target
 # Options(9번) 버튼으로 drive <-> arm 토글. Arm 진입 시 기본은 MANUAL.
 # Arm 활성 중 Share(8번) 버튼으로 MANUAL <-> AUTO 전환.
@@ -236,7 +236,7 @@ ros2 launch tool_manipulator_bringup manual.launch.py \
 
 # 터미널 1 - RViz (URDF만, MoveIt 없이 가볍게)
 source /opt/ros/humble/setup.bash
-source /home/shu/ResKU/install/setup.bash
+source ~/ResKU/install/setup.bash
 ros2 launch tool_manipulator_description display.launch.py use_mesh:=true publish_joint_states:=false
 
 # 터미널 2 - CAN 인터페이스 켜기 (위 "CAN 인터페이스 활성화 can_arm" 참고, 이미 켰으면 생략)
@@ -247,7 +247,7 @@ sudo ip link set up can_arm
 # sign/q_offset은 hardware.yaml의 shoulder_joint/elbow_joint/wrist_pitch_joint 값과
 # 맞춘다. CAN 인터페이스 기본값은 can_arm이다.
 source /opt/ros/humble/setup.bash
-source /home/shu/ResKU/install/setup.bash
+source ~/ResKU/install/setup.bash
 ros2 launch rmd_joint_state_bridge joint_state_bridge.launch.py
 # 예: ros2 launch rmd_joint_state_bridge joint_state_bridge.launch.py wrist_sign:=-1.0 wrist_q_offset:=0.0523599
 
@@ -382,10 +382,10 @@ ros2 run usb_cam usb_cam_node_exe --ros-args \
 한다. 소스 수정 후 최초 1회는 관련 패키지를 빌드한 다음 새 터미널에서 실행한다.
 
 ```bash
-cd /home/shu/ResKU
+cd ~/ResKU
 colcon build --packages-select \
   army_manipulator_bringup army_manipulator_description
-source /home/shu/ResKU/install/setup.bash
+source ~/ResKU/install/setup.bash
 ```
 
 **터미널 런처 권장 순서**
