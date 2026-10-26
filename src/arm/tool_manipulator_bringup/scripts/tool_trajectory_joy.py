@@ -104,6 +104,13 @@ def nearest_path_suffix(path, measured):
                 total=sum(durations), entry_index=index)
 
 
+def collision_check_budget(sample_count, minimum_timeout, service_rate=50.):
+    """Allow serial MoveIt validity calls enough time, while keeping a hard ceiling."""
+    if sample_count < 1 or service_rate <= 0.:
+        raise ValueError('invalid collision-check budget input')
+    return min(120., max(float(minimum_timeout), sample_count/service_rate+2.))
+
+
 def planned_entry(path, trajectory, measured, minimum_duration=.02):
     """Convert a MoveIt joint trajectory into a managed path prefix."""
     names = list(trajectory.joint_names)
@@ -225,6 +232,7 @@ class ToolTrajectoryJoy(Node):
         self.use_nearest_entry = False
         self.command_feedback_sequence = None
         self.actuation_deadline = None
+        self.collision_deadline = None
 
     def report(self, state, reason):
         self.diagnostics.publish(String(data=json.dumps(dict(
@@ -362,11 +370,14 @@ class ToolTrajectoryJoy(Node):
                     req.robot_state.is_diff = True
                     self.requests.append(req)
             self.stage, self.started, self.request_index = 'checking', now, 0
+            budget = collision_check_budget(len(self.requests), self.collision_timeout)
+            self.collision_deadline = now+budget
             self.future = self.collision.call_async(self.requests[0])
             approach = ('; approaching taught start from %.4f rad' % path['start_error']
                         if path['start_error'] > self.start_tolerance else '')
             self.report('checking',
-                        f'checking tool path {path_id} ({len(self.requests)} samples){approach}')
+                        f'checking tool path {path_id} ({len(self.requests)} samples, '
+                        f'{budget:.1f}s budget){approach}')
         except (ValueError, RuntimeError, KeyError) as exc:
             self.path_id = path_id
             self.begin_failed(str(exc))
@@ -528,7 +539,7 @@ class ToolTrajectoryJoy(Node):
                     raise RuntimeError(
                         'robot state changed beyond stopped-feedback tolerance during '
                         'path validation; '+self.snapshot_change_reason(validation=True))
-                if now-self.started > self.collision_timeout:
+                if now > self.collision_deadline:
                     raise TimeoutError('tool path collision check timed out')
                 if not self.future.done():
                     return

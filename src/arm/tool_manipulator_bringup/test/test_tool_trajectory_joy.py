@@ -10,8 +10,8 @@ import yaml
 
 SCRIPTS = Path(__file__).resolve().parents[1]/'scripts'
 sys.path.insert(0, str(SCRIPTS))
-from tool_trajectory_joy import (execution_plan, load_path, nearest_path_suffix,
-                                 planned_entry, requested_path)
+from tool_trajectory_joy import (collision_check_budget, execution_plan, load_path,
+                                 nearest_path_suffix, planned_entry, requested_path)
 
 
 def write_path(tmp_path, enabled=True, times=(0., 1., 3.)):
@@ -128,6 +128,12 @@ def test_nearest_final_point_still_creates_safe_hold_target():
     assert len(plan['waypoints']) == 1
     np.testing.assert_array_equal(plan['waypoints'][0], np.ones(6))
     assert plan['durations'] == [.5]
+
+
+def test_collision_budget_scales_for_long_serial_moveit_checks():
+    assert collision_check_budget(100, 10.) == 10.
+    assert collision_check_budget(1068, 10.) == pytest.approx(23.36)
+    assert collision_check_budget(10000, 10.) == 120.
 
 
 def test_moveit_entry_plan_is_prefixed_to_taught_path():
