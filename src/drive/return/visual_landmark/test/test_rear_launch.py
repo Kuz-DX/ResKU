@@ -87,3 +87,16 @@ def test_by_id_is_resolved_before_usb_cam_to_avoid_relative_symlink_bug(monkeypa
     actions = module.configure(context())
     camera = next(action for action in actions if action.get('package') == 'usb_cam')
     assert camera['parameters'][0]['video_device'] == '/dev/video2'
+
+
+def test_low_resolution_trial_scales_intrinsics_without_changing_distortion():
+    root = Path(__file__).resolve().parents[4]/'vision/camera/config/calibration'
+    original = yaml.safe_load((root/'apc850_rear_preview_trial_1280x720.yaml').read_text())
+    scaled = yaml.safe_load((root/'apc850_rear_preview_trial_640x360.yaml').read_text())
+    assert (scaled['image_width'], scaled['image_height']) == (640, 360)
+    for key, columns in [('camera_matrix', 3), ('projection_matrix', 4)]:
+        expected = [v * .5 if i < 2*columns else v
+                    for i, v in enumerate(original[key]['data'])]
+        assert scaled[key]['data'] == pytest.approx(expected)
+    assert scaled['distortion_coefficients'] == original['distortion_coefficients']
+    assert scaled['rectification_matrix'] == original['rectification_matrix']

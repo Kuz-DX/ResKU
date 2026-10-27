@@ -1,0 +1,57 @@
+# Trial intrinsics scaled by 0.5 from 1280x720; valid only for identical FOV.
+# Not an independent calibration. Verify camera mode before correction use.
+camera_matrix:
+  cols: 3
+  data:
+  - 509.42004316662087
+  - 0.0
+  - 316.6407716161184
+  - 0.0
+  - 506.8977340109953
+  - 209.16536663963439
+  - 0.0
+  - 0.0
+  - 1.0
+  rows: 3
+camera_name: apc850_rear
+distortion_coefficients:
+  cols: 5
+  data:
+  - -0.43412460102315614
+  - 0.4000568738062116
+  - -0.003182130500089253
+  - -0.005225997010112098
+  - -0.6445535536864695
+  rows: 1
+distortion_model: plumb_bob
+image_height: 360
+image_width: 640
+projection_matrix:
+  cols: 4
+  data:
+  - 509.42004316662087
+  - 0.0
+  - 316.6407716161184
+  - 0.0
+  - 0.0
+  - 506.8977340109953
+  - 209.16536663963439
+  - 0.0
+  - 0.0
+  - 0.0
+  - 1.0
+  - 0.0
+  rows: 3
+rectification_matrix:
+  cols: 3
+  data:
+  - 1.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 1.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 1.0
+  rows: 3

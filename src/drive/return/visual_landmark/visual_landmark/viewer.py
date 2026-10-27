@@ -5,7 +5,7 @@ import cv2
 import numpy as np
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from sensor_msgs.msg import CompressedImage
 from std_msgs.msg import String
 
@@ -14,6 +14,10 @@ class Viewer(Node):
     def __init__(self):
         super().__init__('vpr_viewer')
         self.frames = {}
+        self.pending = {}
+        self.displayed = {}
+        image_qos = QoSProfile(history=HistoryPolicy.KEEP_LAST, depth=1,
+                               reliability=ReliabilityPolicy.BEST_EFFORT)
         self.lines = {}
         for key, topic in {
             'Rear live': '/rear/camera/image_raw/compressed',
@@ -21,7 +25,7 @@ class Viewer(Node):
             'Matches': '/visual_landmark/debug/matches/compressed',
         }.items():
             self.create_subscription(CompressedImage, topic,
-                lambda msg, key=key: self.receive(key, msg), qos_profile_sensor_data)
+                lambda msg, key=key: self.receive(key, msg), image_qos)
         for key, topic in {
             'mission': '/mission/return/state',
             'localization': '/visual_landmark/localization_event',
@@ -32,9 +36,8 @@ class Viewer(Node):
                 lambda msg, key=key: self.status(key, msg), 10)
 
     def receive(self, key, msg):
-        frame = cv2.imdecode(np.frombuffer(msg.data, np.uint8), cv2.IMREAD_COLOR)
-        if frame is not None:
-            self.frames[key] = frame, time.monotonic()
+        # Decode at display time, replacing queued frames with the latest arrival.
+        self.pending[key] = msg, time.monotonic()
 
     def status(self, key, msg):
         try:
@@ -55,6 +58,11 @@ class Viewer(Node):
             self.lines[key] = msg.data
 
     def show(self):
+        for key, (msg, arrival) in list(self.pending.items()):
+            frame = cv2.imdecode(np.frombuffer(msg.data, np.uint8), cv2.IMREAD_COLOR)
+            if frame is not None:
+                self.frames[key] = frame, arrival
+        self.pending.clear()
         now = time.monotonic()
         panel = np.zeros((650, 1200, 3), np.uint8)
         lines = ['VPR trial | Q closes viewer only | green=PnP inlier, amber=descriptor match',
@@ -62,9 +70,12 @@ class Viewer(Node):
         for key in ('Rear live', 'Front live', 'Matches'):
             if key in self.frames:
                 frame, arrival = self.frames[key]
+                if self.displayed.get(key) == arrival:
+                    continue
+                self.displayed[key] = arrival
                 scale = min(1., 1200/frame.shape[1], 650/frame.shape[0])
                 view = cv2.resize(frame, None, fx=scale, fy=scale)
-                cv2.putText(view, f'{key}: {now-arrival:.1f}s since received', (10, view.shape[0]-12),
+                cv2.putText(view, f'{key}: {now-arrival:.1f}s since received at render', (10, view.shape[0]-12),
                             cv2.FONT_HERSHEY_SIMPLEX, .5, (0,0,255) if now-arrival>2 else (255,255,0), 1)
                 cv2.imshow(key, view)
             else:
@@ -85,7 +96,9 @@ def main(args=None):
     node = Viewer()
     try:
         while rclpy.ok():
-            rclpy.spin_once(node, timeout_sec=.03)
+            rclpy.spin_once(node, timeout_sec=.01)
+            for _ in range(12):
+                rclpy.spin_once(node, timeout_sec=0.)
             if not node.show():
                 break
     except KeyboardInterrupt:

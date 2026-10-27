@@ -95,6 +95,8 @@ def generate_launch_description():
         DeclareLaunchArgument('effective_track_width_m', default_value='0.4904'),
         DeclareLaunchArgument('angular_slip_compensation_factor', default_value='1.05'),
         DeclareLaunchArgument('use_imu_yaw', default_value='true'),
+        DeclareLaunchArgument('publish_legacy_camera_tf', default_value='true',
+                              description='Publish old drive camera_link mounting TF'),
         # [2026-09-29] true: myahrs_driver를 RPYIMU(gyro 포함)로 띄우고
         # reduced_odom이 gyro wz + (use_imu_yaw면) yaw_relative를 융합,
         # 시작 방향을 odom yaw=0으로. false면 이전(휠 wz / AHRS 절대 yaw)과 동일.
@@ -243,6 +245,7 @@ def generate_launch_description():
             package='tf2_ros',
             executable='static_transform_publisher',
             name='base_to_camera_tf',
+            condition=IfCondition(LaunchConfiguration('publish_legacy_camera_tf')),
             arguments=[
                 '--x', '0.34815', '--y', '0', '--z', '0.25795',
                 '--roll', '0.0030', '--pitch', '0.8106', '--yaw', '0',

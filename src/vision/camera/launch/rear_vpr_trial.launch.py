@@ -13,11 +13,12 @@ def generate_launch_description():
     defaults = dict(
         device='/dev/v4l/by-id/usb-Alcorlink_Corp._USB_2.0_Camera-video-index0',
         parent_frame='base_link',
-        camera_info_url='package://vision/config/camera/calibration/apc850_rear_preview_trial_1280x720.yaml',
+        width='640', height='360', fps='15.0', pixel_format='mjpeg2rgb',
+        camera_info_url='package://vision/config/camera/calibration/apc850_rear_preview_trial_640x360.yaml',
         x='-0.343627', y='0.0', z='0.650674',
         roll='-1.6231562043547265', pitch='0.0', yaw='1.5707963267948966')
     args = {key: LaunchConfiguration(key) for key in defaults}
-    args.update(width='1280', height='720', fps='15.0', publish_extrinsic='true')
+    args.update(publish_extrinsic='true')
     return LaunchDescription([
         *[DeclareLaunchArgument(key, default_value=value) for key, value in defaults.items()],
         LogInfo(msg='TRIAL rear optical TF: approximate 27mm rearward offset, 3deg down, zero housing roll. Keep visual_apply_correction=false. Do not run another rear driver/TF publisher.'),

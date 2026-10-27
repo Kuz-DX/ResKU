@@ -231,3 +231,42 @@ ros2 bag record -o "adaptive_vpr_trial_$(date +%Y%m%d_%H%M%S)" \
 Q는 뷰어만 종료하며 주행을 정지시키지 않는다.
 영상 저장·시각화는 CPU/디스크 부하를 늘린다. processing latency와 stale/deadline
 거부가 증가하면 실제 로봇에서 영상 부하를 낮추고 다시 측정한다.
+
+### APC850 low-resolution latency trial
+
+`rear_vpr_trial.launch.py` now defaults to MJPEG 640×360 at 15fps (one quarter
+of the previous pixel count). Width, height, fps and pixel_format are exposed.
+The accompanying 640×360 CameraInfo is scaled from the existing trial intrinsics;
+it is not a new calibration. It assumes the same field of view, without cropping.
+Keep `visual_apply_correction:=false` until image geometry has been verified.
+Stop the existing rear driver before restarting; do not run two rear drivers.
+Start a new mission after changing resolution; do not mix old and new references.
+
+Run on the robot PC, after transferring the code by your normal process:
+
+```bash
+cd ~/ResKU
+cbr --packages-select vision visual_landmark
+si
+v4l2-ctl --device=/dev/v4l/by-id/usb-Alcorlink_Corp._USB_2.0_Camera-video-index0 --list-formats-ext
+```
+
+If MJPEG 640×360 at 15fps is listed:
+
+```bash
+ros2 launch vision rear_vpr_trial.launch.py
+```
+
+If that mode is absent, keep the original calibrated resolution until a supported
+mode and corresponding CameraInfo are selected. Restore the previous mode with:
+
+```bash
+ros2 launch vision rear_vpr_trial.launch.py width:=1280 height:=720 fps:=15.0 \
+  camera_info_url:=package://vision/config/camera/calibration/apc850_rear_preview_trial_1280x720.yaml
+```
+
+Restart the laptop viewer after updating/building `visual_landmark` there too.
+Its image subscriptions now keep only one frame and defer decoding until display,
+replacing pending images with the latest arrival. The displayed age is local receipt
+age at rendering, not camera exposure-to-display latency. Real USB/network latency
+and camera auto-exposure still require measurement on the robot.

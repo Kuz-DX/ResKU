@@ -208,7 +208,7 @@ def generate_launch_description():
         DeclareLaunchArgument('vpr_camera_info_topic', default_value='/arm/camera/color/camera_info'),
 
         # [단계 1] rmd_x8_driver_node(CAN, 유일한 소유자) + myahrs_driver_node
-        # + static TF(base_link->imu_link/camera_link) + reduced_odom_node.
+        # + static TF(base_link->imu_link) + reduced_odom_node.
         # 그대로 재사용 -- manual/return 어느 쪽이든 이 파이프라인은 항상 켜져
         # 있어야 한다 (odom 자체를 reset하지 않는다).
         IncludeLaunchDescription(
@@ -216,6 +216,8 @@ def generate_launch_description():
             launch_arguments={
                 'can_interface': can_interface,
                 'imu_port': imu_port,
+                # VPR cameras supply their own TF; old drive camera is unused.
+                'publish_legacy_camera_tf': 'false',
                 'effective_track_width_m': track_width,
                 'angular_slip_compensation_factor': slip_factor,
                 'use_imu_yaw': use_imu_yaw,
