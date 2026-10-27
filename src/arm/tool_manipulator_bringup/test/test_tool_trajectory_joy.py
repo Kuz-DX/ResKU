@@ -86,25 +86,52 @@ def test_close_and_return_action_is_loaded_and_validated(tmp_path):
         load_path(path, model)
 
 
-def test_tool2_preserves_taught_points_and_remains_disabled_for_limits(tmp_path):
+def test_tool2_corrected_points_preserve_original_fk_xyz_with_joint_margin():
+    from tool_trajectory_joy import ArmKinematics
     path = SCRIPTS.parent/'config/tool2_trajectory.yaml'
     data = yaml.safe_load(path.read_text())
+    reference = yaml.safe_load((SCRIPTS.parent/'config/tool2_ik_reference.yaml').read_text())
+    model = ArmKinematics(
+        SCRIPTS.parent.parent/'tool_manipulator_description/urdf/tool_manipulator.urdf.xacro',
+        SCRIPTS.parent/'config/hardware.yaml')
     assert len(data['points']) == 5
-    assert data['execution_enabled'] is False
-    assert load_path(path, Mock()) is None
+    assert data['execution_enabled'] is True
+    assert data['timing_mode'] == 'joint_limits'
+    assert reference['frame_id'] == 'base_actuator' and reference['tip_link'] == 'tcp_link'
+    invalid_originals = []
+    for i, (point, evidence) in enumerate(zip(data['points'], reference['points']), start=1):
+        original = np.asarray(evidence['original_positions_rad'])
+        corrected = np.asarray(point['positions_rad'])
+        assert evidence['point'] == i
+        assert len(corrected) == 6
+        np.testing.assert_array_equal(corrected, evidence['corrected_positions_rad'])
+        if not model.within_limits(original, .02):
+            invalid_originals.append(i)
+        assert model.within_limits(corrected, .02)
+        target = model.fk(original)
+        np.testing.assert_allclose(target, evidence['original_tcp_transform'], atol=1e-12)
+        error = model.pose_error(corrected, target)
+        assert np.linalg.norm(error[:3]) < 1e-6
+        assert np.linalg.norm(error[:3]) == pytest.approx(evidence['tcp_position_error_m'], abs=1e-12)
+        assert np.linalg.norm(error[3:]) == pytest.approx(evidence['tcp_orientation_change_rad'])
+    assert invalid_originals == [2, 3, 4, 5]
+    loaded = load_path(path, model)
+    assert len(loaded['waypoints']) == 4
+    assert loaded['after_path'] == dict(ee_close_rad=1.251728, return_to_start=True)
+    returning = reverse_path(loaded)
+    np.testing.assert_array_equal(returning['start'], data['points'][4]['positions_rad'])
+    np.testing.assert_array_equal(returning['waypoints'],
+                                  [p['positions_rad'] for p in data['points'][3::-1]])
+    assert returning['durations'] == [.02]*4
+
+
+def test_tool2_ee_close_is_independent_dynamixel_id4():
+    data = yaml.safe_load((SCRIPTS.parent/'config/tool2_trajectory.yaml').read_text())
     hardware = yaml.safe_load((SCRIPTS.parent/'config/hardware.yaml').read_text())
-    def within_limits(q, margin):
-        return all(hardware['joints'][name]['soft_limit_rad'][0]+margin <= value <=
-                   hardware['joints'][name]['soft_limit_rad'][1]-margin
-                   for name, value in zip(data['joint_names'], q))
-    invalid = [i+1 for i, point in enumerate(data['points'])
-               if not within_limits(point['positions_rad'], .02)]
-    assert invalid == [2, 3, 4, 5]
-    data['execution_enabled'] = True
-    enabled = tmp_path/'enabled.yaml'
-    enabled.write_text(yaml.safe_dump(data))
-    with pytest.raises(ValueError, match='joint margin'):
-        load_path(enabled, SimpleNamespace(within_limits=within_limits))
+    assert 'ee_joint' not in data['joint_names']
+    assert hardware['joints']['ee_joint']['vendor'] == 'dynamixel'
+    assert hardware['joints']['ee_joint']['id'] == 4
+    assert data['after_path']['ee_close_rad'] == 1.251728
 
 
 def test_reverse_path_retraces_all_points_with_reversed_segment_times():

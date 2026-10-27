@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 import rclpy
 from rclpy.duration import Duration
-from rclpy.executors import ExternalShutdownException
+from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.qos import qos_profile_sensor_data
 from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo
@@ -34,6 +34,7 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         if self.settings and not self.camera_frame:
             raise ValueError('docking_camera_frame must name the calibrated optical frame')
         self.camera = None
+        self.camera_reason = 'CameraInfo not received'
         self.velocity = None
         self.feedback_sequence = 0
         self.tf_buffer = Buffer()
@@ -76,6 +77,21 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         self.advance_locked = False
         self.advance_target = None
         self.advance_plan = None
+        self.reset_tag_acquisition()
+
+    def reset_tag_acquisition(self):
+        """Acquire a fresh anchor after the taught approach has stopped."""
+        self.observation = None
+        self.last_image_stamp = -1
+        self.last_base_tag = None
+        self.tag_received = self.tag_accepted = 0
+        self.tag_reason = 'no tag messages received since acquisition started'
+        self.last_acquire_report = -math.inf
+
+    def tag_diagnostic(self):
+        return ('received=%d accepted=%d; %s; camera=%s' % (
+            self.tag_received, self.tag_accepted, self.tag_reason,
+            self.camera_reason))
 
     def on_joy(self, msg: Joy):
         self.last_joy_time = time.monotonic()
@@ -97,31 +113,49 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
     def on_camera(self, msg):
         self.camera = None
         matrix, distortion = np.asarray(msg.k).reshape(3, 3), np.asarray(msg.d)
-        if (msg.header.frame_id == self.camera_frame and matrix[0, 0] > 0
-                and matrix[1, 1] > 0 and np.all(np.isfinite(matrix))
-                and np.all(np.isfinite(distortion))
-                and msg.distortion_model in ('plumb_bob', 'rational_polynomial')):
+        if msg.header.frame_id != self.camera_frame:
+            self.camera_reason = (
+                f'CameraInfo frame mismatch: received={msg.header.frame_id!r}, '
+                f'expected={self.camera_frame!r}')
+        elif (matrix[0, 0] <= 0 or matrix[1, 1] <= 0
+                or not np.all(np.isfinite(matrix)) or not np.all(np.isfinite(distortion))):
+            self.camera_reason = 'CameraInfo has invalid intrinsics/distortion'
+        elif msg.distortion_model not in ('plumb_bob', 'rational_polynomial'):
+            self.camera_reason = f'unsupported CameraInfo distortion model: {msg.distortion_model!r}'
+        else:
             self.camera = (matrix, distortion)
+            self.camera_reason = f'ready ({self.camera_frame})'
 
     def on_tag(self, msg):
         if not self.active or getattr(self, 'advance_locked', False):
             return
+        self.tag_received += 1
         self.observation = None
         try:
             data = json.loads(msg.data)
             stamp = Time(seconds=int(data['stamp']['sec']), nanoseconds=int(data['stamp']['nanosec']))
             stamp_ns = stamp.nanoseconds
             age = (self.get_clock().now().nanoseconds-stamp_ns)/1e9
-            if (self.camera is None or data['frame_id'] != self.camera_frame
-                    or not 0 <= age < self.cfg['tag_max_age_s']
-                    or stamp_ns <= self.last_image_stamp):
-                raise ValueError('stale tag image or camera calibration unavailable')
+            if self.camera is None:
+                raise ValueError(self.camera_reason)
+            if data['frame_id'] != self.camera_frame:
+                raise ValueError(
+                    f'tag frame mismatch: received={data["frame_id"]!r}, '
+                    f'expected={self.camera_frame!r}')
+            if not 0 <= age < self.cfg['tag_max_age_s']:
+                raise ValueError(
+                    f'tag image age={age:.3f}s outside [0, {self.cfg["tag_max_age_s"]:.3f}s)')
+            if stamp_ns <= self.last_image_stamp:
+                raise ValueError('tag image timestamp did not advance')
             self.last_image_stamp = stamp_ns
             detections = [d for d in data['detections'] if d['id'] == self.cfg['tag_id']
                           and ('tag_family' not in self.cfg
                                or d.get('family') == self.cfg['tag_family'])]
             if len(detections) != 1:
-                raise ValueError('expected exactly one matching tag')
+                seen = [(d.get('id'), d.get('family')) for d in data['detections']]
+                raise ValueError(
+                    f'expected one tag id={self.cfg["tag_id"]} '
+                    f'family={self.cfg.get("tag_family", "any")}; received={seen}')
             camera_tag = tag_pose(detections[0], *self.camera, self.cfg)
             tf = self.tf_buffer.lookup_transform(
                 self.base_frame, self.camera_frame, stamp,
@@ -132,13 +166,21 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                 jump, turn = pose_errors(self.last_base_tag, base_tag)
                 if (jump > self.cfg['max_tag_position_jump_m']
                         or turn > self.cfg['max_tag_angle_jump_rad']):
-                    raise ValueError('tag pose discontinuity rejected')
+                    raise ValueError(
+                        f'tag pose discontinuity rejected: translation={jump:.4f}m '
+                        f'angle={turn:.4f}rad')
             self.last_base_tag = base_tag
             self.observation = (stamp_ns, time.monotonic(), base_tag)
+            self.tag_accepted += 1
+            self.tag_reason = 'valid tag pose accepted'
+        except TransformException as exc:
+            self.stable = 0
+            self.tag_reason = f'TF {self.base_frame} <- {self.camera_frame}: {exc}'
         except (ValueError, TypeError, KeyError, IndexError, OverflowError,
-                TransformException, cv2.error):
+                cv2.error) as exc:
             # An invalid/absent target invalidates the previous observation too.
             self.stable = 0
+            self.tag_reason = str(exc)
 
     def begin(self, path_id, planned_path=None):
         if (planned_path is None and self.requested_docked_state is None
@@ -193,6 +235,9 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             self.reset()
             return
         if self.docking_started is None:
+            # Do not let a noisy pose observed during approach permanently
+            # reject every stopped observation against an old jump anchor.
+            self.reset_tag_acquisition()
             self.docking_started = time.monotonic()
             self.stage = 'dock_acquire'
         else:
@@ -253,8 +298,11 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                 self.guard(now)
                 if self.stage == 'dock_acquire':
                     if now-self.docking_started > self.cfg['acquire_timeout_s']:
-                        raise RuntimeError('target tag acquisition timed out')
+                        raise RuntimeError('target tag acquisition timed out: '+self.tag_diagnostic())
                     if self.observation is None:
+                        if now-self.last_acquire_report >= 1.:
+                            self.report('dock_acquire', 'waiting for valid tag: '+self.tag_diagnostic())
+                            self.last_acquire_report = now
                         return
                     self.fresh_observation(now)
                     self.stage = 'dock_observe'
@@ -438,12 +486,20 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
 def main():
     rclpy.init()
     node = None
+    executor = None
     try:
         node = ToolDockingCoordinator()
-        rclpy.spin(node)
+        # The default mutually-exclusive group still serializes path/tag/state
+        # callbacks. TransformListener has its own reentrant group: a second
+        # worker can receive TF while on_tag waits for the image-time transform.
+        executor = MultiThreadedExecutor(num_threads=2)
+        executor.add_node(node)
+        executor.spin()
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
+        if executor is not None:
+            executor.shutdown()
         if node is not None:
             if node.stage != 'idle':
                 node.fail('docking coordinator shutdown')

@@ -42,6 +42,7 @@ def node(tmp_path):
         expected_docked=None, actuation_deadline=None,
         last_joy_time=1., deadman_timeout=.3, deadman_held=True,
         motion_enabled=True, last_preview_report=-math.inf,
+        camera_reason='CameraInfo not received',
         model=Mock(), report=Mock(), reset=Mock(), begin=Mock(), fail=Mock(),
         docking_command=Mock(), get_clock=Mock(), margin=.02,
         observation=(1, 0., np.eye(4)))
@@ -562,6 +563,7 @@ def test_tool1_approach_continues_after_l2_release_and_joy_stops(tmp_path, stage
 
 def test_tool1_completion_automatically_aligns_and_plans_advance_without_joy(tmp_path):
     n = camera_node(tmp_path)
+    tag = n.observation[2].copy()
     n.docking_started = None
     n.stage, n.execution_id = 'executing', 'tool1'
     n.path, n.execution_timeout, n.started = dict(total=10.), 40., 0.
@@ -577,8 +579,7 @@ def test_tool1_completion_automatically_aligns_and_plans_advance_without_joy(tmp
         n.tick()
         assert n.stage == 'dock_acquire'
         assert n.hold_epoch == 'hold-epoch'
-        tag = n.observation[2]
-        n.observation = None
+        assert n.observation is None  # Approach frames cannot authorize docking.
         n.tick()
         assert n.stage == 'dock_acquire'  # Wait for the tag, not another trigger.
         for i in range(n.cfg['stable_samples']):
@@ -589,6 +590,122 @@ def test_tool1_completion_automatically_aligns_and_plans_advance_without_joy(tmp
         np.testing.assert_allclose(n.advance_target[:3, 3], [0., 0., .075])
     n.fail.assert_not_called()
     n.docking_command.publish.assert_not_called()
+
+
+def tag_input_node(tmp_path):
+    from geometry_msgs.msg import TransformStamped
+    from sensor_msgs.msg import CameraInfo
+    n = camera_node(tmp_path)
+    n.reset_tag_acquisition()
+    n.camera_frame, n.base_frame = 'arm_camera_color_optical_frame', 'base_actuator'
+    n.get_clock.return_value.now.return_value.nanoseconds = 2_000_000_000
+    n.tf_buffer = Mock()
+    tf = TransformStamped()
+    tf.transform.rotation.w = 1.
+    n.tf_buffer.lookup_transform.return_value = tf
+    info = CameraInfo()
+    info.header.frame_id = n.camera_frame
+    info.k = [600., 0., 320., 0., 600., 240., 0., 0., 1.]
+    info.d = [0.]*5
+    info.distortion_model = 'plumb_bob'
+    n.on_camera(info)
+    h = n.cfg['tag_size_m']/2
+    square = np.array([[-h,h,0], [h,h,0], [h,-h,0], [-h,-h,0]])
+    pixels = cv2.projectPoints(square, np.array([.15, -.1, .03]),
+                              np.array([.01, .02, .3]), np.asarray(info.k).reshape(3, 3),
+                              np.zeros(5))[0].reshape(4, 2)
+    data = dict(stamp=dict(sec=1, nanosec=950_000_000), frame_id=n.camera_frame,
+                detections=[dict(id=1, family='tag36h11', hamming=0, decision_margin=70.62,
+                                 corners_px=[dict(u=u, v=v) for u, v in pixels])])
+    return n, info, data
+
+
+def test_existing_detector_message_is_accepted_with_matching_camera_and_image_time_tf(tmp_path):
+    n, _, data = tag_input_node(tmp_path)
+    n.on_tag(SimpleNamespace(data=json.dumps(data)))
+    assert n.tag_received == n.tag_accepted == 1
+    assert n.observation is not None
+    np.testing.assert_allclose(n.observation[2][:3, 3], [.01, .02, .3], atol=1e-7)
+    args = n.tf_buffer.lookup_transform.call_args.args
+    assert args[:2] == (n.base_frame, n.camera_frame)
+    assert args[2].nanoseconds == 1_950_000_000  # Never substitute latest TF.
+
+
+@pytest.mark.parametrize('failure,reason', [
+    ('camera_frame', 'CameraInfo frame mismatch'), ('camera_missing', 'CameraInfo not received'),
+    ('tag_frame', 'tag frame mismatch'), ('age', 'tag image age='),
+    ('wrong_id', 'expected one tag'), ('quality', 'tag quality rejected'),
+    ('tf', 'TF base_actuator <- arm_camera_color_optical_frame'),
+    ('jump', 'tag pose discontinuity rejected')])
+def test_tag_rejection_retains_exact_reason_and_invalidates_previous_observation(tmp_path, failure, reason):
+    from tf2_ros import TransformException
+    n, info, data = tag_input_node(tmp_path)
+    n.observation = (1, 1., np.eye(4))
+    if failure == 'camera_frame':
+        info.header.frame_id = 'camera_color_optical_frame'
+        n.on_camera(info)
+    if failure == 'camera_missing':
+        n.camera, n.camera_reason = None, 'CameraInfo not received'
+    if failure == 'tag_frame': data['frame_id'] = 'wrong'
+    if failure == 'age': data['stamp']['sec'] = 0
+    if failure == 'wrong_id': data['detections'][0]['id'] = 0
+    if failure == 'quality': data['detections'][0]['hamming'] = 1
+    if failure == 'tf':
+        n.tf_buffer.lookup_transform.side_effect = TransformException('image-time transform unavailable')
+    if failure == 'jump': n.last_base_tag = np.eye(4)
+    n.on_tag(SimpleNamespace(data=json.dumps(data)))
+    assert n.observation is None and n.tag_accepted == 0 and n.tag_received == 1
+    assert reason in n.tag_diagnostic()
+    n.begin.assert_not_called()
+
+
+def test_approach_pose_anchor_is_discarded_before_acquiring_stopped_tag(tmp_path):
+    n, _, data = tag_input_node(tmp_path)
+    n.last_base_tag = np.eye(4)  # An old/noisy approach pose would reject the new tag.
+    n.docking_started = None
+    n.status = dict(epoch='hold')
+    n.path_completed()
+    assert n.last_base_tag is None and n.observation is None
+    n.on_tag(SimpleNamespace(data=json.dumps(data)))
+    assert n.tag_accepted == 1 and n.observation is not None
+
+
+def test_acquisition_wait_and_timeout_report_reason_without_log_flooding(tmp_path):
+    n, info, data = tag_input_node(tmp_path)
+    n.docking_started = 1.
+    n.stage, n.observation = 'dock_acquire', None
+    n.guard = Mock()
+    info.header.frame_id = 'wrong'
+    n.on_camera(info)
+    n.on_tag(SimpleNamespace(data=json.dumps(data)))
+    with patch('tool_docking_coordinator.time.monotonic', return_value=1.1):
+        for _ in range(10):
+            n.tick()
+    n.report.assert_called_once()
+    assert 'CameraInfo frame mismatch' in n.report.call_args.args[1]
+    assert 'received=1 accepted=0' in n.report.call_args.args[1]
+    with patch('tool_docking_coordinator.time.monotonic', return_value=12.):
+        n.tick()
+    assert 'target tag acquisition timed out' in n.fail.call_args.args[0]
+    assert 'CameraInfo frame mismatch' in n.fail.call_args.args[0]
+
+
+def test_main_spins_tf_concurrently_and_shuts_executor_down_before_node():
+    import tool_docking_coordinator as module
+    n = Mock(stage='idle')
+    events = []
+    n.destroy_node.side_effect = lambda: events.append('node')
+    with patch.object(module, 'rclpy') as ros, \
+            patch.object(module, 'ToolDockingCoordinator', return_value=n), \
+            patch.object(module, 'MultiThreadedExecutor') as executor_type:
+        executor = executor_type.return_value
+        executor.spin.side_effect = KeyboardInterrupt
+        executor.shutdown.side_effect = lambda: events.append('executor')
+        module.main()
+    executor_type.assert_called_once_with(num_threads=2)
+    executor.add_node.assert_called_once_with(n)
+    assert events == ['executor', 'node']
+    n.fail.assert_not_called()
 
 
 @pytest.mark.parametrize('entry_offset', [0., .272])

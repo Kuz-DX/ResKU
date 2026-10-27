@@ -123,18 +123,27 @@ L2 (axis 2 below -0.5) reserves buttons 2/3/4 for physical 1/2/3, selecting
 path 0/1/2. While L2 is held, the TCP producer suppresses L1 and square HOME
 handling so one combination cannot start both a path and TCP/HOME motion.
 Paths must contain reviewed captured points and have `execution_enabled: true`.
-Path 2 stores five user-supplied points with nominal 20-second segments. Its
+Path 2 is enabled with five FK/IK-corrected points and `timing_mode: joint_limits`.
+Each original point's TCP XYZ in `base_actuator` is preserved within 1 micrometre;
+the six arm joints satisfy the existing limits with a 0.02-rad margin. Orientation
+is relaxed with user acceptance: changes at points 1..5 are approximately
+0 / 113.70 / 27.46 / 14.38 / 81.33 degrees. These are numerical candidates selected
+to favor the original orientation/joint posture and continuity, not a proof of
+globally minimal change. Original joint values, full FK transforms and residuals
+are retained in `config/tool2_ik_reference.yaml`. The runtime trajectory's
 `after_path` action closes `ee_joint` to the existing measured 1.251728 rad target,
-waits for stopped feedback, then retraces points 5/4/3/2/1 and enters HOLD.
+waits for stopped feedback at point 5, then commands points 4/3/2/1 and enters HOLD.
+`ee_joint` is the independent Dynamixel ID 4 and is excluded from the six-axis IK.
 Each phase is collision checked, including the gripper sweep and the reverse
 arm path with the closed gripper. The manager owns EE velocity (at most 0.12 rad/s)
 and aborts on stale feedback, arm drift, a 3-second EE stall or 60-second timeout.
 A failed close never starts the return. The reverse path always reaches original
 point 1, including when UI entry selected a nearer approach point. This sequence
 does not send Arduino docking pulses; a release request is unsupported.
-Path 2 remains disabled because shoulder points 2..5, elbow points 3/4 and
-wrist-roll point 5 violate the current limits or the 0.02-rad margin. Reconcile
-the taught coordinates with the hardware/URDF limits before enabling it.
+The original shoulder points 2..5, elbow points 3/4 and wrist-roll point 5
+violated the limits or margin; they remain reference data, not executable points.
+Only offline kinematics and sequencing are verified here; live collision validation
+is still required by the existing execution pipeline.
 Path 0 is enabled. Path 1 is enabled for approach-only testing and retains
 original points 1/2/5/7. Its `timing_mode: joint_limits` keeps capture timestamps
 as metadata and lets the manager derive segment timing from joint travel and
@@ -162,7 +171,7 @@ remain mandatory. Both launch switches `enable_tool_docking` and
 enables the full tool-1 sequence on L2 + square; launch itself submits no tool
 request. Set `enable_tool_docking:=false` for path-only playback or
 `enable_docking_motion:=false` for alignment preview after the approach.
-Path 2 is excluded and remains disabled.
+Path 2 uses its own close-and-return sequence, without tag alignment.
 Tool 1 uses `require_l2_hold: false`: one L2 + tool-1 selection starts the path
 and automatically continues into tag alignment and the checked 75 mm advance.
 Releasing L2 or losing subsequent Joy messages does not cancel that sequence.

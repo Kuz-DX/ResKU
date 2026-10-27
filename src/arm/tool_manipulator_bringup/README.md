@@ -119,6 +119,12 @@ ros2 launch src/arm/tool_manipulator_bringup/launch/ik_manual.launch.py \
 `tool_change_min/scripts/measure_apriltag_docking.py`와 같은 코너 순서로 PnP를 계산한다.
 태그 획득 후 검출 유실, 낮은 품질, 오래된 영상, TF 누락, 관절 피드백 유실, 소유권 변경,
 보정 한계 초과, 충돌 검사/IK 실패는 중단 사유다. 마지막 검출값으로 계속 접근하지 않는다.
+검출 화면에 ID가 보여도 도킹 입력 검사를 통과한 것은 아니다. `dock_acquire` 대기 중에는
+1초마다 수신/승인 횟수와 마지막 거부 사유를 출력하며, 10초 획득 timeout에도 이를 포함한다.
+`CameraInfo frame mismatch`, `tag frame mismatch`, `tag image age`, `TF`, PnP 오류를
+구분해서 확인한다. 관측은 영상 시각의 TF를 사용한다. TF 수신은 별도 executor worker에서
+처리하고, 툴 경로·관절 상태·태그 콜백은 기존 상호 배제 그룹에서 직렬 처리한다.
+접근 완료 시에는 접근 중 관측한 태그 기준 자세를 지우고 정지 후의 새 관측으로 시작한다.
 
 Arduino 명령과 완료 상태는 `std_msgs/Bool`을 사용한다. 체결은 `/arm/docking`에
 `true` 후 즉시 `false`, 해지는 `false` 후 즉시 `true`를 발행하는 트리거 펄스다.

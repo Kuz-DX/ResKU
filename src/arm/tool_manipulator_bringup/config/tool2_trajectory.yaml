@@ -1,14 +1,14 @@
-# User-supplied tool 2 approach: 1 -> 2 -> 3 -> 4 -> 5, close ee_joint,
-# then retrace 5 -> 4 -> 3 -> 2 -> 1. Nominal segments are 20 seconds;
-# the mode manager may extend them to respect its loaded-arm speed limits.
-# Disabled until taught coordinates and configured limits are reconciled:
-# shoulder points 2..5 exceed 1.518; elbow point 4 exceeds 1.542;
-# wrist_roll point 5 is below -0.75. The 0.02-rad margin also excludes
-# elbow point 3. Do not clip recorded coordinates or bypass validation.
-execution_enabled: false
+# Tool 2: corrected points 1 -> 2 -> 3 -> 4 -> 5, independent DXL ID 4 close,
+# then 4 -> 3 -> 2 -> 1. TCP XYZ is preserved; orientation changes are accepted.
+# FK/IK uses base_actuator -> tcp_link, with a 0.02-rad joint-limit margin.
+# Original poses, FK targets and residuals: tool2_ik_reference.yaml.
+# Times are nominal metadata; manager joint speed/acceleration limits set timing.
+# Runtime collision checks still gate approach, EE close and reverse path.
+execution_enabled: true
+timing_mode: joint_limits
 joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
 after_path:
-  # Existing measured gripper closed position (raw 2808, zero raw 1992).
+  # Separate ee_joint / Dynamixel ID 4; excluded from six-axis arm IK.
   ee_close_rad: 1.251728
   return_to_start: true
 points:
@@ -16,14 +16,14 @@ points:
     positions_rad: [-0.004601942363863909, 1.2746139314261702, 1.330464414226767, -1.2765338042560084,
       -2.0694557179012918e-13, -0.001533980787678857]
   - time_from_start_sec: 20.0
-    positions_rad: [-0.07516505860660327, 1.829803123874989, 1.5128514009550071, -1.4269811005567645,
-      0.03681553890904876, -0.09357282806081813]
+    positions_rad: [-2.089836437018305, 1.497999999, 1.33561023020994, -1.571999999,
+      0.14606424890739408, 0.6565536763825899]
   - time_from_start_sec: 40.0
-    positions_rad: [-0.5016117176388115, 1.829803123874989, 1.5351915940752456, -1.2374384662955906,
-      -0.09970875121277345, -0.09357282806081813]
+    positions_rad: [-0.13965889947659457, 1.497999999, 1.132847045400794, -1.571999999,
+      -0.19557675212537212, -0.24122555075570395]
   - time_from_start_sec: 60.0
-    positions_rad: [-1.2563302652785473, 1.829803123874989, 1.5598006672861775, -1.1634364101372316,
-      -0.41724277430510126, -0.3528155812134912]
+    positions_rad: [-1.192820779353109, 1.497999999, 1.1222543787465549, -1.5446470434011872,
+      -0.44172304248534167, -0.46998936426551424]
   - time_from_start_sec: 80.0
-    positions_rad: [-1.9619614277059418, 1.829803123874989, 1.4659020014657822, -1.0676178714869984,
-      -0.9295923574589056, -0.06442719309099054]
+    positions_rad: [-0.07677446388839546, 0.9796193979506459, 1.521999999, -1.0278231083621654,
+      -0.6230134794511799, -1.0155354921216062]
