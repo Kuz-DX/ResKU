@@ -457,6 +457,28 @@ def test_alignment_converts_optical_goal_to_tcp_with_mount_offset(tmp_path):
     np.testing.assert_allclose(camera_goal[:3, 3], [0, 0, -.01], atol=1e-12)
 
 
+def test_unaligned_tag_correction_enters_existing_path_checker(tmp_path):
+    n = camera_node(tmp_path)
+    n.observation = (1, 0., transform([.01, 0., .2], [0, 0, 0, 1]))
+    n.model.solve.return_value = np.full(6, .001)
+    n.model.within_limits.return_value = True
+    n.model.pose_error.return_value = np.zeros(6)
+    del n.begin  # Exercise the coordinator and inherited trajectory begin together.
+    n.healthy_hold = Mock(return_value=dict(epoch='hold'))
+    n.shoulder_isolation_half_width = .08
+    n.collision_step, n.collision_timeout = .005, 10.
+    n.start_tolerance = .03
+    n.collision, n.mode = Mock(), Mock()
+    n.collision.service_is_ready.return_value = True
+    n.mode.service_is_ready.return_value = True
+    n.observed_feedback = -1
+    n.observe(1.)
+    assert n.stage == 'checking'
+    assert len(n.requests) > 0
+    np.testing.assert_allclose(n.path['start'], np.zeros(6))
+    n.fail.assert_not_called()
+
+
 def test_aligned_camera_latches_relative_75mm_only_after_distinct_stable_samples(tmp_path):
     n = camera_node(tmp_path)
     for _ in range(n.cfg['stable_samples']-1):

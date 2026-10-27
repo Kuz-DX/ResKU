@@ -347,7 +347,7 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             camera_target[:3, 2]*self.cfg['advance_distance_m'])
         self.advance_seed = q.copy()
         self.advance_count = math.ceil(self.cfg['advance_distance_m']/self.cfg['step_m'])
-        self.advance_plan = dict(waypoints=[], durations=[], total=0., start_error=0.,
+        self.advance_plan = dict(start=q.copy(), waypoints=[], durations=[], total=0., start_error=0.,
                                  cartesian_line=True)
         self.advance_snapshot = dict(self.full_state)
         self.stage = 'dock_advance_plan'
@@ -479,7 +479,7 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         travel, rotation = pose_errors(current, increment)
         duration = max(.5, float(np.max(np.abs(solved-q)))/self.cfg['joint_speed_rad_s'],
                        travel/self.cfg['linear_speed_m_s'], rotation/self.cfg['angular_speed_rad_s'])
-        self.begin(self.path_id, dict(waypoints=[solved], durations=[duration],
+        self.begin(self.path_id, dict(start=q.copy(), waypoints=[solved], durations=[duration],
                                      total=duration, start_error=0.))
 
 
