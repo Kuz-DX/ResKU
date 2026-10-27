@@ -10,6 +10,7 @@
 #define RMD_HARDWARE_INTERFACE__CONVERSIONS
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 
 
@@ -69,6 +70,27 @@ namespace rmd_hardware_interface {
   */
   constexpr double torqueToCurrent(double const torque, double const torque_constant) noexcept {
     return torque/torque_constant;
+  }
+
+  inline double positionJumpThreshold(double const velocity_limit_rad_s,
+      double const sample_dt_s, double const nominal_dt_s, double const margin_factor) noexcept {
+    if (!std::isfinite(velocity_limit_rad_s) || !std::isfinite(sample_dt_s) ||
+        !std::isfinite(nominal_dt_s) || !std::isfinite(margin_factor) ||
+        velocity_limit_rad_s <= 0.0 || sample_dt_s <= 0.0 || nominal_dt_s <= 0.0 ||
+        margin_factor <= 0.0) {
+      return NAN;
+    }
+    // A late CAN response legitimately covers more travel than a nominal
+    // sample. An early response must not make the bound tighter than one cycle.
+    return velocity_limit_rad_s * std::max(sample_dt_s, nominal_dt_s) * margin_factor;
+  }
+
+  inline bool directionMismatch(double const command_delta, double const feedback_delta,
+      double const command_deadband, double const feedback_deadband) noexcept {
+    return std::isfinite(command_delta) && std::isfinite(feedback_delta) &&
+      std::abs(command_delta) >= command_deadband &&
+      std::abs(feedback_delta) >= feedback_deadband &&
+      command_delta * feedback_delta < 0.0;
   }
 
 }  // namespace rmd_hardware_interface

@@ -5,8 +5,10 @@
 #include <chrono>
 #include <cmath>
 #include <fstream>
+#include <iomanip>
 #include <limits>
 #include <memory>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -171,6 +173,36 @@ namespace rmd_hardware_interface {
         can_receive_timeout_.count(), feedback_timeout_.count());
       return CallbackReturn::ERROR;
     }
+    auto const status1_period_parameter = info_.hardware_parameters.find("status1_period_ms");
+    status1_period_ = std::chrono::milliseconds(
+      status1_period_parameter == info_.hardware_parameters.end() ? 100 :
+      std::stol(status1_period_parameter->second));
+    if (status1_period_.count() < 20 || status1_period_.count() > 5000) {
+      RCLCPP_FATAL(getLogger(), "status1_period_ms must be in [20, 5000].");
+      return CallbackReturn::ERROR;
+    }
+    if (!parse_positive_double("position_jump_margin_factor", position_jump_margin_factor_) ||
+        !parse_positive_double("direction_command_deadband", direction_command_deadband_) ||
+        !parse_positive_double("direction_feedback_deadband", direction_feedback_deadband_)) {
+      return CallbackReturn::ERROR;
+    }
+    auto const parse_duration = [this](char const* name, std::chrono::milliseconds& value) {
+      auto const parameter = info_.hardware_parameters.find(name);
+      if (parameter == info_.hardware_parameters.end()) {
+        RCLCPP_FATAL(getLogger(), "Required hardware parameter '%s' is missing.", name);
+        return false;
+      }
+      value = std::chrono::milliseconds(std::stol(parameter->second));
+      if (value.count() <= 0 || value.count() > 5000) {
+        RCLCPP_FATAL(getLogger(), "Hardware parameter '%s' must be in [1, 5000] ms.", name);
+        return false;
+      }
+      return true;
+    };
+    if (!parse_duration("direction_window_ms", direction_window_) ||
+        !parse_duration("direction_mismatch_duration_ms", direction_mismatch_duration_)) {
+      return CallbackReturn::ERROR;
+    }
     driver_ = std::make_unique<rmd_sdk::CanDriver>(ifname_);
     driver_->setReceiveTimeout(can_receive_timeout_);
     actuator_interface_ = std::make_unique<rmd_sdk::ActuatorInterface>(*driver_, actuator_id_);
@@ -228,9 +260,15 @@ namespace rmd_hardware_interface {
     }
     position_state_valid_.store(false);
     communication_fault_.store(false);
+    hardware_safety_fault_.store(false);
     fault_published_.store(false);
     last_valid_feedback_ns_.store(0);
     next_fault_log_ns_.store(0);
+    next_status1_time_ = std::chrono::steady_clock::now();
+    watchdog_previous_valid_ = false;
+    status1_verified_position_ = std::numeric_limits<double>::quiet_NaN();
+    direction_window_valid_ = false;
+    direction_mismatch_accumulated_ = std::chrono::milliseconds(0);
     position_command_valid_.store(false);
     position_interface_running_.store(false);
     velocity_interface_running_.store(false);
@@ -298,6 +336,7 @@ namespace rmd_hardware_interface {
     async_effort_command_.store(0.0);
     position_state_valid_.store(false);
     communication_fault_.store(false);
+    hardware_safety_fault_.store(false);
     fault_published_.store(false);
     last_valid_feedback_ns_.store(0);
     next_fault_log_ns_.store(0);
@@ -313,6 +352,14 @@ namespace rmd_hardware_interface {
     recovery_start_position_ = std::numeric_limits<double>::quiet_NaN();
     current_limit_start_position_ = std::numeric_limits<double>::quiet_NaN();
     next_position_diagnostic_time_ = std::chrono::steady_clock::now();
+    next_status1_time_ = std::chrono::steady_clock::now();
+    watchdog_previous_position_ = std::numeric_limits<double>::quiet_NaN();
+    watchdog_previous_valid_ = false;
+    direction_window_position_ = std::numeric_limits<double>::quiet_NaN();
+    direction_window_command_ = std::numeric_limits<double>::quiet_NaN();
+    status1_verified_position_ = std::numeric_limits<double>::quiet_NaN();
+    direction_window_valid_ = false;
+    direction_mismatch_accumulated_ = std::chrono::milliseconds(0);
 
     if (info_.joints.size() != 1) {
       RCLCPP_FATAL(getLogger(), "Expected a single joint but got %zu joints.", info_.joints.size());
@@ -324,6 +371,8 @@ namespace rmd_hardware_interface {
     fault_qos.reliable().transient_local();
     fault_publisher_ = fault_node_->create_publisher<std_msgs::msg::String>(
       "/control/hardware_fault", fault_qos);
+    diagnostic_publisher_ = fault_node_->create_publisher<std_msgs::msg::String>(
+      "/arm/rmd_diagnostics", rclcpp::QoS(rclcpp::KeepLast(10)).reliable());
 
     auto const sign_parameter = info_.hardware_parameters.find("sign");
     if (sign_parameter == info_.hardware_parameters.end()) {
@@ -623,6 +672,11 @@ namespace rmd_hardware_interface {
   hardware_interface::return_type MyActuatorRmdHardwareInterface::write(rclcpp::Time const& /*time*/,
     rclcpp::Duration const& /*period*/) {
     if (position_interface_running_) {
+      if (hardware_safety_fault_.load()) {
+        // The asynchronous thread owns the frozen last-known-good command.
+        // Never replace it with a possibly corrupted measured position.
+        return hardware_interface::return_type::OK;
+      }
       if (std::isfinite(position_command_)) {
         double const measured = async_position_state_.load();
         // Allow a smooth return from an out-of-range starting pose. Never clamp
@@ -694,6 +748,30 @@ namespace rmd_hardware_interface {
     RCLCPP_ERROR(getLogger(), "Published latched hardware fault: %s", message.data.c_str());
   }
 
+  void MyActuatorRmdHardwareInterface::latchHardwareSafetyFault(std::string const& reason) {
+    if (hardware_safety_fault_.exchange(true)) {
+      return;
+    }
+    // Keep safe_position_command_ unchanged: it is the last position that
+    // passed command limits/current protection before this fault was observed.
+    RCLCPP_ERROR(getLogger(), "%s; frozen command=%.6f rad",
+      reason.c_str(), safe_position_command_);
+    publishHardwareFault(reason + "; frozen at last safe command=" +
+      std::to_string(safe_position_command_) + " rad");
+    // These values are static/slow diagnostics and are queried only on fault,
+    // never in the 2 ms control cadence.
+    try {
+      auto const encoder {actuator_interface_->getMultiTurnEncoderPosition()};
+      auto const original {actuator_interface_->getMultiTurnEncoderOriginalPosition()};
+      auto const offset {actuator_interface_->getMultiTurnEncoderZeroOffset()};
+      RCLCPP_ERROR(getLogger(),
+        "RMD fault encoder snapshot: position=%d original=%d zero_offset=%d",
+        encoder, original, offset);
+    } catch (std::exception const& exception) {
+      RCLCPP_ERROR(getLogger(), "RMD fault encoder snapshot failed: %s", exception.what());
+    }
+  }
+
   void MyActuatorRmdHardwareInterface::asyncThread(std::chrono::milliseconds const& cycle_time) {
     auto const setup_deadline {std::chrono::steady_clock::now() + initial_feedback_timeout_};
     bool setup_warning_logged {false};
@@ -734,7 +812,8 @@ namespace rmd_hardware_interface {
           "Motor output shut down; entering feedback-only teaching mode.");
       }
       if (position_interface_running_ && position_command_valid_.load()) {
-        double const requested_command {async_position_command_.load()};
+        double const requested_command {hardware_safety_fault_.load() ?
+          safe_position_command_ : async_position_command_.load()};
         if (std::isfinite(requested_command)) {
           double const measured_position {async_position_state_.load()};
           double const measured_current {std::abs(feedback_.current)};
@@ -847,7 +926,63 @@ namespace rmd_hardware_interface {
       double const encoder_position_rad {degToRad(position_state)};
       double const corrected_position_rad {
         position_sign_ * (encoder_position_rad - q_offset_)};
-      if (std::isfinite(corrected_position_rad)) {
+      if (std::isfinite(corrected_position_rad) && !hardware_safety_fault_.load()) {
+        if (watchdog_previous_valid_ && position_interface_running_.load()) {
+          double const sample_dt {
+            std::chrono::duration<double>(now-watchdog_previous_time_).count()};
+          double const nominal_dt {static_cast<double>(cycle_time.count())/1000.0};
+          double const jump_limit {positionJumpThreshold(
+            degToRad(max_velocity_), sample_dt, nominal_dt, position_jump_margin_factor_)};
+          double const jump {std::abs(corrected_position_rad-watchdog_previous_position_)};
+          if (std::isfinite(jump_limit) && sample_dt <=
+              static_cast<double>(feedback_timeout_.count())/1000.0 && jump > jump_limit) {
+            std::ostringstream reason;
+            reason << "RMD position jump: previous=" << watchdog_previous_position_
+                   << " rad, current=" << corrected_position_rad
+                   << " rad, delta=" << jump << " rad, limit=" << jump_limit
+                   << " rad, dt=" << sample_dt << " s";
+            latchHardwareSafetyFault(reason.str());
+          }
+        }
+        watchdog_previous_position_ = corrected_position_rad;
+        watchdog_previous_time_ = now;
+        // Hand-guided teaching intentionally has no claimed position command;
+        // reset the motion watchdog instead of treating hand motion as a jump.
+        watchdog_previous_valid_ = position_interface_running_.load();
+
+        if (!position_interface_running_.load() || current_limit_active_ || current_limit_latched_ ||
+            !std::isfinite(safe_position_command_)) {
+          direction_window_valid_ = false;
+          direction_mismatch_accumulated_ = std::chrono::milliseconds(0);
+        } else if (!direction_window_valid_) {
+          direction_window_position_ = corrected_position_rad;
+          direction_window_command_ = safe_position_command_;
+          direction_window_start_ = now;
+          direction_window_valid_ = true;
+        } else if (now-direction_window_start_ >= direction_window_) {
+          auto const elapsed {std::chrono::duration_cast<std::chrono::milliseconds>(
+            now-direction_window_start_)};
+          double const command_delta {safe_position_command_-direction_window_command_};
+          double const feedback_delta {corrected_position_rad-direction_window_position_};
+          if (directionMismatch(command_delta, feedback_delta,
+              direction_command_deadband_, direction_feedback_deadband_)) {
+            direction_mismatch_accumulated_ += elapsed;
+          } else {
+            direction_mismatch_accumulated_ = std::chrono::milliseconds(0);
+          }
+          direction_window_position_ = corrected_position_rad;
+          direction_window_command_ = safe_position_command_;
+          direction_window_start_ = now;
+          if (direction_mismatch_accumulated_ >= direction_mismatch_duration_) {
+            std::ostringstream reason;
+            reason << "RMD command/feedback direction mismatch: command_delta="
+                   << command_delta << " rad, feedback_delta=" << feedback_delta
+                   << " rad, duration_ms=" << direction_mismatch_accumulated_.count();
+            latchHardwareSafetyFault(reason.str());
+          }
+        }
+      }
+      if (std::isfinite(corrected_position_rad) && !hardware_safety_fault_.load()) {
         async_position_state_.store(corrected_position_rad);
         position_state_valid_.store(true);
         last_valid_feedback_ns_.store(std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -861,12 +996,55 @@ namespace rmd_hardware_interface {
             corrected_position_rad);
           next_position_diagnostic_time_ = diagnostic_time + std::chrono::seconds(1);
         }
-      } else {
+      } else if (!std::isfinite(corrected_position_rad)) {
         RCLCPP_ERROR(getLogger(),
           "Received non-finite motor position; keeping the last valid state.");
       }
       async_velocity_state_.store(position_sign_ * degToRad(velocity_state));
       async_effort_state_.store(currentToTorque(current_state, torque_constant_));
+
+      if (now >= next_status1_time_) {
+        auto const status1 {actuator_interface_->getMotorStatus1()};
+        next_status1_time_ = now + status1_period_;
+        auto const error_code {static_cast<std::uint16_t>(status1.error_code)};
+        if (diagnostic_publisher_) {
+          std::ostringstream diagnostic;
+          diagnostic << "{\"joint\":\"" << info_.joints.at(0).name
+                     << "\",\"motor_id\":" << actuator_id_
+                     << ",\"raw_angle_deg\":" << position_state
+                     << ",\"ros_position_rad\":" << corrected_position_rad
+                     << ",\"requested_position_rad\":" << async_position_command_.load()
+                     << ",\"safe_position_rad\":" << safe_position_command_
+                     << ",\"current_a\":" << feedback_.current
+                     << ",\"velocity_deg_s\":" << feedback_.shaft_speed
+                     << ",\"temperature_c\":" << status1.temperature
+                     << ",\"voltage_v\":" << status1.voltage
+                     << ",\"error_code\":" << error_code
+                     << ",\"current_protection\":"
+                     << (current_limit_active_ || current_limit_latched_ ? "true" : "false")
+                     << "}";
+          std_msgs::msg::String message;
+          message.data = diagnostic.str();
+          diagnostic_publisher_->publish(message);
+        }
+        if (error_code != 0U && !hardware_safety_fault_.load()) {
+          if (std::isfinite(status1_verified_position_)) {
+            async_position_state_.store(status1_verified_position_);
+            async_velocity_state_.store(0.0);
+          }
+          // Freeze the last command that passed all software guards.  Output-off
+          // is intentionally avoided because an unbraked loaded arm can fall.
+          std::ostringstream reason;
+          reason << "RMD status1 fault 0x" << std::hex << std::setfill('0')
+                 << std::setw(4) << error_code << std::dec
+                 << ", temperature=" << status1.temperature
+                 << " C, voltage=" << status1.voltage
+                 << " V; frozen at last safe command=" << safe_position_command_ << " rad";
+          latchHardwareSafetyFault(reason.str());
+        } else if (error_code == 0U && !hardware_safety_fault_.load()) {
+          status1_verified_position_ = corrected_position_rad;
+        }
+      }
 
       if (communication_failure_start_ns != 0) {
         auto const recovered_after_ms = (

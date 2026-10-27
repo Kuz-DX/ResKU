@@ -41,6 +41,9 @@ class ControlModeManager(Node):
         # printed links. Order matches JOINTS.
         path_speeds = [.08, .04, .06, .06, .08, .08]
         path_accelerations = [.08, .03, .06, .06, .08, .08]
+        # Limit acceleration slew as well as acceleration itself.  The loaded
+        # shoulder gets the gentlest S-curve to avoid exciting printed links.
+        path_jerks = [.30, .04, .15, .15, .30, .30]
         path_feedback_leads = [.04, .015, .025, .025, .04, .04]
         tcp_accelerations = [float(self.declare_parameter(
             'tcp_acceleration_rad_s2', .25).value)]*len(JOINTS)
@@ -49,7 +52,8 @@ class ControlModeManager(Node):
                              path_accelerations=path_accelerations,
                              tcp_accelerations=tcp_accelerations,
                              joint_names=JOINTS, path_speeds=path_speeds,
-                             path_feedback_leads=path_feedback_leads)
+                             path_feedback_leads=path_feedback_leads,
+                             path_jerks=path_jerks)
         self.core.tcp_entry_required = True
         self.ee = self.create_publisher(Float64MultiArray, '/ee_velocity_controller/commands', 1)
         self.position = self.create_publisher(Float64MultiArray, '/manual_position_controller/commands', 1)
@@ -80,8 +84,15 @@ class ControlModeManager(Node):
         self.activated = False
         self.last_error = ''
         self.last_report = None
+        self.last_path_clamp_warning = -float('inf')
+        self.path_clamp_warning_rad = float(self.declare_parameter(
+            'path_clamp_warning_rad', .001).value)
+        if not 0 < self.path_clamp_warning_rad <= .05:
+            raise ValueError('path_clamp_warning_rad must be in (0, 0.05]')
         self.activation_blockers = []
-        self.create_timer(.02, self.tick)
+        # Match the 100 Hz ros2_control update rate so the position stream does
+        # not alternate between new and repeated 20 ms samples.
+        self.create_timer(.01, self.tick)
         self.publish_status()
 
     def on_state(self, msg):
@@ -177,7 +188,8 @@ class ControlModeManager(Node):
                     accepted = self.core.cancel_path(data['epoch'], data['execution_id'], time.monotonic())
                 else:
                     accepted = self.core.path(data['epoch'], data['execution_id'], data['waypoints'],
-                                              time.monotonic(), durations=data.get('durations'))
+                                              time.monotonic(), durations=data.get('durations'),
+                                              stop_at_waypoints=data.get('stop_at_waypoints'))
             else:
                 accepted = self.core.command(source, data['epoch'], data['positions'],
                                              data.get('ee_velocity', 0.), time.monotonic())
@@ -304,7 +316,11 @@ class ControlModeManager(Node):
             controller_age_sec=now-self.controller_time if self.controllers else None,
             command_subscribers=self.position.get_subscription_count(),
             last_execution_id=c.last_execution_id, last_execution_result=c.last_execution_result,
-            execution_id=c.execution_id, remaining_waypoints=len(c.queue), last_error=self.last_error))))
+            execution_id=c.execution_id, remaining_waypoints=len(c.queue), last_error=self.last_error,
+            path_reference_error_rad=c.path_reference_error,
+            path_command_error_rad=c.path_command_error,
+            path_clamp_amount_rad=c.path_clamp_amount,
+            path_goal_error_rad=c.path_goal_error))))
 
     def tick(self):
         now = time.monotonic()
@@ -316,6 +332,15 @@ class ControlModeManager(Node):
                 self.core.fresh(now) and self.core.mode != 'fault'):
             self.position.publish(Float64MultiArray(data=self.core.target))
         target = self.core.tick(now, dt)
+        if (self.core.mode == 'tool_auto' and
+                self.core.path_clamp_amount >= self.path_clamp_warning_rad and
+                now-self.last_path_clamp_warning >= 1.):
+            self.get_logger().warning(
+                'tool path feedback clamp active: reference_error=%.6f command_error=%.6f '
+                'clamp=%.6f goal_remaining=%.6f rad' % (
+                    self.core.path_reference_error, self.core.path_command_error,
+                    self.core.path_clamp_amount, self.core.path_goal_error))
+            self.last_path_clamp_warning = now
         if target is not None:
             self.position.publish(Float64MultiArray(data=target))
         enabled = self.core.ready and self.core.mode in ('manual', 'tcp_ik') and not self.core.transitioning

@@ -144,6 +144,53 @@ def planned_entry(path, trajectory, measured, minimum_duration=.02):
                     np.abs(np.asarray(measured)-path['start']))))
 
 
+def isolate_shoulder_zero_crossings(path, half_width=.08, isolated_speed=.015,
+                                     shoulder_index=1):
+    """Stage a full shoulder zero crossing while every other joint is stopped."""
+    if not 0 < half_width <= .25 or not 0 < isolated_speed <= .05:
+        raise ValueError('invalid shoulder isolation parameters')
+    segment_start = np.asarray(path['start'], dtype=float)
+    output, durations, stops = [], [], []
+    for segment_goal, duration in zip(path['waypoints'], path['durations']):
+        goal = np.asarray(segment_goal, dtype=float)
+        a, b = segment_start[shoulder_index], goal[shoulder_index]
+        ascending = a < 0. < b
+        descending = b < 0. < a
+        if not (ascending or descending):
+            output.append(goal)
+            durations.append(duration)
+            stops.append(False)
+            segment_start = goal
+            continue
+        entry_value, exit_value = ((max(a, -half_width), min(b, half_width))
+                                   if ascending else
+                                   (min(a, half_width), max(b, -half_width)))
+        entry_fraction = (entry_value-a)/(b-a)
+        exit_fraction = (exit_value-a)/(b-a)
+        entry = segment_start+entry_fraction*(goal-segment_start)
+        nominal_exit = segment_start+exit_fraction*(goal-segment_start)
+        isolated_exit = entry.copy()
+        isolated_exit[shoulder_index] = exit_value
+        phases = (
+            (entry, max(.02, duration*entry_fraction), True),
+            (isolated_exit, max(.5, abs(exit_value-entry_value)/isolated_speed), True),
+            (nominal_exit, max(.5, duration*(exit_fraction-entry_fraction)), True),
+            (goal, max(.02, duration*(1.-exit_fraction)), False),
+        )
+        for point, phase_duration, stop in phases:
+            if output and np.max(np.abs(point-output[-1])) < 1e-12:
+                stops[-1] = stops[-1] or stop
+                continue
+            output.append(point)
+            durations.append(float(phase_duration))
+            stops.append(stop)
+        segment_start = goal
+    if len(output) > 1000:
+        raise ValueError('shoulder isolation expands path beyond 1000 waypoints')
+    return dict(path, waypoints=output, durations=durations,
+                stop_at_waypoints=stops, total=sum(durations))
+
+
 class ToolTrajectoryJoy(Node):
     def __init__(self):
         super().__init__('tool_trajectory_joy')
@@ -166,6 +213,11 @@ class ToolTrajectoryJoy(Node):
         # 0.25 rad/s^2 from joint_limits.yaml * 0.4 = 0.10 rad/s^2.  Keep the
         # MoveIt entry plan aligned with the loaded-arm runtime path limiter.
         self.planning_acceleration_scale = float(param('entry_planning_acceleration_scale', .4))
+        self.shoulder_isolation_enabled = bool(param('shoulder_isolation_enabled', True))
+        self.shoulder_isolation_half_width = float(param(
+            'shoulder_isolation_half_width_rad', .08))
+        self.shoulder_isolation_speed = float(param(
+            'shoulder_isolation_speed_rad_s', .015))
         self.l2_axis = int(param('l2_axis', 2))
         self.l2_threshold = float(param('l2_pressed_below', -.5))
         # This controller's physical button 1 is reported as ROS Joy button 2.
@@ -179,6 +231,8 @@ class ToolTrajectoryJoy(Node):
                 or not .5 <= self.planning_timeout <= 30. or not 1 <= self.planning_attempts <= 10
                 or not 0 < self.planning_velocity_scale <= .2
                 or not 0 < self.planning_acceleration_scale <= 1.
+                or not 0 < self.shoulder_isolation_half_width <= .25
+                or not 0 < self.shoulder_isolation_speed <= .05
                 or self.l2_axis < 0 or self.first_button < 0):
             raise ValueError('invalid tool trajectory joystick parameters')
         self.paths = {}
@@ -199,7 +253,11 @@ class ToolTrajectoryJoy(Node):
         self.create_subscription(JointState, '/joint_states', self.on_state, 1)
         self.create_subscription(Joy, '/joy', self.on_joy, 1)
         self.docking_command = self.create_publisher(Bool, '/arm/docking', 10)
-        self.create_subscription(Bool, '/arm/docked', self.on_docked, 10)
+        docking_qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                                 durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self.create_subscription(Bool, '/arm/docked', self.on_docked, docking_qos)
+        self.create_subscription(String, '/arm/docking_status', self.on_docking_status,
+                                 docking_qos)
         self.ui_held = {(path_id, desired): False for path_id in range(3)
                         for desired in (False, True)}
         for path_id in range(3):
@@ -210,6 +268,7 @@ class ToolTrajectoryJoy(Node):
                 Bool, f'/arm/tool{path_id}_release',
                 lambda msg, p=path_id: self.on_ui_request(msg, p, False), 10)
         self.docked_state = None
+        self.docking_status = 'UNKNOWN'
         self.docked_feedback_sequence = 0
         self.actuation_timeout = float(param('docking_feedback_timeout_sec', 10.))
         if not .5 <= self.actuation_timeout <= 60.:
@@ -295,6 +354,19 @@ class ToolTrajectoryJoy(Node):
             return
         self.requested_docked_state = desired_docked
         self.use_nearest_entry = nearest_entry
+        if desired_docked is not None:
+            if self.docked_state is None:
+                self.path_id = request
+                self.report('blocked', 'docking mechanism state is UNKNOWN; initialize it first')
+                self.path_id = None
+                self.requested_docked_state = None
+                return
+            if self.docked_state == desired_docked:
+                self.path_id = request
+                state = 'docked' if desired_docked else 'released'
+                self.report('completed', f'tool already {state}; servo and arm were not moved')
+                self.reset()
+                return
         if request not in self.paths:
             self.path_id = request
             self.report('blocked', f'tool path {request} is not execution-enabled')
@@ -350,6 +422,10 @@ class ToolTrajectoryJoy(Node):
                                       self.max_start_delta, self.approach_speed)
             else:
                 path = planned_path
+            if self.shoulder_isolation_enabled:
+                path = isolate_shoulder_zero_crossings(
+                    path, self.shoulder_isolation_half_width,
+                    self.shoulder_isolation_speed)
             if not self.collision.service_is_ready() or not self.mode.service_is_ready():
                 raise RuntimeError('tool mode or MoveIt collision service unavailable')
             self.path_id, self.path = path_id, path
@@ -431,12 +507,28 @@ class ToolTrajectoryJoy(Node):
         self.reset()
 
     def on_docked(self, msg):
-        self.docked_state = bool(msg.data)
-        self.docked_feedback_sequence += 1
+        # Compatibility fallback for an older bridge. The authoritative status
+        # prevents a transient-local stale Bool from overwriting UNKNOWN.
+        if not hasattr(self, 'docking_status') or self.docking_status not in (
+                'UNKNOWN', 'MOVING', 'ERROR'):
+            self.docked_state = bool(msg.data)
+            self.docked_feedback_sequence += 1
+
+    def on_docking_status(self, msg):
+        self.docking_status = msg.data
+        if msg.data == 'DOCKED':
+            self.docked_state = True
+            self.docked_feedback_sequence += 1
+        elif msg.data == 'RELEASED':
+            self.docked_state = False
+            self.docked_feedback_sequence += 1
+        elif msg.data in ('UNKNOWN', 'MOVING', 'ERROR'):
+            self.docked_state = None
 
     def send_docking_pulse(self, desired):
+        # This is a desired-state command. Arduino reports completion after its
+        # timed servo motion; it is not physical latch-sensor confirmation.
         self.docking_command.publish(Bool(data=desired))
-        self.docking_command.publish(Bool(data=not desired))
 
     def snapshot_delta(self):
         if self.full_state is None or self.snapshot is None:
@@ -579,7 +671,8 @@ class ToolTrajectoryJoy(Node):
                 self.publisher.publish(String(data=json.dumps(dict(
                     epoch=s['epoch'], execution_id=self.execution_id,
                     waypoints=[q.tolist() for q in self.path['waypoints']],
-                    durations=self.path['durations']))))
+                    durations=self.path['durations'],
+                    stop_at_waypoints=self.path.get('stop_at_waypoints')))))
                 self.stage = 'executing'
                 self.started = now
                 self.report('executing', f'executing tool path {self.path_id}')

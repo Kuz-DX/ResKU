@@ -115,6 +115,9 @@ namespace rmd_sdk {
       case ErrorCode::ENCODER_CALIBRATION_ERROR:
         os << " (encoder calibration error)";
         break;
+      case ErrorCode::ENCODER_DATA_ERROR:
+        os << " (encoder data error)";
+        break;
       default:
         os << " (unknown error)";
     }

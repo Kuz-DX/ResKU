@@ -11,7 +11,8 @@ import yaml
 SCRIPTS = Path(__file__).resolve().parents[1]/'scripts'
 sys.path.insert(0, str(SCRIPTS))
 from tool_trajectory_joy import (collision_check_budget, execution_plan, load_path,
-                                 nearest_path_suffix, planned_entry, requested_path)
+                                 isolate_shoulder_zero_crossings, nearest_path_suffix,
+                                 planned_entry, requested_path, ToolTrajectoryJoy)
 
 
 def write_path(tmp_path, enabled=True, times=(0., 1., 3.)):
@@ -72,14 +73,14 @@ def test_ui_request_uses_one_rising_edge_and_nearest_entry():
     node.request_path.assert_called_with(0, True, nearest_entry=True)
 
 
-def test_docking_trigger_is_immediately_returned_to_opposite_level():
+def test_docking_command_publishes_requested_state_once():
     node = SimpleNamespace(docking_command=Mock())
     from tool_trajectory_joy import ToolTrajectoryJoy
     ToolTrajectoryJoy.send_docking_pulse(node, True)
-    assert [call.args[0].data for call in node.docking_command.publish.call_args_list] == [True, False]
+    assert [call.args[0].data for call in node.docking_command.publish.call_args_list] == [True]
     node.docking_command.reset_mock()
     ToolTrajectoryJoy.send_docking_pulse(node, False)
-    assert [call.args[0].data for call in node.docking_command.publish.call_args_list] == [False, True]
+    assert [call.args[0].data for call in node.docking_command.publish.call_args_list] == [False]
 
 
 def test_report_uses_distinct_logger_calls_for_different_severities():
@@ -166,6 +167,46 @@ def test_moveit_entry_must_reach_taught_start():
                 durations=[3.], total=3.)
     with pytest.raises(ValueError, match='did not reach'):
         planned_entry(path, trajectory, np.ones(6)*.2)
+
+
+def test_shoulder_zero_crossing_is_staged_and_other_joints_hold():
+    start = np.array([0., -.2, 0., 0., 0., 0.])
+    goal = np.array([.4, .2, .3, -.2, .1, -.1])
+    result = isolate_shoulder_zero_crossings(dict(
+        start=start, waypoints=[goal], durations=[4.], total=4., start_error=0.))
+    assert len(result['waypoints']) == 4
+    entry, isolated_exit, nominal_exit, final = result['waypoints']
+    assert entry[1] == pytest.approx(-.08)
+    assert isolated_exit[1] == pytest.approx(.08)
+    assert isolated_exit[[0, 2, 3, 4, 5]] == pytest.approx(
+        entry[[0, 2, 3, 4, 5]])
+    assert nominal_exit[1] == pytest.approx(.08)
+    assert final == pytest.approx(goal)
+    assert result['stop_at_waypoints'] == [True, True, True, False]
+    assert result['durations'][1] >= .16/.015
+
+
+def test_shoulder_non_crossing_path_is_not_reshaped():
+    goal = np.array([.1, .3, 0., 0., 0., 0.])
+    result = isolate_shoulder_zero_crossings(dict(
+        start=np.zeros(6), waypoints=[goal], durations=[2.], total=2.))
+    np.testing.assert_allclose(result['waypoints'], [goal])
+    assert result['durations'] == [2.]
+    assert result['stop_at_waypoints'] == [False]
+
+
+def test_shoulder_crossing_inside_window_is_still_isolated():
+    start = np.array([0., .038, 0., 0., 0., 0.])
+    goal = np.array([.1, -.013, .2, 0., 0., 0.])
+    result = isolate_shoulder_zero_crossings(dict(
+        start=start, waypoints=[goal], durations=[3.], total=3.))
+    entry, isolated_exit, nominal_exit = result['waypoints'][:3]
+    assert entry == pytest.approx(start)
+    assert isolated_exit[1] == pytest.approx(goal[1])
+    assert isolated_exit[[0, 2, 3, 4, 5]] == pytest.approx(
+        start[[0, 2, 3, 4, 5]])
+    assert nominal_exit == pytest.approx(goal)
+    assert result['stop_at_waypoints'][:3] == [True, True, True]
 
 
 def test_path_snapshot_accepts_dxl_hunt_but_keeps_rmd_tight():

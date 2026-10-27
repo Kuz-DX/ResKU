@@ -48,6 +48,13 @@ def bringup(context):
         return RegisterEventHandler(OnProcessExit(target_action=process, on_exit=lambda event, ctx:
             actions if event.returncode == 0 else [EmitEvent(event=Shutdown(reason='managed startup failed'))]))
     ready = [manager, manual]
+    if real and LaunchConfiguration('launch_docking_bridge').perform(context) == 'true':
+        ready.append(Node(executable=sys.executable,
+                          arguments=[str(scripts/'arduino_docking_bridge.py')],
+                          parameters=[{
+                              'port': LaunchConfiguration('docking_serial_port').perform(context),
+                              'baud': int(LaunchConfiguration('docking_serial_baud').perform(context)),
+                          }], output='screen'))
     tcp_nodes = []
     if LaunchConfiguration('launch_tcp_joy').perform(context) == 'true':
         tcp = Node(executable=sys.executable, arguments=[str(scripts/'tcp_joy.py')],
@@ -65,6 +72,9 @@ def bringup(context):
                                                   else 'tool_trajectory_joy.py'))],
                           parameters=[base.description, {'hardware_config': base.hardware_file,
                                                         'trajectory_dir': str(trajectory_dir),
+                                                        'shoulder_isolation_enabled': True,
+                                                        'shoulder_isolation_half_width_rad': 0.08,
+                                                        'shoulder_isolation_speed_rad_s': 0.015,
                                                         **docking_parameters}],
                           output='screen')
         # Planning scene service only: no execution ownership or controller actions.
@@ -104,5 +114,8 @@ def generate_launch_description():
         DeclareLaunchArgument('enable_docking_motion', default_value='false', choices=['true', 'false']),
         DeclareLaunchArgument('docking_config', default_value=str(hardware_default.parent/'tool_docking.yaml')),
         DeclareLaunchArgument('docking_camera_frame', default_value=''),
+        DeclareLaunchArgument('launch_docking_bridge', default_value='true', choices=['true', 'false']),
+        DeclareLaunchArgument('docking_serial_port', default_value='/dev/ttyACM0'),
+        DeclareLaunchArgument('docking_serial_baud', default_value='115200'),
         OpaqueFunction(function=bringup),
     ])

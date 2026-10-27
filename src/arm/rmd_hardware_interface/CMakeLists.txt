@@ -14,6 +14,10 @@ find_package(rclcpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
 find_package(std_msgs REQUIRED)
 
+if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+endif()
+
 add_library(${PROJECT_NAME}
   src/rmd_hardware_interface.cpp
 )
@@ -39,6 +43,11 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
 )
 
 pluginlib_export_plugin_description_file(hardware_interface rmd_hardware_interface.xml)
+
+if(BUILD_TESTING)
+  ament_add_gtest(motion_watchdog_test test/motion_watchdog_test.cpp)
+  target_include_directories(motion_watchdog_test PRIVATE include)
+endif()
 
 install(
   DIRECTORY include/

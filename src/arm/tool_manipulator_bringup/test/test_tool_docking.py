@@ -123,7 +123,7 @@ def test_duplicate_images_or_feedback_never_count_as_stability(tmp_path):
     n.docking_command.publish.assert_not_called()
 
 
-def test_three_stages_then_attach_pulse_and_fresh_docked_response(tmp_path):
+def test_three_stages_then_attach_command_and_fresh_docked_response(tmp_path):
     n = node(tmp_path)
     n.cfg['actuation_enabled'] = True
     for _ in range(n.cfg['stable_samples']*3-1):
@@ -131,7 +131,7 @@ def test_three_stages_then_attach_pulse_and_fresh_docked_response(tmp_path):
         n.docking_command.publish.assert_not_called()
     sample(n)
     assert n.stage == 'dock_actuate'
-    assert [call.args[0].data for call in n.docking_command.publish.call_args_list] == [True, False]
+    assert [call.args[0].data for call in n.docking_command.publish.call_args_list] == [True]
     # A pre-command matching state is not completion; a fresh opposite state is not either.
     ToolDockingCoordinator.observe(n, 1.1)
     n.reset.assert_not_called()
@@ -141,16 +141,16 @@ def test_three_stages_then_attach_pulse_and_fresh_docked_response(tmp_path):
     ToolDockingCoordinator.on_docked(n, SimpleNamespace(data=True))
     ToolDockingCoordinator.observe(n, 1.2)
     n.reset.assert_called_once()
-    assert n.docking_command.publish.call_count == 2
+    assert n.docking_command.publish.call_count == 1
     n.begin.assert_not_called()  # no speculative retreat
 
 
-def test_release_uses_false_then_true_pulse_and_waits_for_false(tmp_path):
+def test_release_uses_explicit_false_command_and_waits_for_false(tmp_path):
     n = node(tmp_path)
     n.cfg.update(actuation_enabled=True, desired_docked=False)
     for _ in range(n.cfg['stable_samples']*3):
         sample(n)
-    assert [call.args[0].data for call in n.docking_command.publish.call_args_list] == [False, True]
+    assert [call.args[0].data for call in n.docking_command.publish.call_args_list] == [False]
     ToolDockingCoordinator.on_docked(n, SimpleNamespace(data=False))
     ToolDockingCoordinator.observe(n, 1.1)
     n.reset.assert_called_once()

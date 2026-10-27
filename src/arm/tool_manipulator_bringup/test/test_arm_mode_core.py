@@ -121,9 +121,11 @@ def test_loaded_shoulder_can_use_tighter_path_limits():
     c = ModeCore([(-2., 2.)]*6, [.12]*6,
                  path_speeds=[.08, .04, .06, .06, .08, .08],
                  path_accelerations=[.08, .03, .06, .06, .08, .08],
+                 path_jerks=[.3, .04, .15, .15, .3, .3],
                  path_feedback_leads=[.04, .015, .025, .025, .04, .04])
     assert c.path_speed_limits[1] == .04
     assert c.path_accelerations[1] == .03
+    assert c.path_jerks[1] == .04
     assert c.path_feedback_leads[1] == .015
 
 
@@ -139,7 +141,7 @@ def test_outward_motion_near_soft_limit_faults_before_crossing_limit():
 def test_path_continues_through_intermediate_waypoint_without_stopping():
     c = ready('tool_auto')
     c.path(c.epoch, 'run1', [[.01]*6, [.02]*6], .1)
-    for i in range(1, 20):
+    for i in range(1, 100):
         now = .1+i*.02
         c.feedback([0.]*6, [.03]*6, now)
         c.tick(now, .02)
@@ -173,6 +175,7 @@ def test_path_requires_measured_settlement_only_at_final_waypoint():
 def test_tool_path_command_acceleration_and_final_braking_are_bounded():
     c = ready('tool_auto')
     c.path_accelerations = [.2]*6
+    c.path_jerks = [1.]*6
     c.path(c.epoch, 'smooth', [[.2]*6], .1, durations=[2.])
     velocities = []
     previous = c.target[0]
@@ -184,10 +187,31 @@ def test_tool_path_command_acceleration_and_final_braking_are_bounded():
         previous = current
         if current == pytest.approx(.2):
             break
-    assert max(abs(b-a) for a, b in zip(velocities, velocities[1:])) <= .2*.02+1e-9
-    assert velocities[0] == pytest.approx(.5*.2*.02)
+    accelerations = [(b-a)/.02 for a, b in zip(velocities, velocities[1:])]
+    assert max(map(abs, accelerations)) <= .2+1e-9
+    assert max(abs(b-a) for a, b in zip(accelerations, accelerations[1:])) <= 1.*.02+1e-8
+    assert velocities[0] > 0.
     assert velocities[-1] < max(velocities)
     assert c.target[0] == pytest.approx(.2)
+
+
+def test_explicit_intermediate_stop_waits_for_stopped_feedback():
+    c = ready('tool_auto')
+    assert c.path(c.epoch, 'staged', [[.01]*6, [.02]*6], .1,
+                  durations=[1., 1.], stop_at_waypoints=[True, False])
+    c.target = c.goal = [.01]*6
+    c.path_velocity = [0.]*6
+    c.path_acceleration = [0.]*6
+    for i in range(1, 8):
+        now = .1+i*.01
+        c.feedback([.01]*6, [.03]*6, now)
+        c.tick(now, .01)
+    assert c.goal == [.01]*6
+    for i in range(1, 6):
+        now = .2+i*.01
+        c.feedback([.01]*6, [0.]*6, now)
+        c.tick(now, .01)
+    assert c.goal == [.02]*6
 
 
 def test_tcp_full_input_is_acceleration_bounded_without_packet_dropping():

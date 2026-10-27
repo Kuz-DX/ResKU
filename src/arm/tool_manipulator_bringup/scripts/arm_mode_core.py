@@ -13,7 +13,7 @@ TCP_ENTRY_TOLERANCE = (.02, .001, .001, .001, .02, .02)
 class ModeCore:
     def __init__(self, limits, speeds, startup_recovery_enabled=False, path_accelerations=None,
                  tcp_accelerations=None, joint_names=None, path_speeds=None,
-                 path_feedback_leads=None):
+                 path_feedback_leads=None, path_jerks=None):
         self.limits, self.speeds = limits, speeds
         self.joint_names = (list(joint_names) if joint_names is not None else
                             [f'joint_{index}' for index in range(len(speeds))])
@@ -24,6 +24,11 @@ class ModeCore:
         if (len(self.path_accelerations) != len(speeds)
                 or not all(math.isfinite(a) and 0 < a <= 2. for a in self.path_accelerations)):
             raise ValueError('invalid path acceleration limits')
+        self.path_jerks = (list(path_jerks) if path_jerks is not None
+                           else [1.0]*len(speeds))
+        if (len(self.path_jerks) != len(speeds)
+                or not all(math.isfinite(j) and 0 < j <= 20. for j in self.path_jerks)):
+            raise ValueError('invalid path jerk limits')
         self.path_speed_limits = (list(path_speeds) if path_speeds is not None
                                   else list(speeds))
         if (len(self.path_speed_limits) != len(speeds)
@@ -53,8 +58,15 @@ class ModeCore:
         self.queue = []
         self.execution_id = None
         self.path_durations = []
+        self.path_stops = []
+        self.path_stop = False
         self.path_speeds = list(speeds)
         self.path_velocity = [0.]*len(speeds)
+        self.path_acceleration = [0.]*len(speeds)
+        self.path_reference_error = 0.
+        self.path_command_error = 0.
+        self.path_clamp_amount = 0.
+        self.path_goal_error = 0.
         # A waypoint clock must never run the command far ahead of loaded
         # hardware.  Keep command lead small and let measured feedback pace it.
         self.path_feedback_leads = (list(path_feedback_leads)
@@ -243,8 +255,15 @@ class ModeCore:
         self.command_time = -math.inf
         self.settled = 0
         self.path_durations = []
+        self.path_stops = []
+        self.path_stop = False
         self.path_speeds = list(self.path_speed_limits)
         self.path_velocity = [0.]*len(self.speeds)
+        self.path_acceleration = [0.]*len(self.speeds)
+        self.path_reference_error = 0.
+        self.path_command_error = 0.
+        self.path_clamp_amount = 0.
+        self.path_goal_error = 0.
         self.path_progress_time = None
         self.path_best_error = math.inf
 
@@ -350,7 +369,8 @@ class ModeCore:
         self.reason = 'TCP deadman stop; explicit mode request required'
         return True
 
-    def path(self, epoch, execution_id, waypoints, now, durations=None):
+    def path(self, epoch, execution_id, waypoints, now, durations=None,
+             stop_at_waypoints=None):
         if (self.mode != 'tool_auto' or epoch != self.epoch or self.transitioning or
                 self.focus != 'arm' or not self.ready or not self.fresh(now)):
             return False
@@ -364,10 +384,16 @@ class ModeCore:
                 not all(type(d) in (int, float) and math.isfinite(d) and 0 < d < 120.
                         for d in durations)):
             raise ValueError('invalid waypoint durations')
+        if stop_at_waypoints is not None and (len(stop_at_waypoints) != len(waypoints)
+                or not all(type(stop) is bool for stop in stop_at_waypoints)):
+            raise ValueError('invalid waypoint stop flags')
         self.queue = [list(p) for p in waypoints]
         self.path_durations = list(durations) if durations is not None else [None]*len(waypoints)
+        self.path_stops = (list(stop_at_waypoints) if stop_at_waypoints is not None
+                           else [False]*len(waypoints))
         self.execution_id = execution_id
         self.path_velocity = [0.]*len(self.speeds)
+        self.path_acceleration = [0.]*len(self.speeds)
         self._next_waypoint()
         self.started = now
         self.path_progress_time = now
@@ -377,6 +403,7 @@ class ModeCore:
     def _next_waypoint(self):
         self.goal = self.queue.pop(0)
         duration = self.path_durations.pop(0)
+        self.path_stop = self.path_stops.pop(0)
         if duration is None:
             self.path_speeds = list(self.path_speed_limits)
         else:
@@ -397,44 +424,113 @@ class ModeCore:
             self.target = self.goal = list(self.position)
         return True
 
+    @staticmethod
+    def _jerk_braking_distance(velocity, acceleration, acceleration_limit, jerk):
+        """Conservative continuous distance needed to stop along one direction."""
+        velocity = max(0., velocity)
+        acceleration = max(-acceleration_limit, min(acceleration_limit, acceleration))
+        ramp_time = max(0., (acceleration+acceleration_limit)/jerk)
+        velocity_after_ramp = velocity+acceleration*ramp_time-.5*jerk*ramp_time**2
+        if velocity_after_ramp <= 0.:
+            # Stop during the jerk ramp. Bisection avoids a fragile cubic root.
+            lower, upper = 0., ramp_time
+            for _ in range(24):
+                middle = .5*(lower+upper)
+                vm = velocity+acceleration*middle-.5*jerk*middle**2
+                if vm > 0.:
+                    lower = middle
+                else:
+                    upper = middle
+            ramp_time = upper
+            velocity_after_ramp = 0.
+        ramp_distance = (velocity*ramp_time+.5*acceleration*ramp_time**2
+                         -jerk*ramp_time**3/6.)
+        return max(0., ramp_distance)+velocity_after_ramp**2/(2.*acceleration_limit)
+
     def _tool_path_step(self, goal, dt):
-        """Acceleration-bounded path command; brake only for the final goal."""
+        """Jerk/acceleration-bounded path command with explicit stop waypoints."""
         result = []
-        final_segment = not self.queue
-        for index, (position, target, speed, velocity, acceleration) in enumerate(zip(
+        reference = []
+        must_stop = not self.queue or self.path_stop
+        for index, (position, target, speed, velocity, acceleration, jerk,
+                    current_acceleration) in enumerate(zip(
                 self.target, goal, self.path_speeds, self.path_velocity,
-                self.path_accelerations)):
+                self.path_accelerations, self.path_jerks, self.path_acceleration)):
             distance = target-position
             if abs(distance) < 1e-12:
-                next_velocity = 0. if final_segment else velocity
+                next_velocity = 0. if must_stop else velocity
                 result.append(target)
                 self.path_velocity[len(result)-1] = next_velocity
+                self.path_acceleration[len(result)-1] = 0. if must_stop else current_acceleration
+                reference.append(target)
                 continue
             desired_speed = speed
-            if final_segment:
+            if must_stop:
                 # v^2 <= 2*a*d guarantees enough distance to stop at the goal.
-                # One control-period margin compensates the discrete velocity
-                # slew so the final sample is not reached by a velocity jump.
-                desired_speed = min(desired_speed, max(0.,
-                    math.sqrt(2.*acceleration*abs(distance))-acceleration*dt))
+                # Do not subtract an acceleration-period margin here: below
+                # 0.5*a*dt^2 that becomes zero and strands the command just
+                # short of the waypoint. The jerk-aware brake below supplies
+                # the discrete stopping margin without creating a dead zone.
+                desired_speed = min(
+                    desired_speed, math.sqrt(2.*acceleration*abs(distance)))
+                direction = math.copysign(1., distance)
+                braking_distance = self._jerk_braking_distance(
+                    velocity*direction, current_acceleration*direction,
+                    acceleration, jerk)
+                # Once directional speed is within one jerk quantum, forcing a
+                # zero-speed target can create a one-cycle stop just short of
+                # the goal. Allow the bounded final approach instead.
+                directional_velocity = max(0., velocity*direction)
+                if (directional_velocity > jerk*dt*dt and
+                        abs(distance) <= braking_distance+directional_velocity*dt):
+                    desired_speed = 0.
             desired_velocity = math.copysign(desired_speed, distance)
-            change = acceleration*dt
-            next_velocity = velocity+max(-change, min(change, desired_velocity-velocity))
+            velocity_error = desired_velocity-velocity
+            # At cruise velocity the demanded acceleration is exactly zero.
+            # Using copysign() directly for a zero error would select positive
+            # acceleration and create a small accelerate/decelerate limit cycle.
+            desired_acceleration = (0. if abs(velocity_error) < 1e-12 else
+                                    math.copysign(acceleration, velocity_error))
+            # Begin removing acceleration early enough to meet the requested
+            # velocity without an acceleration discontinuity (dv=a^2/2j).
+            if (current_acceleration*velocity_error > 0.
+                    and abs(velocity_error) <= current_acceleration**2/(2.*jerk)):
+                desired_acceleration = 0.
+            acceleration_change = jerk*dt
+            next_acceleration = current_acceleration+max(
+                -acceleration_change,
+                min(acceleration_change, desired_acceleration-current_acceleration))
+            next_velocity = velocity+next_acceleration*dt
             step = .5*(velocity+next_velocity)*dt
-            if abs(step) >= abs(distance) or step*distance <= 0:
+            if must_stop and step*distance <= 0:
+                # A conservative jerk brake may stop just before the target;
+                # approach again from zero instead of reversing or snapping.
+                result.append(position)
+                self.path_velocity[len(result)-1] = 0.
+                self.path_acceleration[len(result)-1] = 0.
+            elif abs(step) >= abs(distance):
                 result.append(target)
                 # Preserve velocity through an intermediate sample. At the final
                 # goal the measured-settle gate still requires actual standstill.
-                self.path_velocity[len(result)-1] = 0. if final_segment else next_velocity
+                self.path_velocity[len(result)-1] = 0. if must_stop else next_velocity
+                self.path_acceleration[len(result)-1] = 0. if must_stop else next_acceleration
             else:
                 result.append(position+step)
                 self.path_velocity[len(result)-1] = next_velocity
+                self.path_acceleration[len(result)-1] = next_acceleration
+            reference.append(result[-1])
             # Feedback-paced command envelope. This preserves the taught path
             # and acceleration profile while preventing a slow/stalled motor
             # from accumulating a large following error.
             measured = self.position[index]
             lead = self.path_feedback_leads[index]
             result[-1] = max(measured-lead, min(measured+lead, result[-1]))
+        self.path_reference_error = max(
+            abs(value-measured) for value, measured in zip(reference, self.position))
+        self.path_command_error = max(
+            abs(value-measured) for value, measured in zip(result, self.position))
+        self.path_clamp_amount = max(abs(a-b) for a, b in zip(reference, result))
+        self.path_goal_error = max(abs(a-b) for a, b in zip(goal, self.position))
         return result
 
     def _tcp_step(self, goal, dt):
@@ -448,7 +544,7 @@ class ModeCore:
                 self.tcp_velocity[index] = 0.
                 result.append(target)
                 continue
-            braking_speed = math.sqrt(2.*acceleration*abs(distance))
+            braking_speed = max(0., math.sqrt(2.*acceleration*abs(distance))-acceleration*dt)
             desired_velocity = math.copysign(min(speed, braking_speed), distance)
             change = acceleration*dt
             next_velocity = velocity+max(-change, min(change, desired_velocity-velocity))
@@ -547,8 +643,9 @@ class ModeCore:
             # reaches each sample; require measured standstill only at the
             # final waypoint. Waiting for five stopped feedback cycles at every
             # MoveIt sample caused repeated stop/start chatter.
-            elif (self.queue and
-                  max(abs(a-b) for a, b in zip(self.target, self.goal)) < 1e-6):
+            elif (self.queue and ((self.path_stop and self.settled >= 5) or
+                  (not self.path_stop and
+                   max(abs(a-b) for a, b in zip(self.target, self.goal)) < 1e-6))):
                 self._next_waypoint()
                 self.started, self.settled = now, 0
                 self.path_progress_time = now

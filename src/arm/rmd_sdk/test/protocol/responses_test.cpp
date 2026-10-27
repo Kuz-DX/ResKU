@@ -70,6 +70,15 @@ namespace rmd_sdk {
       EXPECT_EQ(motor_status.error_code, rmd_sdk::ErrorCode::LOW_VOLTAGE);
     }
 
+    TEST(GetMotorStatus1ResponseTest, encoder_data_error) {
+      rmd_sdk::GetMotorStatus1Response const response {
+        {0x9A, 0x23, 0x00, 0x00, 0x08, 0x02, 0x00, 0x40}};
+      rmd_sdk::MotorStatus1 const motor_status {response.getStatus()};
+      EXPECT_EQ(motor_status.temperature, 35);
+      EXPECT_NEAR(motor_status.voltage, 52.0, 0.1);
+      EXPECT_EQ(motor_status.error_code, rmd_sdk::ErrorCode::ENCODER_DATA_ERROR);
+    }
+
     TEST(GetMotorStatus2ResponseTest, parsing) {
       rmd_sdk::GetMotorStatus2Response const response {{0x9C, 0x32, 0x64, 0x00, 0xF4, 0x01, 0x2D, 0x00}};
       rmd_sdk::MotorStatus2 const motor_status {response.getStatus()};

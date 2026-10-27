@@ -6,7 +6,8 @@ import time
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, String
+from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 import serial
 
 
@@ -21,52 +22,58 @@ class ArduinoDockingBridge(Node):
         self.last_open_attempt = 0.0
         self.last_query = 0.0
         self.pending = False
-        self.last_arm_command = False
         self.state = None
         self.rx_buffer = bytearray()
         self.protocol = None
-        self.calibration_target = None
-        self.calibration_deadline = None
-        self._state_publishers = [self.create_publisher(Bool, topic, 10)
+        state_qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                               durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self._state_publishers = [self.create_publisher(Bool, topic, state_qos)
                                   for topic in ('/docked', '/arm/docked')]
+        self._status_publisher = self.create_publisher(
+            String, '/arm/docking_status', state_qos)
         self.create_subscription(Bool, '/docking', self.on_command, 10)
         self.create_subscription(Bool, '/arm/docking', self.on_arm_command, 10)
         self.create_timer(0.02, self.poll)
 
     def on_arm_command(self, msg):
-        # The existing coordinator sends either True->False or False->True.
-        # Only the True edge requests a state toggle.
-        rising = msg.data and not self.last_arm_command
-        self.last_arm_command = msg.data
-        if rising:
-            self.trigger()
+        # Bool is the desired state, not a toggle: true=dock, false=release.
+        self.command_state(bool(msg.data))
 
     def on_command(self, msg):
         # /docking is a one-shot request; separate `ros2 topic pub --once`
         # invocations must each work without an intervening False message.
         if msg.data:
-            self.trigger()
+            if self.state is None:
+                self.get_logger().warning('Legacy toggle rejected while state is UNKNOWN')
+            else:
+                self.command_state(not self.state)
 
-    def trigger(self):
-        if self.serial is None or self.pending or self.state is None:
-            self.get_logger().warning('Docking request ignored: disconnected, busy, or state unknown')
+    def command_state(self, desired):
+        if self.serial is None or self.pending:
+            self.get_logger().warning('Docking request ignored: disconnected or busy')
+            return
+        if self.state is not None and self.state == desired:
+            self.get_logger().info('Docking mechanism already in requested state')
+            self.publish_state()
             return
         try:
-            if self.protocol == 'calibration':
-                self.calibration_target = not self.state
-                angle = 90 if self.calibration_target else 180
-                self.calibration_deadline = None
-                self.serial.write(f'{angle}\n'.encode('ascii'))
-            else:
-                self.serial.write(b'T\n')
+            self.serial.write(b'D\n' if desired else b'R\n')
             self.pending = True
+            self.publish_status('MOVING')
         except (serial.SerialException, OSError) as exc:
             self.disconnect(exc)
 
     def publish_state(self):
+        if self.state is None:
+            self.publish_status('UNKNOWN')
+            return
         msg = Bool(data=self.state)
         for publisher in self._state_publishers:
             publisher.publish(msg)
+        self.publish_status('DOCKED' if self.state else 'RELEASED')
+
+    def publish_status(self, status):
+        self._status_publisher.publish(String(data=status))
 
     def disconnect(self, exc):
         self.get_logger().error(f'Arduino connection lost: {exc}')
@@ -77,8 +84,7 @@ class ArduinoDockingBridge(Node):
         self.state = None
         self.rx_buffer.clear()
         self.protocol = None
-        self.calibration_target = None
-        self.calibration_deadline = None
+        self.publish_status('UNKNOWN')
 
     def poll(self):
         if self.serial is None:
@@ -94,9 +100,8 @@ class ArduinoDockingBridge(Node):
                 self.pending = False
                 self.rx_buffer.clear()
                 self.protocol = None
-                self.calibration_target = None
-                self.calibration_deadline = None
                 self.serial.write(b'Q\n')
+                self.publish_status('UNKNOWN')
             except (serial.SerialException, OSError) as exc:
                 self.get_logger().warning(f'Arduino connection unavailable: {exc}')
             return
@@ -117,33 +122,30 @@ class ArduinoDockingBridge(Node):
                     self.state = line == 'STATE 1'
                     self.pending = False
                     self.publish_state()
+                elif line == 'STATE UNKNOWN':
+                    self.protocol = 'docking'
+                    self.state = None
+                    self.pending = False
+                    self.publish_status('UNKNOWN')
                 elif ('MG996R D9 calibration ready' in line
-                      or line.startswith('ERROR: send 0..180')):
-                    if self.protocol is None:
-                        self.protocol = 'calibration'
-                        self.calibration_target = False
-                        self.pending = True
-                        self.serial.write(b'180\n')
-                        self.get_logger().info(
-                            'Calibration sketch detected; commanding initial 180 degrees')
-                elif line.startswith('ANGLE ') and self.protocol == 'calibration':
-                    angle = 90 if self.calibration_target else 180
-                    if self.pending and line == f'ANGLE {angle} (commanded)':
-                        self.calibration_deadline = time.monotonic() + 3.0
+                      or line.startswith('ERROR: send 0..180')
+                      or line.startswith('ANGLE ')):
+                    # Never retain the old calibration-sketch fallback here: it
+                    # commanded 180 degrees as soon as the serial port opened.
+                    # The production firmware must support D/R/Q and boot UNKNOWN.
+                    self.pending = False
+                    self.publish_status('ERROR')
+                    self.get_logger().error(
+                        'Legacy calibration firmware detected; automatic motion is disabled. '
+                        'Flash Arduino/DockingMotor/DockingMotor.ino')
                 elif line == 'STOPPED':
                     self.pending = False
                 elif line.startswith('ERROR '):
                     self.pending = False
+                    self.publish_status('ERROR')
                     self.get_logger().error(f'Arduino rejected docking request: {line}')
                 elif line and line not in ('MOVING', 'BUSY'):
                     self.get_logger().warning(f'Arduino response: {line}')
-            if (self.protocol == 'calibration' and self.pending
-                    and self.calibration_deadline is not None
-                    and time.monotonic() >= self.calibration_deadline):
-                self.state = self.calibration_target
-                self.pending = False
-                self.calibration_deadline = None
-                self.publish_state()
         except (serial.SerialException, OSError) as exc:
             self.disconnect(exc)
 

@@ -30,6 +30,13 @@
         <param name="can_receive_timeout_ms">100</param>
         <param name="initial_feedback_timeout_ms">3000</param>
         <param name="feedback_timeout_ms">500</param>
+        <!-- Low-rate status/error polling; do not add 0x9A to the 2 ms loop. -->
+        <param name="status1_period_ms">100</param>
+        <param name="position_jump_margin_factor">4.0</param>
+        <param name="direction_window_ms">100</param>
+        <param name="direction_command_deadband">0.001</param>
+        <param name="direction_feedback_deadband">0.001</param>
+        <param name="direction_mismatch_duration_ms">150</param>
         <param name="position_limit_rejection_margin">0.01745329252</param>
       </hardware>
       <joint name="${name}">

@@ -240,6 +240,7 @@ namespace rmd_hardware_interface {
       rclcpp::Logger getLogger() const;
 
       void publishHardwareFault(std::string const& reason);
+      void latchHardwareSafetyFault(std::string const& reason);
 
       /**\fn asyncThread
        * \brief
@@ -287,6 +288,12 @@ namespace rmd_hardware_interface {
       std::chrono::milliseconds can_receive_timeout_;
       std::chrono::milliseconds initial_feedback_timeout_;
       std::chrono::milliseconds feedback_timeout_;
+      std::chrono::milliseconds status1_period_;
+      double position_jump_margin_factor_;
+      std::chrono::milliseconds direction_window_;
+      std::chrono::milliseconds direction_mismatch_duration_;
+      double direction_command_deadband_;
+      double direction_feedback_deadband_;
 
       // Buffers only used by the main thread
       double position_state_;
@@ -318,6 +325,7 @@ namespace rmd_hardware_interface {
       // read and copied into the command buffer.
       std::atomic<bool> position_state_valid_;
       std::atomic<bool> communication_fault_;
+      std::atomic<bool> hardware_safety_fault_;
       std::atomic<bool> fault_published_;
       std::atomic<std::int64_t> last_valid_feedback_ns_;
       std::atomic<std::int64_t> next_fault_log_ns_;
@@ -328,6 +336,7 @@ namespace rmd_hardware_interface {
       std::atomic<bool> release_motor_requested_;
       rclcpp::Node::SharedPtr fault_node_;
       rclcpp::Publisher<std_msgs::msg::String>::SharedPtr fault_publisher_;
+      rclcpp::Publisher<std_msgs::msg::String>::SharedPtr diagnostic_publisher_;
 
       // Position-mode current protection is owned by the asynchronous thread.
       // It relaxes the position target instead of switching control modes.
@@ -339,6 +348,16 @@ namespace rmd_hardware_interface {
       double recovery_start_position_;
       double current_limit_start_position_;
       std::chrono::steady_clock::time_point next_position_diagnostic_time_;
+      std::chrono::steady_clock::time_point next_status1_time_;
+      double watchdog_previous_position_;
+      std::chrono::steady_clock::time_point watchdog_previous_time_;
+      bool watchdog_previous_valid_;
+      double direction_window_position_;
+      double direction_window_command_;
+      double status1_verified_position_;
+      std::chrono::steady_clock::time_point direction_window_start_;
+      bool direction_window_valid_;
+      std::chrono::milliseconds direction_mismatch_accumulated_;
   };
 
 }  // namespace rmd_hardware_interface
