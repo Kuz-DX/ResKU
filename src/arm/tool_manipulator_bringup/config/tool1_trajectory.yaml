@@ -1,4 +1,35 @@
-# Fill with capture_tool_trajectory.py; review before enabling execution.
+# User-recorded path 1; final point is the requested docking pose.
+# Keep disabled pending corrected waypoints/calibration: points 3, 4, 6, 8, 9
+# (one-based) violate the current 0.02-rad joint margin. Points 4 and 6 also
+# exceed hard soft_limit_rad bounds (elbow and/or wrist roll). Do not clip the
+# final docking pose or widen hardware limits to enable this recording.
 execution_enabled: false
 joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
-points: []
+points:
+  - time_from_start_sec: 0.0
+    positions_rad: [-0.0030679615759785506, 1.0325367828166843, 1.3191198806152473,
+      -1.4666001491455465, 0.015339807878649747, 0.03067961575792033]
+  - time_from_start_sec: 6.571365
+    positions_rad: [0.615126295941935, 1.0105455969573005, 1.4615386783357962,
+      -1.4357077468167363, 0.1810097329702991, 0.1181165206674013]
+  - time_from_start_sec: 15.591553
+    positions_rad: [1.239456476611391, 0.881914849727446, 1.5348424536563363,
+      -1.0840239424872953, 0.1810097329702991, 0.16413594430397005]
+  - time_from_start_sec: 18.983189
+    positions_rad: [1.5646604036431468, 0.8895942744677713, 1.5461871204259103,
+      -1.1718140491363485, 0.7086991240029592, 0.19174759848591272]
+  - time_from_start_sec: 27.046781
+    positions_rad: [2.0831459099484935, 0.8494517149877071, 1.4805628364247228,
+      -1.5528194568046436, 0.5721748338811374, -1.0277671278831733]
+  - time_from_start_sec: 41.405529
+    positions_rad: [3.098641191528788, 0.8129743309578645, 1.5636404129458537,
+      -1.5083135076155665, -0.47553404424475554, -1.8729905420081616]
+  - time_from_start_sec: 129.10062
+    positions_rad: [3.2888548092266077, 0.4934045542387666, 1.4027210346066878,
+      -1.5432200926554531, -0.4801359866084125, -1.9527575429782145]
+  - time_from_start_sec: 201.012082
+    positions_rad: [3.2044858658928974, 0.438601226378789, 1.5325735735656434,
+      -1.267283580525727, -0.4924078329114976, -1.8315730607352494]
+  - time_from_start_sec: 203.315841
+    positions_rad: [3.2044858658928974, 0.4361577760786413, 1.5325735735656434,
+      -1.2644909898066699, -0.4924078329114976, -1.8315730607352494]

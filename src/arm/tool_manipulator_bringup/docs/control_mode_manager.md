@@ -123,7 +123,11 @@ L2 (axis 2 below -0.5) reserves buttons 2/3/4 for physical 1/2/3, selecting
 path 0/1/2. While L2 is held, the TCP producer suppresses L1 and square HOME
 handling so one combination cannot start both a path and TCP/HOME motion.
 Paths must contain reviewed captured points and have `execution_enabled: true`.
-This checkout contains path 0 only; path 1 and path 2 are empty disabled templates.
+Path 0 is enabled. Path 1 contains the user-supplied nine-point docking recording
+but is disabled: points 3/4/6/8/9 violate the current joint margin, including
+elbow/wrist-roll soft-limit violations at points 4/6. The final docking point
+also violates the elbow margin; retain the supplied coordinates pending corrected
+waypoints or verified calibration. Path 2 is excluded and remains disabled.
 
 TCP-ready and entry checks allow the same bounded 0.02-rad DXL/EE encoder
 variation used by tool-path validation; RMD entry tolerance stays at 0.001 rad.
