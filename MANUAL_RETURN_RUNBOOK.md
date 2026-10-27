@@ -194,6 +194,8 @@ ros2 topic pub -1 /path/return std_msgs/msg/Bool "{data: false}"
 ros2 topic pub -1 /path/return std_msgs/msg/Bool "{data: true}"
 ```
 
+전체 주행 매핑: [JOYSTICK_MAPPING.md](src/drive/manual/manual_joy_control/JOYSTICK_MAPPING.md).
+
 조이스틱 버튼 (실기 미검증 — 번호는 코드 기준이라 로봇에서 `/joy`로 확인 필요):
 
 | 버튼 | 동작 |
