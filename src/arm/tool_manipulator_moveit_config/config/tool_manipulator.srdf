@@ -170,6 +170,8 @@
     <disable_collisions link1="cam_link" link2="ee_actuator" reason="RigidAssembly"/>
     <disable_collisions link1="cam_link" link2="wrist_actuator_yaw" reason="Adjacent"/>
     <disable_collisions link1="cam_link" link2="wrist_link_roll" reason="Adjacent"/>
+    <!-- The fixed +Y tool case rests on the circuit-box top face. -->
+    <disable_collisions link1="circuit_box" link2="tool_case_y_plus" reason="FixtureContact"/>
     <disable_collisions link1="ee_actuator" link2="wrist_actuator_yaw" reason="Adjacent"/>
     <disable_collisions link1="ee_actuator" link2="wrist_link_roll" reason="Adjacent"/>
     <disable_collisions link1="elbow_actuator" link2="shoulder_actuator" reason="Adjacent"/>
