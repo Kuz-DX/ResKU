@@ -78,6 +78,43 @@ class Joint:
     child: str
 
 
+def _bounded_damped_step(jacobian, error, lower, upper, damping):
+    """Active-set box-constrained damped least squares for one IK iteration."""
+    hessian = jacobian.T @ jacobian + damping**2 * np.eye(jacobian.shape[1])
+    gradient = jacobian.T @ error
+    step = np.zeros(jacobian.shape[1])
+    active = np.zeros(len(step), dtype=int)  # -1 lower, +1 upper, 0 free
+    for _ in range(80):
+        free = active == 0
+        candidate = step.copy()
+        if np.any(free):
+            candidate[free] = np.linalg.solve(
+                hessian[np.ix_(free, free)],
+                gradient[free] - hessian[np.ix_(free, ~free)] @ step[~free])
+        direction = candidate - step
+        fraction, hit, side = 1., None, 0
+        for j in np.flatnonzero(free):
+            if candidate[j] < lower[j]:
+                value = (lower[j]-step[j])/direction[j]
+                if value < fraction:
+                    fraction, hit, side = value, j, -1
+            elif candidate[j] > upper[j]:
+                value = (upper[j]-step[j])/direction[j]
+                if value < fraction:
+                    fraction, hit, side = value, j, 1
+        step += fraction * direction
+        if hit is not None:
+            step[hit] = lower[hit] if side < 0 else upper[hit]
+            active[hit] = side
+            continue
+        derivative = hessian @ step - gradient
+        violation = active * derivative
+        if np.max(violation) <= 1e-10:
+            return step
+        active[int(np.argmax(violation))] = 0
+    raise ValueError('axis IK bound search did not converge')
+
+
 class ArmKinematics:
     """Kinematic chain and limits generated directly from the shared URDF."""
 
@@ -252,6 +289,64 @@ class ArmKinematics:
                                  + '; '.join(violations))
             q = candidate
         raise ValueError("IK did not converge")
+
+    def solve_axis(self, position, direction, local_axis, seed, margin_rad=0.0,
+                   max_iterations=100, max_time_s=.03, joint_step_rad=.03):
+        """Constrain TCP position and a mounted axis; leave axial rotation free.
+
+        Every iteration respects hardware margins and the seed-relative joint
+        step bound. A joint at its bound remains available to move back inward.
+        """
+        position, direction, local_axis, seed = [np.asarray(v, dtype=float) for v in
+                                               (position, direction, local_axis, seed)]
+        if (any(v.shape != (3,) or not np.all(np.isfinite(v))
+                for v in (position, direction, local_axis))
+                or np.linalg.norm(direction) < 1e-9 or np.linalg.norm(local_axis) < 1e-9
+                or not math.isfinite(max_time_s) or max_time_s <= 0
+                or not math.isfinite(joint_step_rad) or joint_step_rad <= 0):
+            raise ValueError('invalid axis IK input')
+        if not self.within_limits(seed, margin_rad):
+            raise ValueError('axis IK seed violates soft limits')
+        direction = direction / np.linalg.norm(direction)
+        local_axis = local_axis / np.linalg.norm(local_axis)
+        lower = np.maximum([self.limits[j][0]+margin_rad for j in self.joint_names],
+                           seed-joint_step_rad)
+        upper = np.minimum([self.limits[j][1]-margin_rad for j in self.joint_names],
+                           seed+joint_step_rad)
+        deadline = time.monotonic()+max_time_s
+        q = seed.copy()
+        for _ in range(max_iterations):
+            if time.monotonic() >= deadline:
+                raise ValueError('axis IK time budget exceeded')
+            pose = self.fk(q)
+            axis = pose[:3, :3] @ local_axis
+            error = np.r_[position-pose[:3, 3], direction-axis]
+            if np.linalg.norm(error[:3]) < 1e-5 and np.linalg.norm(error[3:]) < 1e-4:
+                if time.monotonic() >= deadline:
+                    raise ValueError('axis IK time budget exceeded')
+                return q
+            jacobian = self.jacobian(q)
+            jacobian[3:] = np.cross(jacobian[3:].T, axis).T
+            delta = _bounded_damped_step(jacobian, error, lower-q, upper-q, .003)
+            for backtrack in range(12):
+                candidate = q + delta * 2.**(-backtrack)
+                if not self.within_limits(candidate, margin_rad):
+                    continue
+                next_pose = self.fk(candidate)
+                next_error = np.r_[position-next_pose[:3, 3],
+                                   direction-next_pose[:3, :3] @ local_axis]
+                if next_error @ next_error < error @ error:
+                    q = candidate
+                    break
+            else:
+                break
+        pose = self.fk(q)
+        angle = math.acos(float(np.clip(direction @ (pose[:3, :3] @ local_axis), -1., 1.)))
+        active = [f'{name}={value:.6f}' for j, (name, value) in enumerate(zip(self.joint_names, q))
+                  if min(value-lower[j], upper[j]-value) < 1e-6]
+        raise ValueError('axis IK could not satisfy position/direction within joint bounds: '
+                         f'position_error={np.linalg.norm(position-pose[:3, 3])*1000:.3f}mm, '
+                         f'axis_error={angle:.6f}rad; active soft/step bounds={active}')
 
     def linear_path_to_pose(self, start: np.ndarray, target: np.ndarray, step_m: float,
                             orientation_step_rad: float,

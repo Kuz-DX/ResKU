@@ -19,7 +19,8 @@ from tf2_ros import Buffer, TransformException, TransformListener
 
 from tool_trajectory_joy import ToolTrajectoryJoy, ARM_JOINTS
 from tool_docking_core import (load_settings, transform, pose_errors, bounded_target,
-                               tag_pose, tag_normal_from_camera_side)
+                               tag_pose, tag_normal_from_camera_side,
+                               direction_angle, interpolate_direction)
 
 
 class ToolDockingCoordinator(ToolTrajectoryJoy):
@@ -226,7 +227,10 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             return
         if getattr(self, 'advance_locked', False):
             q = np.asarray([self.full_state[j] for j in ARM_JOINTS])
-            distance, angle = pose_errors(self.model.fk(q), self.advance_target)
+            actual = self.model.fk(q)
+            distance = np.linalg.norm(actual[:3, 3]-self.advance_target[:3, 3])
+            angle = direction_angle(actual[:3, :3] @ self.advance_local_axis,
+                                    self.advance_direction)
             if (distance > self.cfg['position_tolerance_m']
                     or angle > self.cfg['angle_tolerance_rad']
                     or np.max(np.abs(self.velocity)) > self.cfg['stopped_speed_rad_s']):
@@ -337,22 +341,31 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
 
     def start_advance(self, q, current, tag_normal):
         """Latch one relative line after stopped tag confirmation."""
+        self.advance_local_axis = self.tcp_camera[:3, 2].copy()
+        self.advance_start_direction = current[:3, :3] @ self.advance_local_axis
+        self.advance_direction = tag_normal.copy()
+        tilt = direction_angle(self.advance_start_direction, tag_normal)
+        if tilt > self.cfg['max_angle_error_rad']:
+            raise RuntimeError(f'entry-axis tilt {tilt:.4f}rad exceeds permitted correction envelope')
         self.advance_locked = True
         self.advance_origin = current.copy()
         self.advance_target = current.copy()
         self.advance_target[:3, 3] += tag_normal*self.cfg['advance_distance_m']
         self.advance_seed = q.copy()
-        self.advance_count = math.ceil(self.cfg['advance_distance_m']/self.cfg['step_m'])
+        self.advance_count = max(math.ceil(self.cfg['advance_distance_m']/self.cfg['step_m']),
+                                 math.ceil(tilt/self.cfg['step_rad']))
         self.advance_plan = dict(start=q.copy(), waypoints=[], durations=[], total=0., start_error=0.,
                                  cartesian_line=True)
         self.advance_snapshot = dict(self.full_state)
         self.stage = 'dock_advance_plan'
         self.report('advance_planning',
                     'tag confirmed at stopped tool-1 endpoint; planning fixed %.1f mm tag-normal advance; '
-                    'normal=[%.4f, %.4f, %.4f] seed=%s; tag visibility no longer required; %s' %
+                    'normal=[%.4f, %.4f, %.4f] seed=%s; axial rotation free; '
+                    'tilt changes gradually by %.2f deg; tag visibility no longer required; %s' %
                     (self.cfg['advance_distance_m']*1000.,
                      *map(float, tag_normal),
                      '['+', '.join(f'{value:.4f}' for value in q)+']',
+                     math.degrees(tilt),
                      'L2 remains required' if self.cfg.get('require_l2_hold', True)
                      else 'continuing automatic tool sequence'))
 
@@ -367,21 +380,27 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         target = self.advance_origin.copy()
         target[:3, 3] += ((self.advance_target[:3, 3]-self.advance_origin[:3, 3])
                          * index/self.advance_count)
+        direction = interpolate_direction(self.advance_start_direction, self.advance_direction,
+                                          index/self.advance_count)
         try:
-            solved = self.model.solve(target, self.advance_seed, self.margin,
-                                      max_iterations=100, max_time_s=.03)
+            solved = self.model.solve_axis(
+                target[:3, 3], direction, self.advance_local_axis, self.advance_seed, self.margin,
+                max_iterations=100, max_time_s=.03, joint_step_rad=self.cfg['joint_step_rad'])
         except ValueError as exc:
             raise ValueError(f'advance IK point {index}/{self.advance_count}: {exc}') from exc
         delta = np.abs(solved-self.advance_seed)
         if (not self.model.within_limits(solved, self.margin)
                 or np.max(delta) > self.cfg['joint_step_rad']):
             raise RuntimeError('advance IK exceeds joint step/limits')
-        residual = self.model.pose_error(solved, target)
-        if np.linalg.norm(residual[:3]) > 1e-4 or np.linalg.norm(residual[3:]) > 1e-3:
+        actual = self.model.fk(solved)
+        if (np.linalg.norm(actual[:3, 3]-target[:3, 3]) > 1e-4
+                or direction_angle(actual[:3, :3] @ self.advance_local_axis, direction) > 1e-3):
             raise RuntimeError('advance IK residual too large')
         duration = max(.02, float(np.max(delta))/self.cfg['joint_speed_rad_s'],
                        self.cfg['advance_distance_m']/self.advance_count
-                       / self.cfg['linear_speed_m_s'])
+                       / self.cfg['linear_speed_m_s'],
+                       pose_errors(self.model.fk(self.advance_seed), actual)[1]
+                       / self.cfg['angular_speed_rad_s'])
         # Preserve the Cartesian line instead of isolating shoulder motion;
         # retain its conservative speed cap on every segment.
         if self.shoulder_isolation_enabled:

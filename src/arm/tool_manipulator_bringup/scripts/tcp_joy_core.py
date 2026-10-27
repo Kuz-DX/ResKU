@@ -166,7 +166,7 @@ class TcpStepper:
                     max_iterations=self.iterations//attempts, max_time_s=remaining)
             except ValueError as exc:
                 error = str(exc)
-                if error == 'IK iteration would violate soft limits':
+                if error.startswith('IK iteration would violate soft limits'):
                     limit_rejections += 1
                 self.velocity_scale *= .5
                 continue

@@ -56,7 +56,7 @@ ros2 launch src/arm/tool_manipulator_bringup/launch/ik_manual.launch.py
 기본 `ros2 launch tool_manipulator_bringup ik_manual.launch.py`는
 `enable_tool_docking:=true`, `enable_docking_motion:=true`,
 `docking_camera_frame:=arm_camera_color_optical_frame`로 실행한다.
-L2+네모를 한 번 누르면 툴 1 접근 경로 → 정지 상태의 태그 확인 → 상대 75 mm 전진 → HOLD가
+L2+네모를 한 번 누르면 툴 1 접근 경로 → 정지 상태의 태그 확인 → 상대 30 mm 전진 → HOLD가
 한 시퀀스로 이어진다. launch 자체는 툴 경로를 시작하지 않는다. 카메라와 AprilTag
 검출기는 별도로 실행한다. `enable_tool_docking:=false`를 명시하면
 `tool_trajectory_joy.py`로 경로만 재생한다. 도킹을 켜면
@@ -151,7 +151,7 @@ L2 해제 또는 `/joy` 0.3초 이상 수신 중단 시 취소한다.
 `/arm/docked` publisher가
 모두 보여야 한다.
 
-### 툴 1: 저장 경로 종료 후 태그 방향으로 상대 75 mm 전진
+### 툴 1: 저장 경로 종료 후 태그 방향으로 상대 30 mm 전진
 
 툴 1은 `tag36h11` ID 1, 검은 사각형 20 mm를 사용한다. 저장 경로의 마지막 하강
 지점은 주석으로만 남아 있으며, 해당 관절값이나 FK 좌표를 목표 생성에 사용하지 않는다.
@@ -162,21 +162,28 @@ L2 해제 또는 `/joy` 0.3초 이상 수신 중단 시 취소한다.
 ```text
 툴 1 접근 경로 → 정지/HOLD → 태그 관측
 → 서로 다른 영상·정지 피드백 5회 확인
-→ 툴 1 종료 위치에서 태그 법선 방향으로 상대 75 mm 전진 → HOLD
+→ 툴 1 종료 위치에서 태그 법선 방향으로 상대 30 mm 전진 → HOLD
 ```
 
-태그 중심으로 옮기거나 카메라 방향을 정렬하는 동작은 하지 않는다. 카메라 광학 프레임과
-TCP 사이 TF를 사용해 카메라가 태그 면의 어느 쪽에 있는지 확인하고 전진 방향을 고른다.
-전진은 **최종 태그 거리 75 mm가 아니라 현재 위치에서 75 mm 이동**이다. 관측 거리가
+별도의 태그 중심 이동·제자리 정렬 단계는 없다. 카메라 광학 프레임과 TCP 사이 TF를
+사용해 태그 쪽을 향하는 법선을 고른다. 30 mm 전진과 동시에 카메라 광축을 현재 방향에서
+태그 법선으로 점진적으로 바꾸어 마지막에는 영상면과 태그 면이 평행해지도록 한다.
+진입축 주위 회전은 자유롭다. 실측 태그 방향을 사용하며 55°를 고정 목표로 넣지 않는다.
+초기 광축과 법선의 차이는 `max_angle_error_rad`(0.25 rad) 범위 내여야 한다.
+전진은 **최종 태그 거리 30 mm가 아니라 현재 위치에서 30 mm 이동**이다. 관측 거리가
 전진량과 위치 허용오차의 합보다 짧으면 거부한다.
 
 확인 중에는 신선한 태그 관측이 필요하다. 5회 확인 후 전진 방향과 시작 위치를 고정한
 뒤에는 태그가 시야 밖으로 나가도 계속 진행한다. 전진 전체는 작은 Cartesian 구간으로
 IK를 구하고 충돌 검사를 마친 뒤 제출하며, 일부만 풀렸을 때는 이동하지 않는다.
+이 전진 전용 IK는 위치와 광축 방향을 대상으로 6개 관절을 계산하며, 관절 제한을
+포함한 계산으로 한 관절이 경계에 닿으면 가능한 다른 관절 움직임을 찾는다.
+현재 자세에서 풀리는 해가 없으면 제한을 넘기거나 불완전한 경로를 실행하지 않는다.
 이 구간은 직선 유지를 위해 어깨 분리 동작을 적용하지 않고 보수적인 어깨 속도 제한을
 구간 시간에 반영한다. 명시적 취소, 제어권 변경, 피드백·충돌·관절 제한 오류는 중단/HOLD로
 처리한다. 목표 전진 속도는 5 mm/s이고 관절 제한 때문에 더 느려질 수 있다.
-최종 FK 오차 2 mm·방향 오차 0.02 rad·정지 상태를 확인하며 체결 신호는 보내지 않는다.
+최종 FK 위치 오차 2 mm·광축 방향 오차 0.02 rad·정지 상태를 확인하며 체결 신호는 보내지 않는다.
+진입축 주위 회전은 최종 방향 오차에 포함하지 않는다.
 
 팔 카메라·AprilTag 검출기와 보정된 TF가 제공되는 상태에서 실행한다. 아래 optical frame은
 기본 팔 D435i 설정 기준이며 실제 `CameraInfo.header.frame_id`와 일치해야 한다.
@@ -193,8 +200,8 @@ ros2 launch src/arm/tool_manipulator_bringup/launch/ik_manual.launch.py \
 기존 툴 1 선택 조합(L2 + ROS `buttons[3]`)으로 한 번 요청한다. 이후 L2를 놓아도
 툴 1 경로가 완료되면 별도 입력 없이 태그 확인과 전진까지 이어진다.
 현재 별도의 UI docking/release 요청은 기존 체결 흐름을 사용하므로 이 테스트에는 사용하지 않는다.
-`tag confirmed at stopped tool-1 endpoint; planning fixed 75.0 mm ...`가 방향 고정 시점이고,
-`tag-normal advance 75.0 mm completed; HOLD; no actuation`가 최종 완료 로그다.
+`tag confirmed at stopped tool-1 endpoint; planning fixed 30.0 mm ...`가 방향 고정 시점이고,
+`tag-normal advance 30.0 mm completed; HOLD; no actuation`가 최종 완료 로그다.
 이 동작은 오프라인 계약 테스트로 검증했으며 하드웨어 동작·카메라 외부 보정·실제 간섭은
 실기 확인 전이다.
 

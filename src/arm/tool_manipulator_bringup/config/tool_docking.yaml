@@ -48,10 +48,11 @@ tools:
     # Detector family: tag36h11, matching the vision.apriltag default.
     # Tag plane is 55 degrees to the horizontal circuit-box top.
     # Camera image plane should align parallel to the tag plane on approach.
-    # Align the optical axis through the tag centre at the first observed
     # Confirm a stopped tool-1 endpoint and fresh tag samples, then advance
-    # RELATIVE 75 mm along the observed tag normal without camera alignment.
-    # This is NOT a final camera-to-tag distance of 75 mm.
+    # RELATIVE 30 mm along the observed tag normal. Tilt the camera axis
+    # gradually toward that normal during advance; axial rotation is free.
+    # No separate centering/alignment motion. All six arm joints participate.
+    # This is NOT a final camera-to-tag distance of 30 mm.
     # No FK endpoint from tool1_trajectory.yaml is read or used.
     # Tag loss during confirmation cancels; after the direction is locked the
     # checked advance may finish without tag visibility. Feedback remains mandatory.
@@ -61,7 +62,7 @@ tools:
     tag_family: tag36h11
     tag_id: 1
     tag_size_m: 0.020             # measured outer black square, excluding white margin
-    advance_distance_m: 0.075
+    advance_distance_m: 0.030
     actuation_enabled: false     # finish in HOLD, no attach/release command
     tag_max_age_s: 0.25
     min_decision_margin: 40.0

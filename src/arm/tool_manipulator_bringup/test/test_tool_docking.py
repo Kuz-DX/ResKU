@@ -15,7 +15,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'scripts'))
 from tool_docking_core import (load_settings, transform, bounded_target, pose_errors,
-                               tag_pose, camera_normal_target)
+                               tag_pose, camera_normal_target, interpolate_direction)
 from tool_docking_coordinator import ToolDockingCoordinator
 from tool_trajectory_joy import ToolTrajectoryJoy, ARM_JOINTS
 
@@ -67,7 +67,7 @@ def test_shipped_config_only_enables_tool1_camera_alignment_and_relative_advance
     cfg = load_settings(ROOT/'config/tool_docking.yaml')
     assert set(cfg) == {1}
     assert cfg[1]['alignment_mode'] == 'camera_normal_advance'
-    assert cfg[1]['advance_distance_m'] == .075
+    assert cfg[1]['advance_distance_m'] == .030
     assert cfg[1]['tag_family'] == 'tag36h11'
     assert cfg[1]['tag_id'] == 1
     assert not cfg[1]['actuation_enabled']
@@ -465,18 +465,18 @@ def test_off_axis_tag_does_not_start_visual_correction(tmp_path):
         n.model.solve.assert_not_called()
     camera_sample(n)
     assert n.stage == 'dock_advance_plan'
-    np.testing.assert_allclose(n.advance_target[:3, 3], [0., 0., .075])
+    np.testing.assert_allclose(n.advance_target[:3, 3], [0., 0., .030])
     n.model.solve.assert_not_called()
 
 
-def test_valid_tag_latches_relative_75mm_only_after_distinct_stable_samples(tmp_path):
+def test_valid_tag_latches_relative_30mm_only_after_distinct_stable_samples(tmp_path):
     n = camera_node(tmp_path)
     for _ in range(n.cfg['stable_samples']-1):
         camera_sample(n)
         assert not n.advance_locked
     camera_sample(n)
     assert n.advance_locked and n.stage == 'dock_advance_plan'
-    np.testing.assert_allclose(n.advance_target[:3, 3], [0., 0., .075])
+    np.testing.assert_allclose(n.advance_target[:3, 3], [0., 0., .030])
     n.begin.assert_not_called()  # no partial motion before whole-line validation
     n.docking_command.publish.assert_not_called()
 
@@ -492,17 +492,30 @@ def test_preview_never_latches_or_executes_fixed_advance(tmp_path):
 
 def test_too_close_tag_rejects_advance_instead_of_crossing_plane(tmp_path):
     n = camera_node(tmp_path)
-    n.observation[2][:3, 3] = [0., 0., .07]
+    n.observation[2][:3, 3] = [0., 0., .025]
     with pytest.raises(RuntimeError, match='stand-off too short'):
         camera_sample(n)
     n.begin.assert_not_called()
 
 
-def test_complete_line_is_solved_before_collision_checked_submission(tmp_path):
+@pytest.mark.parametrize('tilt', [0., .15])
+def test_complete_line_is_solved_before_collision_checked_submission(tmp_path, tilt):
     n = camera_node(tmp_path)
+    origin = np.eye(4)
+    origin[:3, :3] = cv2.Rodrigues(np.array([0., tilt, 0.]))[0]
+    n.model.fk.return_value = origin
     for _ in range(n.cfg['stable_samples']):
         camera_sample(n)
-    n.model.solve.side_effect = lambda target, seed, *a, **k: seed+0.0001
+    poses = {tuple(np.zeros(6)): origin}
+    def solve_axis(position, direction, local_axis, seed, *a, **k):
+        solved = seed+0.0001
+        pose = np.eye(4)
+        pose[:3, 3] = position
+        pose[:3, :3] = cv2.Rodrigues(np.array([0., math.atan2(direction[0], direction[2]), 0.]))[0]
+        poses[tuple(solved)] = pose
+        return solved
+    n.model.solve_axis.side_effect = solve_axis
+    n.model.fk.side_effect = lambda q: poses[tuple(q)]
     n.model.within_limits.return_value = True
     n.model.pose_error.return_value = np.zeros(6)
     for _ in range(n.advance_count-1):
@@ -512,20 +525,23 @@ def test_complete_line_is_solved_before_collision_checked_submission(tmp_path):
     path_id, plan = n.begin.call_args.args
     assert path_id == 1 and plan['cartesian_line']
     assert len(plan['waypoints']) == n.advance_count
-    assert plan['total'] >= .075/.005-1e-10
+    assert plan['total'] >= .030/.005-1e-10
     assert plan['stop_at_waypoints'] == [False]*(n.advance_count-1)+[True]
-    calls = n.model.solve.call_args_list
-    np.testing.assert_allclose(calls[-1].args[0][:3, 3], [0., 0., .075])
+    calls = n.model.solve_axis.call_args_list
+    np.testing.assert_allclose(calls[-1].args[0], [0., 0., .030])
     for i, call in enumerate(calls, 1):
-        np.testing.assert_allclose(call.args[0][:3, 3], [0, 0, .075*i/n.advance_count])
-        np.testing.assert_allclose(call.args[0][:3, :3], np.eye(3))
+        np.testing.assert_allclose(call.args[0], [0, 0, .030*i/n.advance_count])
+        np.testing.assert_allclose(call.args[1], interpolate_direction(
+            origin[:3, 2], np.array([0, 0, 1]), i/n.advance_count), atol=1e-12)
+        np.testing.assert_allclose(call.args[2], [0, 0, 1])
+    n.model.solve.assert_not_called()
 
 
 def test_failed_advance_ik_never_submits_partial_path(tmp_path):
     n = camera_node(tmp_path)
     for _ in range(n.cfg['stable_samples']):
         camera_sample(n)
-    n.model.solve.side_effect = ValueError('IK iteration would violate soft limits')
+    n.model.solve_axis.side_effect = ValueError('IK iteration would violate soft limits')
     with pytest.raises(ValueError, match='soft limits'):
         n.plan_advance_step()
     n.begin.assert_not_called()
@@ -598,7 +614,7 @@ def test_tool1_completion_automatically_aligns_and_plans_advance_without_joy(tmp
             n.observation = (i+1, 1.1, tag)
             n.tick()
         assert n.stage == 'dock_advance_plan' and n.advance_locked
-        np.testing.assert_allclose(n.advance_target[:3, 3], [0., 0., .075])
+        np.testing.assert_allclose(n.advance_target[:3, 3], [0., 0., .030])
     n.fail.assert_not_called()
     n.docking_command.publish.assert_not_called()
 
@@ -846,7 +862,8 @@ def test_operator_can_cancel_automatic_tool1(tmp_path):
 def test_advance_completion_checks_fk_endpoint_without_actuation(tmp_path, endpoint_error):
     n = camera_node(tmp_path)
     n.advance_locked = True
-    n.advance_target = transform([0., 0., .075], [0., 0., 0., 1.])
+    n.advance_local_axis = n.advance_direction = np.array([0., 0., 1.])
+    n.advance_target = transform([0., 0., .030], [0., 0., 0., 1.])
     measured = n.advance_target.copy()
     measured[2, 3] += endpoint_error
     n.model.fk.return_value = measured
@@ -857,8 +874,25 @@ def test_advance_completion_checks_fk_endpoint_without_actuation(tmp_path, endpo
     else:
         n.path_completed()
         n.reset.assert_called_once()
-        assert '75.0 mm completed' in n.report.call_args.args[1]
+        assert '30.0 mm completed' in n.report.call_args.args[1]
     n.docking_command.publish.assert_not_called()
+
+
+def test_advance_completion_allows_axial_rotation_but_rejects_wrong_tilt(tmp_path):
+    for rotation, passes in (([0., 0., 1.2], True), ([.1, 0., 0.], False)):
+        n = camera_node(tmp_path)
+        n.advance_locked = True
+        n.advance_local_axis = n.advance_direction = np.array([0., 0., 1.])
+        n.advance_target = np.eye(4)
+        actual = np.eye(4)
+        actual[:3, :3] = cv2.Rodrigues(np.array(rotation))[0]
+        n.model.fk.return_value = actual
+        if passes:
+            n.path_completed()
+            n.reset.assert_called_once()
+        else:
+            with pytest.raises(RuntimeError, match='endpoint feedback'):
+                n.path_completed()
 
 
 def test_front_on_tag_accepts_equivalent_ippe_solutions():
@@ -909,7 +943,7 @@ def test_cartesian_advance_keeps_line_and_still_builds_collision_requests(tmp_pa
     assert n.path is plan
 
 
-@pytest.mark.parametrize('distance', [None, 0., -.075, float('nan'), .11])
+@pytest.mark.parametrize('distance', [None, 0., -.030, float('nan'), .11])
 def test_invalid_fixed_advance_distance_is_rejected(tmp_path, distance):
     data = yaml.safe_load((ROOT/'config/tool_docking.yaml').read_text())
     data['tools'][1]['advance_distance_m'] = distance

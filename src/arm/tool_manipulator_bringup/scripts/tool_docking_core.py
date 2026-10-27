@@ -25,6 +25,27 @@ def pose_errors(current, target):
             float(np.linalg.norm(cv2.Rodrigues(target[:3, :3] @ current[:3, :3].T)[0])))
 
 
+def direction_angle(first, second):
+    first, second = np.asarray(first, dtype=float), np.asarray(second, dtype=float)
+    if (first.shape != (3,) or second.shape != (3,)
+            or not np.all(np.isfinite(first)) or not np.all(np.isfinite(second))
+            or np.linalg.norm(first) < 1e-9 or np.linalg.norm(second) < 1e-9):
+        raise ValueError('expected finite nonzero directions')
+    first, second = first/np.linalg.norm(first), second/np.linalg.norm(second)
+    return math.atan2(float(np.linalg.norm(np.cross(first, second))), float(first @ second))
+
+
+def interpolate_direction(first, second, fraction):
+    angle = direction_angle(first, second)
+    if not 0 <= fraction <= 1 or angle >= math.pi-1e-6:
+        raise ValueError('invalid direction interpolation')
+    first, second = np.asarray(first, dtype=float), np.asarray(second, dtype=float)
+    first, second = first/np.linalg.norm(first), second/np.linalg.norm(second)
+    if angle < 1e-9:
+        return second.copy()
+    return (math.sin((1-fraction)*angle)*first+math.sin(fraction*angle)*second)/math.sin(angle)
+
+
 def bounded_target(current, target, translation_step, rotation_step):
     """One simultaneous bounded translation/rotation increment in base frame."""
     result = current.copy()
