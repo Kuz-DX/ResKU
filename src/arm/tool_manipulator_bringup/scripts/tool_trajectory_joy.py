@@ -30,7 +30,7 @@ from arm_mode_core import TCP_ENTRY_TOLERANCE
 
 
 def load_path(path, model, margin=.02):
-    """Load one captured path; the zero-time point is its required start pose."""
+    """Load captured points with recorded or manager-limited execution timing."""
     data = yaml.safe_load(Path(path).read_text())
     if not isinstance(data, dict):
         raise ValueError(f'{path}: YAML root must be a mapping')
@@ -38,6 +38,9 @@ def load_path(path, model, margin=.02):
         return None
     if data.get('joint_names') != list(ARM_JOINTS):
         raise ValueError(f'{path}: invalid joint order')
+    timing_mode = data.get('timing_mode', 'recorded')
+    if timing_mode not in ('recorded', 'joint_limits'):
+        raise ValueError(f'{path}: timing_mode must be recorded or joint_limits')
     raw = data.get('points')
     if not isinstance(raw, list) or len(raw) < 2 or len(raw) > 1000:
         raise ValueError(f'{path}: expected 2..1000 points')
@@ -57,8 +60,18 @@ def load_path(path, model, margin=.02):
             raise ValueError(f'{path}: point {index} violates joint margin')
         times.append(float(t))
         points.append(q)
-    if times[0] != 0. or any(not a < b or b-a >= 120. for a, b in zip(times, times[1:])):
-        raise ValueError(f'{path}: times must start at 0 and increase; each segment must be <120s')
+    if times[0] != 0. or any(not a < b for a, b in zip(times, times[1:])):
+        raise ValueError(f'{path}: times must start at 0 and increase')
+    durations = [b-a for a, b in zip(times, times[1:])]
+    if timing_mode == 'recorded' and any(d >= 120. for d in durations):
+        raise ValueError(f'{path}: recorded segment times must be <120s')
+    if timing_mode == 'joint_limits':
+        # Request the minimum positive duration accepted by the timed path
+        # pipeline. ModeCore._next_waypoint stretches each segment to the
+        # slowest joint's travel/speed limit, preserving synchronized motion.
+        # Acceleration, jerk and feedback pacing remain owned by the manager.
+        # Capture pauses must not become commanded travel times.
+        durations = [.02]*len(durations)
     after = data.get('after_path')
     if after is not None:
         if (not isinstance(after, dict) or
@@ -69,7 +82,7 @@ def load_path(path, model, margin=.02):
                 not -2.351592547829 <= after['ee_close_rad'] <= 2.839398438376):
             raise ValueError(f'{path}: invalid close-and-return action')
     return dict(start=points[0], waypoints=points[1:],
-                durations=[b-a for a, b in zip(times, times[1:])], total=times[-1],
+                durations=durations, total=sum(durations),
                 after_path=after)
 
 

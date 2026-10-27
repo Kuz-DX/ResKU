@@ -111,10 +111,12 @@ def generate_launch_description():
         DeclareLaunchArgument('launch_joy', default_value='false', choices=['true', 'false']),
         DeclareLaunchArgument('mock_initial_positions_file', default_value=''),
         DeclareLaunchArgument('launch_tcp_joy', default_value='true', choices=['true', 'false']),
-        DeclareLaunchArgument('enable_tool_docking', default_value='false', choices=['true', 'false']),
-        DeclareLaunchArgument('enable_docking_motion', default_value='false', choices=['true', 'false']),
+        # One L2 + square request owns the taught approach and its docking tail.
+        # Enabling the producer does not submit a path at launch time.
+        DeclareLaunchArgument('enable_tool_docking', default_value='true', choices=['true', 'false']),
+        DeclareLaunchArgument('enable_docking_motion', default_value='true', choices=['true', 'false']),
         DeclareLaunchArgument('docking_config', default_value=str(hardware_default.parent/'tool_docking.yaml')),
-        DeclareLaunchArgument('docking_camera_frame', default_value=''),
+        DeclareLaunchArgument('docking_camera_frame', default_value='arm_camera_color_optical_frame'),
         DeclareLaunchArgument('launch_docking_bridge', default_value='true', choices=['true', 'false']),
         DeclareLaunchArgument('docking_serial_port', default_value='/dev/ttyACM0'),
         DeclareLaunchArgument('docking_serial_baud', default_value='115200'),

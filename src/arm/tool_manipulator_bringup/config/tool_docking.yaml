@@ -1,4 +1,5 @@
-# Opt-in only. Existing L2 paths remain unchanged until launch AND path are enabled.
+# IK launch enables docking by default; only enabled paths receive a docking tail.
+# A tool-path request is still required before approach/alignment/advance.
 # Before enabling, teach the stored trajectory to end BEFORE contact, with tag visible.
 # tag_tcp_stages xyz/xyzw values are TCP poses in the TAG frame (m, quaternion x y z w).
 # camera_normal_advance derives alignment from live tag/optical-frame TF instead.

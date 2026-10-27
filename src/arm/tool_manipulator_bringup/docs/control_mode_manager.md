@@ -136,8 +136,12 @@ Path 2 remains disabled because shoulder points 2..5, elbow points 3/4 and
 wrist-roll point 5 violate the current limits or the 0.02-rad margin. Reconcile
 the taught coordinates with the hardware/URDF limits before enabling it.
 Path 0 is enabled. Path 1 is enabled for approach-only testing and retains
-original points 1/2/5/7 and their timestamps, ending at 129.10062 s in the recorded
-path before HOLD (actual execution can take longer under runtime limits).
+original points 1/2/5/7. Its `timing_mode: joint_limits` keeps capture timestamps
+as metadata and lets the manager derive segment timing from joint travel and
+existing speed limits, with acceleration, jerk and feedback pacing still applied.
+The recorded 102-second gap between points 5 and 7 no longer slows that segment.
+Paths without this setting retain recorded timing. MoveIt entry and docking
+correction/advance durations keep their own timing.
 Intermediate points 3/4/6/8 were removed at the user's request because they
 violated joint limits or margins. The user reports collision simulation of the
 intermediate path is complete; runtime collision validation still applies.
@@ -153,7 +157,11 @@ travel, not a 75 mm final stand-off. The whole advance is IK/collision checked
 before execution. Tag visibility is required through alignment; after the
 advance is latched, tag loss is allowed but feedback and ownership checks
 remain mandatory. Both launch switches `enable_tool_docking` and
-`enable_docking_motion` must be true for actual alignment/advance motion.
+`enable_docking_motion` default to true in `ik_manual.launch.py`, with
+`docking_camera_frame=arm_camera_color_optical_frame`. Plain IK launch therefore
+enables the full tool-1 sequence on L2 + square; launch itself submits no tool
+request. Set `enable_tool_docking:=false` for path-only playback or
+`enable_docking_motion:=false` for alignment preview after the approach.
 Path 2 is excluded and remains disabled.
 Tool 1 uses `require_l2_hold: false`: one L2 + tool-1 selection starts the path
 and automatically continues into tag alignment and the checked 75 mm advance.

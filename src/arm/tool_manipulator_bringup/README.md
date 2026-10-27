@@ -1,7 +1,7 @@
 # Tool Manipulator Bringup
 
 팔의 실기·모의 구동, 조이스틱 수동 구동, 설정 점검과 캘리브레이션 도구를 모아 둔
-패키지다. Managed 경로 재생과 선택적으로 활성화하는 AprilTag 도킹 실행기를 제공한다.
+패키지다. Managed 경로 재생과 AprilTag 도킹 실행기를 제공한다.
 
 ## 남긴 실행 경로
 
@@ -51,13 +51,17 @@ base/roll/yaw를 0 rad로 정렬한다. 이후 TCP-ready 경로를 검사하고,
 ros2 launch src/arm/tool_manipulator_bringup/launch/ik_manual.launch.py
 ```
 
-## 선택 기능: L2 경로 이후 AprilTag 도킹
+## L2 경로 이후 AprilTag 도킹
 
-기존 실행 명령과 L2 경로 0/1/2 재생은 그대로 유지한다.
-`enable_tool_docking:=false`가 기본이며, 이 경우 기존 `tool_trajectory_joy.py`를
-실행한다. 옵션을 켜면 `tool_docking_coordinator.py` 하나로 교체한다. 두 실행기를
-동시에 띄우지 않는다. 새 실행기도 `tool_docking.yaml`에서 `enabled: false`인
-경로는 기존 방식으로 재생하고 HOLD로 끝낸다.
+기본 `ros2 launch tool_manipulator_bringup ik_manual.launch.py`는
+`enable_tool_docking:=true`, `enable_docking_motion:=true`,
+`docking_camera_frame:=arm_camera_color_optical_frame`로 실행한다.
+L2+네모를 한 번 누르면 툴 1 접근 경로 → 태그 정렬 → 상대 75 mm 전진 → HOLD가
+한 시퀀스로 이어진다. launch 자체는 툴 경로를 시작하지 않는다. 카메라와 AprilTag
+검출기는 별도로 실행한다. `enable_tool_docking:=false`를 명시하면
+`tool_trajectory_joy.py`로 경로만 재생한다. 도킹을 켜면
+`tool_docking_coordinator.py` 하나만 실행하며, 설정에서 `enabled: false`인
+경로는 저장 경로 완료 후 HOLD로 끝낸다.
 
 UI는 `std_msgs/msg/Bool`의 `/arm/tool0_docking` 또는 `/arm/tool0_release`를
 `true`로 올려 경로 0 작업을 한 번 요청한다. 다시 요청하려면 먼저 해당 토픽을
@@ -68,9 +72,8 @@ release는 `false -> true`를 즉시 발행하고, 이후 새 `/arm/docked` 피�
 `true` 또는 `false`가 될 때까지 HOLD를 유지한다. 같은 계약을 tool1/tool2에도
 적용한다.
 
-`enable_tool_docking:=true`만 지정하면 활성 경로의 저장 궤적 이후 태그와 목표 오차를
-`preview` 상태로 출력하지만 보정 이동이나 Arduino 구동은 실행하지 않는다. 실측·preview 검증까지
-통과한 뒤에만 `enable_docking_motion:=true`를 추가해 실제 보정을 별도로 무장한다.
+`enable_docking_motion:=false`를 명시하면 활성 경로의 저장 궤적 이후 태그와 목표 오차를
+`preview` 상태로 출력하며 보정 이동이나 Arduino 구동은 실행하지 않는다.
 
 도킹을 활성화한 경로의 순서는 다음과 같다.
 
@@ -105,6 +108,7 @@ L2 + 경로 선택 → 기존 관절 경로 검증/재생 → 실제 완료 및 
 # 아래 프레임 이름은 실제 보정된 카메라 optical frame으로 교체한다.
 ros2 launch src/arm/tool_manipulator_bringup/launch/ik_manual.launch.py \
   enable_tool_docking:=true \
+  enable_docking_motion:=false \
   docking_camera_frame:=YOUR_CALIBRATED_OPTICAL_FRAME
 ```
 
@@ -145,6 +149,9 @@ L2 해제 또는 `/joy` 0.3초 이상 수신 중단 시 취소한다.
 
 툴 1은 `tag36h11` ID 1, 검은 사각형 20 mm를 사용한다. 저장 경로의 마지막 하강
 지점은 주석으로만 남아 있으며, 해당 관절값이나 FK 좌표를 목표 생성에 사용하지 않는다.
+툴 1의 `timing_mode: joint_limits`는 측정 시각을 기록용으로만 사용한다.
+저장점 사이 이동 시간은 관절 이동량과 모드 관리자의 속도 제한으로 정하며,
+기존 가속도·저크·피드백 제한을 적용한다. 측정 중 대기 시간이 이동을 늦추지 않는다.
 
 ```text
 툴 1 접근 경로 → 정지/HOLD → 태그 관측

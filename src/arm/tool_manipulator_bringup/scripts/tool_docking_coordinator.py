@@ -48,7 +48,9 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         if not 0.1 <= self.deadman_timeout <= 1.0:
             raise ValueError('docking_deadman_timeout_s must be in [0.1, 1.0]')
         self.create_service(Trigger, '/arm/tool_docking/cancel', self.on_cancel)
-        self.get_logger().info(f'Optional docking paths: {sorted(self.settings)}')
+        self.get_logger().info(
+            f'Optional docking paths: {sorted(self.settings)}; motion_enabled={self.motion_enabled}; '
+            'waiting for an explicit tool path request')
 
     def reset(self):
         super().reset()
@@ -144,6 +146,10 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             self.active = True
             self.cfg = self.settings[path_id]
             self.docking_started = None
+            self.path_id = path_id
+            self.report('docking_armed',
+                        f'tool path {path_id} includes tag alignment after approach completion; '
+                        f'motion_enabled={self.motion_enabled}')
             if (self.cfg['actuation_enabled']
                     and (self.docking_command.get_subscription_count() == 0
                          or self.count_publishers('/arm/docked') == 0)):

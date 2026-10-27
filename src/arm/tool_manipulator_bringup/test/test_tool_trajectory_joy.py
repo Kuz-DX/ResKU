@@ -36,6 +36,38 @@ def test_enabled_path_uses_zero_point_as_start_and_segment_durations(tmp_path):
     assert loaded['durations'] == [1., 2.]
 
 
+def test_joint_limited_timing_is_independent_of_capture_pauses(tmp_path):
+    from arm_mode_core import ModeCore
+    model = Mock()
+    model.within_limits.return_value = True
+    schedules = []
+    for times in ((0., 1., 3.), (0., 200., 1000.)):
+        path = write_path(tmp_path, times=times)
+        data = yaml.safe_load(path.read_text())
+        data['timing_mode'] = 'joint_limits'
+        path.write_text(yaml.safe_dump(data))
+        loaded = load_path(path, model)
+        c = ModeCore([(-2., 2.)]*6, [.12]*6,
+                     path_speeds=[.08, .04, .06, .06, .08, .08])
+        c.ready, c.focus = True, 'arm'
+        c.feedback(loaded['start'], [0.]*6, 1.)
+        c.mode = c.requested = 'tool_auto'
+        assert c.path(c.epoch, 'capture', loaded['waypoints'], 1., loaded['durations'])
+        schedules.append(c.path_speeds)
+        # All joints travel .01 rad. The .04 rad/s shoulder cap sets .25 s.
+        assert c.path_speeds == pytest.approx([.04]*6)
+    assert schedules[0] == schedules[1]
+
+
+def test_unknown_timing_mode_is_rejected(tmp_path):
+    path = write_path(tmp_path)
+    data = yaml.safe_load(path.read_text())
+    data['timing_mode'] = 'joint_limit'
+    path.write_text(yaml.safe_dump(data))
+    with pytest.raises(ValueError, match='timing_mode'):
+        load_path(path, Mock())
+
+
 def test_disabled_path_is_not_loadable_for_execution(tmp_path):
     assert load_path(write_path(tmp_path, enabled=False), Mock()) is None
 

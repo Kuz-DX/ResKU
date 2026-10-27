@@ -4,6 +4,7 @@ import sys
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts'))
@@ -55,3 +56,48 @@ def test_tcp_ready_then_recorded_path_zero_completes():
     elapsed = replay('path0', [p.tolist() for p in plan['waypoints']],
                      plan['durations'], plan['stop_at_waypoints'])
     assert elapsed < budget, (elapsed, budget)
+
+
+def test_tool1_recorded_pause_does_not_slow_execution_or_exceed_joint_speed_limits():
+    config = Path(__file__).resolve().parents[1]/'config'
+    data = yaml.safe_load((config/'tool1_trajectory.yaml').read_text())
+    hardware = yaml.safe_load((config/'hardware.yaml').read_text())['joints']
+    limits = [hardware[j]['soft_limit_rad'] for j in data['joint_names']]
+    c = ModeCore(limits, [.12]*6,
+                 path_speeds=[.08, .04, .06, .06, .08, .08],
+                 path_accelerations=[.08, .03, .06, .06, .08, .08],
+                 path_jerks=[.30, .04, .15, .15, .30, .30],
+                 path_feedback_leads=[.04, .015, .025, .025, .04, .04])
+    def within_limits(q, margin):
+        return all(lo+margin <= v <= hi-margin for v, (lo, hi) in zip(q, limits))
+    taught = load_path(config/'tool1_trajectory.yaml',
+                       SimpleNamespace(within_limits=within_limits))
+    c.ready, c.focus = True, 'arm'
+    c.mode = c.requested = 'tool_auto'
+    c.feedback(taught['start'], [0.]*6, 0.)
+    plan = isolate_shoulder_zero_crossings(execution_plan(taught, c.position))
+    budget = execution_timeout(plan, c.position, c.path_speed_limits)
+    assert c.path(c.epoch, 'tool1', plan['waypoints'], 0.,
+                  plan['durations'], plan['stop_at_waypoints'])
+    now, final_started, final_cruise_time = 0., None, None
+    for _ in range(int(budget/.01)+1):
+        now += .01
+        if not c.queue and final_started is None:
+            final_started = now
+            final_cruise_time = max(abs(g-t)/v for g, t, v in
+                                   zip(c.goal, c.target, c.path_speeds) if v > 0.)
+        velocity = [(t-p)/.01 for t, p in zip(c.target, c.position)]
+        c.feedback(c.target, velocity, now)
+        before = np.asarray(c.target)
+        c.tick(now, .01)
+        assert np.all(np.abs(np.asarray(c.target)-before)/.01 <=
+                      np.asarray(c.path_speed_limits)+1e-8)
+        if c.last_execution_id == 'tool1':
+            break
+    assert c.last_execution_result == 'succeeded', c.reason
+    # The same final joint segment needs ~15 s at the existing speed caps,
+    # plus acceleration/settling, rather than the recorded 102 s pause.
+    assert final_cruise_time == pytest.approx(15.0713612409768)
+    assert now-final_started < 30.
+    assert now < budget
+    np.testing.assert_allclose(c.position, data['points'][-1]['positions_rad'], atol=.01)

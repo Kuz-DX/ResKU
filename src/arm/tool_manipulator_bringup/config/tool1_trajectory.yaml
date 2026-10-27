@@ -1,11 +1,14 @@
 # User-recorded path 1: approach-only test, stopping BEFORE the final descent.
 # Original intermediate points 3, 4, 6, 8 removed at user request because
-# they violate the current joint margin/limits. Original timestamps retained.
+# they violate the current joint margin/limits. Capture timestamps are metadata:
+# measurement pauses are not playback durations. The manager derives timing
+# from joint travel and its existing speed/acceleration/jerk limits.
 # User reports collision simulation of the intermediate path is complete.
 # Execute original points 1/2/5/7, then HOLD. Original point 9 is reference only.
 # With enable_tool_docking + enable_docking_motion, the coordinator then aligns
 # the camera to tag 1 and advances 75 mm along the observed normal before HOLD.
 execution_enabled: true
+timing_mode: joint_limits
 joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
 points:
   - time_from_start_sec: 0.0
