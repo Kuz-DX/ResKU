@@ -132,7 +132,8 @@ ros2 topic pub --once /visual_landmark/debug_check std_msgs/msg/Bool '{data: tru
 - debug 요청은 scheduler pending UUID와 무관하므로 watchdog anchor를 reset하지 않는다.
 - no camera/동기화 실패/입력 소실이면 기존 timeout으로 끝난다.
 - 별도 알고리즘 없이 기존 on_pair → features → match → 두 프레임 검증을 사용한다.
-  debug_frame_result/terminal event의 attempts를 Viewer가 표시하며 추가 SIFT/PnP는 없다.
+  debug_frame_result/terminal event의 attempts를 Viewer가 표시한다. 매칭/PnP는 생산 VPR 검사에서만 실행한다.
+  별도의 live preview는 뷰어에서 SIFT 검출만 수행하며 아래 설명처럼 검증 결과와 구분한다.
 - Matches는 마지막 후보/프레임이며 녹색 inlier만으로 최종 검증 성공을 의미하지 않는다.
   not_run은 해당 단계가 실행되지 않았거나 진단값이 없다는 뜻이다.
 
@@ -211,3 +212,35 @@ source install/setup.bash
 - 실제 ROS Humble localization 노드 초기화: OFF 전용 토픽 구독 없음, ON 구독 있음 확인.
 - git diff --check, reverse patch --check 통과.
 - 실차 정지/수동 전환/카메라 정확도는 아직 실차에서 시험하지 않았다.
+
+
+## 라이브 SIFT 특징점 표시 (2026-10-27)
+
+`vpr_viewer`는 전후방 영상에 **실제 SIFT keypoint를 청록색으로 상시 표시**한다.
+Record/Return/검사 요청과 무관하며, 검출점은 매칭 성공·PnP inlier·보정 결과가 아니다.
+SIFT 원/방향 표시와 개수를 보여준다. 생산 VPR의 원본 해상도 특징과 동일한 집합을
+보장하지 않는다(뷰어는 최대 폭 640, 약 400개, 기본 5Hz로 부하를 제한).
+
+```bash
+ros2 run visual_landmark vpr_viewer
+```
+
+화면은 **VPR Dashboard 단일 창**이다. 위쪽은 후방/전방 라이브 SIFT,
+아래 왼쪽은 Matches, 아래 오른쪽은 상태/진단이다. 창 크기는 조절할 수 있으며 영상 비율을 유지한다.
+입력이 없어도 창을 표시하고 WAITING, 마지막 영상이 멈추면 빨간 STALE와 수신 경과 시간을
+계속 갱신한다. source age는 ROS 영상 stamp와 현재 ROS 시각의 차이로 PC 시계 불일치도 포함한다.
+RX 번호가 증가하지 않으면 새 영상이 수신되지 않는 것이다. 기존 프레임에 점이 보여도
+그 영상이 live임을 뜻하지 않으므로 STALE를 확인한다.
+
+```bash
+# 뷰어 부하를 더 낮출 때
+ros2 run visual_landmark vpr_viewer --ros-args -p preview_rate_hz:=2.0 -p preview_max_features:=200
+# SIFT preview를 끄고 라이브 영상과 생산 매칭 그림만 볼 때
+ros2 run visual_landmark vpr_viewer --ros-args -p live_features:=false
+```
+
+영상·SIFT preview는 표시 진단일 뿐 motion/mission/correction 토픽을 발행하지 않는다.
+Matches는 생산 localizer의 debug image를 그대로 표시하며 VPR 검사·입력·참조가 준비되어야 한다.
+`automatic_rejected: stale automatic odometry`는 참조 촬영 실패다. /odometry/filtered 수신과
+영상-odom source stamp skew, 두 PC 시계를 확인하고 해결한 뒤 새 mission에서 기록한다.
+이 거부를 우회하려고 freshness gate를 완화하지 않는다.
