@@ -8,11 +8,19 @@ from unittest.mock import Mock
 import numpy as np
 import pytest
 from std_msgs.msg import String
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts'))
 from arm_mode_core import ModeCore
 from arm_control_mode_manager import ControlModeManager
 from tcp_joy import TcpJoy
+
+
+def test_options_tcp_ready_alignment_zeros_dxl_axes():
+    config_path = Path(__file__).resolve().parents[1]/'config/tcp_ready.yaml'
+    goal = yaml.safe_load(config_path.read_text())['tcp_ready']['positions_rad']
+    assert len(goal) == 6
+    assert [goal[i] for i in (0, 4, 5)] == [0.0, 0.0, 0.0]
 
 
 def core():

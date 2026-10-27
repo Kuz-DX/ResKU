@@ -6,8 +6,10 @@ drive-to-arm focus edge, the TCP producer samples the live joint-space approach,
 requires every MoveIt state-validity response to pass, and executes the target
 through Mode Manager `tool_auto` ownership. Recovery remains separate.
 
-Candidate A is `[0, 1.2, 1.2, -1.2, 0, 0]` rad in base, shoulder, elbow,
-wrist-pitch, wrist-roll, wrist-yaw order. This is a tested candidate, not an
+The executable TCP-ready target is stored in `config/tcp_ready.yaml`. On the
+Options drive-to-arm workflow, its RMD shoulder/elbow/wrist-pitch values define
+the ready posture while the Dynamixel base/wrist-roll/wrist-yaw targets are
+exactly `0.0` rad. Candidate A below is an earlier evaluated candidate, not an
 approved hardware pose or a certified workspace.
 
 | Candidate | RMD positions (rad) | Minimum joint margin (rad) | Scaled condition | IK directions passed |
