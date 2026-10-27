@@ -1,15 +1,21 @@
 <?xml version="1.0"?>
-<!-- Tool 1: existing MX-106T gripper, pinion and racks.  This file owns every
-     link downstream of the common tcp_link; it is never part of no-tool URDF. -->
+<!-- Tool 1: existing MX-106T gripper, pinion and racks. The housing and racks
+     attach to tcp_link; only the pinion attaches to the rotating ee output. -->
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
-  <xacro:macro name="tool_1_gripper" params="prefix parent use_mesh:=false">
+  <xacro:macro name="tool_1_gripper" params="prefix parent drive_parent use_mesh:=false">
     <xacro:property name="tool_1_tcp_offset" value="0.0256"/>
     <!-- MX-106 raw reference: raw 1992 = 0 rad; raw increment = CCW/closing; 4096 tick/rev. -->
     <xacro:property name="tool_1_gripper_limit_lower" value="-2.351592547829"/> <!-- raw 459 -->
     <xacro:property name="tool_1_gripper_open" value="-0.076699"/> <!-- measured raw 1941..1942 -->
     <xacro:property name="tool_1_gripper_close" value="1.251728"/> <!-- measured raw 2808 -->
     <xacro:property name="tool_1_gripper_limit_upper" value="2.839398438376"/> <!-- raw 3843 -->
-    <xacro:property name="tool_1_rack_offset" value="0.018"/>
+    <!-- Rail groove: |TCP Y|=20.8..24.0 mm, TCP Z=21.3..38.9 mm.
+         Rack flange: |TCP Y|=21.0..23.8 mm, TCP Z=21.6..38.6 mm. -->
+    <xacro:property name="tool_1_rack_offset" value="0.01825"/>
+    <xacro:property name="tool_1_rack_height" value="0.0253"/>
+    <!-- Left STL was exported with a -2.821821-degree roll about its slide
+         axis. Undo that mesh tilt to seat its flange parallel to the rail. -->
+    <xacro:property name="tool_1_left_mesh_yaw" value="0.049250067850631254"/>
     <xacro:property name="tool_1_pitch_radius" value="0.017"/>
 
     <joint name="${prefix}tool_1_mount_joint" type="fixed">
@@ -19,17 +25,17 @@
     <link name="${prefix}tool_1_link">
       <inertial><mass value="0.001"/><inertia ixx="1e-7" ixy="0" ixz="0" iyy="1e-7" iyz="0" izz="1e-7"/></inertial>
     </link>
-    <!-- Common tool geometry frame: from tcp_link, rotate Y +90 deg then Z +90 deg. -->
+    <!-- Rack frame raised to the wrist housing's upper guide slots. -->
     <joint name="${prefix}tool_1_geometry_joint" type="fixed">
       <parent link="${prefix}tool_1_link"/><child link="${prefix}tool_1_geometry_link"/>
-      <origin xyz="0 0 0" rpy="0 ${pi/2} ${pi/2}"/>
+      <origin xyz="0 0 ${tool_1_rack_height}" rpy="0 ${pi/2} ${pi/2}"/>
     </joint>
     <link name="${prefix}tool_1_geometry_link"/>
 
 
     <!-- The gripper's driven spur gear is concentric with tcp_link/ee_joint. -->
     <joint name="${prefix}tool_spurgear_mount_joint" type="fixed">
-      <parent link="${prefix}tool_1_link"/>
+      <parent link="${drive_parent}"/>
       <child link="${prefix}tool_spurgear"/>
       <origin xyz="0 0 0" rpy="0 0 0"/>
     </joint>
@@ -77,12 +83,10 @@
       <parent link="${prefix}tool_1_geometry_link"/>
       <child  link="${prefix}rack_left"/>
       <xacro:property name="pinion_pitch_radius" value="0.017"/>
-      <!-- rack_left origin from wrist_yaw in world axes:
-           (X=+34, Y=-62, Z=+78.36) mm.
-           URDF xyz below is expressed in tool_1_geometry_link.
-           The joint rpy also carries the requested world-Z +90 deg rotation. -->
+      <!-- In tcp_link, the left rack joint is at X=-62, Y=-18.25, Z=25.3 mm.
+           The origin below is expressed in tool_1_geometry_link. -->
       <axis xyz="0 0 1"/>
-      <origin xyz="0 0.062 -0.034" rpy="${-pi/2} 0 ${pi}"/>
+      <origin xyz="0 0.062 ${-tool_1_rack_offset}" rpy="${-pi/2} 0 ${pi}"/>
       <limit lower="0" upper="0.030" effort="8.4" velocity="0.1"/>
       <!-- ee_joint 각속도 -> 랙 선속도 변환: v = omega * pinion_pitch_radius.
            [수정] rack_right와 부호를 통일했다 - 두 rack의 로컬 Z(슬라이드축)가
@@ -96,12 +100,12 @@
     <link name="${prefix}rack_left">
       <xacro:if value="${use_mesh}">
         <visual>
-          <origin xyz="0 0 0" rpy="0 0 0"/>
+          <origin xyz="0 0 0" rpy="0 0 ${tool_1_left_mesh_yaw}"/>
           <geometry><mesh filename="package://tool_manipulator_description/meshes/visual/rack_left.stl" scale="0.001 0.001 0.001"/></geometry>
           <material name="petg_grey"/>
         </visual>
         <collision>
-          <origin xyz="0 0 0" rpy="0 0 0"/>
+          <origin xyz="0 0 0" rpy="0 0 ${tool_1_left_mesh_yaw}"/>
           <geometry><mesh filename="package://tool_manipulator_description/meshes/collision/rack_left.stl" scale="0.001 0.001 0.001"/></geometry>
         </collision>
       </xacro:if>
@@ -128,11 +132,8 @@
     <joint name="${prefix}rack_right_joint" type="prismatic">
       <parent link="${prefix}tool_1_geometry_link"/>
       <child  link="${prefix}rack_right"/>
-      <!-- rack_right origin from wrist_yaw in world axes:
-           (X=-34, Y=+62, Z=+78.36) mm.
-           URDF xyz below is expressed in tool_1_geometry_link.  The joint rpy carries the
-           requested world-Z +90 deg rotation. -->
-      <origin xyz="0 -0.062 0.034" rpy="${-pi/2} 0 0"/>
+      <!-- In tcp_link, the right rack joint is at X=+62, Y=+18.25, Z=25.3 mm. -->
+      <origin xyz="0 -0.062 ${tool_1_rack_offset}" rpy="${-pi/2} 0 0"/>
       <axis xyz="0 0 1"/>
       <limit lower="0" upper="0.030" effort="8.4" velocity="0.1"/>
       <mimic joint="ee_joint" multiplier="${pinion_pitch_radius}"

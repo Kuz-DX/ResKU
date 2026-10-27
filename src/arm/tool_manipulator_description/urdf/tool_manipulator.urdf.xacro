@@ -178,14 +178,14 @@
     <collision><origin xyz="0.0104 0.0157 0"/><geometry><box size="0.016 0.0154 0.050"/></geometry></collision>
   </xacro:macro>
 
-  <!-- Case 2 (+Y) centre is an arm_world offset. Its Z
-       centre is calibrated so the tilted local +Z outer-face midpoint is
-       z=167.935 mm in arm_world. -->
+  <!-- Case 2 (+Y) centre is an arm_world offset. With the 55-degree tilt,
+       the lowest corner of its collision geometry meets the circuit-box top
+       at world Z=369.5 mm for the default mounting dimensions. -->
   <link name="tool_case_y_plus"><xacro:tool_case_walls/></link>
   <joint name="arm_world_to_tool_case_y_plus" type="fixed">
     <parent link="arm_world"/><child link="tool_case_y_plus"/>
     <!-- arm_world has world orientation, so pitch +55 deg is world-Y tilt. -->
-    <origin xyz="-0.268 0.10245 0.153595589" rpy="0 0.959931088597 0"/>
+    <origin xyz="-0.268 0.10245 0.163911809" rpy="0 0.959931088597 0"/>
   </joint>
   <!-- Each dock face is the case local YZ plane at outer X = +/-18.4 mm.
        Its +Z axis is the outward face normal, so an EE TCP XY plane can be
@@ -689,8 +689,8 @@
 
 
   <!-- Common end-effector output: Dynamixel ID 4 is always ee_joint.
-       Tools mount downstream of ee_output_link, so each selected tool shares
-       the same physical output shaft rather than declaring its own motor joint. -->
+       Tool 1 fixes its housing and racks to tcp_link and mounts only the driven
+       spur gear on ee_output_link. Other tools use the rotating output. -->
   <link name="ee_output_link"/>
   <joint name="ee_joint" type="continuous">
     <parent link="tcp_link"/><child link="ee_output_link"/>
@@ -736,7 +736,7 @@
 
   <!-- The common arm ends at tcp_link; the selected tool is downstream. -->
   <xacro:if value="${selected_tool_id == 0}">
-    <xacro:tool_1_gripper prefix="" parent="ee_output_link" use_mesh="$(arg use_mesh)"/>
+    <xacro:tool_1_gripper prefix="" parent="tcp_link" drive_parent="ee_output_link" use_mesh="$(arg use_mesh)"/>
   </xacro:if>
   <xacro:if value="${selected_tool_id == 1}">
     <xacro:tool_2 prefix="" parent="ee_output_link" use_mesh="$(arg use_mesh)"/>
