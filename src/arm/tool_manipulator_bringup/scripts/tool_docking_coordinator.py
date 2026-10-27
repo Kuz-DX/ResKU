@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Optional L2 path -> measured tag alignment -> Arduino transaction coordinator."""
+"""Optional tool path -> tag-guided continuation coordinator."""
 import json
 import math
 import time
@@ -19,7 +19,7 @@ from tf2_ros import Buffer, TransformException, TransformListener
 
 from tool_trajectory_joy import ToolTrajectoryJoy, ARM_JOINTS
 from tool_docking_core import (load_settings, transform, pose_errors, bounded_target,
-                               tag_pose, camera_normal_target)
+                               tag_pose, tag_normal_from_camera_side)
 
 
 class ToolDockingCoordinator(ToolTrajectoryJoy):
@@ -71,8 +71,6 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         self.last_joy_time = -math.inf
         self.deadman_held = False
         self.last_preview_report = -math.inf
-        self.camera_alignment_distance = None
-        self.camera_reference_x = None
         self.tcp_camera = None
         self.advance_locked = False
         self.advance_target = None
@@ -130,7 +128,6 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         if not self.active or getattr(self, 'advance_locked', False):
             return
         self.tag_received += 1
-        self.observation = None
         try:
             data = json.loads(msg.data)
             stamp = Time(seconds=int(data['stamp']['sec']), nanoseconds=int(data['stamp']['nanosec']))
@@ -178,7 +175,8 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             self.tag_reason = f'TF {self.base_frame} <- {self.camera_frame}: {exc}'
         except (ValueError, TypeError, KeyError, IndexError, OverflowError,
                 cv2.error) as exc:
-            # An invalid/absent target invalidates the previous observation too.
+            # Keep the last accepted pose only until its strict freshness
+            # deadline. One missed image must not cancel an in-flight correction.
             self.stable = 0
             self.tag_reason = str(exc)
 
@@ -189,8 +187,11 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             self.cfg = self.settings[path_id]
             self.docking_started = None
             self.path_id = path_id
+            continuation = ('stopped tag confirmation and fixed advance'
+                            if self.cfg.get('alignment_mode') == 'camera_normal_advance'
+                            else 'tag alignment')
             self.report('docking_armed',
-                        f'tool path {path_id} includes tag alignment after approach completion; '
+                        f'tool path {path_id} includes {continuation} after approach completion; '
                         f'motion_enabled={self.motion_enabled}')
             if (self.cfg['actuation_enabled']
                     and (self.docking_command.get_subscription_count() == 0
@@ -251,11 +252,11 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
 
     def fresh_observation(self, now):
         if self.observation is None:
-            raise RuntimeError('target tag missing or rejected')
+            raise RuntimeError('target tag missing or rejected: '+self.tag_diagnostic())
         stamp, received, base_tag = self.observation
         age = (self.get_clock().now().nanoseconds-stamp)/1e9
         if not 0 <= age < self.cfg['tag_max_age_s'] or now-received >= self.cfg['tag_max_age_s']:
-            raise RuntimeError('target tag stale')
+            raise RuntimeError('target tag stale: '+self.tag_diagnostic())
         return stamp, base_tag
 
     def check_deadman(self, now):
@@ -319,7 +320,7 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         except (ValueError, RuntimeError, KeyError, TransformException, np.linalg.LinAlgError) as exc:
             self.fail(str(exc))
 
-    def camera_target(self, base_tag, current):
+    def camera_advance_direction(self, base_tag, current):
         if self.tcp_camera is None:
             # Camera is rigidly mounted on the wrist; get the optical-frame
             # extrinsic, not the mounting/body frame. No saved endpoint is used.
@@ -329,22 +330,17 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             p, q = tf.translation, tf.rotation
             self.tcp_camera = transform([p.x, p.y, p.z], [q.x, q.y, q.z, q.w])
         camera = current @ self.tcp_camera
-        if self.camera_reference_x is None:
-            self.camera_reference_x = camera[:3, 0].copy()
-        target, distance = camera_normal_target(
-            base_tag, camera, self.camera_reference_x, self.camera_alignment_distance)
+        normal, distance = tag_normal_from_camera_side(base_tag, camera)
         if distance <= self.cfg['advance_distance_m']+self.cfg['position_tolerance_m']:
             raise RuntimeError('tag stand-off too short for the requested fixed advance')
-        self.camera_alignment_distance = distance
-        return target @ np.linalg.inv(self.tcp_camera), target
+        return normal, distance
 
-    def start_advance(self, q, current, camera_target):
-        """Latch one relative line after visual alignment; never re-anchor it."""
+    def start_advance(self, q, current, tag_normal):
+        """Latch one relative line after stopped tag confirmation."""
         self.advance_locked = True
         self.advance_origin = current.copy()
         self.advance_target = current.copy()
-        self.advance_target[:3, 3] += (
-            camera_target[:3, 2]*self.cfg['advance_distance_m'])
+        self.advance_target[:3, 3] += tag_normal*self.cfg['advance_distance_m']
         self.advance_seed = q.copy()
         self.advance_count = math.ceil(self.cfg['advance_distance_m']/self.cfg['step_m'])
         self.advance_plan = dict(start=q.copy(), waypoints=[], durations=[], total=0., start_error=0.,
@@ -352,7 +348,7 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         self.advance_snapshot = dict(self.full_state)
         self.stage = 'dock_advance_plan'
         self.report('advance_planning',
-                    'alignment confirmed; planning fixed %.1f mm tag-normal advance; '
+                    'tag confirmed at stopped tool-1 endpoint; planning fixed %.1f mm tag-normal advance; '
                     'tag visibility no longer required; %s' %
                     (self.cfg['advance_distance_m']*1000.,
                      'L2 remains required' if self.cfg.get('require_l2_hold', True)
@@ -399,18 +395,14 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         current = self.model.fk(q)
         camera_mode = self.cfg.get('alignment_mode') == 'camera_normal_advance'
         if camera_mode:
-            target, camera_target = self.camera_target(base_tag, current)
+            tag_normal, tag_distance = self.camera_advance_direction(base_tag, current)
+            aligned = True  # Tool 1 uses the taught endpoint; no visual correction.
         else:
             target = base_tag @ self.cfg['targets'][self.dock_stage]
-        if camera_mode:
-            distance, angle = pose_errors(current @ self.tcp_camera, camera_target)
-            if pose_errors(current, target)[0] > self.cfg['max_position_error_m']:
-                raise RuntimeError('camera alignment TCP target beyond permitted correction envelope')
-        else:
             distance, angle = pose_errors(current, target)
+            aligned = (distance <= self.cfg['position_tolerance_m']
+                       and angle <= self.cfg['angle_tolerance_rad'])
         stopped = np.max(np.abs(self.velocity)) <= self.cfg['stopped_speed_rad_s']
-        aligned = (distance <= self.cfg['position_tolerance_m']
-                   and angle <= self.cfg['angle_tolerance_rad'])
         if self.stage == 'dock_actuate':
             if (not stopped or not aligned
                     or np.max(np.abs(q-self.lock_goal)) > self.cfg['joint_tolerance_rad']):
@@ -430,14 +422,17 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         if not stopped:
             self.stable = 0
             return
-        if distance > self.cfg['max_position_error_m'] or angle > self.cfg['max_angle_error_rad']:
+        if not camera_mode and (distance > self.cfg['max_position_error_m']
+                                or angle > self.cfg['max_angle_error_rad']):
             raise RuntimeError('tag target beyond permitted correction envelope')
         if not self.motion_enabled:
             if now-self.last_preview_report >= 1.0:
                 self.last_preview_report = now
-                self.report('preview',
-                            f'stage {self.dock_stage}: position_error={distance:.6f}m, '
-                            f'angle_error={angle:.6f}rad; alignment motion disarmed')
+                detail = (f'tag stand-off={tag_distance:.3f}m; advance motion disarmed'
+                          if camera_mode else
+                          f'stage {self.dock_stage}: position_error={distance:.6f}m, '
+                          f'angle_error={angle:.6f}rad; alignment motion disarmed')
+                self.report('preview', detail)
             return
         if aligned:
             self.stable += 1
@@ -445,7 +440,7 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                 return
             self.stable = 0
             if camera_mode:
-                self.start_advance(q, current, camera_target)
+                self.start_advance(q, current, tag_normal)
                 return
             if self.dock_stage < 2:
                 self.dock_stage += 1
@@ -466,6 +461,8 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             self.stage = 'dock_actuate'
             action = 'dock' if self.expected_docked else 'release'
             self.report('actuating', f'Arduino {action} pulse sent; waiting for /arm/docked')
+            return
+        if camera_mode:
             return
         self.stable = 0
         increment = bounded_target(current, target, self.cfg['step_m'], self.cfg['step_rad'])

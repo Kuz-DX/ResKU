@@ -5,8 +5,8 @@
 # from joint travel and its existing speed/acceleration/jerk limits.
 # User reports collision simulation of the intermediate path is complete.
 # Execute original points 1/2/5/7, then HOLD. Original point 9 is reference only.
-# With enable_tool_docking + enable_docking_motion, the coordinator then aligns
-# the camera to tag 1 and advances 75 mm along the observed normal before HOLD.
+# With enable_tool_docking + enable_docking_motion, the coordinator confirms
+# tag 1 at the stopped endpoint, then advances 75 mm along its normal to HOLD.
 execution_enabled: true
 timing_mode: joint_limits
 joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]

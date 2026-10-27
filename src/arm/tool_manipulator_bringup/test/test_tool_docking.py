@@ -43,6 +43,7 @@ def node(tmp_path):
         last_joy_time=1., deadman_timeout=.3, deadman_held=True,
         motion_enabled=True, last_preview_report=-math.inf,
         camera_reason='CameraInfo not received',
+        tag_received=0, tag_accepted=0, tag_reason='no tag messages received',
         model=Mock(), report=Mock(), reset=Mock(), begin=Mock(), fail=Mock(),
         docking_command=Mock(), get_clock=Mock(), margin=.02,
         observation=(1, 0., np.eye(4)))
@@ -411,8 +412,6 @@ def camera_node(tmp_path):
     n = node(tmp_path)
     n.cfg = load_settings(ROOT/'config/tool_docking.yaml')[1]
     n.path_id = 1
-    n.camera_alignment_distance = None
-    n.camera_reference_x = None
     n.tcp_camera = np.eye(4)
     n.advance_locked = False
     n.advance_target = None
@@ -448,38 +447,29 @@ def test_camera_normal_alignment_uses_camera_side_and_centres_optical_axis(flip)
     assert np.linalg.det(goal[:3, :3]) == pytest.approx(1.)
 
 
-def test_alignment_converts_optical_goal_to_tcp_with_mount_offset(tmp_path):
+def test_advance_uses_camera_side_of_tag_with_mount_offset(tmp_path):
     n = camera_node(tmp_path)
     n.tcp_camera = transform([.03, .04, -.01], [0, 0, np.sin(.2), np.cos(.2)])
-    tcp_goal, camera_goal = n.camera_target(n.observation[2], np.eye(4))
-    np.testing.assert_allclose(tcp_goal @ n.tcp_camera, camera_goal, atol=1e-12)
-    assert n.camera_alignment_distance == pytest.approx(.21)
-    np.testing.assert_allclose(camera_goal[:3, 3], [0, 0, -.01], atol=1e-12)
+    normal, distance = n.camera_advance_direction(n.observation[2], np.eye(4))
+    np.testing.assert_allclose(normal, [0, 0, 1])
+    assert distance == pytest.approx(.21)
 
 
-def test_unaligned_tag_correction_enters_existing_path_checker(tmp_path):
+def test_off_axis_tag_does_not_start_visual_correction(tmp_path):
     n = camera_node(tmp_path)
-    n.observation = (1, 0., transform([.01, 0., .2], [0, 0, 0, 1]))
-    n.model.solve.return_value = np.full(6, .001)
-    n.model.within_limits.return_value = True
-    n.model.pose_error.return_value = np.zeros(6)
-    del n.begin  # Exercise the coordinator and inherited trajectory begin together.
-    n.healthy_hold = Mock(return_value=dict(epoch='hold'))
-    n.shoulder_isolation_half_width = .08
-    n.collision_step, n.collision_timeout = .005, 10.
-    n.start_tolerance = .03
-    n.collision, n.mode = Mock(), Mock()
-    n.collision.service_is_ready.return_value = True
-    n.mode.service_is_ready.return_value = True
-    n.observed_feedback = -1
-    n.observe(1.)
-    assert n.stage == 'checking'
-    assert len(n.requests) > 0
-    np.testing.assert_allclose(n.path['start'], np.zeros(6))
-    n.fail.assert_not_called()
+    n.observation = (1, 0., transform([.03, 0., .2], [0, 0, 0, 1]))
+    for _ in range(n.cfg['stable_samples']-1):
+        camera_sample(n)
+        assert n.stage == 'dock_observe' and not n.advance_locked
+        n.begin.assert_not_called()
+        n.model.solve.assert_not_called()
+    camera_sample(n)
+    assert n.stage == 'dock_advance_plan'
+    np.testing.assert_allclose(n.advance_target[:3, 3], [0., 0., .075])
+    n.model.solve.assert_not_called()
 
 
-def test_aligned_camera_latches_relative_75mm_only_after_distinct_stable_samples(tmp_path):
+def test_valid_tag_latches_relative_75mm_only_after_distinct_stable_samples(tmp_path):
     n = camera_node(tmp_path)
     for _ in range(n.cfg['stable_samples']-1):
         camera_sample(n)
@@ -487,7 +477,6 @@ def test_aligned_camera_latches_relative_75mm_only_after_distinct_stable_samples
     camera_sample(n)
     assert n.advance_locked and n.stage == 'dock_advance_plan'
     np.testing.assert_allclose(n.advance_target[:3, 3], [0., 0., .075])
-    assert n.camera_alignment_distance == pytest.approx(.2)  # final gap is .125, not .075
     n.begin.assert_not_called()  # no partial motion before whole-line validation
     n.docking_command.publish.assert_not_called()
 
@@ -659,7 +648,7 @@ def test_existing_detector_message_is_accepted_with_matching_camera_and_image_ti
     ('wrong_id', 'expected one tag'), ('quality', 'tag quality rejected'),
     ('tf', 'TF base_actuator <- arm_camera_color_optical_frame'),
     ('jump', 'tag pose discontinuity rejected')])
-def test_tag_rejection_retains_exact_reason_and_invalidates_previous_observation(tmp_path, failure, reason):
+def test_tag_rejection_retains_exact_reason_and_previous_observation(tmp_path, failure, reason):
     from tf2_ros import TransformException
     n, info, data = tag_input_node(tmp_path)
     n.observation = (1, 1., np.eye(4))
@@ -676,9 +665,22 @@ def test_tag_rejection_retains_exact_reason_and_invalidates_previous_observation
         n.tf_buffer.lookup_transform.side_effect = TransformException('image-time transform unavailable')
     if failure == 'jump': n.last_base_tag = np.eye(4)
     n.on_tag(SimpleNamespace(data=json.dumps(data)))
-    assert n.observation is None and n.tag_accepted == 0 and n.tag_received == 1
+    assert n.observation is not None and n.tag_accepted == 0 and n.tag_received == 1
     assert reason in n.tag_diagnostic()
     n.begin.assert_not_called()
+
+
+def test_one_rejected_frame_keeps_recent_tag_but_stale_tag_stops_motion(tmp_path):
+    n, _, data = tag_input_node(tmp_path)
+    n.on_tag(SimpleNamespace(data=json.dumps(data)))
+    accepted = n.observation
+    data['detections'] = []
+    n.on_tag(SimpleNamespace(data=json.dumps(data)))
+    assert n.observation is accepted
+    assert n.tag_received == 2 and n.tag_accepted == 1
+    assert ToolDockingCoordinator.fresh_observation(n, accepted[1] + .1)[0] == accepted[0]
+    with pytest.raises(RuntimeError, match='target tag stale: received=2 accepted=1'):
+        ToolDockingCoordinator.fresh_observation(n, accepted[1] + .26)
 
 
 def test_approach_pose_anchor_is_discarded_before_acquiring_stopped_tag(tmp_path):

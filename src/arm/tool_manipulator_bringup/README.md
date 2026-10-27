@@ -56,7 +56,7 @@ ros2 launch src/arm/tool_manipulator_bringup/launch/ik_manual.launch.py
 기본 `ros2 launch tool_manipulator_bringup ik_manual.launch.py`는
 `enable_tool_docking:=true`, `enable_docking_motion:=true`,
 `docking_camera_frame:=arm_camera_color_optical_frame`로 실행한다.
-L2+네모를 한 번 누르면 툴 1 접근 경로 → 태그 정렬 → 상대 75 mm 전진 → HOLD가
+L2+네모를 한 번 누르면 툴 1 접근 경로 → 정지 상태의 태그 확인 → 상대 75 mm 전진 → HOLD가
 한 시퀀스로 이어진다. launch 자체는 툴 경로를 시작하지 않는다. 카메라와 AprilTag
 검출기는 별도로 실행한다. `enable_tool_docking:=false`를 명시하면
 `tool_trajectory_joy.py`로 경로만 재생한다. 도킹을 켜면
@@ -101,7 +101,7 @@ L2 + 경로 선택 → 기존 관절 경로 검증/재생 → 실제 완료 및 
 - 기구에 맞는 위치/각도/속도 허용값과 보정 범위. 제공된 값은 실기 검증값이 아니다.
 
 이 3단계 TCP 목표 방식은 경로 0 템플릿의 필수값을 채운 뒤 활성화한다.
-경로 1은 아래의 별도 카메라 정렬·고정 거리 전진 방식을 사용하며, 경로 2는 비활성이다.
+경로 1은 아래의 별도 태그 확인·고정 거리 전진 방식을 사용하며, 경로 2는 비활성이다.
 경로 번호와 tag ID가 같다고 가정하지 않는다.
 
 ```bash
@@ -143,7 +143,7 @@ ros2 topic echo /arm/tool_trajectory/status
 도킹 노드는 전용 취소 서비스와 기존 `/arm/cancel`에 의한 모드/epoch 변경을 감시한다.
 도킹 노드 종료 시 launch도 종료한다. 프로세스 강제 종료/통신 단절에서 Arduino의 동작을
 정지시키는 자체 watchdog은 펌웨어에 필요하다. 성공 시에도 자동 후퇴하지 않고 HOLD를 유지한다.
-툴 1은 `require_l2_hold: false`로 설정되어 한 번 요청하면 저장 경로부터 정렬·전진까지
+툴 1은 `require_l2_hold: false`로 설정되어 한 번 요청하면 저장 경로부터 태그 확인·전진까지
 자동으로 이어진다. 시작 후 L2 해제나 `/joy` 수신 중단으로 취소되지 않는다.
 다른 도킹 설정은 기본값 `require_l2_hold: true`일 때 L2를 계속 눌러야 하며,
 L2 해제 또는 `/joy` 0.3초 이상 수신 중단 시 취소한다.
@@ -151,7 +151,7 @@ L2 해제 또는 `/joy` 0.3초 이상 수신 중단 시 취소한다.
 `/arm/docked` publisher가
 모두 보여야 한다.
 
-### 툴 1: 카메라 정렬 후 상대 75 mm 전진
+### 툴 1: 저장 경로 종료 후 태그 방향으로 상대 75 mm 전진
 
 툴 1은 `tag36h11` ID 1, 검은 사각형 20 mm를 사용한다. 저장 경로의 마지막 하강
 지점은 주석으로만 남아 있으며, 해당 관절값이나 FK 좌표를 목표 생성에 사용하지 않는다.
@@ -161,18 +161,16 @@ L2 해제 또는 `/joy` 0.3초 이상 수신 중단 시 취소한다.
 
 ```text
 툴 1 접근 경로 → 정지/HOLD → 태그 관측
-→ 카메라 광축을 태그 중심에 맞추고 영상면을 태그 면과 평행하게 정렬
 → 서로 다른 영상·정지 피드백 5회 확인
-→ 측정 위치에서 태그 법선 방향으로 상대 75 mm 전진 → HOLD
+→ 툴 1 종료 위치에서 태그 법선 방향으로 상대 75 mm 전진 → HOLD
 ```
 
-정렬 거리는 최초 관측한 카메라와 태그 면 사이의 수직 거리를 유지한다. 카메라 롤은
-현재 영상의 가로 방향을 태그 면에 투영해 유지하며, 태그의 55° 설치 각도를 하드코딩하지
-않고 실제 관측 자세를 사용한다. 카메라 광학 프레임과 TCP 사이 TF로 TCP 목표를 계산한다.
+태그 중심으로 옮기거나 카메라 방향을 정렬하는 동작은 하지 않는다. 카메라 광학 프레임과
+TCP 사이 TF를 사용해 카메라가 태그 면의 어느 쪽에 있는지 확인하고 전진 방향을 고른다.
 전진은 **최종 태그 거리 75 mm가 아니라 현재 위치에서 75 mm 이동**이다. 관측 거리가
 전진량과 위치 허용오차의 합보다 짧으면 거부한다.
 
-정렬에는 신선한 태그 관측이 계속 필요하다. 정렬 완료 시 전진 방향과 시작 위치를 고정한
+확인 중에는 신선한 태그 관측이 필요하다. 5회 확인 후 전진 방향과 시작 위치를 고정한
 뒤에는 태그가 시야 밖으로 나가도 계속 진행한다. 전진 전체는 작은 Cartesian 구간으로
 IK를 구하고 충돌 검사를 마친 뒤 제출하며, 일부만 풀렸을 때는 이동하지 않는다.
 이 구간은 직선 유지를 위해 어깨 분리 동작을 적용하지 않고 보수적인 어깨 속도 제한을
@@ -182,7 +180,7 @@ IK를 구하고 충돌 검사를 마친 뒤 제출하며, 일부만 풀렸을 �
 
 팔 카메라·AprilTag 검출기와 보정된 TF가 제공되는 상태에서 실행한다. 아래 optical frame은
 기본 팔 D435i 설정 기준이며 실제 `CameraInfo.header.frame_id`와 일치해야 한다.
-`enable_docking_motion:=false`는 접근 경로 완료 후 오차만 표시하고 정렬·전진하지 않는다.
+`enable_docking_motion:=false`는 접근 경로 완료 후 태그 거리만 표시하고 전진하지 않는다.
 
 ```bash
 ros2 launch src/arm/tool_manipulator_bringup/launch/ik_manual.launch.py \
@@ -193,9 +191,9 @@ ros2 launch src/arm/tool_manipulator_bringup/launch/ik_manual.launch.py \
 ```
 
 기존 툴 1 선택 조합(L2 + ROS `buttons[3]`)으로 한 번 요청한다. 이후 L2를 놓아도
-툴 1 경로가 완료되면 별도 입력 없이 태그 정렬과 전진까지 이어진다.
+툴 1 경로가 완료되면 별도 입력 없이 태그 확인과 전진까지 이어진다.
 현재 별도의 UI docking/release 요청은 기존 체결 흐름을 사용하므로 이 테스트에는 사용하지 않는다.
-`alignment confirmed; planning fixed 75.0 mm ...`가 방향 고정 시점이고,
+`tag confirmed at stopped tool-1 endpoint; planning fixed 75.0 mm ...`가 방향 고정 시점이고,
 `tag-normal advance 75.0 mm completed; HOLD; no actuation`가 최종 완료 로그다.
 이 동작은 오프라인 계약 테스트로 검증했으며 하드웨어 동작·카메라 외부 보정·실제 간섭은
 실기 확인 전이다.

@@ -42,11 +42,8 @@ def camera_normal_target(base_tag, base_camera, reference_x, stand_off=None):
     Optical +Z looks toward the tag. Choose the tag-normal sign from the
     observed camera side rather than assuming a particular PnP normal sign.
     """
-    normal = base_tag[:3, 2].copy()
-    separation = base_tag[:3, 3]-base_camera[:3, 3]
-    if np.dot(normal, separation) < 0:
-        normal = -normal
-    distance = float(np.dot(normal, separation)) if stand_off is None else float(stand_off)
+    normal, measured_distance = tag_normal_from_camera_side(base_tag, base_camera)
+    distance = measured_distance if stand_off is None else float(stand_off)
     if not math.isfinite(distance) or distance <= 0:
         raise ValueError('camera must remain in front of the tag plane')
     x_axis = np.asarray(reference_x)-normal*np.dot(reference_x, normal)
@@ -58,6 +55,18 @@ def camera_normal_target(base_tag, base_camera, reference_x, stand_off=None):
     target[:3, :3] = np.column_stack((x_axis, np.cross(normal, x_axis), normal))
     target[:3, 3] = base_tag[:3, 3]-normal*distance
     return target, distance
+
+
+def tag_normal_from_camera_side(base_tag, base_camera):
+    """Choose the observed tag normal pointing from the camera toward the tag."""
+    normal = base_tag[:3, 2].copy()
+    separation = base_tag[:3, 3]-base_camera[:3, 3]
+    if np.dot(normal, separation) < 0:
+        normal = -normal
+    distance = float(np.dot(normal, separation))
+    if not math.isfinite(distance) or distance <= 0:
+        raise ValueError('camera must remain in front of the tag plane')
+    return normal, distance
 
 
 def tag_pose(detection, camera_matrix, distortion, settings):

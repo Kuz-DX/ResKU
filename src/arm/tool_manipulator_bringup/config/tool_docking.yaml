@@ -49,12 +49,12 @@ tools:
     # Tag plane is 55 degrees to the horizontal circuit-box top.
     # Camera image plane should align parallel to the tag plane on approach.
     # Align the optical axis through the tag centre at the first observed
-    # normal distance; preserve camera roll. Then advance RELATIVE 75 mm
-    # toward the tag along its observed normal, freeze direction, and HOLD.
+    # Confirm a stopped tool-1 endpoint and fresh tag samples, then advance
+    # RELATIVE 75 mm along the observed tag normal without camera alignment.
     # This is NOT a final camera-to-tag distance of 75 mm.
     # No FK endpoint from tool1_trajectory.yaml is read or used.
-    # Tag loss cancels alignment; after alignment the checked advance may
-    # finish without tag visibility. Healthy feedback remains mandatory.
+    # Tag loss during confirmation cancels; after the direction is locked the
+    # checked advance may finish without tag visibility. Feedback remains mandatory.
     # One tool-1 request starts the path and its automatic docking continuation.
     require_l2_hold: false
     alignment_mode: camera_normal_advance
