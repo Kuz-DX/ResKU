@@ -31,7 +31,7 @@ alias는 각각 `manual.launch.py`의 `real_hardware:=false`/`true`를 실행한
 복귀 중 조이스틱 이동 입력은 무시하고 EE는 정지시킨다. 시작 상태는 `drive`이며,
 `Startup RMD recovery verified from joint feedback` 로그와 조이스틱 연결을 확인한 뒤
 스틱·D-pad·L1/R1/O를 중립으로 놓고 Options를 눌러 `arm`으로 전환한다.
-최초 `arm` 진입 시 DXL base/roll/yaw 3축을 0 rad로 최대 0.03 rad/s로 정렬한다.
+최초 `arm` 진입 시 DXL base/roll/yaw 3축을 0 rad로 최대 0.09 rad/s로 정렬한다.
 시작 각도 제한은 없으며, 각 축의 소프트 리밋 안에서 현재 자세부터 이동한다.
 제한 시간은 가장 오래 걸리는 축의 예상 이동 시간에 15초를 더해 정한다.
 정렬 중에는 RMD 목표를 유지하고 EE 속도는 0으로 보내며 조이스틱 이동 입력은 무시한다.

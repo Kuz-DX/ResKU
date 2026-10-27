@@ -3,7 +3,7 @@
 Evaluated 2026-10-25; candidate values are in `config/tcp_ready.yaml`.
 `ik_manual.launch.py` loads this file. After startup recovery, the first explicit
 drive-to-arm focus edge aligns Dynamixel base/roll/yaw to zero in HOLD, at up to
-0.03 rad/s from the measured pose within joint limits. The TCP producer
+0.09 rad/s from the measured pose within joint limits. The TCP producer
 waits for this alignment; its timeout is the longest expected DXL travel time
 at that speed plus 15 seconds. It then samples the live joint-space approach,
 requires every MoveIt state-validity response to pass, and executes the target

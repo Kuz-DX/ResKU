@@ -33,7 +33,7 @@ def harness():
     node.params.update(forward_axis=4, wrist_yaw_axis=0, wrist_roll_axis=6,
                        ee_velocity_axis=6, wrist_pitch_axis=7, vertical_axis=1, base_ccw_button=4, base_cw_button=5,
                        ee_enable_button=1, focus_button=9, stop_pose_button=3, deadzone=.12, manage_focus=True,
-                       entry_alignment_speed_rad_s=.03, entry_alignment_timeout_margin_sec=15.)
+                       entry_alignment_speed_rad_s=.09, entry_alignment_timeout_margin_sec=15.)
     node.poll_controller = Mock()
     node.axis = lambda name: 0.
     node.list_client = Mock()
@@ -341,8 +341,8 @@ def test_first_arm_entry_aligns_only_dxl_to_zero_once():
         node.on_timer()
         delta = node.target-before
         if node.entry_alignment_started == now:
-            assert node.entry_alignment_deadline-now == pytest.approx(17., abs=1e-9)
-        assert np.max(np.abs(delta[[0, 4, 5]])) <= .03*.02+1e-12
+            assert node.entry_alignment_deadline-now == pytest.approx(15.+.06/.09, abs=1e-9)
+        assert np.max(np.abs(delta[[0, 4, 5]])) <= .09*.02+1e-12
         np.testing.assert_array_equal(delta[1:4], [0.]*3)
         node.positions = dict(zip(JOINTS, node.target))
         if node.entry_alignment_complete:

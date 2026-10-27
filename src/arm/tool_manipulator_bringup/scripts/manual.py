@@ -54,7 +54,7 @@ class Manual(ManualController):
         'startup_recovery_speed_rad_s': .03,
         'startup_recovery_max_excursion_rad': math.radians(5.),
         'startup_recovery_timeout_sec': 15.,
-        'entry_alignment_speed_rad_s': .03,
+        'entry_alignment_speed_rad_s': .09,
         'entry_alignment_timeout_margin_sec': 15.,
     }
 

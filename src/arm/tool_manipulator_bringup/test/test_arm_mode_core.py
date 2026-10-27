@@ -42,8 +42,8 @@ def test_first_arm_focus_aligns_dxl_before_managed_mode_entry():
         previous = list(c.target)
         target = c.tick(now, .02)
         if c.entry_alignment_started == now:
-            assert c.entry_alignment_deadline-now == pytest.approx(17.)
-        assert max(abs(target[i]-previous[i]) for i in (0, 4, 5)) <= .0006+1e-12
+            assert c.entry_alignment_deadline-now == pytest.approx(15.+.06/.09)
+        assert max(abs(target[i]-previous[i]) for i in (0, 4, 5)) <= .0018+1e-12
         assert [target[i] for i in (1, 2, 3)] == [previous[i] for i in (1, 2, 3)]
         measured = list(target)
         if c.entry_alignment_complete:

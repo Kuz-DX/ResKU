@@ -196,7 +196,7 @@ ros2 launch tool_manipulator_bringup manual.launch.py
 3축을 현재 자세에서 0 rad로 저속 정렬한다. 정렬 중 수동 입력은 차단되며, 완료 후
 조작 입력을 중립으로 놓아야 수동 제어가 열린다. 수동 경로는 충돌 검사를 하지 않는다. 다른 hardware
 launch나 읽기 전용 bridge와 동시에 실행하지 않는다.
-DXL 정렬 제한 시간은 시작 각도와 0.03 rad/s 속도로 계산한 예상 시간에 15초를 더한다.
+DXL 정렬 제한 시간은 시작 각도와 0.09 rad/s 속도로 계산한 예상 시간에 15초를 더한다.
 
 로봇이 아닌 조이스틱 연결 PC에서 `/joy`만 발행하려면 두 PC의 ROS domain을 99로
 맞추고 `ROS_LOCALHOST_ONLY=0`을 설정한다. 이때 잭스의 `manual.launch.py`에는

@@ -104,7 +104,7 @@ class ModeCore:
         self.entry_alignment_complete = True
         self.entry_alignment_started = None
         self.entry_alignment_deadline = None
-        self.entry_alignment_speed = .03
+        self.entry_alignment_speed = .09
         self.entry_alignment_timeout_margin = 15.
         self.tcp_entry_required = False
         self.tcp_entry = None
