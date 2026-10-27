@@ -133,8 +133,10 @@ ros2 topic echo /arm/tool_trajectory/status
 도킹 노드는 전용 취소 서비스와 기존 `/arm/cancel`에 의한 모드/epoch 변경을 감시한다.
 도킹 노드 종료 시 launch도 종료한다. 프로세스 강제 종료/통신 단절에서 Arduino의 동작을
 정지시키는 자체 watchdog은 펌웨어에 필요하다. 성공 시에도 자동 후퇴하지 않고 HOLD를 유지한다.
-도킹이 활성화된 경로는 L2를 deadman으로 사용한다. 저장 경로 재생부터 정렬·전진·체결까지 L2를
-계속 눌러야 하며, L2를 놓거나 `/joy`가 0.3초 이상 끊기면 취소하고 자동 후퇴하지 않는다.
+툴 1은 `require_l2_hold: false`로 설정되어 한 번 요청하면 저장 경로부터 정렬·전진까지
+자동으로 이어진다. 시작 후 L2 해제나 `/joy` 수신 중단으로 취소되지 않는다.
+다른 도킹 설정은 기본값 `require_l2_hold: true`일 때 L2를 계속 눌러야 하며,
+L2 해제 또는 `/joy` 0.3초 이상 수신 중단 시 취소한다.
 `actuation_enabled: true`인 경로는 시작 시점부터 `/arm/docking` subscriber와
 `/arm/docked` publisher가
 모두 보여야 한다.
@@ -161,7 +163,7 @@ ros2 topic echo /arm/tool_trajectory/status
 뒤에는 태그가 시야 밖으로 나가도 계속 진행한다. 전진 전체는 작은 Cartesian 구간으로
 IK를 구하고 충돌 검사를 마친 뒤 제출하며, 일부만 풀렸을 때는 이동하지 않는다.
 이 구간은 직선 유지를 위해 어깨 분리 동작을 적용하지 않고 보수적인 어깨 속도 제한을
-구간 시간에 반영한다. L2 해제, 조이스틱 끊김, 피드백·충돌·관절 제한 오류는 중단/HOLD로
+구간 시간에 반영한다. 명시적 취소, 제어권 변경, 피드백·충돌·관절 제한 오류는 중단/HOLD로
 처리한다. 목표 전진 속도는 5 mm/s이고 관절 제한 때문에 더 느려질 수 있다.
 최종 FK 오차 2 mm·방향 오차 0.02 rad·정지 상태를 확인하며 체결 신호는 보내지 않는다.
 
@@ -177,7 +179,8 @@ ros2 launch src/arm/tool_manipulator_bringup/launch/ik_manual.launch.py \
   launch_docking_bridge:=false
 ```
 
-기존 툴 1 선택 조합(L2 + ROS `buttons[3]`)으로 요청하고 완료까지 L2를 유지한다.
+기존 툴 1 선택 조합(L2 + ROS `buttons[3]`)으로 한 번 요청한다. 이후 L2를 놓아도
+툴 1 경로가 완료되면 별도 입력 없이 태그 정렬과 전진까지 이어진다.
 현재 별도의 UI docking/release 요청은 기존 체결 흐름을 사용하므로 이 테스트에는 사용하지 않는다.
 `alignment confirmed; planning fixed 75.0 mm ...`가 방향 고정 시점이고,
 `tag-normal advance 75.0 mm completed; HOLD; no actuation`가 최종 완료 로그다.

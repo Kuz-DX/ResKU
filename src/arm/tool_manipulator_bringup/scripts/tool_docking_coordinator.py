@@ -207,9 +207,24 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             raise RuntimeError('target tag stale')
         return stamp, base_tag
 
+    def check_deadman(self, now):
+        # Tool 1 is a single requested sequence, including its docking tail.
+        # The trigger authorizes the sequence; subsequent Joy messages are not
+        # its heartbeat. Feedback, ownership and explicit cancel still guard it.
+        if not self.cfg.get('require_l2_hold', True):
+            return
+        age = now-self.last_joy_time
+        detail = f'stage={self.stage}, joy_age={age:.3f}s'
+        if self.stage == 'checking':
+            detail += f', checked={self.request_index}/{len(self.requests)}'
+        if age >= self.deadman_timeout:
+            raise RuntimeError(
+                f'docking joystick stream stale ({detail}, limit={self.deadman_timeout:.3f}s)')
+        if not self.deadman_held:
+            raise RuntimeError(f'docking deadman L2 released ({detail}); hold L2 through checking and motion')
+
     def guard(self, now):
-        if now-self.last_joy_time >= self.deadman_timeout or not self.deadman_held:
-            raise RuntimeError('docking deadman released or joystick stream stale')
+        self.check_deadman(now)
         if now-self.docking_started > self.cfg['sequence_timeout_s']:
             raise RuntimeError('docking sequence timeout')
         s = self.status
@@ -226,9 +241,7 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
     def tick(self):
         try:
             if self.active and self.docking_started is None:
-                if (time.monotonic()-self.last_joy_time >= self.deadman_timeout
-                        or not self.deadman_held):
-                    raise RuntimeError('docking deadman released or joystick stream stale')
+                self.check_deadman(time.monotonic())
             if self.active and self.docking_started is not None:
                 now = time.monotonic()
                 self.guard(now)
@@ -286,8 +299,10 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         self.stage = 'dock_advance_plan'
         self.report('advance_planning',
                     'alignment confirmed; planning fixed %.1f mm tag-normal advance; '
-                    'tag visibility no longer required, L2 remains required' %
-                    (self.cfg['advance_distance_m']*1000.))
+                    'tag visibility no longer required; %s' %
+                    (self.cfg['advance_distance_m']*1000.,
+                     'L2 remains required' if self.cfg.get('require_l2_hold', True)
+                     else 'continuing automatic tool sequence'))
 
     def plan_advance_step(self):
         # One bounded IK solve per timer tick keeps feedback/cancel callbacks live.

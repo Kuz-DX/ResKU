@@ -126,6 +126,8 @@ def load_settings(filename):
         if raw.get('enabled') is not True:
             continue
         item = dict(raw)
+        if type(item.setdefault('require_l2_hold', True)) is not bool:
+            raise ValueError('require_l2_hold must be a boolean')
         mode = item.setdefault('alignment_mode', 'tag_tcp_stages')
         if mode not in ('tag_tcp_stages', 'camera_normal_advance'):
             raise ValueError('unknown docking alignment_mode')

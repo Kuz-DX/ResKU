@@ -82,6 +82,8 @@ class TcpJoy(TcpMotionWorkflow, Node):
         self.ready_future = None
         self.ready_execution_id = None
         self.ready_safe_at = None
+        self.entry_deadline = None
+        self.entry_retry_after = 0.
         self.auto_entry_armed = False
         self.entry_retry_count = 0
         self.last_focus = None

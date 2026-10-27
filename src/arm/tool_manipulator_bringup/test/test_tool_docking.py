@@ -69,7 +69,22 @@ def test_shipped_config_only_enables_tool1_camera_alignment_and_relative_advance
     assert cfg[1]['tag_family'] == 'tag36h11'
     assert cfg[1]['tag_id'] == 1
     assert not cfg[1]['actuation_enabled']
+    assert cfg[1]['require_l2_hold'] is False
     assert 'targets' not in cfg[1]
+
+
+@pytest.mark.parametrize('value', ['false', None, 0])
+def test_invalid_l2_hold_policy_rejected(tmp_path, value):
+    data = yaml.safe_load((ROOT/'config/tool_docking.yaml').read_text())
+    data['tools'][1]['require_l2_hold'] = value
+    path = tmp_path/'invalid_hold.yaml'
+    path.write_text(yaml.safe_dump(data))
+    with pytest.raises(ValueError, match='require_l2_hold'):
+        load_settings(path)
+
+
+def test_other_docking_configs_keep_continuous_l2_by_default(tmp_path):
+    assert settings(tmp_path)['require_l2_hold'] is True
 
 
 def test_enabling_unmeasured_config_is_rejected(tmp_path):
@@ -289,6 +304,23 @@ def test_released_deadman_blocks_alignment(tmp_path):
         ToolDockingCoordinator.guard(n, 1.)
 
 
+@pytest.mark.parametrize('stale', [False, True])
+def test_deadman_abort_during_path_check_reports_distinct_cause_and_progress(tmp_path, stale):
+    n = node(tmp_path)
+    n.stage = 'checking'
+    n.docking_started = None
+    n.request_index, n.requests = 12, [None]*861
+    n.deadman_held = stale
+    with patch('tool_docking_coordinator.time.monotonic', return_value=1.4 if stale else 1.1), \
+            patch.object(ToolTrajectoryJoy, 'tick') as parent_tick:
+        n.tick()
+    parent_tick.assert_not_called()
+    reason = n.fail.call_args.args[0]
+    assert ('joystick stream stale' if stale else 'deadman L2 released') in reason
+    assert 'stage=checking' in reason and 'checked=12/861' in reason
+    assert ('joy_age=0.400s' if stale else 'joy_age=0.100s') in reason
+
+
 def test_actuation_timeout_cannot_report_success(tmp_path):
     n = node(tmp_path)
     n.stage = 'dock_actuate'
@@ -485,16 +517,95 @@ def test_tag_loss_only_permitted_after_advance_direction_is_locked(tmp_path, loc
     assert n.fresh_observation.called != locked
 
 
-def test_deadman_still_cancels_blind_advance(tmp_path):
+def test_opt_in_deadman_still_cancels_blind_advance(tmp_path):
     n = camera_node(tmp_path)
+    n.cfg['require_l2_hold'] = True
     n.docking_started = 0.
     n.stage = 'executing'
     n.advance_locked = True
     n.deadman_held = False
-    with patch.object(ToolTrajectoryJoy, 'tick') as parent:
+    with patch('tool_docking_coordinator.time.monotonic', return_value=1.1), \
+            patch.object(ToolTrajectoryJoy, 'tick') as parent:
         n.tick()
         parent.assert_not_called()
     assert 'deadman' in n.fail.call_args.args[0]
+
+
+@pytest.mark.parametrize('stage', ['planning_entry', 'checking', 'executing'])
+def test_tool1_approach_continues_after_l2_release_and_joy_stops(tmp_path, stage):
+    n = camera_node(tmp_path)
+    n.stage = stage
+    n.docking_started = None
+    n.deadman_held, n.last_joy_time = False, -math.inf
+    with patch.object(ToolTrajectoryJoy, 'tick') as parent:
+        n.tick()
+    parent.assert_called_once()
+    n.fail.assert_not_called()
+
+
+def test_tool1_completion_automatically_aligns_and_plans_advance_without_joy(tmp_path):
+    n = camera_node(tmp_path)
+    n.docking_started = None
+    n.stage, n.execution_id = 'executing', 'tool1'
+    n.path, n.execution_timeout, n.started = dict(total=10.), 40., 0.
+    n.deadman_held, n.last_joy_time = False, -math.inf
+    n.status_time = n.state_time = 1.
+    n.status = dict(mode='tool_auto', epoch='path-epoch', ready=True,
+                    startup_complete=True, focus='arm')
+    with patch('tool_docking_coordinator.time.monotonic', return_value=1.1):
+        n.tick()
+        assert n.stage == 'executing' and n.docking_started is None
+        n.status.update(last_execution_id='tool1', last_execution_result='succeeded',
+                        mode='hold', transitioning=False, epoch='hold-epoch')
+        n.tick()
+        assert n.stage == 'dock_acquire'
+        assert n.hold_epoch == 'hold-epoch'
+        tag = n.observation[2]
+        n.observation = None
+        n.tick()
+        assert n.stage == 'dock_acquire'  # Wait for the tag, not another trigger.
+        for i in range(n.cfg['stable_samples']):
+            n.feedback_sequence += 1
+            n.observation = (i+1, 1.1, tag)
+            n.tick()
+        assert n.stage == 'dock_advance_plan' and n.advance_locked
+        np.testing.assert_allclose(n.advance_target[:3, 3], [0., 0., .075])
+    n.fail.assert_not_called()
+    n.docking_command.publish.assert_not_called()
+
+
+@pytest.mark.parametrize('failure', [None, 'feedback', 'focus', 'fault', 'epoch', 'tag', 'timeout'])
+def test_automatic_tool1_keeps_docking_guards(tmp_path, failure):
+    n = camera_node(tmp_path)
+    n.docking_started = 1.
+    n.stage = 'executing'
+    n.advance_locked = True
+    n.deadman_held, n.last_joy_time = False, -math.inf
+    n.status_time = n.state_time = 1.
+    n.status = dict(mode='tool_auto', ready=True, startup_complete=True, focus='arm', epoch='e')
+    if failure == 'feedback': n.state_time = 0.
+    if failure == 'focus': n.status['focus'] = 'drive'
+    if failure == 'fault': n.status['mode'] = 'fault'
+    if failure == 'epoch':
+        n.stage = 'dock_observe'
+        n.status['mode'], n.hold_epoch = 'hold', 'old'
+    if failure == 'tag':
+        n.advance_locked = False
+        n.fresh_observation = Mock(side_effect=RuntimeError('target tag missing'))
+    if failure == 'timeout': n.docking_started = -200.
+    with patch('tool_docking_coordinator.time.monotonic', return_value=1.1), \
+            patch.object(ToolTrajectoryJoy, 'tick') as parent:
+        n.tick()
+    assert parent.called is (failure is None)
+    assert n.fail.called is (failure is not None)
+
+
+def test_operator_can_cancel_automatic_tool1(tmp_path):
+    n = camera_node(tmp_path)
+    n.stage = 'dock_observe'
+    response = n.on_cancel(None, SimpleNamespace())
+    assert response.success
+    n.fail.assert_called_once_with('operator cancelled docking/path')
 
 
 @pytest.mark.parametrize('endpoint_error', [0., .004])

@@ -40,6 +40,8 @@ class TcpMotionWorkflow:
         self.ready_state, self.ready_checks = 'idle', []
         self.ready_snapshot = self.ready_started = self.ready_future = None
         self.ready_execution_id = self.ready_safe_at = None
+        self.entry_deadline = None
+        self.entry_retry_after = 0.
 
     def _fail_ready(self, reason):
         self._reset_ready()
@@ -54,6 +56,13 @@ class TcpMotionWorkflow:
         """Collision-check and execute one explicit-focus TCP-ready entry."""
         s = self.status
         if not self.ready_enabled or not self.auto_entry_armed:
+            return
+        deadline = vars(self).get('entry_deadline')
+        if (self.ready_state in ('await_entry', 'request_tcp')
+                and deadline is not None and now >= deadline):
+            self._fail_ready(
+                'TCP entry did not settle within 3.0 sec; remain HOLD; '
+                'release and press L1 to retry')
             return
         if self.ready_state in ('request_tcp', 'wait_tcp'):
             if now-self.ready_started > 3.:
@@ -198,8 +207,12 @@ class TcpMotionWorkflow:
             return
         if self.ready_state == 'await_entry' and self.ready_safe_at is not None:
             # Allow the manager subscription to consume the published proof first.
-            if now-self.ready_safe_at < .1 or not self.tcp_mode.service_is_ready():
+            if (now-self.ready_safe_at < .1
+                    or now < vars(self).get('entry_retry_after', 0.)
+                    or not self.tcp_mode.service_is_ready()):
                 return
+            if deadline is None:
+                self.entry_deadline = now+3.
             self.ready_future = self.tcp_mode.call_async(Trigger.Request())
             self.ready_started = now
             self.ready_request_epoch = s.get('epoch')
@@ -218,16 +231,16 @@ class TcpMotionWorkflow:
                               'TCP entry waiting for 0.20 sec stable feedback',
                               'TCP entry requires stopped feedback'):
                     self.entry_retry_count += 1
-                    if self.entry_retry_count >= 3:
-                        self.ready_state = 'failed'
-                        self.auto_entry_armed = False
-                        self.reason = 'TCP entry remained unstable after three checks; remain HOLD'
-                    else:
-                        self.ready_state = 'await_entry'
-                        self.ready_safe_at = None
-                        self.auto_entry_armed = True
-                        self.reason = 'TCP entry feedback changed; checking again (%d/3)' % (
-                            self.entry_retry_count)
+                    # Settling is expected after a completed path. Bound it by
+                    # elapsed time, not three fast service round trips. Each
+                    # retry still needs a fresh collision proof and all manager
+                    # guards, including 0.20 sec of stopped feedback.
+                    self.ready_state = 'await_entry'
+                    self.ready_safe_at = None
+                    self.entry_retry_after = now+.25
+                    self.auto_entry_armed = True
+                    self.reason = 'TCP entry settling; recheck %d: %s' % (
+                        self.entry_retry_count, detail)
                 else:
                     self.ready_state = 'failed'
                     self.reason = 'TCP_IK request rejected: '+detail

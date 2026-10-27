@@ -223,7 +223,7 @@ def ready_node():
         ready_enabled=True, auto_entry_armed=True, ready_state='idle',
         ready_goal=np.array([0., 1.2, 1.2, -1.2, 0., 0.]), ready_duration=10.,
         ready_step=.005, ready_timeout=3., ready_max_delta=.5, home_max_delta=1.,
-        entry_retry_count=0,
+        entry_retry_count=0, entry_deadline=None, entry_retry_after=0.,
         ready_checks=[], ready_snapshot=None,
         ready_started=1., ready_future=None, ready_execution_id=None,
         ready_safe_at=None, measured=np.array([0., 1.48, 1.50, -1.55, 0., 0.]),
@@ -390,16 +390,70 @@ def test_entry_feedback_race_rechecks_without_relaxing_guard():
     n.tool_pub.publish.assert_not_called()
 
 
-def test_entry_feedback_race_stops_after_three_attempts():
+@pytest.mark.parametrize('reason', [
+    'TCP entry feedback changed; recheck required',
+    'TCP entry waiting for 0.20 sec stable feedback',
+    'TCP entry requires stopped feedback'])
+def test_entry_settling_can_retry_more_than_three_checks_then_enter(reason):
     n = ready_node()
-    n.ready_state = 'request_tcp'
-    n.entry_retry_count = 2
-    n.ready_future = Mock()
-    n.ready_future.result.return_value = SimpleNamespace(
-        success=False, message='TCP entry feedback changed; recheck required')
+    n.ready_state = 'await_entry'
+    n.ready_safe_at = .8
     TcpJoy.drive_ready(n, 1.)
+    assert n.entry_deadline == 4.
+    for attempt in range(4):
+        now = 1.02+attempt*.3
+        n.status_time = n.state_time = now
+        n.ready_future.done.return_value = True
+        n.ready_future.result.return_value = SimpleNamespace(success=False, message=reason)
+        TcpJoy.drive_ready(n, now)
+        assert n.ready_state == 'await_entry' and n.auto_entry_armed
+        assert n.ready_safe_at is None and reason in n.reason
+        # No new proof means no request, even after the retry delay.
+        TcpJoy.drive_ready(n, now+.26)
+        assert n.ready_state == 'await_entry'
+        n.ready_safe_at = now+.02
+        TcpJoy.drive_ready(n, now+.15)
+        assert n.ready_state == 'await_entry'
+        TcpJoy.drive_ready(n, now+.26)
+        assert n.ready_state == 'request_tcp'
+        assert n.entry_deadline == 4.
+    n.ready_future.result.return_value = SimpleNamespace(success=True)
+    TcpJoy.drive_ready(n, 2.2)
+    assert n.ready_state == 'wait_tcp'
+    n.status.update(mode='tcp_ik', transitioning=False)
+    n.status_time = n.state_time = 2.22
+    TcpJoy.drive_ready(n, 2.22)
+    assert n.ready_state == 'idle' and not n.auto_entry_armed
+    n.tool_pub.publish.assert_not_called()
+
+
+@pytest.mark.parametrize('stage', ['await_entry', 'request_tcp'])
+@pytest.mark.parametrize('fresh', [False, True])
+def test_entry_settling_deadline_expires_even_without_fresh_feedback(stage, fresh):
+    n = ready_node()
+    n.ready_state = stage
+    n.entry_deadline = 4.
+    n.ready_future = Mock()
+    n.ready_future.done.return_value = False
+    if fresh:
+        n.status_time = n.state_time = 4.
+    TcpJoy.drive_ready(n, 4.)
     assert n.ready_state == 'failed' and not n.auto_entry_armed
-    assert 'three checks' in n.reason
+    assert 'did not settle within 3.0 sec' in n.reason
+    n.tcp_mode.call_async.assert_not_called()
+    n.tool_pub.publish.assert_not_called()
+
+
+def test_fresh_l1_retry_resets_entry_settling_deadline():
+    n = ready_node()
+    n.ready_state = 'failed'
+    n.auto_entry_armed = False
+    n.entry_deadline, n.entry_retry_after = .5, .4
+    n.default_ready_goal = n.ready_goal.copy()
+    n.twist = np.zeros(6)
+    TcpJoy.retry_ready(n, True, False, False, 1.)
+    assert n.auto_entry_armed and n.ready_state == 'idle'
+    assert n.entry_deadline is None and n.entry_retry_after == 0.
 
 
 def test_home_completion_stays_hold_and_restores_tcp_ready_target():

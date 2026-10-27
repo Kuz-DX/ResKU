@@ -123,6 +123,18 @@ L2 (axis 2 below -0.5) reserves buttons 2/3/4 for physical 1/2/3, selecting
 path 0/1/2. While L2 is held, the TCP producer suppresses L1 and square HOME
 handling so one combination cannot start both a path and TCP/HOME motion.
 Paths must contain reviewed captured points and have `execution_enabled: true`.
+Path 2 stores five user-supplied points with nominal 20-second segments. Its
+`after_path` action closes `ee_joint` to the existing measured 1.251728 rad target,
+waits for stopped feedback, then retraces points 5/4/3/2/1 and enters HOLD.
+Each phase is collision checked, including the gripper sweep and the reverse
+arm path with the closed gripper. The manager owns EE velocity (at most 0.12 rad/s)
+and aborts on stale feedback, arm drift, a 3-second EE stall or 60-second timeout.
+A failed close never starts the return. The reverse path always reaches original
+point 1, including when UI entry selected a nearer approach point. This sequence
+does not send Arduino docking pulses; a release request is unsupported.
+Path 2 remains disabled because shoulder points 2..5, elbow points 3/4 and
+wrist-roll point 5 violate the current limits or the 0.02-rad margin. Reconcile
+the taught coordinates with the hardware/URDF limits before enabling it.
 Path 0 is enabled. Path 1 is enabled for approach-only testing and retains
 original points 1/2/5/7 and their timestamps, ending at 129.10062 s in the recorded
 path before HOLD (actual execution can take longer under runtime limits).
@@ -139,10 +151,17 @@ at the initial observed normal distance, then translate 75 mm toward the tag
 along the latched normal and HOLD without Arduino actuation. This is relative
 travel, not a 75 mm final stand-off. The whole advance is IK/collision checked
 before execution. Tag visibility is required through alignment; after the
-advance is latched, tag loss is allowed but L2, feedback and ownership checks
+advance is latched, tag loss is allowed but feedback and ownership checks
 remain mandatory. Both launch switches `enable_tool_docking` and
 `enable_docking_motion` must be true for actual alignment/advance motion.
 Path 2 is excluded and remains disabled.
+Tool 1 uses `require_l2_hold: false`: one L2 + tool-1 selection starts the path
+and automatically continues into tag alignment and the checked 75 mm advance.
+Releasing L2 or losing subsequent Joy messages does not cancel that sequence.
+Explicit cancel, feedback, ownership and collision checks remain active. Other
+docking configurations default to continuous L2 hold unless explicitly disabled.
+At one sample per 20 ms timer tick, 861 samples take at least about 17 seconds
+to validate. A new path request while checking is ignored.
 
 TCP-ready and entry checks allow the same bounded 0.02-rad DXL/EE encoder
 variation used by tool-path validation; RMD entry tolerance stays at 0.001 rad.
@@ -255,6 +274,13 @@ activation. An explicit drive-to-arm focus edge may arm one collision-checked
 tcp_ready move if the current pose fails the entry margin or condition check;
 execution waits for L1. Candidate comparisons, limitations
 and the assessment protocol are documented in [tcp_ready.md](tcp_ready.md).
+Transient entry rejections (snapshot drift, moving feedback or the 0.20-second
+stability wait) are rechecked within a single 3-second window starting with the
+first TCP mode request, with at least 0.25 seconds between rejection and retry.
+Each retry requires a new collision assessment; retries never extend the window
+or relax the manager's stopped-feedback and position tolerances. Expiry leaves
+HOLD; a fresh neutral L1 press starts a new assessment. Other rejections fail
+immediately.
 
 ## Timed tool paths
 

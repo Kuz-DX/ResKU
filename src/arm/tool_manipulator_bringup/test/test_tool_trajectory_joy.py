@@ -13,6 +13,7 @@ sys.path.insert(0, str(SCRIPTS))
 from tool_trajectory_joy import (collision_check_budget, execution_plan, load_path,
                                  isolate_shoulder_zero_crossings, nearest_path_suffix,
                                  planned_entry, requested_path, ToolTrajectoryJoy)
+from tool_trajectory_joy import reverse_path
 
 
 def write_path(tmp_path, enabled=True, times=(0., 1., 3.)):
@@ -37,6 +38,141 @@ def test_enabled_path_uses_zero_point_as_start_and_segment_durations(tmp_path):
 
 def test_disabled_path_is_not_loadable_for_execution(tmp_path):
     assert load_path(write_path(tmp_path, enabled=False), Mock()) is None
+
+
+def test_close_and_return_action_is_loaded_and_validated(tmp_path):
+    path = write_path(tmp_path)
+    data = yaml.safe_load(path.read_text())
+    data['after_path'] = dict(ee_close_rad=1.251728, return_to_start=True)
+    path.write_text(yaml.safe_dump(data))
+    model = Mock()
+    model.within_limits.return_value = True
+    assert load_path(path, model)['after_path'] == data['after_path']
+    data['after_path']['ee_close_rad'] = 20.
+    path.write_text(yaml.safe_dump(data))
+    with pytest.raises(ValueError, match='close-and-return'):
+        load_path(path, model)
+
+
+def test_tool2_preserves_taught_points_and_remains_disabled_for_limits(tmp_path):
+    path = SCRIPTS.parent/'config/tool2_trajectory.yaml'
+    data = yaml.safe_load(path.read_text())
+    assert len(data['points']) == 5
+    assert data['execution_enabled'] is False
+    assert load_path(path, Mock()) is None
+    hardware = yaml.safe_load((SCRIPTS.parent/'config/hardware.yaml').read_text())
+    def within_limits(q, margin):
+        return all(hardware['joints'][name]['soft_limit_rad'][0]+margin <= value <=
+                   hardware['joints'][name]['soft_limit_rad'][1]-margin
+                   for name, value in zip(data['joint_names'], q))
+    invalid = [i+1 for i, point in enumerate(data['points'])
+               if not within_limits(point['positions_rad'], .02)]
+    assert invalid == [2, 3, 4, 5]
+    data['execution_enabled'] = True
+    enabled = tmp_path/'enabled.yaml'
+    enabled.write_text(yaml.safe_dump(data))
+    with pytest.raises(ValueError, match='joint margin'):
+        load_path(enabled, SimpleNamespace(within_limits=within_limits))
+
+
+def test_reverse_path_retraces_all_points_with_reversed_segment_times():
+    points = [np.ones(6)*i*.1 for i in range(5)]
+    path = dict(start=points[0], waypoints=points[1:], durations=[1., 2., 3., 4.], total=10.)
+    result = reverse_path(path)
+    np.testing.assert_array_equal(result['start'], points[4])
+    np.testing.assert_array_equal(result['waypoints'], points[3::-1])
+    assert result['durations'] == [4., 3., 2., 1.]
+
+
+def test_sequence_closes_before_returning_and_finishes_at_original_start():
+    points = [np.ones(6)*i*.1 for i in range(5)]
+    path = dict(start=points[0], waypoints=points[1:], durations=[1., 2., 3., 4.],
+                total=10., after_path=dict(ee_close_rad=1.251728, return_to_start=True))
+    from tool_trajectory_joy import ARM_JOINTS
+    node = SimpleNamespace(paths={2: path}, path_id=2, sequence_phase='approach',
+                           full_state=dict(zip(ARM_JOINTS, points[-1])),
+                           start_tolerance=.03, max_start_delta=.1, approach_speed=.05,
+                           report=Mock(), begin=Mock(), reset=Mock())
+    ToolTrajectoryJoy.path_completed(node)
+    assert node.sequence_phase == 'closing'
+    closing = node.begin.call_args.args[1]
+    assert closing['ee_target_rad'] == 1.251728
+    np.testing.assert_array_equal(closing['waypoints'], [points[4]])
+    node.reset.assert_not_called()
+    # Called again only after the manager reports successful EE completion.
+    ToolTrajectoryJoy.path_completed(node)
+    assert node.sequence_phase == 'returning'
+    returning = node.begin.call_args.args[1]
+    np.testing.assert_array_equal(returning['waypoints'], points[3::-1])
+    assert 'ee_target_rad' not in returning
+    ToolTrajectoryJoy.path_completed(node)
+    node.reset.assert_called_once()
+
+
+def test_failed_ee_execution_does_not_start_return():
+    import time
+    now = time.monotonic()
+    node = SimpleNamespace(stage='executing', status_time=now, state_time=now,
+                           status=dict(last_execution_id='close', last_execution_result='aborted'),
+                           execution_id='close', path_completed=Mock(), fail=Mock())
+    ToolTrajectoryJoy.tick(node)
+    node.path_completed.assert_not_called()
+    node.fail.assert_called_once()
+
+
+def test_ee_collision_check_sweeps_gripper_with_arm_held():
+    from tool_trajectory_joy import ARM_JOINTS
+    measured = np.zeros(6)
+    node = SimpleNamespace(
+        healthy_hold=Mock(return_value={'epoch': 'hold-epoch'}),
+        full_state=dict(zip(ARM_JOINTS, measured)), shoulder_isolation_enabled=False,
+        collision=Mock(), mode=Mock(), collision_timeout=10., start_tolerance=.03,
+        report=Mock(), begin_failed=Mock())
+    node.full_state.update(ee_joint=0., rack_left_joint=.02, rack_right_joint=.02)
+    ToolTrajectoryJoy.begin(node, 2, dict(
+        start=measured, waypoints=[measured], durations=[.5], total=.5,
+        start_error=0., ee_target_rad=.1))
+    node.begin_failed.assert_not_called()
+    assert node.stage == 'checking'
+    values = [dict(zip(req.robot_state.joint_state.name,
+                       req.robot_state.joint_state.position)) for req in node.requests]
+    assert [value['ee_joint'] for value in values] == pytest.approx(np.linspace(0., .1, 6))
+    assert all(all(value[j] == 0. for j in ARM_JOINTS) for value in values)
+    assert all('rack_left_joint' not in value and 'rack_right_joint' not in value
+               for value in values)
+
+
+def test_ee_goal_dispatch_uses_manager_and_requires_collision_success():
+    import json
+    import time
+    from arm_control_mode_manager import ControlModeManager
+    now = time.monotonic()
+    node = SimpleNamespace(
+        stage='wait_mode', status_time=now, state_time=now,
+        status=dict(mode='tool_auto', epoch='close-epoch'), unchanged=Mock(return_value=True),
+        path=dict(ee_target_rad=1.251728), publisher=Mock(), report=Mock(), path_id=2)
+    ToolTrajectoryJoy.tick(node)
+    message = node.publisher.publish.call_args.args[0]
+    command = json.loads(message.data)
+    assert command['ee_target_rad'] == 1.251728 and 'waypoints' not in command
+    gateway = SimpleNamespace(core=Mock())
+    ControlModeManager.on_command(gateway, 'tool_auto', message)
+    assert gateway.core.close_ee.call_args.args[:3] == (
+        'close-epoch', node.execution_id, 1.251728)
+    gateway.core.path.assert_not_called()
+    node.stage = 'checking'
+    node.healthy_hold = Mock(return_value=dict(epoch='hold-epoch'))
+    node.original_epoch = 'hold-epoch'
+    node.collision_deadline = now+10.
+    node.future = Mock()
+    node.future.result.return_value = SimpleNamespace(valid=False, contacts=[])
+    node.request_index, node.requests = 0, [object()]
+    node.fail, node.mode = Mock(), Mock()
+    node.publisher.reset_mock()
+    ToolTrajectoryJoy.tick(node)
+    node.fail.assert_called_once()
+    node.mode.call_async.assert_not_called()
+    node.publisher.publish.assert_not_called()
 
 
 @pytest.mark.parametrize('times', [(1., 2.), (0., 0.), (0., 120.)])

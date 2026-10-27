@@ -27,6 +27,59 @@ def test_only_owner_and_current_epoch_can_command():
     assert max(c.tick(.12, .02)) <= .12*.02
 
 
+def test_managed_ee_reaches_feedback_goal_then_holds_arm():
+    c = ready('tool_auto')
+    c.ee_feedback(0., 0., .1)
+    assert not c.close_ee('old', 'close', .2, .1)
+    assert c.close_ee(c.epoch, 'close', .2, .1)
+    position = 0.
+    for step in range(1, 1001):
+        now = .1+step*.02
+        position += c.ee*.02
+        c.ee_feedback(position, c.ee, now)
+        c.feedback([0.]*6, [0.]*6, now)
+        assert c.tick(now, .02) == [0.]*6
+        assert abs(c.ee) <= .12
+        if c.last_execution_result is not None:
+            break
+    assert c.last_execution_result == 'succeeded'
+    assert abs(position-.2) <= .01
+    assert c.mode == 'hold' and c.ee == 0. and c.ee_goal is None
+
+
+@pytest.mark.parametrize('failure', ['stale', 'stall', 'arm_drift', 'cancel'])
+def test_managed_ee_failure_stops_without_success(failure):
+    c = ready('tool_auto')
+    c.ee_feedback(0., 0., .1)
+    assert c.close_ee(c.epoch, 'close', .2, .1)
+    for step in range(1, 201):
+        now = .1+step*.02
+        if failure != 'stale':
+            c.ee_feedback(0., 0., now)
+        arm = [0., .006 if failure == 'arm_drift' else 0., 0., 0., 0., 0.]
+        c.feedback(arm, [0.]*6, now)
+        if failure == 'cancel':
+            assert c.cancel_path(c.epoch, 'close', now)
+        c.tick(now, .02)
+        if c.last_execution_result is not None:
+            break
+    assert c.last_execution_result == 'aborted'
+    assert c.mode == 'hold' and c.ee == 0. and c.ee_goal is None
+
+
+def test_managed_ee_requires_fresh_feedback_and_valid_goal():
+    c = ready('tool_auto')
+    with pytest.raises(ValueError, match='fresh ee'):
+        c.close_ee(c.epoch, 'close', .2, .1)
+    c.ee_feedback(0., 0., .1)
+    for goal in (True, float('nan'), 3., -3.):
+        with pytest.raises(ValueError, match='invalid ee goal'):
+            c.close_ee(c.epoch, 'close', goal, .1)
+    c.ee_feedback(float('nan'), 0., .1)
+    with pytest.raises(ValueError, match='fresh ee'):
+        c.close_ee(c.epoch, 'close', .2, .1)
+
+
 @pytest.mark.parametrize('distance,duration', [(.004, 10.), (.04, 100.)])
 def test_slow_tracking_path_does_not_report_motor_stall(distance, duration):
     c = ready('tool_auto')

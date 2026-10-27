@@ -53,7 +53,9 @@ tools:
     # This is NOT a final camera-to-tag distance of 75 mm.
     # No FK endpoint from tool1_trajectory.yaml is read or used.
     # Tag loss cancels alignment; after alignment the checked advance may
-    # finish without tag visibility. L2 and healthy feedback remain mandatory.
+    # finish without tag visibility. Healthy feedback remains mandatory.
+    # One tool-1 request starts the path and its automatic docking continuation.
+    require_l2_hold: false
     alignment_mode: camera_normal_advance
     tag_family: tag36h11
     tag_id: 1

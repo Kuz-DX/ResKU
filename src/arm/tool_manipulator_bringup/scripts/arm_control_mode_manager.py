@@ -104,6 +104,8 @@ class ControlModeManager(Node):
             return
         p = dict(zip(msg.name, msg.position))
         v = dict(zip(msg.name, msg.velocity))
+        if 'ee_joint' in p and 'ee_joint' in v:
+            self.core.ee_feedback(p['ee_joint'], v['ee_joint'], time.monotonic())
         if all(j in p and j in v for j in JOINTS):
             self.core.feedback([p[j] for j in JOINTS], [v[j] for j in JOINTS], time.monotonic())
         else:
@@ -190,6 +192,9 @@ class ControlModeManager(Node):
             elif source == 'tool_auto':
                 if data.get('cancel') is True:
                     accepted = self.core.cancel_path(data['epoch'], data['execution_id'], time.monotonic())
+                elif 'ee_target_rad' in data:
+                    accepted = self.core.close_ee(data['epoch'], data['execution_id'],
+                                                  data['ee_target_rad'], time.monotonic())
                 else:
                     accepted = self.core.path(data['epoch'], data['execution_id'], data['waypoints'],
                                               time.monotonic(), durations=data.get('durations'),
@@ -351,7 +356,9 @@ class ControlModeManager(Node):
             self.last_path_clamp_warning = now
         if target is not None:
             self.position.publish(Float64MultiArray(data=target))
-        enabled = self.core.ready and self.core.mode in ('manual', 'tcp_ik') and not self.core.transitioning
+        enabled = (self.core.ready and not self.core.transitioning and
+                   (self.core.mode in ('manual', 'tcp_ik') or
+                    (self.core.mode == 'tool_auto' and self.core.ee_goal is not None)))
         self.ee.publish(Float64MultiArray(data=[self.core.ee if enabled else 0.]))
         self.publish_status()
 

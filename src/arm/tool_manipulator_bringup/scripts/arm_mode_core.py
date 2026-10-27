@@ -61,6 +61,11 @@ class ModeCore:
         self.target = None
         self.goal = None
         self.ee = 0.
+        self.ee_position = self.ee_velocity = None
+        self.ee_state_time = -math.inf
+        self.ee_goal = None
+        self.ee_best_error = math.inf
+        self.ee_progress_time = None
         self.command_time = -math.inf
         self.queue = []
         self.execution_id = None
@@ -303,12 +308,71 @@ class ModeCore:
     def fresh(self, now):
         return self.position is not None and 0 <= now-self.state_time < .5
 
+    def ee_feedback(self, position, velocity, now):
+        if not all(math.isfinite(v) for v in (position, velocity)):
+            self.ee_state_time = -math.inf
+            return
+        self.ee_position, self.ee_velocity, self.ee_state_time = position, velocity, now
+
+    def close_ee(self, epoch, execution_id, target, now):
+        """Execute a collision-checked gripper goal under tool_auto ownership."""
+        if (self.mode != 'tool_auto' or epoch != self.epoch or self.transitioning or
+                self.focus != 'arm' or not self.ready or not self.fresh(now)):
+            return False
+        if self.execution_id is not None:
+            raise ValueError('execution already active; cancel first')
+        if (not isinstance(execution_id, str) or not execution_id or
+                type(target) not in (int, float) or not math.isfinite(target) or
+                not -2.351592547829 <= target <= 2.839398438376):
+            raise ValueError('invalid ee goal')
+        if not 0 <= now-self.ee_state_time < .3:
+            raise ValueError('fresh ee feedback required')
+        if max(map(abs, self.velocity)) > .02:
+            raise ValueError('arm must be stopped before ee motion')
+        self.target = self.goal = list(self.position)
+        self.execution_id, self.ee_goal = execution_id, float(target)
+        self.started = self.ee_progress_time = now
+        self.ee_best_error = abs(target-self.ee_position)
+        self.settled = 0
+        return True
+
+    def run_ee(self, now):
+        """Hold all arm joints; stop on stale feedback, drift, stall or timeout."""
+        self.ee = 0.
+        if not 0 <= now-self.ee_state_time < .3:
+            self.abort_path_to_hold('ee feedback timeout', now)
+        elif any(abs(a-b) > tol for a, b, tol in zip(
+                self.position, self.goal, (.02, .005, .005, .005, .02, .02))):
+            self.abort_path_to_hold('arm moved during ee motion', now)
+        elif now-self.started > 60.:
+            self.abort_path_to_hold('ee motion timeout', now)
+        else:
+            error = self.ee_goal-self.ee_position
+            if abs(error) < self.ee_best_error-.001:
+                self.ee_best_error, self.ee_progress_time = abs(error), now
+            if abs(error) <= .01 and abs(self.ee_velocity) <= .02:
+                self.settled += 1
+                if self.settled >= 5:
+                    completed = self.execution_id
+                    self.request('hold', now)
+                    self.last_execution_id = completed
+                    self.last_execution_result = 'succeeded'
+                    self.reason = 'ee goal reached'
+            elif now-self.ee_progress_time > 3.:
+                self.abort_path_to_hold('ee motion stalled', now)
+            else:
+                self.settled = 0
+                if abs(error) > .01:
+                    self.ee = max(-.12, min(.12, error))
+        return list(self.target)
+
     def invalidate(self):
         if self.execution_id is not None:
             self.last_execution_id = self.execution_id
             self.last_execution_result = 'aborted'
         self.epoch = uuid.uuid4().hex
         self.goal, self.queue, self.execution_id, self.ee = None, [], None, 0.
+        self.ee_goal = None
         self.command_time = -math.inf
         self.settled = 0
         self.path_durations = []
@@ -685,6 +749,8 @@ class ModeCore:
             # Capture one hold target, rather than following drifting feedback.
             if self.goal is None:
                 self.goal = list(self.position)
+        if self.mode == 'tool_auto' and self.ee_goal is not None:
+            return self.run_ee(now)
         goal = self.goal if self.goal is not None else self.target
         step = min(max(dt, 0.), .04)
         if self.mode == 'tool_auto' and self.execution_id:

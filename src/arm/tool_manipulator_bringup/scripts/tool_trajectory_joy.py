@@ -59,8 +59,25 @@ def load_path(path, model, margin=.02):
         points.append(q)
     if times[0] != 0. or any(not a < b or b-a >= 120. for a, b in zip(times, times[1:])):
         raise ValueError(f'{path}: times must start at 0 and increase; each segment must be <120s')
+    after = data.get('after_path')
+    if after is not None:
+        if (not isinstance(after, dict) or
+                set(after) != {'ee_close_rad', 'return_to_start'} or
+                after['return_to_start'] is not True or
+                type(after['ee_close_rad']) not in (int, float) or
+                not math.isfinite(after['ee_close_rad']) or
+                not -2.351592547829 <= after['ee_close_rad'] <= 2.839398438376):
+            raise ValueError(f'{path}: invalid close-and-return action')
     return dict(start=points[0], waypoints=points[1:],
-                durations=[b-a for a, b in zip(times, times[1:])], total=times[-1])
+                durations=[b-a for a, b in zip(times, times[1:])], total=times[-1],
+                after_path=after)
+
+
+def reverse_path(path):
+    """Retrace all taught points, excluding any automatically planned entry."""
+    points = [path['start'], *path['waypoints']]
+    return dict(start=points[-1], waypoints=list(reversed(points[:-1])),
+                durations=list(reversed(path['durations'])), total=path['total'])
 
 
 def requested_path(axes, buttons, previous, l2_axis=2, threshold=-.5, first_button=2):
@@ -312,6 +329,7 @@ class ToolTrajectoryJoy(Node):
         self.command_feedback_sequence = None
         self.actuation_deadline = None
         self.collision_deadline = None
+        self.sequence_phase = 'approach'
 
     def report(self, state, reason):
         self.diagnostics.publish(String(data=json.dumps(dict(
@@ -372,7 +390,13 @@ class ToolTrajectoryJoy(Node):
             return
         self.requested_docked_state = desired_docked
         self.use_nearest_entry = nearest_entry
-        if desired_docked is not None:
+        close_and_return = self.paths.get(request, {}).get('after_path') is not None
+        if close_and_return and desired_docked is False:
+            self.path_id = request
+            self.report('blocked', 'this path defines ee close and return, not tool release')
+            self.reset()
+            return
+        if desired_docked is not None and not close_and_return:
             if self.docked_state is None:
                 self.path_id = request
                 self.report('blocked', 'docking mechanism state is UNKNOWN; initialize it first')
@@ -454,19 +478,35 @@ class ToolTrajectoryJoy(Node):
             starts = [measured, *path['waypoints'][:-1]]
             self.requests = []
             samples = 0
-            for start, target in zip(starts, path['waypoints']):
-                count = max(1, math.ceil(float(np.max(np.abs(target-start)))/self.collision_step))
-                samples += count+1
-                if samples > 20000:
-                    raise ValueError('collision sampling budget exceeded')
-                for q in np.linspace(start, target, count+1):
-                    req = GetStateValidity.Request()
-                    values = dict(self.snapshot)
-                    values.update(zip(ARM_JOINTS, map(float, q)))
-                    req.robot_state.joint_state.name = list(values)
-                    req.robot_state.joint_state.position = list(values.values())
-                    req.robot_state.is_diff = True
-                    self.requests.append(req)
+            if 'ee_target_rad' in path:
+                ee_start = self.snapshot['ee_joint']
+                count = max(1, math.ceil(abs(path['ee_target_rad']-ee_start)/.02))
+                if count > 1000:
+                    raise ValueError('ee collision sampling budget exceeded')
+                states = []
+                for ee in np.linspace(ee_start, path['ee_target_rad'], count+1):
+                    values = dict(self.snapshot, ee_joint=float(ee))
+                    # MoveIt derives rack positions from the ee mimic joint.
+                    for name in ('rack_left_joint', 'rack_right_joint'):
+                        values.pop(name, None)
+                    states.append(values)
+            else:
+                states = []
+                for start, target in zip(starts, path['waypoints']):
+                    count = max(1, math.ceil(float(np.max(np.abs(target-start)))/self.collision_step))
+                    samples += count+1
+                    if samples > 20000:
+                        raise ValueError('collision sampling budget exceeded')
+                    for q in np.linspace(start, target, count+1):
+                        values = dict(self.snapshot)
+                        values.update(zip(ARM_JOINTS, map(float, q)))
+                        states.append(values)
+            for values in states:
+                req = GetStateValidity.Request()
+                req.robot_state.joint_state.name = list(values)
+                req.robot_state.joint_state.position = list(values.values())
+                req.robot_state.is_diff = True
+                self.requests.append(req)
             self.stage, self.started, self.request_index = 'checking', now, 0
             budget = collision_check_budget(len(self.requests), self.collision_timeout)
             self.collision_deadline = now+budget
@@ -511,6 +551,28 @@ class ToolTrajectoryJoy(Node):
         self.reset()
 
     def path_completed(self):
+        after = self.paths[self.path_id].get('after_path')
+        if after is not None:
+            if self.sequence_phase == 'approach':
+                self.sequence_phase = 'closing'
+                measured = np.asarray([self.full_state[j] for j in ARM_JOINTS])
+                self.report('closing', 'approach complete; checking ee close motion')
+                self.begin(self.path_id, dict(
+                    start=measured, waypoints=[measured], durations=[.5],
+                    total=.5, start_error=0., ee_target_rad=after['ee_close_rad']))
+            elif self.sequence_phase == 'closing':
+                self.sequence_phase = 'returning'
+                # Use the full taught reverse path even if UI entry started midway.
+                path = execution_plan(reverse_path(self.paths[self.path_id]),
+                                      [self.full_state[j] for j in ARM_JOINTS],
+                                      self.start_tolerance, self.max_start_delta,
+                                      self.approach_speed)
+                self.report('returning', 'ee close confirmed; checking reverse path')
+                self.begin(self.path_id, path)
+            else:
+                self.report('completed', f'tool path {self.path_id} closed ee and returned; HOLD')
+                self.reset()
+            return
         if self.requested_docked_state is not None:
             if (self.docking_command.get_subscription_count() == 0
                     or self.count_publishers('/arm/docked') == 0):
@@ -692,14 +754,19 @@ class ToolTrajectoryJoy(Node):
                     raise RuntimeError('robot moved before path execution; '
                                        + self.snapshot_change_reason(validation=True))
                 self.execution_id = 'tool-path-'+uuid.uuid4().hex
-                self.execution_timeout = execution_timeout(
-                    self.path, [self.full_state[j] for j in ARM_JOINTS],
-                    s.get('path_speed_limits_rad_s', [.04]*6))
-                self.publisher.publish(String(data=json.dumps(dict(
-                    epoch=s['epoch'], execution_id=self.execution_id,
-                    waypoints=[q.tolist() for q in self.path['waypoints']],
-                    durations=self.path['durations'],
-                    stop_at_waypoints=self.path.get('stop_at_waypoints')))))
+                command = dict(epoch=s['epoch'], execution_id=self.execution_id)
+                if 'ee_target_rad' in self.path:
+                    self.execution_timeout = 65.
+                    command['ee_target_rad'] = self.path['ee_target_rad']
+                else:
+                    self.execution_timeout = execution_timeout(
+                        self.path, [self.full_state[j] for j in ARM_JOINTS],
+                        s.get('path_speed_limits_rad_s', [.04]*6))
+                    command.update(
+                        waypoints=[q.tolist() for q in self.path['waypoints']],
+                        durations=self.path['durations'],
+                        stop_at_waypoints=self.path.get('stop_at_waypoints'))
+                self.publisher.publish(String(data=json.dumps(command)))
                 self.stage = 'executing'
                 self.started = now
                 self.report('executing', f'executing tool path {self.path_id}')
