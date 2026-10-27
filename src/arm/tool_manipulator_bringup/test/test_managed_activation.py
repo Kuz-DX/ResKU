@@ -34,6 +34,19 @@ def test_no_activation_until_command_subscriber_discovered():
     assert 'position command subscriber not discovered' in node.activation_blockers
 
 
+def test_lost_switch_reply_does_not_fault_confirmed_active_controllers():
+    node = harness(1)
+    node.activation_started = 1.
+    node.controllers['manual_position_controller'] = 'active'
+    node.controller_time = node.last_poll = 7.
+    node.core.feedback(node.core.position, [0.]*6, 7.)
+    node.switch_future = Mock()
+    node.switch_future.done.return_value = False
+    ControlModeManager.poll(node, 7.)
+    assert node.activated and node.core.ready
+    assert node.core.mode != 'fault'
+
+
 def test_measured_seed_is_published_before_strict_switch():
     node = harness(1)
     events = []
@@ -92,7 +105,9 @@ def test_focus_activation_waits_for_first_dxl_alignment():
     node.focus_activation_pending = True
     ControlModeManager.activate_pending_focus(node, 1.)
     assert node.focus_activation_pending and node.core.mode == 'hold'
-    node.core.tick(1.02, .02)
+    for now in (1.02, 1.1, 1.22):
+        node.core.feedback([0.]*6, [0.]*6, now)
+        node.core.tick(now, .02)
     assert node.core.entry_alignment_complete
-    ControlModeManager.activate_pending_focus(node, 1.02)
+    ControlModeManager.activate_pending_focus(node, 1.22)
     assert not node.focus_activation_pending

@@ -159,6 +159,19 @@ def test_entry_requires_collision_result_before_approval():
     n.pub.publish.assert_not_called()
 
 
+def test_tcp_transition_cancels_old_assessment_without_overwriting_accepted_proof():
+    n = assessment_node()
+    n.check.call_async.return_value.done.return_value = False
+    TcpJoy.assess_entry(n, 1.)
+    assert n.entry_pending is not None
+    # A successful mode request changes epoch while still stopping in HOLD.
+    n.status.update(transitioning=True, epoch='new-mode-epoch')
+    TcpJoy.assess_entry(n, 1.02)
+    assert n.entry_pending is None
+    n.check.call_async.return_value.cancel.assert_called_once()
+    n.entry_pub.publish.assert_not_called()
+
+
 @pytest.mark.parametrize('failure', ['margin', 'singular', 'unavailable', 'collision', 'timeout', 'changed'])
 def test_entry_assessment_fails_closed(failure):
     n = assessment_node()
@@ -255,6 +268,36 @@ def test_tcp_ready_path_is_checked_before_managed_execution():
     assert payload['waypoints'] == [n.ready_goal.tolist()]
     assert payload['durations'] == [10.]
     assert n.ready_state == 'executing'
+
+
+@pytest.mark.parametrize('joint,drift,accepted', [
+    ('ee_joint', .003, True), ('ee_joint', .021, False),
+    ('base_joint', .019, True), ('base_joint', .021, False),
+    ('shoulder_joint', .004, True), ('shoulder_joint', .0051, False)])
+def test_ready_snapshot_distinguishes_dxl_hunt_from_motion(joint, drift, accepted):
+    n = ready_node()
+    n.full_state['ee_joint'] = 0.
+    TcpJoy.drive_ready(n, 1.)
+    n.full_state[joint] += drift
+    names = list(n.full_state)[:6]
+    if joint in names:
+        n.measured[names.index(joint)] += drift
+    n.ready_checks[0].done.return_value = False
+    TcpJoy.drive_ready(n, 1.1)
+    assert (n.ready_state == 'checking') is accepted
+    n.tool_mode.call_async.assert_not_called()
+
+
+@pytest.mark.parametrize('drift,accepted', [(.003, True), (.021, False)])
+def test_entry_assessment_allows_only_bounded_ee_encoder_hunt(drift, accepted):
+    n = assessment_node()
+    n.full_state['ee_joint'] = 0.
+    n.check.call_async.return_value.done.return_value = True
+    n.check.call_async.return_value.result.return_value = SimpleNamespace(valid=True)
+    TcpJoy.assess_entry(n, 1.)
+    n.full_state['ee_joint'] += drift
+    TcpJoy.assess_entry(n, 1.02)
+    assert json.loads(n.entry_pub.publish.call_args.args[0].data)['safe'] is accepted
 
 
 def test_tcp_ready_collision_failure_never_requests_motion():

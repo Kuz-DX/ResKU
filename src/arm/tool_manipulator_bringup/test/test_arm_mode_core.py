@@ -27,6 +27,36 @@ def test_only_owner_and_current_epoch_can_command():
     assert max(c.tick(.12, .02)) <= .12*.02
 
 
+@pytest.mark.parametrize('distance,duration', [(.004, 10.), (.04, 100.)])
+def test_slow_tracking_path_does_not_report_motor_stall(distance, duration):
+    c = ready('tool_auto')
+    assert c.path(c.epoch, 'slow', [[distance, 0., 0., 0., 0., 0.]], .1,
+                  durations=[duration])
+    for step in range(1, int((duration+5.)/.02)):
+        now = .1+step*.02
+        c.feedback(c.target, [0.]*6, now)
+        c.tick(now, .02)
+        if c.last_execution_result is not None:
+            break
+    assert c.last_execution_result == 'succeeded', c.reason
+
+
+def test_blocked_joint_still_aborts_even_while_other_joints_move():
+    c = ready('tool_auto')
+    assert c.path(c.epoch, 'blocked', [[.4, .5, 0., 0., 0., 0.]], .1)
+    for step in range(1, 501):
+        now = .1+step*.02
+        measured = list(c.target)
+        measured[0] = 0.
+        c.feedback(measured, [0.]*6, now)
+        c.tick(now, .02)
+        if c.last_execution_result is not None:
+            break
+    assert c.last_execution_result == 'aborted'
+    assert 'stalled: joint_0' in c.reason
+    assert c.mode == 'hold'
+
+
 def test_first_arm_focus_aligns_dxl_before_managed_mode_entry():
     c = ModeCore([(-2., 2.)]*6, [.12]*6)
     c.entry_alignment_enabled = True

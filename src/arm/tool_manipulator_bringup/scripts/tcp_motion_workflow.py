@@ -7,6 +7,7 @@ import numpy as np
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
 from moveit_msgs.srv import GetStateValidity
+from arm_mode_core import TCP_ENTRY_TOLERANCE, non_arm_feedback_changed
 try:
     from tool_change_min.kinematics import ARM_JOINTS
 except ImportError:
@@ -101,9 +102,7 @@ class TcpMotionWorkflow:
             self.reason = 'checking path to TCP ready'
             return
         if self.ready_state == 'checking':
-            if (self.full_state.keys() != self.ready_full_state.keys()
-                    or any(abs(v-self.ready_full_state[j]) > .001
-                           for j, v in self.full_state.items() if j not in ARM_JOINTS)):
+            if non_arm_feedback_changed(self.full_state, self.ready_full_state, ARM_JOINTS):
                 self._fail_ready('non-arm feedback changed during TCP ready check; remain HOLD')
                 return
             if (not all(f.done() for f in self.ready_checks)
@@ -113,7 +112,11 @@ class TcpMotionWorkflow:
                     'TCP ready collision check timeout (%d/%d complete); remain HOLD' %
                     (completed, len(self.ready_requests)))
                 return
-            if np.max(np.abs(self.measured-self.ready_snapshot)) > .01:
+            tolerances = np.array(TCP_ENTRY_TOLERANCE)
+            # During a sampled path check, use the same one-sample RMD drift
+            # budget as the tool-path validator. Final TCP entry stays tighter.
+            tolerances[1:4] = self.ready_step
+            if np.any(np.abs(self.measured-self.ready_snapshot) > tolerances):
                 self._fail_ready('feedback changed during TCP ready check; remain HOLD')
                 return
             if not all(f.done() for f in self.ready_checks):
@@ -191,7 +194,7 @@ class TcpMotionWorkflow:
                     self.reason = 'manual Stop_pose reached; release then hold L1 for TCP ready'
             elif s.get('mode') == 'fault' or (s.get('last_execution_id') == self.ready_execution_id
                                               and s.get('last_execution_result') == 'aborted'):
-                self._fail_ready('TCP ready execution failed; inspect arm')
+                self._fail_ready('TCP ready execution failed: '+s.get('reason', 'inspect arm'))
             return
         if self.ready_state == 'await_entry' and self.ready_safe_at is not None:
             # Allow the manager subscription to consume the published proof first.

@@ -26,7 +26,7 @@ try:
 except ImportError:
     from arm_shared_kinematics import ArmKinematics, ARM_JOINTS
 from tcp_joy_core import TcpStepper, joy_twist, LimitBlocked, SafetyError, TcpMetrics
-from arm_mode_core import TCP_ENTRY_TOLERANCE
+from arm_mode_core import TCP_ENTRY_TOLERANCE, non_arm_feedback_changed
 from tcp_motion_workflow import TcpMotionWorkflow
 
 
@@ -121,6 +121,7 @@ class TcpJoy(TcpMotionWorkflow, Node):
         """Read-only assessment in HOLD; never requests motion or changes mode."""
         s = self.status
         eligible = (now-self.status_time < .3 and s.get('mode') == 'hold'
+                    and not s.get('transitioning')
                     and s.get('ready') and s.get('startup_complete')
                     and s.get('entry_alignment_complete', True)
                     and now-self.state_time < .3 and self.measured is not None)
@@ -159,9 +160,7 @@ class TcpJoy(TcpMotionWorkflow, Node):
             if self.entry_pending:
                 p = self.entry_pending
                 if (p['epoch'] != s.get('epoch') or np.any(np.abs(q-p['q']) > TCP_ENTRY_TOLERANCE)
-                        or self.full_state.keys() != p['full_state'].keys()
-                        or any(abs(v-p['full_state'][j]) > .001
-                               for j, v in self.full_state.items() if j not in ARM_JOINTS)):
+                        or non_arm_feedback_changed(self.full_state, p['full_state'], ARM_JOINTS)):
                     raise ValueError('TCP entry snapshot changed; recheck required')
                 if now-p['started'] > .15:
                     raise ValueError('TCP entry collision timeout; remain HOLD')
@@ -247,6 +246,26 @@ class TcpJoy(TcpMotionWorkflow, Node):
         valid = (len(msg.axes) >= 5 and len(msg.buttons) >= 6
                  and np.all(np.isfinite(msg.axes))
                  and all(b in (0, 1) for b in msg.buttons))
+        # L2 owns the path-selection buttons, including square and L1.
+        # Quiesce TCP preparation before the path producer requests HOLD.
+        if valid and msg.axes[2] < -.5:
+            self.joy_time = time.monotonic()
+            self.discard()
+            self.deadman = self.deadman_engaged = self.rearmed = False
+            self.twist = np.zeros(6)
+            self.previous_home = bool(msg.buttons[3])
+            if vars(self).get('ready_enabled', False):
+                if self.ready_state in ('request_tool', 'wait_tool', 'executing'):
+                    if self.cancel.service_is_ready():
+                        self.cancel.call_async(Trigger.Request())
+                self._reset_ready()
+                self.auto_entry_armed = False
+                self.returning_home = False
+                self.ready_goal = self.default_ready_goal.copy()
+            if self.epoch is not None and not self.blocked:
+                self.pub.publish(String(data=json.dumps(dict(epoch=self.epoch, pause=True))))
+            self.reason = 'L2 path selection; TCP input paused'
+            return
         self.deadman, self.twist = joy_twist(msg.axes, msg.buttons)
         wrist_mode = valid and bool(msg.buttons[5])
         if wrist_mode != vars(self).get('wrist_mode', False):

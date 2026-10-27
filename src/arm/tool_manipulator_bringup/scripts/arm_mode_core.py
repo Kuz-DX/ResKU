@@ -10,6 +10,13 @@ MODES = ('manual', 'tcp_ik', 'tool_auto', 'hold', 'fault')
 TCP_ENTRY_TOLERANCE = (.02, .001, .001, .001, .02, .02)
 
 
+def non_arm_feedback_changed(current, snapshot, arm_joints):
+    """EE is also a DXL encoder; unknown joints retain the tight fallback."""
+    return (current.keys() != snapshot.keys() or any(
+        abs(value-snapshot[joint]) > (.02 if joint == 'ee_joint' else .001)
+        for joint, value in current.items() if joint not in arm_joints))
+
+
 class ModeCore:
     def __init__(self, limits, speeds, startup_recovery_enabled=False, path_accelerations=None,
                  tcp_accelerations=None, joint_names=None, path_speeds=None,
@@ -77,6 +84,8 @@ class ModeCore:
                            for v in self.path_feedback_leads)):
             raise ValueError('invalid path feedback leads')
         self.path_stall_timeout = 2.0
+        self.path_stall_since = [None]*len(speeds)
+        self.path_stall_position = [0.]*len(speeds)
         self.path_progress_time = None
         self.path_best_error = math.inf
         self.last_execution_id = None
@@ -245,7 +254,10 @@ class ModeCore:
         self.goal = list(self.target)
         self.reason = 'aligning DXL base/roll/yaw to zero'
         if (max(abs(self.target[i]) for i in indexes) <= 1e-9 and
-                max(abs(self.position[i]) for i in indexes) <= .005):
+                max(abs(self.position[i]) for i in indexes) <= .005 and
+                max(map(abs, self.velocity)) <= .02 and
+                self.entry_stable_since is not None and
+                now-self.entry_stable_since >= .2):
             self.entry_alignment_complete = True
             self.entry_alignment_started = None
             self.entry_alignment_deadline = None
@@ -438,6 +450,14 @@ class ModeCore:
         self.path_durations = list(durations) if durations is not None else [None]*len(waypoints)
         self.path_stops = (list(stop_at_waypoints) if stop_at_waypoints is not None
                            else [False]*len(waypoints))
+        # Carry velocity through a sample only when the next segment continues
+        # in the same direction. Otherwise the old velocity can drive a tiny
+        # reverse segment away from its goal for many seconds.
+        starts = [self.target, *waypoints[:-1]]
+        for i in range(len(waypoints)-1):
+            if any(abs(b-a) > 1e-9 and (b-a)*(d-b) <= 0.
+                   for a, b, d in zip(starts[i], waypoints[i], waypoints[i+1])):
+                self.path_stops[i] = True
         self.execution_id = execution_id
         self.path_velocity = [0.]*len(self.speeds)
         self.path_acceleration = [0.]*len(self.speeds)
@@ -461,6 +481,28 @@ class ModeCore:
             self.path_speeds = [abs(b-a)/duration for a, b in zip(self.target, self.goal)]
         self.path_progress_time = self.started
         self.path_best_error = math.inf
+        self.path_stall_since = [None]*len(self.speeds)
+
+    def stalled_path_joint(self, now):
+        """Detect a loaded joint failing to follow, not a slow command ramp.
+
+        A small final error already inside the completion tolerance is not a
+        stall. Start each joint's watchdog only after a meaningful command lead
+        builds up; progress of another joint cannot hide a blocked actuator.
+        """
+        for i, (measured, target, goal, lead) in enumerate(zip(
+                self.position, self.target, self.goal, self.path_feedback_leads)):
+            if abs(goal-measured) <= .01 or abs(target-measured) < lead*.5:
+                self.path_stall_since[i] = None
+                continue
+            epsilon = min(.001, max(1e-6, self.path_speeds[i]*self.path_stall_timeout*.25))
+            if (self.path_stall_since[i] is None or
+                    abs(goal-measured) < abs(goal-self.path_stall_position[i])-epsilon):
+                self.path_stall_since[i] = now
+                self.path_stall_position[i] = measured
+            elif now-self.path_stall_since[i] > self.path_stall_timeout:
+                return i
+        return None
 
     def cancel_path(self, epoch, execution_id, now):
         if (self.mode != 'tool_auto' or epoch != self.epoch
@@ -674,19 +716,18 @@ class ModeCore:
                     self.reason = ''
                 self.settled = 0
         elif self.mode == 'tool_auto' and self.execution_id is not None:
+            stalled_joint = self.stalled_path_joint(now)
             error = max(abs(a-b) for a, b in zip(self.position, self.goal))
             if error < self.path_best_error-.001:
                 self.path_best_error = error
                 self.path_progress_time = now
             if now-self.started > 120.:
                 self.abort_path_to_hold('waypoint timeout; path aborted to HOLD', now)
-            elif (self.path_progress_time is not None
-                  and now-self.path_progress_time > self.path_stall_timeout):
-                index = max(range(len(self.position)),
-                            key=lambda i: abs(self.goal[i]-self.position[i]))
+            elif stalled_joint is not None:
+                index = stalled_joint
                 self.abort_path_to_hold(
                     'waypoint stalled: %s goal=%.6f measured=%.6f error=%.6f rad; '
-                    'inspect motor current/protection' %
+                    'command lead persisted without feedback progress; inspect hardware' %
                     (self.joint_names[index], self.goal[index], self.position[index],
                      abs(self.goal[index]-self.position[index])), now)
             # Intermediate trajectory samples describe one continuous motion,

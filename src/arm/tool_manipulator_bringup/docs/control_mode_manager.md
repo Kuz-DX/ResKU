@@ -94,7 +94,7 @@ Start the managed stack with its TCP producer and MoveIt planning-scene service:
 
 ```bash
 ros2 launch ~/ResKU/src/arm/tool_manipulator_bringup/launch/ik_manual.launch.py
-# Press Options once: drive -> arm automatically requests TCP_IK.
+# Press Options: align DXL, then hold L1 for the checked TCP-ready approach.
 ros2 topic echo /arm/control_status --once --full-length
 ros2 topic echo /arm/tcp_joy/status
 ```
@@ -108,13 +108,34 @@ with this launch. Startup recovery must finish before requesting TCP_IK.
 TCP mock startup defaults to `config/tcp_mock_initial_positions.yaml`, a
 nonsingular pose near manual home. An explicit `mock_initial_positions_file`
 overrides it. Real hardware continues to start from measured feedback.
-With `launch_tcp_joy:=true`, an Options drive-to-arm edge automatically requests
-TCP_IK after recovery and controller readiness. If the recovery pose lacks TCP
+With `launch_tcp_joy:=true`, an Options drive-to-arm edge first aligns the DXL
+axes in HOLD. Alignment waits for position convergence and 0.20 seconds of
+stopped feedback. `tcp_joy` alone requests TCP_IK after a fresh entry assessment;
+the manager does not race it with a separate focus-triggered request.
+If the recovery pose lacks TCP
 entry margin, `tcp_joy` collision-checks the configured `tcp_ready` joint line,
 requests TOOL_AUTO ownership, executes it once, verifies the stopped endpoint and
 then requests TCP_IK. Options back to drive requests HOLD. Collision/check/service/
 execution failure, cancel, command timeout, and fault do not automatically retry
 while focus stays on arm; inspect first, then toggle drive and back to arm.
+
+L2 (axis 2 below -0.5) reserves buttons 2/3/4 for physical 1/2/3, selecting
+path 0/1/2. While L2 is held, the TCP producer suppresses L1 and square HOME
+handling so one combination cannot start both a path and TCP/HOME motion.
+Paths must contain reviewed captured points and have `execution_enabled: true`.
+This checkout contains path 0 only; path 1 and path 2 are empty disabled templates.
+
+TCP-ready and entry checks allow the same bounded 0.02-rad DXL/EE encoder
+variation used by tool-path validation; RMD entry tolerance stays at 0.001 rad.
+Collision checks, fresh feedback and joint limits remain required.
+
+Path stall detection watches each joint after command lead has accumulated,
+instead of requiring a fixed 0.001-rad reduction of the largest goal error every
+two seconds. A slow, correctly followed command or an error already within
+completion tolerance is not a motor-current fault. Blocked joints still abort
+to HOLD. Direction reversals stop at the preceding waypoint before proceeding.
+The path executor derives its total timeout from manager speed limits plus ramp
+allowance, since recorded timestamps can be shorter than the bounded motion.
 
 Sony joystick mapping for this launch (ROS Joy indices in parentheses):
 

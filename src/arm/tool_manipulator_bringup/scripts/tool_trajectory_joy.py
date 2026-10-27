@@ -89,7 +89,8 @@ def execution_plan(path, measured, tolerance=.03, max_delta=.10, approach_speed=
         approach_duration = max(.5, error/approach_speed)
         waypoints.insert(0, path['start'])
         durations.insert(0, approach_duration)
-    return dict(waypoints=waypoints, durations=durations,
+    return dict(start=np.asarray(measured, dtype=float).copy(),
+                waypoints=waypoints, durations=durations,
                 total=path['total']+approach_duration, start_error=error)
 
 
@@ -109,6 +110,22 @@ def collision_check_budget(sample_count, minimum_timeout, service_rate=50.):
     if sample_count < 1 or service_rate <= 0.:
         raise ValueError('invalid collision-check budget input')
     return min(120., max(float(minimum_timeout), sample_count/service_rate+2.))
+
+
+def execution_timeout(path, measured, speed_limits):
+    """Account for manager speed retiming and ramp/settling overhead.
+
+    The manager independently enforces joint stall and waypoint timeouts.
+    """
+    speeds = np.asarray(speed_limits, dtype=float)
+    if speeds.shape != (6,) or not np.all(np.isfinite(speeds)) or np.any(speeds <= 0):
+        raise ValueError('invalid manager path speed limits')
+    start = np.asarray(measured, dtype=float)
+    duration = 0.
+    for goal, nominal in zip(path['waypoints'], path['durations']):
+        duration += max(nominal, float(np.max(np.abs(goal-start)/speeds)))
+        start = goal
+    return duration+5.*len(path['waypoints'])+30.
 
 
 def planned_entry(path, trajectory, measured, minimum_duration=.02):
@@ -139,7 +156,8 @@ def planned_entry(path, trajectory, measured, minimum_duration=.02):
     waypoints[-1] = np.asarray(path['start'], dtype=float)
     waypoints.extend(path['waypoints'])
     durations.extend(path['durations'])
-    return dict(waypoints=waypoints, durations=durations,
+    return dict(start=np.asarray(measured, dtype=float).copy(),
+                waypoints=waypoints, durations=durations,
                 total=sum(durations), start_error=float(np.max(
                     np.abs(np.asarray(measured)-path['start']))))
 
@@ -377,6 +395,7 @@ class ToolTrajectoryJoy(Node):
         available = (now-self.status_time < .3 and now-self.state_time < .3
                      and self.full_state is not None and s.get('ready')
                      and s.get('startup_complete') and s.get('focus') == 'arm'
+                     and s.get('entry_alignment_complete', True)
                      and s.get('mode') != 'fault' and not s.get('transitioning')
                      and s.get('requested', s.get('mode')) == s.get('mode'))
         if not available:
@@ -400,6 +419,7 @@ class ToolTrajectoryJoy(Node):
         s = self.status
         if (now-self.status_time >= .3 or now-self.state_time >= .3
                 or self.full_state is None or not s.get('ready') or not s.get('startup_complete')
+                or not s.get('entry_alignment_complete', True)
                 or s.get('focus') != 'arm' or s.get('mode') != 'hold' or s.get('transitioning')
                 or s.get('requested', s.get('mode')) != 'hold'):
             raise RuntimeError('fresh stopped HOLD with arm focus is required')
@@ -639,7 +659,11 @@ class ToolTrajectoryJoy(Node):
                     return
                 result = self.future.result()
                 if result is None or not result.valid:
-                    raise ValueError('tool path collision/state invalid')
+                    pairs = sorted({' <-> '.join(sorted((c.contact_body_1, c.contact_body_2)))
+                                    for c in getattr(result, 'contacts', [])})
+                    detail = ', '.join(pairs[:6]) or 'no contacts; check joint bounds/scene'
+                    raise ValueError('tool path collision/state invalid at sample %d/%d: %s' %
+                                     (self.request_index+1, len(self.requests), detail))
                 self.request_index += 1
                 if self.request_index < len(self.requests):
                     self.future = self.collision.call_async(self.requests[self.request_index])
@@ -668,6 +692,9 @@ class ToolTrajectoryJoy(Node):
                     raise RuntimeError('robot moved before path execution; '
                                        + self.snapshot_change_reason(validation=True))
                 self.execution_id = 'tool-path-'+uuid.uuid4().hex
+                self.execution_timeout = execution_timeout(
+                    self.path, [self.full_state[j] for j in ARM_JOINTS],
+                    s.get('path_speed_limits_rad_s', [.04]*6))
                 self.publisher.publish(String(data=json.dumps(dict(
                     epoch=s['epoch'], execution_id=self.execution_id,
                     waypoints=[q.tolist() for q in self.path['waypoints']],
@@ -683,13 +710,13 @@ class ToolTrajectoryJoy(Node):
                     raise RuntimeError('feedback became stale during path execution')
                 if s.get('last_execution_id') == self.execution_id:
                     if s.get('last_execution_result') != 'succeeded':
-                        raise RuntimeError('managed tool path aborted')
+                        raise RuntimeError('managed tool path aborted: '+s.get('reason', 'unknown'))
                     if s.get('mode') == 'hold' and not s.get('transitioning'):
                         self.path_completed()
                         return
                 elif s.get('mode') != 'tool_auto':
                     raise RuntimeError('tool path ownership lost')
-                if now-self.started > self.path['total']+30.:
+                if now-self.started > self.execution_timeout:
                     raise TimeoutError('tool path completion timed out')
         except (ValueError, RuntimeError, TimeoutError, KeyError) as exc:
             self.fail(str(exc))

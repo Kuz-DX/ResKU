@@ -57,6 +57,15 @@ def test_l2_plus_first_button_has_one_rising_edge():
     assert requested_path(axes, buttons, held)[0] == 0
 
 
+@pytest.mark.parametrize('path_id', [0, 1, 2])
+def test_each_l2_number_selects_its_path_once(path_id):
+    buttons = [0]*13
+    buttons[2+path_id] = 1
+    request, held = requested_path([0., 0., -1.], buttons, [False]*3)
+    assert request == path_id
+    assert requested_path([0., 0., -1.], buttons, held)[0] is None
+
+
 def test_simultaneous_path_buttons_are_ignored():
     request, held = requested_path([0., 0., -1.], [0, 0, 1, 1, 0], [False]*3)
     assert request is None and held == [True, True, False]
@@ -151,6 +160,9 @@ def test_moveit_entry_plan_is_prefixed_to_taught_path():
     path = dict(start=np.zeros(6), waypoints=[np.ones(6)*.2],
                 durations=[3.], total=3.)
     result = planned_entry(path, trajectory, np.ones(6)*.2)
+    np.testing.assert_allclose(result['start'], np.ones(6)*.2)
+    isolated = isolate_shoulder_zero_crossings(result)
+    np.testing.assert_allclose(isolated['start'], np.ones(6)*.2)
     assert [q.tolist() for q in result['waypoints']] == [
         [.1]*6, [0.]*6, [.2]*6]
     assert result['durations'] == pytest.approx([1., 1., 3.])

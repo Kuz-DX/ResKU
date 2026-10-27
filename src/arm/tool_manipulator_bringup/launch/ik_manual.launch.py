@@ -36,7 +36,8 @@ def bringup(context):
         scripts = Path(get_package_prefix('tool_manipulator_bringup'))/'lib/tool_manipulator_bringup'
     manager = Node(executable=sys.executable, arguments=[str(scripts/'arm_control_mode_manager.py')],
                    parameters=[{'hardware_config': base.hardware_file,
-                                'focus_arm_mode': 'tcp_ik' if tcp_enabled else ''}],
+                                # TcpJoy owns entry after alignment and a fresh collision proof.
+                                'focus_arm_mode': ''}],
                    output='screen')
     manual = Node(executable=sys.executable, arguments=[str(scripts/'managed_manual.py')],
                   parameters=[base.description, {'hardware_config': base.hardware_file,

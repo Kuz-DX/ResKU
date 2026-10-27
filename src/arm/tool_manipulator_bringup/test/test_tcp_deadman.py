@@ -36,6 +36,26 @@ def active_core():
     return c
 
 
+@pytest.mark.parametrize('button', [2, 3, 4])
+def test_l2_path_buttons_never_request_home_or_tcp_ready(button):
+    n = node()
+    n.ready_enabled = True
+    n.ready_state = 'idle'
+    n.ready_checks = []
+    n.default_ready_goal = np.zeros(6)
+    n.auto_entry_armed = True
+    n._reset_ready = lambda: TcpJoy._reset_ready(n)
+    msg = joy(False)
+    msg.axes[2] = -1.
+    msg.buttons[button] = 1
+    send(n, msg)
+    assert not n.auto_entry_armed and not n.returning_home
+    assert not n.deadman and not n.rearmed
+    assert n.ready_state == 'idle'
+    n.cancel.call_async.assert_not_called()
+    assert messages(n) == [dict(epoch='e', pause=True)]
+
+
 def test_wrist_modifier_moves_only_wrist_and_skips_ik():
     n = node()
     msg = joy(True)

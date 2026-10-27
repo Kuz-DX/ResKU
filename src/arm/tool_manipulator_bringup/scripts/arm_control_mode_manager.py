@@ -247,7 +247,7 @@ class ControlModeManager(Node):
                 except Exception as exc:
                     self.core.fault('activation failed: '+str(exc))
                 self.switch_future = None
-            elif now-self.activation_started > 5.:
+            elif not active and now-self.activation_started > 5.:
                 self.core.fault('activation timeout')
         if not self.activated and active:
             if self.activation_started is None:
@@ -316,6 +316,7 @@ class ControlModeManager(Node):
             epoch=c.epoch, ready=c.ready, reason=c.reason, controllers=self.controllers,
             startup_recovering=c.startup_recovering, startup_complete=c.startup_complete,
             entry_alignment_complete=c.entry_alignment_complete,
+            path_speed_limits_rad_s=c.path_speed_limits,
             startup_goal_rad=c.startup_goal,
             focus_arm_mode=self.focus_arm_mode,
             focus_activation_pending=self.focus_activation_pending,

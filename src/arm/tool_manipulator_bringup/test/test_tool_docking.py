@@ -300,6 +300,7 @@ def test_legacy_executor_completion_enters_docking_only_after_confirmed_hold(tmp
     n.stage = 'executing'
     n.execution_id = 'path-0'
     n.path = dict(total=10.)
+    n.execution_timeout = 40.
     n.started = 0.
     n.status_time = n.state_time = 1.
     n.status = dict(mode='tool_auto', epoch='path-epoch')
