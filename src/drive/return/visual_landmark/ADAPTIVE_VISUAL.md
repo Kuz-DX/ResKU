@@ -1,3 +1,5 @@
+> 현재 기본 운용은 [CHECKPOINT_VPR.md](CHECKPOINT_VPR.md)의 Record 2초 촬영 및 역순 체크포인트 검사와 정지 사진 UI입니다. 아래 기존 8m/실시간 preview 설명보다 해당 문서가 우선합니다.
+
 # Adaptive Visual Correction
 
 2026-10-27 품질/UI 후속 변경: [VPR_QUALITY_UI.md](VPR_QUALITY_UI.md)를 우선한다.

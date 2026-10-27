@@ -95,9 +95,10 @@ def capture(monkeypatch):
     msg.data=cv2.imencode('.jpg',np.zeros((480,640),np.uint8))[1].tobytes()
     events=[]; saved=[]
     n=NS(_state='MANUAL_RECORDING',_origin=Pose2D(),_odom=od,_odom_arrival=10.,
-         auto_next_try=0.,auto_policy=AutoKeyframes(),image_stale_s=1.,_camera_info=ci,
+         auto_next_try=0.,auto_policy=AutoKeyframes(time_only=False),image_stale_s=1.,_camera_info=ci,
          odometer=NS(s=0.), get_parameter=lambda k:NS(value=values[k]),
          _event=lambda kind,**kw:events.append((kind,kw)))
+    n._select_image_odom=lambda stamp,now:Capture._select_image_odom(n,stamp,now)
     n._save_landmark=lambda img:saved.append(img) or dict(localization_ready=True,extrinsic_ok=True,dir='/tmp',yaw=0.)
     monkeypatch.setattr(module,'features',lambda im, *args, **kwargs:(np.zeros((30,2),np.float32),np.zeros((30,128),np.float32)))
     monkeypatch.setattr(module.np,'savez_compressed',lambda *a,**kw:None)

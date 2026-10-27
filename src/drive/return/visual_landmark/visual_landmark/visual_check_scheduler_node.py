@@ -1,4 +1,4 @@
-"""Optional watchdog. Never commands motion or changes mission state."""
+"""Reverse checkpoint checks, with optional legacy watchdog. No motion authority."""
 import json
 import math
 import uuid
@@ -10,13 +10,15 @@ from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Pose
 from std_msgs.msg import String, Float64
 from diagnostic_msgs.msg import DiagnosticArray
+from visual_landmark.checkpoints import CheckpointSequence
 from visual_landmark.adaptive import CheckWatchdog, RETURN, fresh
 
 
 class VisualCheckScheduler(Node):
     def __init__(self):
         super().__init__('visual_check_scheduler_node')
-        defaults = dict(enable_adaptive_visual_check=True, visual_check_distance_m=8.,
+        defaults = dict(enable_checkpoint_vpr=True, checkpoint_approach_m=.35, checkpoint_passed_m=.75,
+                        enable_adaptive_visual_check=True, visual_check_distance_m=8.,
                         visual_check_retry_cooldown_s=5., visual_check_timeout_s=5.,
                         enable_slip_early_trigger=True, slip_wz_deadband_radps=.15,
                         slip_score_trigger=.35, slip_score_decay=.02,
@@ -33,6 +35,9 @@ class VisualCheckScheduler(Node):
         self.watch = CheckWatchdog(self.p('visual_check_distance_m'), self.p('visual_check_retry_cooldown_s'),
                                    self.p('visual_check_timeout_s'), self.p('slip_wz_deadband_radps'),
                                    self.p('slip_score_trigger'), self.p('slip_score_decay'))
+        self.checkpoint_mode = bool(self.p('enable_checkpoint_vpr'))
+        self.checkpoints = CheckpointSequence(self.p('checkpoint_approach_m'), self.p('checkpoint_passed_m'))
+        self.progress = None
         self.state, self.origin = '', None
         self.wheel = self.gyro = 0.
         self.wheel_time = self.gyro_time = self.diag_time = self.odom_time = None
@@ -49,7 +54,50 @@ class VisualCheckScheduler(Node):
         self.create_subscription(Float64, '/imu/gyro/z_corrected', self.on_gyro, 10)
         self.create_subscription(DiagnosticArray, '/odometry/diagnostics', self.on_diag, 10)
         self.create_subscription(String, '/visual_landmark/localization_event', self.on_result, 10)
+        self.create_subscription(String, '/visual_landmark/checkpoints', self.on_checkpoints, latched)
+        self.create_subscription(String, '/visual_landmark/route_progress', self.on_progress, 1)
         self.create_timer(.1, self.tick)
+
+    def on_checkpoints(self, msg):
+        try:
+            data = json.loads(msg.data)
+            self.checkpoints.load(data['checkpoints'])
+            if not data['checkpoints']:
+                self.cancel()
+                self.checkpoints.reset()
+                self.progress = None
+        except (ValueError, TypeError, KeyError):
+            self.event('checkpoint_catalog_rejected')
+
+    def on_progress(self, msg):
+        try:
+            data = json.loads(msg.data)
+            arc, stamp = float(data['arc']), int(data['stamp_ns'])*1e-9
+            if math.isfinite(arc) and fresh(self.now(), stamp, .5):
+                self.progress = (arc, stamp)
+        except (ValueError, TypeError, KeyError):
+            pass
+
+    def tick_checkpoints(self, now):
+        if self.state != 'FOLLOW_RETURN_PATH' or not fresh(now, self.odom_time, self.p('odom_timeout_s')):
+            return
+        if self.progress is None or not fresh(now, self.progress[1], .5):
+            return
+        if self.watch.pending is not None:
+            return
+        point, missed = self.checkpoints.due(self.progress[0])
+        for lid in missed:
+            self.event('checkpoint_missed', checkpoint_id=lid, reason='passed arrival window')
+        if point is None:
+            return
+        token = uuid.uuid4().hex
+        self.watch.start(token, now)
+        self.checkpoints.active = point['id']
+        data = dict(active=True, request=token, trigger='checkpoint', requested_at=now,
+                    timeout_s=self.p('visual_check_timeout_s'), checkpoint_id=point['id'],
+                    checkpoint_arc=point['arc'], checkpoint_passed_m=self.checkpoints.passed)
+        self.pub.publish(String(data=json.dumps(data)))
+        self.event('check_requested', **data)
 
     def now(self):
         return self.get_clock().now().nanoseconds*1e-9
@@ -63,6 +111,8 @@ class VisualCheckScheduler(Node):
             token = self.watch.pending[0]
             self.pub.publish(String(data=json.dumps(dict(active=False, request=token))))
             self.watch.finish(token, self.now(), False)
+            if getattr(self, 'checkpoint_mode', False):
+                self.checkpoints.active = None  # Manual resume retries only if still in the arrival window.
 
     def on_origin(self, msg):
         key = (msg.position.x, msg.position.y, msg.orientation.z, msg.orientation.w)
@@ -72,6 +122,9 @@ class VisualCheckScheduler(Node):
             self.start_check = False
             self.resume_check_armed = False
             self.origin = key
+            if getattr(self, 'checkpoint_mode', False):
+                self.checkpoints.reset()
+                self.progress = None
 
     def on_state(self, msg):
         if msg.data in RETURN and self.state not in RETURN:
@@ -92,6 +145,9 @@ class VisualCheckScheduler(Node):
             self.cancel()
         if msg.data not in RETURN:
             self.watch.reset()
+        if msg.data in {'MANUAL_RECORDING', 'WAIT_RETURN_COMMAND'} and self.state not in {'MANUAL_RECORDING', 'WAIT_RETURN_COMMAND'} and getattr(self, 'checkpoint_mode', False):
+            self.checkpoints.reset()
+            self.progress = None
         self.state = msg.data
 
     def on_odom(self, msg):
@@ -132,7 +188,10 @@ class VisualCheckScheduler(Node):
             success = data.get('event') in {'validated', 'localized'}
             latency = self.now()-self.watch.pending[1] if self.watch.pending else None
             if self.watch.finish(data.get('check_request'), self.now(), success):
-                self.event('check_success' if success else 'check_failed', request=data.get('check_request'), check_latency_s=latency)
+                lid = self.checkpoints.active if getattr(self, 'checkpoint_mode', False) else None
+                if getattr(self, 'checkpoint_mode', False):
+                    self.checkpoints.finish()
+                self.event('check_success' if success else 'check_failed', request=data.get('check_request'), checkpoint_id=lid, check_latency_s=latency)
         except (ValueError, TypeError):
             return
 
@@ -143,7 +202,13 @@ class VisualCheckScheduler(Node):
         expired = self.watch.expire(now)
         if expired:
             self.pub.publish(String(data=json.dumps(dict(active=False, request=expired))))
-            self.event('check_timeout', request=expired)
+            lid = self.checkpoints.active if getattr(self, 'checkpoint_mode', False) else None
+            if getattr(self, 'checkpoint_mode', False):
+                self.checkpoints.finish()
+            self.event('check_timeout', request=expired, checkpoint_id=lid)
+        if getattr(self, 'checkpoint_mode', False):
+            self.tick_checkpoints(now)
+            return
         healthy = (self.health and self.state == 'FOLLOW_RETURN_PATH' and
                    fresh(now, self.diag_time, self.p('diagnostics_timeout_s')) and
                    fresh(now, self.wheel_time, self.p('wheel_timeout_s')) and

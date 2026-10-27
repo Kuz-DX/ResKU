@@ -13,7 +13,8 @@ landmark에서 후방 카메라 keyframe을 저장한다. 복귀(RETURN) 때 전
     /path/landmark rising edge (MANUAL_RECORDING / WAIT_RETURN_COMMAND에서)
       -> drive_cmd_mux가 즉시 manual 명령을 0으로 hold (이 노드가 죽어 있어도)
       -> 이 노드: /visual_landmark/hold=True 갱신하며
-         정지 확인(odom) -> 잔진동 대기 -> 그 이후 도착한 후방 프레임 1장 저장
+         정지 확인(odom) -> 잔진동 대기 -> 그 이후 도착한 후방 프레임 1장과
+         SIFT 특징점/descriptor를 같은 랜드마크 디렉터리에 저장
       -> /visual_landmark/hold=False -> mux가 manual 복귀
     자세한 단계/타임아웃은 capture_logic.py 참고.
 
@@ -22,10 +23,11 @@ landmark에서 후방 카메라 keyframe을 저장한다. 복귀(RETURN) 때 전
     <db_root>/<YYYYmmdd_HHMMSS>/L000/meta.yaml  id, 순서, mission pose, s_along_path,
                                                camera_info, extrinsic(base->camera), ...
     <db_root>/<YYYYmmdd_HHMMSS>/L000/rear.jpg   카메라가 보낸 압축 바이트 그대로(재인코딩 없음)
+    <db_root>/<YYYYmmdd_HHMMSS>/L000/features.npz  SIFT 좌표/descriptor/설정
 
-extrinsic(base_frame -> 이미지 frame_id)은 촬영 순간 TF에서 조회해 같이 저장한다.
-카메라 static TF가 아직 없으면 null로 저장하고 event에 경고를 남긴다 -- 촬영 자체는
-막지 않는다 (TF는 나중에 확정돼도 되지만, 매칭 단계에서 값이 바뀌었으면 경고해야 한다).
+extrinsic(base_frame -> 이미지 frame_id)과 mission pose는 촬영 순간 TF에서 조회한다.
+TF가 없으면 보관 파일이 남을 수 있지만 captured event를 보내지 않아 Return 참조로
+등록하지 않는다.
 
 Subscribes:
     /path/landmark              std_msgs/Bool             UI 버튼 (rising edge)
@@ -60,6 +62,7 @@ from visual_landmark.localization import transform, features, valid_transform, F
 from visual_landmark.calibration import camera_model
 from visual_landmark.adaptive import AutoKeyframes
 import cv2
+from collections import deque
 import numpy as np
 from visual_landmark.capture_logic import CaptureSequencer, Odometer, PressDetector
 
@@ -102,8 +105,9 @@ class VisualLandmarkNode(Node):
         # 버튼을 눌렀을 때 후방 프레임이 이 시간 안에 한 번도 안 왔으면 바로 실패.
         self.declare_parameter('image_stale_s', 1.0)
 
-        for name, value in dict(enable_auto_keyframes=True, auto_keyframe_distance_m=1.25,
-                                auto_keyframe_yaw_deg=12., auto_keyframe_max_interval_s=6.,
+        # Manual landmarks are the active trial mode. Set this true explicitly to resume auto capture.
+        for name, value in dict(enable_auto_keyframes=False, auto_keyframe_distance_m=1.0, auto_keyframe_distance_only=True, auto_keyframe_time_only=True,
+                                auto_keyframe_yaw_deg=12., auto_keyframe_max_interval_s=2.,
                                 auto_keyframe_min_motion_for_timeout_m=.5,
                                 auto_keyframe_retry_s=1., auto_keyframe_min_features=20,
                                 auto_keyframe_blur_min=0.).items():
@@ -115,7 +119,9 @@ class VisualLandmarkNode(Node):
             self.get_parameter('auto_keyframe_distance_m').value,
             self.get_parameter('auto_keyframe_yaw_deg').value,
             self.get_parameter('auto_keyframe_max_interval_s').value,
-            self.get_parameter('auto_keyframe_min_motion_for_timeout_m').value)
+            self.get_parameter('auto_keyframe_min_motion_for_timeout_m').value,
+            distance_only=self.get_parameter('auto_keyframe_distance_only').value,
+            time_only=self.get_parameter('auto_keyframe_time_only').value)
         if any(not math.isfinite(v) or v <= 0 for v in (self.auto_policy.distance, self.auto_policy.yaw_deg, self.auto_policy.interval, self.auto_policy.min_motion)):
             raise ValueError('auto keyframe thresholds must be positive')
         self.auto_next_try = 0.
@@ -143,6 +149,7 @@ class VisualLandmarkNode(Node):
 
         self._state = ''
         self._origin = None
+        self._odom_history = deque(maxlen=512)  # bounded arrival history, pruned to 3s
         self._odom = None            # latest Odometry
         self._camera_info = None
         self._last_image_arrival = None
@@ -154,6 +161,8 @@ class VisualLandmarkNode(Node):
 
         latched = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
                              durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self.capture_preview_pub = self.create_publisher(CompressedImage,
+            '/visual_landmark/debug/captured/compressed', latched)
         self.hold_pub = self.create_publisher(Bool, p('hold_topic'), 10)
         self.event_pub = self.create_publisher(String, p('event_topic'), 10)
         self.create_subscription(Bool, p('trigger_topic'), self._on_trigger, 10)
@@ -179,6 +188,11 @@ class VisualLandmarkNode(Node):
             self._mission_dir = None
             self._next_order = 0
             self.odometer.reset()
+            if hasattr(self, '_odom_history'):
+                self._odom_history.clear()
+            if hasattr(self, 'capture_preview_pub'):
+                self.capture_preview_pub.publish(CompressedImage())
+                self._last_auto_rejection = None
             if hasattr(self, 'auto_policy'):
                 self.auto_policy.reset()
         self._state = msg.data
@@ -195,6 +209,11 @@ class VisualLandmarkNode(Node):
         self._mission_dir = None
         self._next_order = 0
         self.odometer.reset()
+        if hasattr(self, '_odom_history'):
+            self._odom_history.clear()
+        if hasattr(self, 'capture_preview_pub'):
+            self.capture_preview_pub.publish(CompressedImage())
+            self._last_auto_rejection = None
         if hasattr(self, 'auto_policy'):
             self.auto_policy.reset()
             self.auto_next_try = 0.
@@ -206,6 +225,10 @@ class VisualLandmarkNode(Node):
         if self._origin is not None and self._state in RECORDING_STATES:
             m = Pose2D.from_ros_pose(msg.pose.pose).to_mission_frame(self._origin)
             self.odometer.update(m.x, m.y)
+        if hasattr(self, '_odom_history'):
+            self._odom_history.append((msg, self._odom_arrival, self.odometer.s))
+            while self._odom_history and self._odom_arrival-self._odom_history[0][1] > 3.:
+                self._odom_history.popleft()
 
     def _on_camera_info(self, msg: CameraInfo):
         self._camera_info = msg
@@ -233,6 +256,8 @@ class VisualLandmarkNode(Node):
             self.get_logger().info('Landmark capture started (moving): taking the next frame.')
 
     def _tick(self):
+        if hasattr(self, '_publish_capture_status'):
+            self._publish_capture_status(self._now())
         if not self.seq.busy:
             return
         if self.stop_mode:
@@ -254,20 +279,107 @@ class VisualLandmarkNode(Node):
         if self.seq._frame_after is not None and image_time < self.seq._frame_after:
             return
         try:
+            self._capture_odom_sample = self._select_image_odom(image_time, arrival)
+            ci = self._camera_info
+            if ci is None or ci.header.frame_id != msg.header.frame_id:
+                raise ValueError('manual CameraInfo/frame missing')
+            image = cv2.imdecode(np.frombuffer(msg.data, np.uint8), cv2.IMREAD_GRAYSCALE)
+            if image is None:
+                raise ValueError('manual image decode failed')
+            camera_model(ci.width, ci.height, ci.k, ci.d, ci.distortion_model, image.shape)
+            feature_stats = {}
+            options = getattr(self, 'feature_options', FeatureOptions())
+            points, descriptors = features(image, options, feature_stats)
+            minimum = max(20, int(self.get_parameter('auto_keyframe_min_features').value))
+            if descriptors is None or len(points) < minimum:
+                raise ValueError('manual insufficient SIFT features')
+            self._capture_quality = dict(usable_features=len(points), **feature_stats)
             info = self._save_landmark(msg)
+            if not info['localization_ready'] or not info['extrinsic_ok']:
+                raise ValueError('manual timestamped camera/base TF missing (archive retained)')
+            np.savez_compressed(os.path.join(info['dir'], 'features.npz'),
+                                points=points, descriptors=descriptors,
+                                feature_config=np.asarray(options.signature()),
+                                feature_count_raw=np.asarray(feature_stats.get('feature_count_raw', len(points))))
         except Exception as exc:  # 디스크/권한 오류도 주행을 막으면 안 된다
-            self._fail(f'save failed: {exc}', hold_started=True)
+            self._fail(f'manual capture rejected: {exc}', hold_started=True)
             return
+        finally:
+            self._capture_odom_sample = None
+            self._capture_quality = None
         self.seq.finish()
         if getattr(self, 'auto_enabled', False) and info.get('localization_ready'):
             self.auto_policy.accept(arrival, self.odometer.s, info['yaw'])
         if self.stop_mode:
             self.hold_pub.publish(Bool(data=False))
+        if hasattr(self, 'capture_preview_pub'):
+            try:
+                self._publish_captured_snapshot(image, points, msg.header, info['id'])
+            except Exception as exc:
+                self._event('preview_failed', reason=str(exc))
         self._event('captured', **info)
         self.get_logger().info(
             f"Landmark {info['id']} saved at mission ({info['x']:.2f}, {info['y']:.2f}, "
             f"{math.degrees(info['yaw']):.1f} deg), s={info['s_along_path']:.2f} m"
             + ('' if info['extrinsic_ok'] else ' -- WARNING: no camera TF, extrinsic not stored'))
+
+    def _publish_capture_status(self, now):
+        if now < getattr(self, '_next_capture_status', -float('inf')):
+            return
+        self._next_capture_status = now+2.
+        if self._state not in RECORDING_STATES:
+            reason = 'waiting for Record (state '+self._state+')'
+        elif self._origin is None:
+            reason = 'missing mission origin'
+        elif self._odom is None:
+            reason = 'missing odometry'
+        elif self._last_image_arrival is None or now-self._last_image_arrival > self.image_stale_s:
+            reason = 'missing or stale rear image'
+        elif self._camera_info is None:
+            reason = 'missing rear CameraInfo'
+        elif not self.auto_enabled:
+            reason = 'manual capture ready; press landmark'
+        elif getattr(self, '_last_auto_rejection', None):
+            reason = self._last_auto_rejection
+        elif self.auto_policy.anchor is None:
+            reason = 'waiting for first valid rear snapshot'
+        elif self.auto_policy.time_only:
+            remaining = max(0., self.auto_policy.interval-(now-self.auto_policy.anchor[0]))
+            reason = f'next snapshot in {remaining:.1f}s'
+        else:
+            remaining = max(0., self.auto_policy.distance-(self.odometer.s-self.auto_policy.anchor[1]))
+            reason = f'next snapshot in {remaining:.2f}m'
+        self._event('capture_status', reason=reason, state=self._state)
+
+    def _publish_captured_snapshot(self, image, points, header, lid):
+        # Reuse the just-computed points. Independent of localizer reference loading.
+        view = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+        for point in points:
+            cv2.circle(view, tuple(map(int, point)), 2, (255,255,0), 1)
+        cv2.putText(view, f'RECORDED {lid} | SIFT {len(points)}', (8, 65),
+                    cv2.FONT_HERSHEY_SIMPLEX, .5, (255,255,0), 1)
+        preview = CompressedImage()
+        preview.header, preview.format = header, 'jpeg'
+        preview.data = cv2.imencode('.jpg', view, [cv2.IMWRITE_JPEG_QUALITY,80])[1].tobytes()
+        self.capture_preview_pub.publish(preview)
+
+    def _select_image_odom(self, image_stamp, now):
+        # Keep live odometry freshness separate from image-time association.
+        if self._odom_arrival is None or not 0 <= now-self._odom_arrival <= .5:
+            raise ValueError('stale odometry: no fresh live callback')
+        history = getattr(self, '_odom_history', None)
+        samples = history if history is not None else [(self._odom, self._odom_arrival, self.odometer.s)]
+        valid = []
+        for sample in samples:
+            stamp = sample[0].header.stamp.sec+sample[0].header.stamp.nanosec*1e-9
+            if stamp > 0 and math.isfinite(stamp) and 0 <= now-sample[1] <= 3.:
+                valid.append((abs(image_stamp-stamp), sample))
+        if not valid:
+            raise ValueError('image-time odometry history empty; waiting for samples')
+        skew, sample = min(valid, key=lambda item: item[0])
+        if skew > .5:
+            raise ValueError(f'image-time odometry skew {skew:.3f}s exceeds 0.5s')
+        return sample
 
     def _try_auto(self, msg, now):
         if (self._state not in RECORDING_STATES or self._origin is None or self._odom is None
@@ -282,9 +394,7 @@ class VisualLandmarkNode(Node):
             stamp = msg.header.stamp.sec+msg.header.stamp.nanosec*1e-9
             if stamp <= 0 or not 0 <= now-stamp <= self.image_stale_s:
                 raise ValueError('stale automatic image')
-            odom_stamp = self._odom.header.stamp.sec+self._odom.header.stamp.nanosec*1e-9
-            if odom_stamp <= 0 or abs(stamp-odom_stamp) > .5 or not 0 <= now-self._odom_arrival <= .5:
-                raise ValueError('stale automatic odometry')
+            self._capture_odom_sample = self._select_image_odom(stamp, now)
             ci = self._camera_info
             if ci is None or ci.header.frame_id != msg.header.frame_id:
                 raise ValueError('automatic CameraInfo/frame missing')
@@ -310,11 +420,19 @@ class VisualLandmarkNode(Node):
                                 feature_config=np.asarray(getattr(self, 'feature_options', FeatureOptions()).signature()),
                                 feature_count_raw=np.asarray(feature_stats.get('feature_count_raw', len(points))))
             self.auto_policy.accept(now, self.odometer.s, info['yaw'])
+            self._last_auto_rejection = None
+            if hasattr(self, 'capture_preview_pub'):
+                try:
+                    self._publish_captured_snapshot(image, points, msg.header, info['id'])
+                except Exception as exc:
+                    self._event('preview_failed', reason=str(exc))
             self._event('captured', capture_source='automatic', capture_reason=reason, **info)
         except Exception as exc:
             # No hold or motion command even on failure. Invalid archives are never announced as references.
+            self._last_auto_rejection = str(exc)
             self._event('automatic_rejected', reason=str(exc), capture_reason=reason)
         finally:
+            self._capture_odom_sample = None
             self._capture_source, self._capture_reason = 'manual', None
             self._capture_quality = None
 
@@ -328,7 +446,14 @@ class VisualLandmarkNode(Node):
         self.get_logger().warn(f'Landmark capture failed: {reason}')
 
     def _event(self, kind: str, **fields):
-        self.event_pub.publish(String(data=json.dumps({'event': kind, **fields})))
+        # TF/geometry checks can yield numpy scalar types (notably np.bool_).
+        # A failed diagnostic must never terminate the capture process.
+        def json_scalar(value):
+            if isinstance(value, np.generic):
+                return value.item()
+            raise TypeError(f'unsupported event value: {type(value).__name__}')
+
+        self.event_pub.publish(String(data=json.dumps({'event': kind, **fields}, default=json_scalar)))
 
     def _ensure_mission_dir(self):
         if self._mission_dir is None:
@@ -372,7 +497,8 @@ class VisualLandmarkNode(Node):
         with open(os.path.join(ldir, image_file), 'wb') as f:
             f.write(bytes(img.data))
 
-        odom = self._odom
+        sample = getattr(self, '_capture_odom_sample', None)
+        odom, sample_arrival, sample_s = sample if sample is not None else (self._odom, self._odom_arrival, self.odometer.s)
         odom_pose = Pose2D.from_ros_pose(odom.pose.pose)
         mission = odom_pose.to_mission_frame(self._origin)
         camera_frame = img.header.frame_id or (
@@ -415,14 +541,17 @@ class VisualLandmarkNode(Node):
             'camera_frame': camera_frame,
             'mission_pose': {'x': mission.x, 'y': mission.y, 'yaw': mission.yaw},
             'odom_pose': {'x': odom_pose.x, 'y': odom_pose.y, 'yaw': odom_pose.yaw},
-            's_along_path': self.odometer.s,
+            's_along_path': sample_s,
             'capture_mode': 'moving' if getattr(self, '_capture_source', 'manual') == 'automatic' else self.capture_mode,
             # moving 모드 품질 판단용: 속도가 클수록 rolling shutter 흐림/휨이 크고,
             # odom과 이미지 도착 시각 차이 x 속도만큼 기록 위치가 어긋난다.
             'odom_sample_stamp': odom.header.stamp.sec+odom.header.stamp.nanosec*1e-9,
             'odom_twist_at_capture': {'vx': float(odom.twist.twist.linear.x),
                                       'wz': float(odom.twist.twist.angular.z)},
-            'odom_to_image_arrival_s': float(self._now() - self._odom_arrival),
+            'odom_to_image_arrival_s': float(self._now() - sample_arrival),
+            'odom_image_skew_s': float(abs(odom.header.stamp.sec+odom.header.stamp.nanosec*1e-9
+                                         -img.header.stamp.sec-img.header.stamp.nanosec*1e-9)),
+            'odom_sample_selection': 'nearest_buffered' if sample is not None else 'latest',
             'extrinsic_base_to_camera': extrinsic,
             # Humble의 CameraInfo 배열은 numpy라 YAML이 못 쓴다 -> 순수 float로.
             'camera_info': None if ci is None else {
@@ -436,8 +565,9 @@ class VisualLandmarkNode(Node):
         with open(os.path.join(ldir, 'meta.yaml'), 'w') as f:
             yaml.safe_dump(meta, f, sort_keys=False)
         self._next_order += 1
-        return {'id': lid, 'order': order, 'dir': ldir, 'x': mission.x, 'y': mission.y,
-                'yaw': mission.yaw, 's_along_path': self.odometer.s,
+        return {'id': lid, 'order': int(order), 'dir': ldir,
+                'x': float(mission.x), 'y': float(mission.y),
+                'yaw': float(mission.yaw), 's_along_path': float(sample_s),
                 'extrinsic_ok': extrinsic is not None, 'camera_info_ok': ci is not None,
                 'localization_ready': bool(mission_camera is not None and image_base is not None and ci is not None
                 and valid_transform(mission_camera) and valid_transform(image_base))}

@@ -27,6 +27,7 @@ from return_navigation.recovery import project_route
 from return_navigation.se2 import Pose2D
 from sensor_msgs.msg import CameraInfo, CompressedImage, Image
 from std_msgs.msg import Bool, String
+from visualization_msgs.msg import Marker, MarkerArray
 from tf2_ros import Buffer, TransformListener
 
 from visual_landmark.adaptive import candidate_window, reference_arcs
@@ -116,6 +117,9 @@ class VisualLocalizationNode(Node):
         self.listener = TransformListener(self.buffer, self)
         latched = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
                              durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self.checkpoint_pub = self.create_publisher(String, '/visual_landmark/checkpoints', latched)
+        self.checkpoint_markers = self.create_publisher(MarkerArray, '/visual_landmark/checkpoint_markers', latched)
+        self.current_pub = self.create_publisher(CompressedImage, '/visual_landmark/debug/current/compressed', latched)
         self.pub = self.create_publisher(PoseStamped, '/visual_landmark/correction', 10)
         self.reference_pub = self.create_publisher(CompressedImage, '/visual_landmark/debug/reference/compressed',
             QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
@@ -165,6 +169,8 @@ class VisualLocalizationNode(Node):
         self.route_progress = None
         self.last_auto_progress = None
         self.cached_arcs = None
+        if hasattr(self, 'checkpoint_pub'):
+            self.publish_checkpoint_catalog()
 
     def on_progress(self, msg):
         try:
@@ -175,6 +181,75 @@ class VisualLocalizationNode(Node):
                     self.last_auto_progress = self.route_progress
         except (ValueError, TypeError, KeyError):
             pass
+
+    def publish_checkpoint_catalog(self):
+        arcs = reference_arcs(self.route, self.reference_meta) if len(self.route) >= 2 else {}
+        points = [dict(id=lid, arc=arcs[lid], order=int(meta.get('order', 0)),
+                       mission_pose=meta['mission_pose'], s_along_path=meta.get('s_along_path'),
+                       feature_count=len(self.landmarks[lid][0][0]))
+                  for lid, meta in sorted(self.reference_meta.items(),
+                      key=lambda pair: pair[1].get('order', 0), reverse=True) if lid in arcs]
+        self.checkpoint_pub.publish(String(data=json.dumps(dict(checkpoints=points))))
+        markers = MarkerArray()
+        clear = Marker()
+        clear.action = Marker.DELETEALL
+        markers.markers.append(clear)
+        # Path and these points share mission coordinates. No motor/controller output.
+        for lid, meta in self.reference_meta.items():
+            marker = Marker()
+            marker.header.frame_id = 'mission'
+            marker.ns, marker.id = 'vpr_checkpoints', int(meta.get('order', 0))*2
+            marker.type, marker.action = Marker.SPHERE, Marker.ADD
+            marker.pose.position.x = float(meta['mission_pose']['x'])
+            marker.pose.position.y = float(meta['mission_pose']['y'])
+            marker.pose.orientation.w = 1.
+            marker.scale.x = marker.scale.y = marker.scale.z = .12
+            marker.color.r, marker.color.g, marker.color.a = 1., .65, 1.
+            markers.markers.append(marker)
+            label = Marker()
+            label.header = marker.header
+            label.ns, label.id = marker.ns, marker.id+1
+            label.type, label.action = Marker.TEXT_VIEW_FACING, Marker.ADD
+            label.pose.position.x, label.pose.position.y = marker.pose.position.x, marker.pose.position.y
+            label.pose.position.z, label.pose.orientation.w = .2, 1.
+            label.scale.z, label.color.r, label.color.g, label.color.a = .14, 1., 1., 1.
+            label.text = lid
+            markers.markers.append(label)
+        self.checkpoint_markers.publish(markers)
+
+    def publish_current_snapshot(self, image, points, header, lid):
+        if not getattr(self, 'debug_enabled', False):
+            return
+        view = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+        for point in points:
+            cv2.circle(view, tuple(map(int, point)), 2, (255,255,0), 1)
+        # Reserve a dedicated image banner below the UI header.
+        cv2.putText(view, f'CURRENT CHECK -> {lid} | SIFT {len(points)}', (8, 65),
+                    cv2.FONT_HERSHEY_SIMPLEX, .5, (255,255,0), 1)
+        msg = CompressedImage()
+        msg.header, msg.format = header, 'jpeg'
+        msg.data = cv2.imencode('.jpg', view, [cv2.IMWRITE_JPEG_QUALITY, 80])[1].tobytes()
+        self.current_pub.publish(msg)
+
+    def publish_reference_snapshot(self, lid, label='ROUTE CANDIDATE - NOT VALIDATED'):
+        """Render cached reference points only when the displayed candidate changes."""
+        if not getattr(self, 'debug_enabled', False) or lid not in self.reference_images:
+            return
+        token = (lid, label)
+        if getattr(self, '_display_reference', None) == token:
+            return
+        view = cv2.cvtColor(self.reference_images[lid], cv2.COLOR_GRAY2BGR)
+        for point in self.landmarks[lid][0][0]:
+            cv2.circle(view, tuple(map(int, point)), 2, (255, 255, 0), 1)
+        cv2.rectangle(view, (0, 48), (view.shape[1], 94), (0, 0, 0), -1)
+        cv2.putText(view, f'STORED REAR {lid}', (8, 65), cv2.FONT_HERSHEY_SIMPLEX, .45, (255,255,0), 1)
+        cv2.putText(view, label, (8, 85), cv2.FONT_HERSHEY_SIMPLEX, .4, (255,255,255), 1)
+        msg = CompressedImage()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.format = 'jpeg'
+        msg.data = cv2.imencode('.jpg', view, [cv2.IMWRITE_JPEG_QUALITY, 80])[1].tobytes()
+        self.reference_pub.publish(msg)
+        self._display_reference = token
 
     def on_debug_odom(self, msg):
         now = self.get_clock().now().nanoseconds*1e-9
@@ -237,6 +312,16 @@ class VisualLocalizationNode(Node):
             if (not data.get('request') or self.check is not None or self.state != 'FOLLOW_RETURN_PATH'
                     or not 0 <= now-float(data['requested_at']) <= .5):
                 return
+            if data.get('checkpoint_id') is not None:
+                lid = data['checkpoint_id']
+                if lid not in self.landmarks:
+                    self.event('rejected', reason='unknown checkpoint', check_complete=True,
+                               check_request=data['request'])
+                    return
+                if hasattr(self, 'reference_pub'):
+                    self.publish_reference_snapshot(lid, 'CHECKPOINT TARGET - NOT YET VALIDATED')
+                    self.current_pub.publish(CompressedImage())
+                    self.debug_pub.publish(CompressedImage())
             self.check = dict(data, stationary_debug=False, deadline=now+min(float(data.get('timeout_s', 5.)), self.p('visual_check_timeout_s')))
             self.check_frames, self.check_expansion = 0, 0
             self.pending = None
@@ -291,6 +376,7 @@ class VisualLocalizationNode(Node):
             if msg.data in RECORDING_STATES and self.state not in RECORDING_STATES:
                 if hasattr(self, 'reference_pub'):
                     self.reference_pub.publish(CompressedImage())
+                    self._display_reference = None
                     self.debug_pub.publish(CompressedImage())
                 self.landmarks.clear()
                 getattr(self, 'reference_images', {}).clear()
@@ -303,6 +389,9 @@ class VisualLocalizationNode(Node):
                 self.last_auto_progress = None
                 self.route = []
                 self.last_reference_arc = None
+                if hasattr(self, 'checkpoint_pub'):
+                    self.publish_checkpoint_catalog()
+                    self.current_pub.publish(CompressedImage())
         self.state = msg.data
 
     def on_origin(self, msg):
@@ -316,6 +405,7 @@ class VisualLocalizationNode(Node):
             self.cached_arcs = None
             if hasattr(self, 'reference_pub'):
                 self.reference_pub.publish(CompressedImage())
+                self._display_reference = None
                 self.debug_pub.publish(CompressedImage())
             self.landmarks.clear()
             getattr(self, 'reference_images', {}).clear()
@@ -325,6 +415,9 @@ class VisualLocalizationNode(Node):
             self.reference_meta.clear()
             getattr(self, 'reference_feature_stats', {}).clear()
             self.last_reference_arc = None
+            if hasattr(self, 'checkpoint_pub'):
+                self.publish_checkpoint_catalog()
+                self.current_pub.publish(CompressedImage())
 
     def event(self, kind, **fields):
         if kind in {'candidates', 'debug_frame_result', 'no_match', 'rejected', 'validated', 'localized', 'agreement_pending'}:
@@ -336,6 +429,7 @@ class VisualLocalizationNode(Node):
                 fields.setdefault('timeout_s', max(0., check['deadline']-self.get_clock().now().nanoseconds*1e-9))
             fields.setdefault('check_request', check['request'])
             fields.setdefault('trigger', check.get('trigger'))
+            fields.setdefault('checkpoint_id', check.get('checkpoint_id'))
             if kind in {'validated', 'localized'}:
                 fields['check_complete'] = True
             elif kind == 'agreement_pending':
@@ -401,6 +495,10 @@ class VisualLocalizationNode(Node):
                 self.reference_feature_stats[meta['id']] = feature_stats
             self.reference_meta[meta['id']] = meta
             self.cached_arcs = None
+            if hasattr(self, 'checkpoint_pub'):
+                self.publish_checkpoint_catalog()
+            if hasattr(self, 'reference_pub'):
+                self.publish_reference_snapshot(meta['id'], 'RECORDED SNAPSHOT - CACHED SIFT')
             self.event('reference_loaded', id=meta['id'], features=len(points), cache_reused=cache_reused,
                        **feature_stats,
                        x=float(meta['mission_pose']['x']), y=float(meta['mission_pose']['y']))
@@ -438,16 +536,7 @@ class VisualLocalizationNode(Node):
         msg.format = 'jpeg'
         msg.data = cv2.imencode('.jpg', canvas, [cv2.IMWRITE_JPEG_QUALITY, 75])[1].tobytes()
         self.debug_pub.publish(msg)
-        # Same selected candidate as Matches; stamp belongs to the current check.
-        reference_msg = CompressedImage()
-        reference_msg.header = header
-        reference_msg.format = 'jpeg'
-        reference_view = cv2.cvtColor(reference, cv2.COLOR_GRAY2BGR)
-        cv2.putText(reference_view, f'STORED REAR REF {lid}', (8, 22),
-                    cv2.FONT_HERSHEY_SIMPLEX, .5, (255, 255, 0), 1)
-        reference_msg.data = cv2.imencode('.jpg', reference_view,
-            [cv2.IMWRITE_JPEG_QUALITY, 80])[1].tobytes()
-        self.reference_pub.publish(reference_msg)
+        self.publish_reference_snapshot(lid, 'CHECKED CANDIDATE - SEE VALIDATION STATUS')
 
     def on_pair(self, color, depth):
         started = time.perf_counter()
@@ -505,6 +594,14 @@ class VisualLocalizationNode(Node):
             if not valid_transform(bc) or not valid_transform(oc) or not valid_transform(ob):
                 raise ValueError('invalid current camera/base TF')
             self.check_lock_pose(bc)
+            target = self.check.get('checkpoint_id') if self.check else None
+            if target:
+                progress = getattr(self, 'route_progress', None)
+                if progress is None or not 0 <= (now.nanoseconds-progress[1])*1e-9 <= .5:
+                    raise ValueError('fresh checkpoint route progress required')
+                if progress[0] > float(self.check['checkpoint_arc'])+float(self.check.get('checkpoint_passed_m', .75)):
+                    self.event('rejected', reason='checkpoint arrival window passed', check_complete=True)
+                    return
             self.event('frame', stamp_ns=stamp.nanoseconds)
             sift_started = time.perf_counter()
             feature_stats = {}
@@ -532,6 +629,17 @@ class VisualLocalizationNode(Node):
                     selected = candidate_window(self.cached_arcs, progress[0], self.last_reference_arc,
                     self.p('route_backtrack_m'), self.p('max_visual_candidates'),
                     getattr(self, 'check_expansion', 0))
+            if target:
+                if self.cached_arcs is None:
+                    self.cached_arcs = reference_arcs(self.route, self.reference_meta)
+                if target not in self.cached_arcs:
+                    raise ValueError('checkpoint not on return path')
+                neighbors = candidate_window(self.cached_arcs, self.cached_arcs[target],
+                    None, self.p('route_backtrack_m'), self.p('max_visual_candidates'))
+                selected = [(target, self.cached_arcs[target])]+[(lid, arc) for lid, arc in neighbors if lid != target]
+                selected = selected[:self.p('max_visual_candidates')]
+            if hasattr(self, 'current_pub'):
+                self.publish_current_snapshot(image, current[0], color.header, target or 'route candidate')
             self.frame_diagnostics.update(current_sift_s=sift_time, candidate_ids=[lid for lid, _ in selected],
                                           input_frame_age_s=(now-stamp).nanoseconds*1e-9)
             self.event('candidates', candidate_ids=[lid for lid, _ in selected], current_sift_s=sift_time)
@@ -576,8 +684,8 @@ class VisualLocalizationNode(Node):
                 else:
                     diagnostics['reject_reason'] = 'correction_step_limit'
             ranked.sort(key=lambda item: (-item[0], -item[1], str(item[2])))
-            if debug_frames:
-                display_id = ranked[0][2] if ranked else max(debug_frames,
+            if debug_frames and (not target or target in debug_frames):
+                display_id = target if target in debug_frames else ranked[0][2] if ranked else max(debug_frames,
                     key=lambda key: debug_frames[key][1].get('inliers', 0))
                 try:
                     self.publish_matches(display_id, image, current, *debug_frames[display_id], color.header)
@@ -592,6 +700,8 @@ class VisualLocalizationNode(Node):
                            processing_latency_s=time.perf_counter()-started)
                 return
             best = ranked[0]
+            if target and best[2] != target:
+                raise ValueError('checkpoint mismatch: another reference ranked higher')
             if len(ranked) > 1 and ranked[1][0] >= best[0]*self.p('ambiguity_ratio'):
                 raise ValueError('ambiguous landmarks')
             _, neg_error, lid, correction, relative, diagnostics, arc = best

@@ -1,7 +1,4 @@
-"""Live SIFT preview and production match viewer. Never commands motion.
-
-Preview features are independent diagnostics, not validated VPR matches.
-"""
+"""Snapshot-only dashboard. Displays production features; never commands motion."""
 import json
 import time
 import textwrap
@@ -9,7 +6,7 @@ import cv2
 import numpy as np
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
+from rclpy.qos import QoSProfile, DurabilityPolicy
 from sensor_msgs.msg import CompressedImage
 from std_msgs.msg import String
 
@@ -47,7 +44,7 @@ def quality_lines(data):
     return [f'VPR: {status} | candidate: {selected.get("id", "--")}',
         f'reject: {reason}',
         f'correction applied: {data.get("correction_applied", False)}',
-        'PRODUCTION metrics (not cyan preview)',
+        'PRODUCTION checkpoint metrics',
         f'features raw/grid: {count("feature_count_raw")} / {count("feature_count_grid_filtered")}',
         f'matches raw/mutual: {count("raw_matches")} / {count("mutual_ratio_matches")}',
         f'geometry/depth: {count("geometric_inliers")} / {count("depth_valid_matches")}',
@@ -92,35 +89,20 @@ class Viewer(Node):
         self.declare_parameter('preview_rate_hz', 2.0)
         self.declare_parameter('preview_max_width', 480)
         self.declare_parameter('preview_max_features', 120)
-        rate = float(self.get_parameter('preview_rate_hz').value)
-        if not np.isfinite(rate) or not 0 < rate <= 30:
-            raise ValueError('preview_rate_hz must be in (0, 30]')
-        width = int(self.get_parameter('preview_max_width').value)
-        features = int(self.get_parameter('preview_max_features').value)
-        if not 64 <= width <= 1280 or not 1 <= features <= 2000:
-            raise ValueError('preview_max_width must be 64..1280; preview_max_features 1..2000')
-        self.preview = FeaturePreview(width, features)
-        self.preview_period = 1./rate
-        self.last_decode = {}
-        self.feature_counts = {}
-        self.preview_modes = {}
+        # Snapshot-only dashboard: no live camera subscriptions or UI SIFT.
         self.image_stamps = {}
         self.receive_counts = {}
-        image_qos = QoSProfile(history=HistoryPolicy.KEEP_LAST, depth=1,
-                               reliability=ReliabilityPolicy.BEST_EFFORT)
         self.lines = {}
         self.mission_state = 'IDLE'
-        self.create_subscription(CompressedImage, '/visual_landmark/debug/reference/compressed',
-            lambda msg: self.receive('Stored rear reference', msg),
-            QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
         for key, topic in {
-            'Rear live': '/rear/camera/image_raw/compressed',
-            'Front live': '/arm/camera/color/image_raw/compressed',
+            'Recorded snapshot': '/visual_landmark/debug/captured/compressed',
+            'Stored rear reference': '/visual_landmark/debug/reference/compressed',
+            'Current snapshot': '/visual_landmark/debug/current/compressed',
             'Matches': '/visual_landmark/debug/matches/compressed',
         }.items():
             self.create_subscription(CompressedImage, topic,
                 lambda msg, key=key: self.receive(key, msg),
-                QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL) if key == 'Matches' else image_qos)
+                QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
         for key, topic in {
             'mission': '/mission/return/state',
             'localization': '/visual_landmark/localization_event',
@@ -131,7 +113,7 @@ class Viewer(Node):
                 lambda msg, key=key: self.status(key, msg), 10)
 
     def receive(self, key, msg):
-        if key in {'Stored rear reference', 'Matches'} and not msg.data:
+        if not msg.data:
             self.frames.pop(key, None)
             self.pending.pop(key, None)
             self.frames.pop('Matches', None)
@@ -144,7 +126,7 @@ class Viewer(Node):
     def status(self, key, msg):
         if key == 'mission':
             if msg.data in {'MANUAL_RECORDING', 'WAIT_RETURN_COMMAND'} and self.mission_state not in {'MANUAL_RECORDING', 'WAIT_RETURN_COMMAND'}:
-                for name in ('Stored rear reference', 'Matches'):
+                for name in ('Recorded snapshot', 'Stored rear reference', 'Current snapshot', 'Matches'):
                     self.frames.pop(name, None)
                     self.pending.pop(name, None)
             self.mission_state = msg.data
@@ -164,7 +146,7 @@ class Viewer(Node):
                     self.quality_event.update(data)
                 if data.get('check_complete'):
                     self.preview_pause_until = 0.
-            summary = {k: data[k] for k in ('event', 'id', 'trigger', 'reason', 'inliers',
+            summary = {k: data[k] for k in ('event', 'id', 'checkpoint_id', 'trigger', 'reason', 'inliers',
                 'correction_applied', 'correction_step_m', 'correction_step_yaw', 'planar_correction') if k in data}
             if data.get('trigger') == 'stationary_debug':
                 metrics = ('reference_features', 'current_features', 'mutual_ratio_matches',
@@ -183,39 +165,26 @@ class Viewer(Node):
     def show(self):
         now = time.monotonic()
         for key, (msg, arrival) in list(self.pending.items()):
-            if key not in {'Matches', 'Stored rear reference'} and now-self.last_decode.get(key, -float('inf')) < self.preview_period:
-                continue
             del self.pending[key]
-            self.last_decode[key] = now
             try:
                 frame = cv2.imdecode(np.frombuffer(msg.data, np.uint8), cv2.IMREAD_COLOR)
                 if frame is None:
                     raise ValueError('image decode failed')
-                if key not in {'Matches', 'Stored rear reference'}:
-                    busy = (self.get_parameter('pause_preview_during_check').value
-                            and now < self.preview_pause_until)
-                    enabled = bool(self.get_parameter('live_features').value) and not busy
-                    if enabled:
-                        frame, count = self.preview.render(frame, True)
-                    else:
-                        count = 0
-                    self.feature_counts[key] = count
-                    self.preview_modes[key] = 'PAUSED for VPR' if busy else ('ON' if enabled else 'OFF')
                 self.frames[key] = frame, arrival
                 self.image_stamps[key] = msg.header.stamp.sec + msg.header.stamp.nanosec*1e-9
                 self.lines.pop(key+' error', None)
             except (cv2.error, ValueError) as error:
                 self.lines[key+' error'] = str(error)
         panel = np.full((864, 1280, 3), (24, 24, 24), np.uint8)
-        cv2.putText(panel, 'VPR Dashboard | cyan: preview ONLY | green: PnP inlier | amber: mutual match | F: preview | Q: close',
+        cv2.putText(panel, 'VPR snapshots | cyan: computed SIFT | green: PnP inlier | amber: match | Q: close',
                     (15, 26), cv2.FONT_HERSHEY_SIMPLEX, .53, (230,230,230), 1)
-        returning = getattr(self, 'mission_state', 'IDLE') not in {'IDLE', 'MANUAL_RECORDING', 'WAIT_RETURN_COMMAND'}
-        left = 'Stored rear reference' if returning else 'Rear live'
-        slots = {left: (0, 44, 640, 356), 'Front live': (640, 44, 640, 356),
+        recording = getattr(self, 'mission_state', 'IDLE') in {'IDLE', 'MANUAL_RECORDING', 'WAIT_RETURN_COMMAND'}
+        left = 'Recorded snapshot' if recording else 'Stored rear reference'
+        slots = {left: (0, 44, 640, 356), 'Current snapshot': (640, 44, 640, 356),
                  'Matches': (0, 420, 800, 420)}
         lines = quality_lines(getattr(self, 'quality_event', {}))
         ros_now = self.get_clock().now().nanoseconds*1e-9
-        for key in (left, 'Front live', 'Matches'):
+        for key in (left, 'Current snapshot', 'Matches'):
             if key in self.frames:
                 frame, arrival = self.frames[key]
                 scale = min(1., 1200/frame.shape[1], 650/frame.shape[0])
@@ -223,19 +192,12 @@ class Viewer(Node):
                 age = now-arrival
                 stamp = self.image_stamps.get(key, 0.)
                 source_age = f'{ros_now-stamp:.2f}s' if stamp > 0 else 'unknown'
-                count = self.feature_counts.get(key)
-                mode = getattr(self, 'preview_modes', {}).get(key, 'ON')
-                title = (f'{key}: SIFT={count} preview only' if mode == 'ON' else f'{key}: preview {mode}') if count is not None else key
-                detail = f'RX age {age:.1f}s | source age {source_age} | RX #{self.receive_counts.get(key, 0)}'
-                stored = key in {'Stored rear reference', 'Matches'}
-                if stored:
-                    detail = f'SNAPSHOT result | last check {age:.1f}s ago | held until next check'
-                if age > 2. and not stored:
-                    detail = 'STALE / NO NEW DISPLAY FRAME | '+detail
+                title = key
+                detail = f'SNAPSHOT | received {age:.1f}s ago | held until next result'
                 cv2.rectangle(view, (0, 0), (view.shape[1], 48), (0, 0, 0), -1)
                 cv2.putText(view, title, (8,18), cv2.FONT_HERSHEY_SIMPLEX, .45, (255,255,0), 1)
                 cv2.putText(view, detail, (8,38), cv2.FONT_HERSHEY_SIMPLEX, .4,
-                            (0,0,255) if age>2 and not stored else (255,255,255), 1)
+                            (255,255,255), 1)
                 # Camera receipt/age lives in the image header, leaving room for pipeline metrics.
             else:
                 view = np.zeros((360, 640, 3), np.uint8)
@@ -244,20 +206,25 @@ class Viewer(Node):
                 if key == 'Matches':
                     state = getattr(self, 'mission_state', 'IDLE')
                     hints = ['STILL IMAGE comparison: stored rear / current front',
-                             'Record: collect reference snapshots (distance 1.25m).',
-                             'Return: comparison appears only during a VPR check.',
-                             'Manual: /visual_landmark/debug_check after stopping.',
+                             'Record: snapshots every 2 seconds (plus initial anchor).',
+                             'Return: compare at each reverse-order checkpoint.',
+                             'No match: inspect rejection reason in status.',
                              'Check localization status for missing inputs / rejection.',
                              'Publisher: visual_debug_matches:=true']
                     for row, hint in enumerate(hints):
                         cv2.putText(view, hint, (12, 195+row*24),
                                     cv2.FONT_HERSHEY_SIMPLEX, .43, (210,210,210), 1)
+                if key == left:
+                    why = self.lines.get('capture' if recording else 'localization', 'waiting for node status')
+                    for row, part in enumerate(textwrap.wrap(why, width=65)[:4]):
+                        cv2.putText(view, part, (12, 210+row*22), cv2.FONT_HERSHEY_SIMPLEX, .44, (210,210,210), 1)
                 lines.append(message)
             x, y, width, height = slots[key]
             panel[y:y+height, x:x+width] = fit_panel(view, width, height)
             cv2.rectangle(panel, (x,y), (x+width-1,y+height-1), (80,80,80), 1)
         lines = ['mission: '+self.lines.get('mission', 'waiting'),
-                 'capture: '+self.lines.get('capture', 'waiting')[:45]] + lines
+                 'capture: '+self.lines.get('capture', 'waiting')[:45],
+                 'checkpoint: '+self.lines.get('scheduler', 'waiting for route / checkpoint')[:90]] + lines
         cv2.putText(panel, 'VPR status / diagnostics', (815, 440),
                     cv2.FONT_HERSHEY_SIMPLEX, .6, (255,255,0), 1)
         y = 466
@@ -270,13 +237,10 @@ class Viewer(Node):
                 y += 16
             if y > 828:
                 break
-        cv2.putText(panel, 'Live preview points are not VPR validation. Matches update only during a check.',
+        cv2.putText(panel, 'Snapshots use already-computed features. Candidate display alone is not validation.',
                     (15, 858), cv2.FONT_HERSHEY_SIMPLEX, .46, (180,180,180), 1)
         cv2.imshow(WINDOW_NAME, panel)
         key = cv2.waitKey(1)&255
-        if key == ord('f'):
-            from rclpy.parameter import Parameter
-            self.set_parameters([Parameter('live_features', value=not self.get_parameter('live_features').value)])
         return key != ord('q')
 
 

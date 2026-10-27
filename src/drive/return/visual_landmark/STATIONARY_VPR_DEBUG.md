@@ -1,3 +1,5 @@
+> 현재 기본 운용은 [CHECKPOINT_VPR.md](CHECKPOINT_VPR.md)의 Record 2초 촬영 및 역순 체크포인트 검사와 정지 사진 UI입니다. 아래 기존 8m/실시간 preview 설명보다 해당 문서가 우선합니다.
+
 # 임시 RETURN_MANUAL 정지 VPR debug
 
 기준: Kuz-DX/ResKU main `74d09e0c1808b8670f434ef3cd0068cb3e7f7b1d`.

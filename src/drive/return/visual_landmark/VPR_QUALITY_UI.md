@@ -1,3 +1,5 @@
+> 현재 기본 운용은 [CHECKPOINT_VPR.md](CHECKPOINT_VPR.md)의 Record 2초 촬영 및 역순 체크포인트 검사와 정지 사진 UI입니다. 아래 기존 8m/실시간 preview 설명보다 해당 문서가 우선합니다.
+
 # VPR 품질·최신 프레임·Dashboard 개선 (2026-10-27)
 
 기준 main: `b4fe9d6` (원격 main과 일치 확인). 작업 시작 시 변경사항 없음.
@@ -322,3 +324,9 @@ ros2 run visual_landmark vpr_viewer
 `stationary_debug`는 observation 전용이므로 보정이 켜져 있으면 debug_check가 거부된다.
 실제 보정 검증은 AUTO 복귀의 adaptive check에서 한다. 이 변경은 실행 중인 노드의
 파라미터를 바꾸지 않으며 수정 코드 빌드와 launch 재시작이 필요하다.
+
+表示更新: Record에서 마지막으로 로드한 참조 사진에 캐시된 SIFT 점을 표시한다.
+Return에서는 route_progress를 이용해 표시용 후보 사진을 갱신한다. 이는 검사 트리거와
+독립적이며 추가 SIFT/PnP를 실행하지 않는다. 참조 ID/표시 종류가 바뀔 때만 인코딩한다.
+ROUTE CANDIDATE 표시는 검증 성공이 아니다. 하단 Matches는 실제 검사 결과만 유지한다.
+이 동작은 위의 '첫 검사 전 대기' 설명을 대체한다.

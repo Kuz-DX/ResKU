@@ -13,10 +13,12 @@ def fresh(now, stamp, timeout):
 
 @dataclass
 class AutoKeyframes:
-    distance: float = 1.25
+    distance: float = 1.0
     yaw_deg: float = 12.
-    interval: float = 6.
+    interval: float = 2.
     min_motion: float = .5
+    distance_only: bool = True
+    time_only: bool = True
     anchor: tuple = None
 
     def reset(self):
@@ -29,8 +31,12 @@ class AutoKeyframes:
         if self.anchor is None:
             return 'initial'
         t, s, a = self.anchor
+        if self.time_only:
+            return 'interval' if now-t >= self.interval else None
         if distance-s >= self.distance:
             return 'distance'
+        if self.distance_only:
+            return None
         if abs(math.atan2(math.sin(yaw-a), math.cos(yaw-a))) >= math.radians(self.yaw_deg)-1e-12:
             return 'yaw'
         if now-t >= self.interval and distance-s >= self.min_motion:

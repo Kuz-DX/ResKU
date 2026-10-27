@@ -1,3 +1,5 @@
+> 현재 기본 운용은 [CHECKPOINT_VPR.md](CHECKPOINT_VPR.md)의 Record 2초 촬영 및 역순 체크포인트 검사와 정지 사진 UI입니다. 아래 기존 8m/실시간 preview 설명보다 해당 문서가 우선합니다.
+
 # Back-to-Base 주행 + VPR 실행 명령 (2026-10-27)
 
 CAN 없는 RViz 가상 영상 검증: [VPR_VIRTUAL_TEST.md](../manual_return_sim/VPR_VIRTUAL_TEST.md).
@@ -122,7 +124,7 @@ can_driver manual.launch, autonomous.launch를 동시에 실행하지 않는다.
 ros2 launch robot_bringup manual_return_bringup.launch.py \
   can_interface:=can_drive imu_port:=/dev/ttyACM0 \
   reverse_return:=false \
-  enable_auto_keyframes:=true enable_visual_localization:=true \
+  enable_auto_keyframes:=false enable_visual_localization:=true \
   enable_adaptive_visual_check:=true \
   visual_check_on_return_start:=true visual_check_on_auto_resume:=true \
   visual_debug_matches:=true \

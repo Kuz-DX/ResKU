@@ -26,7 +26,7 @@ def test_blank_image_and_disabled_preview_do_not_invent_features():
     assert count == 0
 
 
-def test_frozen_frame_keeps_refreshing_stale_indicator_and_missing_front(monkeypatch):
+def test_snapshot_is_held_without_stale_camera_warning_and_missing_current(monkeypatch):
     from types import SimpleNamespace
     import visual_landmark.viewer as viewer
     captured = []
@@ -34,19 +34,20 @@ def test_frozen_frame_keeps_refreshing_stale_indicator_and_missing_front(monkeyp
     monkeypatch.setattr(cv2, 'imshow', lambda name, frame: windows.append((name, frame.shape)))
     monkeypatch.setattr(cv2, 'waitKey', lambda *_: -1)
     monkeypatch.setattr(cv2, 'putText', lambda image, text, *args: captured.append(text))
-    node = SimpleNamespace(pending={}, frames={'Rear live': (np.zeros((100, 200, 3), np.uint8), 1.)},
-                           image_stamps={'Rear live': 10.}, feature_counts={'Rear live': 3},
+    node = SimpleNamespace(pending={}, frames={'Recorded snapshot': (np.zeros((100, 200, 3), np.uint8), 1.)},
+                           image_stamps={'Recorded snapshot': 10.}, feature_counts={'Rear live': 3},
                            receive_counts={'Rear live': 1}, lines={},
                            get_clock=lambda: SimpleNamespace(now=lambda: SimpleNamespace(nanoseconds=11_000_000_000)))
     monkeypatch.setattr(viewer.time, 'monotonic', lambda: 1.5)
     assert viewer.Viewer.show(node)
     assert windows == [('VPR Dashboard', (864, 1280, 3))]
-    assert any('Front live: WAITING' in text for text in captured)
+    assert any('Current snapshot: WAITING' in text for text in captured)
     assert not any('STALE' in text for text in captured)
     captured.clear()
     monkeypatch.setattr(viewer.time, 'monotonic', lambda: 5.)
     assert viewer.Viewer.show(node)
-    assert any('STALE' in text and '4.0s' in text for text in captured)
+    assert not any('STALE' in text for text in captured)
+    assert any('4.0s' in text and 'held until next result' in text for text in captured)
 
 
 def test_return_never_falls_back_to_live_rear_and_explains_missing_matches(monkeypatch):
@@ -61,5 +62,22 @@ def test_return_never_falls_back_to_live_rear_and_explains_missing_matches(monke
         get_clock=lambda: SimpleNamespace(now=lambda: SimpleNamespace(nanoseconds=0)))
     viewer.Viewer.show(node)
     assert any('WAITING FOR VPR CHECK / SELECTED REFERENCE' in text for text in texts)
-    assert any('comparison appears only during a VPR check' in text for text in texts)
+    assert any('compare at each reverse-order checkpoint' in text for text in texts)
     assert not any(text.startswith('Rear live:') for text in texts)
+
+
+def test_reference_snapshot_uses_cached_points_and_only_publishes_on_change(monkeypatch):
+    from types import SimpleNamespace
+    from visual_landmark.visual_localization_node import VisualLocalizationNode
+    output = []
+    node = SimpleNamespace(debug_enabled=True,
+        reference_images={'L1': np.zeros((100,200), np.uint8)},
+        landmarks={'L1': ((np.array([[60.,60.]]), None, None, None), None)},
+        reference_pub=SimpleNamespace(publish=output.append),
+        get_clock=lambda: SimpleNamespace(now=lambda: SimpleNamespace(to_msg=lambda: __import__('builtin_interfaces.msg', fromlist=['Time']).Time())))
+    VisualLocalizationNode.publish_reference_snapshot(node, 'L1')
+    VisualLocalizationNode.publish_reference_snapshot(node, 'L1')
+    assert len(output) == 1
+    image = cv2.imdecode(np.frombuffer(output[0].data, np.uint8), cv2.IMREAD_COLOR)
+    assert image is not None
+    assert np.any(image[57:64,57:64])  # Cached reference keypoint is visible.

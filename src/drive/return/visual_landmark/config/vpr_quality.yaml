@@ -2,6 +2,11 @@
 # Sync slop remains 40ms until actual stamp skew is measured; try 20ms after logging.
 visual_landmark_node:
   ros__parameters:
+    enable_auto_keyframes: false
+    auto_keyframe_distance_m: 1.0
+    auto_keyframe_distance_only: true
+    auto_keyframe_time_only: true
+    auto_keyframe_max_interval_s: 2.0
     sift_nfeatures: 800
     sift_contrast_threshold: 0.06
     sift_edge_threshold: 8.0
@@ -52,3 +57,9 @@ vpr_viewer:
     preview_max_width: 480
     preview_max_features: 120
     pause_preview_during_check: true
+
+visual_check_scheduler_node:
+  ros__parameters:
+    enable_checkpoint_vpr: true
+    checkpoint_approach_m: 0.35
+    checkpoint_passed_m: 0.75

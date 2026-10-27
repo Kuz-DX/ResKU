@@ -147,7 +147,9 @@ def test_debug_pipeline_has_no_motion_or_state_publishers():
               and call.func.attr == 'create_publisher']
     assert set(topics) == {'/visual_landmark/correction', '/visual_landmark/localization_event',
                            '/visual_landmark/debug/matches/compressed',
-                           '/visual_landmark/debug/reference/compressed'}
+                           '/visual_landmark/debug/reference/compressed',
+                           '/visual_landmark/debug/current/compressed',
+                           '/visual_landmark/checkpoints', '/visual_landmark/checkpoint_markers'}
 
 
 def test_motion_at_commit_suppresses_validation(monkeypatch):

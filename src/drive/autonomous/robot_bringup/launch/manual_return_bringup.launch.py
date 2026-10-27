@@ -116,15 +116,21 @@ def generate_launch_description():
 
     # Optional visual layer parameters never alter the odometry/controller pipeline.
     return LaunchDescription([
-        DeclareLaunchArgument('enable_auto_keyframes', default_value='true'),
-        DeclareLaunchArgument('auto_keyframe_distance_m', default_value='1.25'),
+        # Manual landmark trial: retain auto implementation, but keep it off by default.
+        DeclareLaunchArgument('enable_auto_keyframes', default_value='false'),
+        DeclareLaunchArgument('auto_keyframe_distance_m', default_value='1.0'),
+        DeclareLaunchArgument('auto_keyframe_time_only', default_value='true'),
+        DeclareLaunchArgument('auto_keyframe_distance_only', default_value='true'),
         DeclareLaunchArgument('auto_keyframe_yaw_deg', default_value='12.0'),
-        DeclareLaunchArgument('auto_keyframe_max_interval_s', default_value='6.0'),
+        DeclareLaunchArgument('auto_keyframe_max_interval_s', default_value='2.0'),
         DeclareLaunchArgument('auto_keyframe_min_motion_for_timeout_m', default_value='0.5'),
         DeclareLaunchArgument('auto_keyframe_min_features', default_value='20'),
         DeclareLaunchArgument('auto_keyframe_blur_min', default_value='0.0'),
         DeclareLaunchArgument('auto_keyframe_retry_s', default_value='1.0'),
         DeclareLaunchArgument('enable_adaptive_visual_check', default_value='true'),
+        DeclareLaunchArgument('enable_checkpoint_vpr', default_value='true'),
+        DeclareLaunchArgument('checkpoint_approach_m', default_value='0.35'),
+        DeclareLaunchArgument('checkpoint_passed_m', default_value='0.75'),
         DeclareLaunchArgument('visual_check_distance_m', default_value='8.0'),
         DeclareLaunchArgument('max_visual_candidates', default_value='3'),
         DeclareLaunchArgument('visual_check_retry_cooldown_s', default_value='5.0'),
@@ -273,8 +279,11 @@ def generate_launch_description():
         Node(
             package='visual_landmark', executable='visual_check_scheduler_node',
             condition=IfCondition(LaunchConfiguration('enable_visual_localization')),
-            parameters=[{
+            parameters=[LaunchConfiguration('visual_quality_config'), {
                 'enable_adaptive_visual_check': ParameterValue(LaunchConfiguration('enable_adaptive_visual_check'), value_type=bool),
+                'enable_checkpoint_vpr': ParameterValue(LaunchConfiguration('enable_checkpoint_vpr'), value_type=bool),
+                'checkpoint_approach_m': ParameterValue(LaunchConfiguration('checkpoint_approach_m'), value_type=float),
+                'checkpoint_passed_m': ParameterValue(LaunchConfiguration('checkpoint_passed_m'), value_type=float),
                 'visual_check_distance_m': ParameterValue(LaunchConfiguration('visual_check_distance_m'), value_type=float),
                 'visual_check_retry_cooldown_s': ParameterValue(LaunchConfiguration('visual_check_retry_cooldown_s'), value_type=float),
                 'visual_check_timeout_s': ParameterValue(LaunchConfiguration('visual_check_timeout_s'), value_type=float),
@@ -318,6 +327,8 @@ def generate_launch_description():
             name='visual_landmark_node',
             parameters=[LaunchConfiguration('visual_quality_config'), {
                 'enable_auto_keyframes': ParameterValue(LaunchConfiguration('enable_auto_keyframes'), value_type=bool),
+                'auto_keyframe_time_only': ParameterValue(LaunchConfiguration('auto_keyframe_time_only'), value_type=bool),
+                'auto_keyframe_distance_only': ParameterValue(LaunchConfiguration('auto_keyframe_distance_only'), value_type=bool),
                 'auto_keyframe_distance_m': ParameterValue(LaunchConfiguration('auto_keyframe_distance_m'), value_type=float),
                 'auto_keyframe_yaw_deg': ParameterValue(LaunchConfiguration('auto_keyframe_yaw_deg'), value_type=float),
                 'auto_keyframe_max_interval_s': ParameterValue(LaunchConfiguration('auto_keyframe_max_interval_s'), value_type=float),

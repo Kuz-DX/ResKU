@@ -6,7 +6,7 @@ from return_navigation.se2 import Pose2D
 
 
 def test_keyframes_distance_heading_timeout_and_stationary():
-    auto = AutoKeyframes()
+    auto = AutoKeyframes(distance=1.25, interval=6., distance_only=False, time_only=False)
     assert auto.reason(0, 0, 0) == 'initial'
     auto.accept(0, 0, 0)
     assert auto.reason(1, 1.24, 0) is None
