@@ -119,8 +119,9 @@ then requests TCP_IK. Options back to drive requests HOLD. Collision/check/servi
 execution failure, cancel, command timeout, and fault do not automatically retry
 while focus stays on arm; inspect first, then toggle drive and back to arm.
 
-L2 (axis 2 below -0.5) reserves buttons 2/3/4 for physical 1/2/3, selecting
-path 0/1/2. While L2 is held, the TCP producer suppresses L1 and square HOME
+L2 (axis 2 below -0.5) plus triangle (`buttons[2]`), square (`buttons[3]`),
+or X (`buttons[0]`) selects tool path 0, 1, or 2 respectively. L2+L1 does not
+select a tool path. While L2 is held, the TCP producer suppresses L1 and square HOME
 handling so one combination cannot start both a path and TCP/HOME motion.
 Paths must contain reviewed captured points and have `execution_enabled: true`.
 Path 2 is enabled with five FK/IK-corrected points and `timing_mode: joint_limits`.

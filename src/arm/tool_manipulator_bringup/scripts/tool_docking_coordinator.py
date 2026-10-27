@@ -349,8 +349,10 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         self.stage = 'dock_advance_plan'
         self.report('advance_planning',
                     'tag confirmed at stopped tool-1 endpoint; planning fixed %.1f mm tag-normal advance; '
-                    'tag visibility no longer required; %s' %
+                    'normal=[%.4f, %.4f, %.4f] seed=%s; tag visibility no longer required; %s' %
                     (self.cfg['advance_distance_m']*1000.,
+                     *map(float, tag_normal),
+                     '['+', '.join(f'{value:.4f}' for value in q)+']',
                      'L2 remains required' if self.cfg.get('require_l2_hold', True)
                      else 'continuing automatic tool sequence'))
 
@@ -365,8 +367,11 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         target = self.advance_origin.copy()
         target[:3, 3] += ((self.advance_target[:3, 3]-self.advance_origin[:3, 3])
                          * index/self.advance_count)
-        solved = self.model.solve(target, self.advance_seed, self.margin,
-                                  max_iterations=100, max_time_s=.03)
+        try:
+            solved = self.model.solve(target, self.advance_seed, self.margin,
+                                      max_iterations=100, max_time_s=.03)
+        except ValueError as exc:
+            raise ValueError(f'advance IK point {index}/{self.advance_count}: {exc}') from exc
         delta = np.abs(solved-self.advance_seed)
         if (not self.model.within_limits(solved, self.margin)
                 or np.max(delta) > self.cfg['joint_step_rad']):

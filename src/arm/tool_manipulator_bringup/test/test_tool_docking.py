@@ -741,7 +741,8 @@ def test_l2_square_from_tcp_mode_keeps_docking_through_entry_plan_and_execution(
     n.paths = {1: load_path(ROOT/'config/tool1_trajectory.yaml', n.model)}
     n.settings = load_settings(ROOT/'config/tool_docking.yaml')
     n.active, n.stage, n.docking_started = False, 'idle', None
-    n.combos, n.l2_axis, n.l2_threshold, n.first_button = [False]*3, 2, -.5, 2
+    n.combos, n.l2_axis, n.l2_threshold, n.first_button, n.third_button = (
+        [False]*3, 2, -.5, 2, 0)
     n.requested_docked_state, n.use_nearest_entry = None, False
     measured = n.paths[1]['start'].copy()
     measured[0] += entry_offset

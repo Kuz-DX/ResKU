@@ -2,6 +2,7 @@
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
@@ -24,6 +25,15 @@ class KinematicsTest(unittest.TestCase):
         error = self.model.pose_error(recovered, target)
         self.assertLess(np.linalg.norm(error[:3]), 1.0e-5)
         self.assertLess(np.linalg.norm(error[3:]), 1.0e-4)
+
+    def test_ik_limit_error_names_candidate_and_allowed_range(self):
+        q = np.array([(lo+hi)/2 for lo, hi in self.model.limits.values()])
+        q[0] = self.model.limits['base_joint'][1] - .02
+        with patch.object(self.model, 'pose_error', return_value=np.array([1., 0, 0, 0, 0, 0])), \
+                patch.object(self.model, 'jacobian', return_value=np.eye(6)):
+            with self.assertRaisesRegex(ValueError,
+                                        r'base_joint candidate=.*allowed=\[.*\] rad'):
+                self.model.solve(np.eye(4), q, margin_rad=.01)
 
     def test_pose_path_waypoints_follow_cartesian_line(self):
         start = np.array([0.20, -0.30, 0.40, -0.25, 0.10, 0.20])

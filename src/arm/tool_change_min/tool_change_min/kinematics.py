@@ -240,7 +240,16 @@ class ArmKinematics:
                 delta *= 0.12 / norm
             candidate = q + delta
             if not self.within_limits(candidate, margin_rad):
-                raise ValueError("IK iteration would violate soft limits")
+                violations = [
+                    f'{name} candidate={value:.6f} allowed='
+                    f'[{self.limits[name][0]+margin_rad:.6f}, '
+                    f'{self.limits[name][1]-margin_rad:.6f}] rad'
+                    for name, value in zip(self.joint_names, candidate)
+                    if (not math.isfinite(value) or
+                        not self.limits[name][0]+margin_rad <= value <=
+                        self.limits[name][1]-margin_rad)]
+                raise ValueError('IK iteration would violate soft limits: '
+                                 + '; '.join(violations))
             q = candidate
         raise ValueError("IK did not converge")
 

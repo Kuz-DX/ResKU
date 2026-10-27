@@ -93,14 +93,17 @@ def reverse_path(path):
                 durations=list(reversed(path['durations'])), total=path['total'])
 
 
-def requested_path(axes, buttons, previous, l2_axis=2, threshold=-.5, first_button=2):
+def requested_path(axes, buttons, previous, l2_axis=2, threshold=-.5,
+                   first_button=2, third_button=0):
     """Return a new 0..2 path request, plus current combo edge state."""
-    valid = (len(axes) > l2_axis and len(buttons) > first_button+2
+    # Linux PlayStation mapping: triangle=2, square=3, X=0.
+    path_buttons = (first_button, first_button+1, third_button)
+    valid = (len(axes) > l2_axis and len(buttons) > max(path_buttons)
              and all(math.isfinite(v) for v in axes)
              and all(v in (0, 1) for v in buttons))
     current = [False]*3
     if valid and axes[l2_axis] < threshold:
-        current = [bool(buttons[first_button+i]) for i in range(3)]
+        current = [bool(buttons[index]) for index in path_buttons]
     edges = [i for i, held in enumerate(current) if held and not previous[i]]
     return (edges[0] if len(edges) == 1 else None), current
 
@@ -268,9 +271,9 @@ class ToolTrajectoryJoy(Node):
             'shoulder_isolation_speed_rad_s', .015))
         self.l2_axis = int(param('l2_axis', 2))
         self.l2_threshold = float(param('l2_pressed_below', -.5))
-        # This controller's physical button 1 is reported as ROS Joy button 2.
-        # Path 0 starts there; the parameter remains overridable per controller.
+        # Linux PlayStation: path 0=triangle (2), 1=square (3), 2=X (0).
         self.first_button = int(param('first_path_button', 2))
+        self.third_button = int(param('third_path_button', 0))
         if (not 0 < self.margin <= .1 or not 0 < self.start_tolerance <= self.max_start_delta <= .25
                 or not 0 < self.approach_speed <= .12
                 or not 0 < self.collision_step <= .01
@@ -281,7 +284,9 @@ class ToolTrajectoryJoy(Node):
                 or not 0 < self.planning_acceleration_scale <= 1.
                 or not 0 < self.shoulder_isolation_half_width <= .25
                 or not 0 < self.shoulder_isolation_speed <= .05
-                or self.l2_axis < 0 or self.first_button < 0):
+                or self.l2_axis < 0 or self.first_button < 0
+                or self.third_button < 0
+                or self.third_button in (self.first_button, self.first_button+1)):
             raise ValueError('invalid tool trajectory joystick parameters')
         self.paths = {}
         for path_id in range(3):
@@ -385,7 +390,7 @@ class ToolTrajectoryJoy(Node):
     def on_joy(self, msg):
         request, self.combos = requested_path(
             msg.axes, msg.buttons, self.combos, self.l2_axis,
-            self.l2_threshold, self.first_button)
+            self.l2_threshold, self.first_button, self.third_button)
         if request is None:
             return
         self.request_path(request)

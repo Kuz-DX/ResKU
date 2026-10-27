@@ -248,7 +248,7 @@ class TcpJoy(TcpMotionWorkflow, Node):
         valid = (len(msg.axes) >= 5 and len(msg.buttons) >= 6
                  and np.all(np.isfinite(msg.axes))
                  and all(b in (0, 1) for b in msg.buttons))
-        # L2 owns the path-selection buttons, including square and L1.
+        # L2 owns tool-path selection: triangle, square and X face buttons.
         # Quiesce TCP preparation before the path producer requests HOLD.
         if valid and msg.axes[2] < -.5:
             self.joy_time = time.monotonic()
