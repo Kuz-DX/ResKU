@@ -266,8 +266,35 @@ def test_tcp_ready_collision_failure_never_requests_motion():
     n.ready_checks[-1].result.return_value = SimpleNamespace(valid=False)
     TcpJoy.drive_ready(n, 1.1)
     assert not n.auto_entry_armed and n.ready_state == 'failed'
+    assert 'sample 1/' in n.reason
+    assert 'no contact pairs reported' in n.reason
     n.tool_mode.call_async.assert_not_called()
     n.tool_pub.publish.assert_not_called()
+
+
+def test_tcp_ready_collision_failure_reports_contact_pair():
+    n = ready_node()
+    TcpJoy.drive_ready(n, 1.)
+    n.ready_checks[-1].done.return_value = True
+    n.ready_checks[-1].result.return_value = SimpleNamespace(
+        valid=False, contacts=[SimpleNamespace(
+            contact_body_1='wrist_link', contact_body_2='chassis_link')])
+    TcpJoy.drive_ready(n, 1.1)
+    assert 'chassis_link <-> wrist_link' in n.reason
+    assert n.ready_state == 'failed'
+    n.tool_mode.call_async.assert_not_called()
+
+
+def test_tcp_ready_delta_failure_names_limiting_joint():
+    n = ready_node()
+    n.measured[1] = 1.626
+    n.full_state['shoulder_joint'] = 1.626
+    n.ready_max_delta = .35
+    TcpJoy.drive_ready(n, 1.)
+    assert n.ready_state == 'failed'
+    assert 'shoulder_joint 0.426 rad exceeds 0.350 rad' in n.reason
+    n.check.call_async.assert_not_called()
+    n.tool_mode.call_async.assert_not_called()
 
 
 def test_tcp_ready_waits_for_one_response_and_times_out_without_motion():

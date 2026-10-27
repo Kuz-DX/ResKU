@@ -116,16 +116,18 @@ then requests TCP_IK. Options back to drive requests HOLD. Collision/check/servi
 execution failure, cancel, command timeout, and fault do not automatically retry
 while focus stays on arm; inspect first, then toggle drive and back to arm.
 
-Sony joystick mapping (axes 1, 0, 4; buttons 4, 5):
+Sony joystick mapping for this launch (ROS Joy indices in parentheses):
 
-| Input while holding L1 | Translation | With R1 held |
+| Input while holding L1 (button 4) | Without R1 | With R1 (button 5) |
 | --- | --- | --- |
-| Left stick up/down | +X / -X | +Roll / -Roll |
-| Left stick left/right | +Y / -Y | +Pitch / -Pitch |
-| Right stick up/down | +Z / -Z | +Yaw / -Yaw |
+| Left stick up/down (axis 1) | TCP +X / -X | No motion |
+| Left stick left/right (axis 0) | TCP +Y / -Y | Wrist roll joint + / - |
+| Right stick up/down (axis 4) | TCP +Z / -Z | No motion |
+| Right stick left/right (axis 3) | No motion | Wrist yaw joint + / - |
 
 Translation axes are expressed in `base_actuator`, with `tcp_link` as the controlled
-point. Rotation increments are about the target TCP local axes. Release L1 once after entering
+point. R1 switches to direct wrist roll/yaw joint jogs; it does not command TCP
+rotation or wrist pitch. Release L1 once after entering
 the mode, then hold it to move. Releasing an engaged L1 zeros increments, discards
 pending checks and requests epoch-bound measured-position HOLD. Joy timeout
 (0.25 s) or malformed input does the same. The manager replaces outstanding
@@ -209,7 +211,9 @@ python3 -m pytest -q ~/ResKU/src/arm/tool_manipulator_bringup/test/test_arm_mode
 TCP_IK now requires a fresh collision-checked, stationary current pose with at
 least 0.10 rad joint margin and scaled condition <=20. Requests without a valid
 assessment remain HOLD and report a reason; this also applies to Options focus
-activation. No tcp_ready movement is automatic. Candidate comparisons, limitations
+activation. An explicit drive-to-arm focus edge may arm one collision-checked
+tcp_ready move if the current pose fails the entry margin or condition check;
+execution waits for L1. Candidate comparisons, limitations
 and the assessment protocol are documented in [tcp_ready.md](tcp_ready.md).
 
 ## Timed tool paths

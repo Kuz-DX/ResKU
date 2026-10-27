@@ -66,14 +66,18 @@ class TcpMotionWorkflow:
             if not self.check.service_is_ready():
                 self.reason = 'waiting for MoveIt collision service before TCP ready'
                 return
-            delta = float(np.max(np.abs(self.ready_goal-self.measured)))
+            differences = np.abs(self.ready_goal-self.measured)
+            limiting_joint = int(np.argmax(differences))
+            delta = float(differences[limiting_joint])
             limit = (self.home_max_delta if vars(self).get('returning_home', False)
                      else self.ready_max_delta)
             if delta > limit:
                 self._fail_ready(
-                    '%s move blocked: %.3f rad exceeds %.3f rad limit' %
+                    '%s move blocked: %s %.3f rad exceeds %.3f rad limit '
+                    '(measured %.3f, goal %.3f rad)' %
                     ('manual Stop_pose' if vars(self).get('returning_home', False)
-                     else 'TCP ready automatic', delta, limit))
+                     else 'TCP ready automatic', ARM_JOINTS[limiting_joint], delta, limit,
+                     self.measured[limiting_joint], self.ready_goal[limiting_joint]))
                 return
             count = max(1, math.ceil(float(np.max(np.abs(self.ready_goal-self.measured))) /
                                      self.ready_step))
@@ -112,9 +116,18 @@ class TcpMotionWorkflow:
                 return
             if not all(f.done() for f in self.ready_checks):
                 return
-            if any(f.result() is None or not f.result().valid for f in self.ready_checks):
-                self._fail_ready('TCP ready path collision/state invalid; remain HOLD')
-                return
+            for index, future in enumerate(self.ready_checks):
+                response = future.result()
+                if response is None or not response.valid:
+                    contacts = sorted({
+                        ' <-> '.join(sorted((contact.contact_body_1, contact.contact_body_2)))
+                        for contact in getattr(response, 'contacts', [])})
+                    detail = (': '+', '.join(contacts[:6]) if contacts else
+                              '; no contact pairs reported (check joint bounds/scene)')
+                    self._fail_ready(
+                        'TCP ready path collision/state invalid at sample %d/%d%s; remain HOLD' %
+                        (index+1, len(self.ready_requests), detail))
+                    return
             if len(self.ready_checks) < len(self.ready_requests):
                 self.reason = 'checking path to TCP ready (%d/%d complete)' % (
                     len(self.ready_checks), len(self.ready_requests))
