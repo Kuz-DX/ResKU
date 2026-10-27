@@ -1,0 +1,19 @@
+# VPR LOCK-only TRIAL. Not a calibrated RGB optical transform.
+# User confirmed 2026-10-27: back-face centre, front-facing, level, body axes aligned.
+status: provisional_unverified
+parent_frame: base_link
+child_frame: arm_camera_cam_link
+camera_model: D435i
+serial_no: '_339222071362'
+measurement_reference: housing_back_face_center_user_reported_behind_lens
+housing_back_translation_m: {x: 0.152853, y: 0.0, z: 0.650674}
+# D435i official description reuses sensor_d435. Nominal body dimensions:
+# back -> front plate 25.05mm, glass recessed 0.1mm, depth zero 4.2mm behind glass.
+# 25.05 - 0.1 - 4.2 = 20.75mm. No tripod-mount offset is added.
+# y/z back-to-root are kept zero by the user's datum policy, not CAD-verified.
+back_to_root_translation_m: {x: 0.02075, y: 0.0, z: 0.0}
+rotation_rpy_rad: {roll: 0.0, pitch: 0.0, yaw: 0.0}
+rotation_basis: user_confirmed_front_facing_level_body_axes_aligned_trial_only
+lateral_policy: preserve_user_y_zero_no_inferred_sensor_lateral_offset
+geometry_source: https://github.com/realsenseai/realsense-ros/blob/7a87097c499e3b0b69518d54a8e7a9ac1924e87c/realsense2_description/urdf/_d435.urdf.xacro
+model_source: https://github.com/realsenseai/realsense-ros/blob/7a87097c499e3b0b69518d54a8e7a9ac1924e87c/realsense2_description/urdf/_d435i.urdf.xacro

@@ -1,4 +1,8 @@
-# 장착 카메라 관찰 시험 준비 (2026-10-26)
+# 장착 카메라 관찰 시험 준비
+
+**2026-10-27 현재 실기는 D435i이며 아래 D455 예정 기록은 과거 상태다.**
+실차 LOCK-only 전방 TF는 [FRONT_D435I_LOCK_TF.md](FRONT_D435I_LOCK_TF.md)를 우선한다.
+팔 전체 URDF 없이 전방 root만 차량에 연결하며, 기존 arm TF와 중복 발행하지 않는다.
 
 전체 구동 명령 모음: [VPR_RUN_COMMANDS.md](VPR_RUN_COMMANDS.md) (로봇/노트북별 터미널, Manual→Auto 시험, 기록·종료).
 
@@ -31,10 +35,11 @@ ros2 launch vision vpr_observation.launch.py
 VPR correction은 false, slip early trigger는 false로 설정된다.
 원점/기록 상태/TF/return progress가 없으면 VPR은 실제 작업을 시작하지 않는다.
 
-전방은 D455로 교체 예정. 전방 D455가 **이 PC에 실제 연결돼 있고** realsense2_camera가 설치돼 있다면:
+전방 실기는 D435i다. 아래 결합 launch를 사용하는 경우에도 장치당 driver는 하나만 실행한다.
+로봇 PC에 driver가 이미 실행 중이면 start_arm=false를 유지한다:
 
 ```bash
-ros2 launch vision vpr_observation.launch.py start_arm:=true arm_serial_no:=_ACTUAL_D455_SERIAL
+ros2 launch vision vpr_observation.launch.py start_arm:=true arm_serial_no:=_339222071362
 ```
 
 전방 driver가 로봇 PC에 이미 실행돼 있으면 start_arm=false를 유지한다.
@@ -63,17 +68,16 @@ preflight는 5개 입력(후방 RGB/CameraInfo, 전방 RGB/CameraInfo/aligned de
 TF 존재는 실제 장착 치수의 정확성·단일 발행자·LOCK 정확성을 증명하지 않는다.
 correction_enabled=null은 현재 실행 노드의 설정을 이 도구가 검사하지 않았다는 뜻이다.
 
-전방 설정은 `vpr_front_d455.yaml`을 사용하며 color/depth와 align_depth를 활성화한다.
-기존 주행용 D455 설정은 depth/align이 꺼져 있으므로 VPR 설정으로 그대로 쓰지 않는다.
-전방 교체 후 D455 자체 color CameraInfo를 쓰고 기존 D435i K/D·시리얼·LOCK TF를 재사용하지 않는다.
+전방 설정은 기존 `arm_d435i.yaml`을 사용하며 color/depth와 align_depth를 활성화한다.
+D435i 자체 color CameraInfo와 runtime 내부 TF를 사용한다. 차량→root는 새 LOCK-only launch가 담당한다.
 `rear_image_intrinsic_ready`는 후방 영상/내부 보정 연결만의 결과이며 전체 VPR 준비 상태와 다르다.
 
 ## 아직 반드시 필요한 실제 측정/확인
 
-1. 전방 D455 연결 PC와 실제 실행 driver/토픽/frame 확인.
+1. 전방 D435i의 실제 실행 driver/토픽/frame을 변경 후 재확인.
 2. 두 카메라 뒷면의 정확한 측정점과 그 점→RGB optical 원점까지의 오프셋 확보.
 3. 장착 roll/pitch/yaw와 전방 측정 당시 LOCK 관절 자세 확보.
-4. 차체/팔 base_link 충돌 해결 및 실제 통합 TF 트리의 단일 발행자 확인.
+4. LOCK-only에서는 팔 TF를 별도 `/arm_model/tf*`로 분리하고 차량 TF의 단일 발행자를 확인.
 5. 검증된 optical TF를 기존 URDF/broadcaster에 반영하고 LOCK 4×4 기준 파일 저장.
 6. 새 mission에서 자동 기록 → 보정 OFF로 VPR 검증 → known-offset 시험.
 
@@ -144,7 +148,7 @@ RealSense driver가 있으면 먼저 종료하거나 start_rear/start_arm을 fal
 ```bash
 ros2 launch vision vpr_observation.launch.py \
   rear_launch:=rear_vpr_trial.launch.py \
-  start_arm:=true arm_serial_no:=_ACTUAL_D455_SERIAL \
+  start_arm:=true arm_serial_no:=_339222071362 \
   start_visual_nodes:=false start_viewer:=true
 ```
 

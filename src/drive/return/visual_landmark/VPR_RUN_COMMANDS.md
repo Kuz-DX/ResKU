@@ -66,7 +66,7 @@ sudo ip link set can_arm up
 로봇 PC의 별도 터미널에서:
 
 ```bash
-ros2 launch tool_manipulator_bringup ik_manual.launch.py \
+ros2 launch vision vpr_lock_arm_control.launch.py \
   real_hardware:=true launch_joy:=false
 ```
 
@@ -84,30 +84,31 @@ ros2 launch tool_manipulator_bringup remote_joy.launch.py
 기존 팔 조작 방식으로 전방 카메라를 LOCK 자세에 놓고 그 자세를 유지한 뒤
 Record/복귀 시험을 시작한다. launch 자체가 특정 LOCK 자세로 자동 이동한다는 뜻은 아니다.
 이 `/joy`를 주행도 공유하므로 아래 주행 launch의 joy_node는 반드시 끈다.
-팔 제어 실행 후에도 차체→팔 장착 TF가 올바른지는 5번 preflight로 별도 확인한다.
+이 wrapper는 팔 모델 TF를 `/arm_model/tf*`로 분리한다. 차량 TF와 팔 모델의 동명 base_link를 섞지 않는다.
+전방 VPR TF는 다음 절의 별도 LOCK static publisher가 담당한다.
 
 ## 2. 로봇 PC 터미널 A: 전후방 카메라
 
-D455 시리얼을 실제 값으로 바꾼다. 밑줄 접두사를 유지한다.
-다른 launch의 같은 카메라 driver는 먼저 종료한다.
+실제 전방은 D435i serial 339222071362이다. 아래는 **각각 별도 터미널**에서 실행하고 유지한다.
+같은 장치의 기존 driver/TF publisher와 중복 실행하지 않는다.
 
 ```bash
-ros2 launch vision vpr_observation.launch.py \
-  rear_launch:=rear_vpr_trial.launch.py \
-  start_arm:=true arm_serial_no:=_ACTUAL_D455_SERIAL \
-  start_visual_nodes:=false start_viewer:=false
+ros2 launch vision arm_camera.launch.py serial_no:=_339222071362
 ```
 
-후방 장치 경로가 다르면 `device:=/dev/v4l/by-id/실제장치`를 추가한다.
-이 명령은 전방 color+aligned depth, 후방 영상+시험 intrinsic+초기 optical TF를
-시작한다. 주행/VPR 노드는 3번에서 시작하므로 start_visual_nodes=false를 유지한다.
-후방 TF는 27mm/약 3도 하향/roll=0의 근사다.
+```bash
+ros2 launch vision rear_vpr_trial.launch.py
+```
 
-**별도 필수 입력:** 실제 차체→팔 장착→관절→전방 color optical TF와 joint_states.
-전방 RealSense driver는 카메라 내부 TF만 제공한다. 기존 검증된 팔 bringup을
-실행하고 팔을 LOCK 자세에 둔다. 차체/팔 base_link 이름 충돌을 해결한 실제
-장착 TF 실행 명령은 아직 이 저장소에서 확정되지 않았으므로 임의 0 TF로 대체하지 않는다.
-이 연결이 없다면 5번 검사가 실패하며 전후방 VPR 위치 추정은 실행할 수 없다.
+```bash
+ros2 launch vision front_d435i_vpr_tf.launch.py
+```
+
+마지막 명령은 사용자 확인 LOCK 자세에서만 유효한 시험용 `base_link -> arm_camera_cam_link`이다.
+위치 (0.173603, 0, 0.650674)m, RPY=(0,0,0), y에 임의 가로 보정은 더하지 않는다.
+RGB optical 내부 TF는 driver가 담당한다. 팔 전체 URDF TF는 차량 `/tf*`에 발행하지 않는다.
+팔 제어가 필요하면 1번 wrapper만 사용하며, 팔이 움직이면 VPR을 중단한다.
+측정 기준·불확실성·명령 전체: [FRONT_D435I_LOCK_TF.md](FRONT_D435I_LOCK_TF.md).
 
 ## 3. 로봇 PC 터미널 B: Back-to-Base + VPR
 
@@ -135,7 +136,7 @@ ros2 launch robot_bringup manual_return_bringup.launch.py \
 ### 실제 VPR 보정 ON 시험
 
 관찰 결과·실제 이동량·TF/LOCK을 확인한 뒤 위 명령의 마지막 줄을 다음으로
-바꿔 재시작한다. 파일 경로는 측정된 D455 LOCK 4×4 행렬 YAML이어야 한다.
+바꿔 재시작한다. 파일 경로는 측정된 D435i LOCK 4×4 행렬 YAML이어야 한다.
 
 ```bash
   visual_apply_correction:=true enable_landmark_recovery:=false \

@@ -23,13 +23,13 @@ def generate_launch_description():
         debug_matches='false', check_on_auto_resume='false',
         start_rear='true', start_arm='false', start_visual_nodes='true',
         camera_info_url='package://vision/config/camera/calibration/apc850_rear_preview_trial_1280x720.yaml',
-        arm_config=str(share/'config/camera/vpr_front_d455.yaml'),
+        arm_config=str(share/'config/camera/arm_d435i.yaml'),
         arm_serial_no='',
         expected_lock_pose_file='')
     declarations = [DeclareLaunchArgument(k, default_value=v) for k, v in defaults.items()]
     def validate_front(context):
         if arg('start_arm').perform(context).lower() == 'true' and not arg('arm_serial_no').perform(context).strip():
-            raise ValueError('Actual front D455 arm_serial_no required when start_arm=true')
+            raise ValueError('Actual front D435i arm_serial_no required when start_arm=true')
         return []
 
     nodes = [OpaqueFunction(function=validate_front),

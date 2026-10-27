@@ -1,3 +1,10 @@
+> 2026-10-27 VPR 카메라 TF: 전방은 **D435i / LOCK-only** 구성이다.
+> 팔 제어는 `ros2 launch vision vpr_lock_arm_control.launch.py`로 TF를 분리하고,
+> `ros2 launch vision front_d435i_vpr_tf.launch.py`를 별도로 실행한다.
+> 기존 `ik_manual.launch.py`를 동시에 실행하지 않는다.
+> 기구 근거·명령·검증은 [전방 LOCK TF 절차](src/drive/return/visual_landmark/FRONT_D435I_LOCK_TF.md)를 따른다.
+> `visual_apply_correction=false`, `enable_landmark_recovery=false`를 유지한다.
+
 # Manual + Return 미션 실행 명령어
 
 manual 주행 중 경로를 기록하고, RETURN 트리거 후 자동으로 출발지까지

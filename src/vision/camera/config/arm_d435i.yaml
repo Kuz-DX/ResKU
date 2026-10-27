@@ -6,8 +6,8 @@
     initial_reset: false
 
     # The driver publishes arm_camera_cam_link as its depth/base origin.
-    # tool_manipulator.urdf.xacro connects the physical mounting-centre
-    # cam_link to that driver root with the D435 nominal mechanical offset.
+    # LOCK-only vehicle VPR: front_d435i_vpr_tf.launch.py owns base_link -> root.
+    # Full articulated arm use: URDF owns the root. Never run both owners.
     base_frame_id: "cam_link"
     publish_tf: true
 

@@ -22,10 +22,16 @@ rear_apc850:
     status: approximate_lens_surface_not_verified_optical_origin
   optical_translation_m: {x: null, y: null, z: null}
 front_d435i_lock:
+  housing_reference_point: back_face_center_user_reported_behind_lens
+  active_camera_confirmed_20261027: true
+  trial_tf_config: front_d435i_vpr_lock_tf.yaml
+  trial_tf_status: provisional_unverified
+  alignment_confirmed_20261027: front_facing_level_body_axes_aligned
   translation_m: {x: 0.152853, y: 0.0, z: 0.650674}
   rotation_rpy_rad: {roll: null, pitch: null, yaw: null}
   optical_translation_m: {x: null, y: null, z: null}
 
+# Historical replacement plan, superseded by actual D435i confirmation 2026-10-27.
 # Front replacement planned 2026-10-26. Old housing/LOCK measurements are not a D455 extrinsic.
 front_d455_planned:
   translation_m: {x: null, y: null, z: null}
