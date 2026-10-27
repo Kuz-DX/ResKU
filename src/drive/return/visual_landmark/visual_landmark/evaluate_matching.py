@@ -58,7 +58,7 @@ def main():
             current_features = prepared(current, ck, current_d, variant, current=True)
             diagnostics = dict(pair=index, variant=variant)
             result = match((rp, descriptors, rk, distortion if variant == 'A' else np.zeros_like(distortion)),
-                           current_features, depth, ck, current_d, diagnostics=diagnostics)
+                           current_features, depth, ck, current_d, diagnostics=diagnostics, reference_shape=reference.shape)
             if result is not None:
                 diagnostics['reference_from_current'] = result[0].tolist()
                 if 'repeat_group' in pair:

@@ -60,7 +60,8 @@ def test_rgbd_matching_recovers_metric_tilt_and_rejects_invalid_depth():
     for i, (u, v) in enumerate(cp):
         x, y = np.round([u, v]).astype(int)
         if 3 <= x < 637 and 3 <= y < 477 and not np.any(depth[y-3:y+4, x-3:x+4]):
-            depth[y-1:y+2, x-1:x+2] = xyz[i, 2]
+            # Supply the configured 5x5 stable depth support.
+            depth[y-2:y+3, x-2:x+3] = xyz[i, 2]
             keep.append(i)
     rng = np.random.default_rng(1)
     descriptors = rng.normal(size=(len(keep), 128)).astype(np.float32)

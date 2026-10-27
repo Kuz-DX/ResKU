@@ -99,7 +99,7 @@ def capture(monkeypatch):
          odometer=NS(s=0.), get_parameter=lambda k:NS(value=values[k]),
          _event=lambda kind,**kw:events.append((kind,kw)))
     n._save_landmark=lambda img:saved.append(img) or dict(localization_ready=True,extrinsic_ok=True,dir='/tmp',yaw=0.)
-    monkeypatch.setattr(module,'features',lambda im:(np.zeros((30,2),np.float32),np.zeros((30,128),np.float32)))
+    monkeypatch.setattr(module,'features',lambda im, *args, **kwargs:(np.zeros((30,2),np.float32),np.zeros((30,128),np.float32)))
     monkeypatch.setattr(module.np,'savez_compressed',lambda *a,**kw:None)
     return n,msg,events,saved
 
@@ -122,7 +122,7 @@ def test_bad_auto_frame_never_becomes_reference(monkeypatch,bad):
     if bad=='camera_info': n._camera_info=None
     if bad=='return': n._state='RETURN_MANUAL'
     if bad=='features':
-        monkeypatch.setattr('visual_landmark.visual_landmark_node.features',lambda im:(np.zeros((2,2)),None))
+        monkeypatch.setattr('visual_landmark.visual_landmark_node.features',lambda im, *args, **kwargs:(np.zeros((2,2)),None))
     if bad=='tf': n._save_landmark=lambda img:dict(localization_ready=False,extrinsic_ok=False)
     Capture._try_auto(n,msg,10.)
     assert not any(event=='captured' for event,_ in events)

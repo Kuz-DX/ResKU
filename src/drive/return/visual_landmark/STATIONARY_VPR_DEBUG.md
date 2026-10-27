@@ -219,7 +219,7 @@ source install/setup.bash
 `vpr_viewer`는 전후방 영상에 **실제 SIFT keypoint를 청록색으로 상시 표시**한다.
 Record/Return/검사 요청과 무관하며, 검출점은 매칭 성공·PnP inlier·보정 결과가 아니다.
 SIFT 원/방향 표시와 개수를 보여준다. 생산 VPR의 원본 해상도 특징과 동일한 집합을
-보장하지 않는다(뷰어는 최대 폭 640, 약 400개, 기본 5Hz로 부하를 제한).
+보장하지 않는다(뷰어는 최대 폭 480, 최대 120개, 기본 2Hz로 부하를 제한).
 
 ```bash
 ros2 run visual_landmark vpr_viewer
@@ -244,3 +244,5 @@ Matches는 생산 localizer의 debug image를 그대로 표시하며 VPR 검사�
 `automatic_rejected: stale automatic odometry`는 참조 촬영 실패다. /odometry/filtered 수신과
 영상-odom source stamp skew, 두 PC 시계를 확인하고 해결한 뒤 새 mission에서 기록한다.
 이 거부를 우회하려고 freshness gate를 완화하지 않는다.
+
+생산 품질 gate·단일 UI 실제 metrics·preview check 중 pause: [VPR_QUALITY_UI.md](VPR_QUALITY_UI.md).

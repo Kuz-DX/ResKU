@@ -1,0 +1,54 @@
+# Initial engineering values; field tuning required. Restart nodes after changes.
+# Sync slop remains 40ms until actual stamp skew is measured; try 20ms after logging.
+visual_landmark_node:
+  ros__parameters:
+    sift_nfeatures: 800
+    sift_contrast_threshold: 0.06
+    sift_edge_threshold: 8.0
+    feature_grid_rows: 4
+    feature_grid_cols: 6
+    feature_grid_max_per_cell: 20
+    feature_max_total: 480
+visual_localization_node:
+  ros__parameters:
+    sift_nfeatures: 800
+    sift_contrast_threshold: 0.06
+    sift_edge_threshold: 8.0
+    feature_grid_rows: 4
+    feature_grid_cols: 6
+    feature_grid_max_per_cell: 20
+    feature_max_total: 480
+    match.min_inliers: 30
+    match.min_inlier_ratio: 0.6
+    match.ratio_test: 0.65
+    match.ransac_px: 2.5
+    match.max_rmse_px: 2.0
+    match.min_depth_m: 0.25
+    match.max_depth_m: 8.0
+    match.depth_edge_ratio: 0.05
+    match.depth_patch_radius: 2
+    match.geometric_filter: true
+    match.geometric_ransac_px: 1.5
+    match.geometric_min_ratio: 0.5
+    match.inlier_grid_rows: 4
+    match.inlier_grid_cols: 6
+    match.min_inlier_grid_cells: 8
+    match.min_inlier_image_coverage: 0.08
+    pose_prior.enabled: true
+    pose_prior.max_translation_m: 0.5
+    pose_prior.max_yaw_deg: 12.0
+    pose_prior.max_roll_deg: 5.0
+    pose_prior.max_pitch_deg: 5.0
+    agreement_translation_m: 0.15
+    agreement_yaw_rad: 0.05
+    sync_queue_size: 2
+    sync_slop_s: 0.04
+    debug_max_lines: 60
+    apply_correction: false
+vpr_viewer:
+  ros__parameters:
+    live_features: true
+    preview_rate_hz: 2.0
+    preview_max_width: 480
+    preview_max_features: 120
+    pause_preview_during_check: true

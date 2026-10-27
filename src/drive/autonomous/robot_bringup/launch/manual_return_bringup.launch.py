@@ -194,6 +194,8 @@ def generate_launch_description():
         DeclareLaunchArgument('enable_visual_localization', default_value='true'),
         DeclareLaunchArgument('enable_landmark_recovery', default_value='false'),
         DeclareLaunchArgument('visual_apply_correction', default_value='false'),
+        DeclareLaunchArgument('visual_quality_config', default_value=os.path.join(
+            get_package_share_directory('visual_landmark'), 'config', 'vpr_quality.yaml')),
         DeclareLaunchArgument('visual_lock_pose_guard', default_value='true'),
         DeclareLaunchArgument('visual_expected_lock_pose_file', default_value=''),
         DeclareLaunchArgument('resume_max_path_distance_m', default_value='3.0'),
@@ -290,7 +292,7 @@ def generate_launch_description():
         Node(
             package='visual_landmark', executable='visual_localization_node',
             condition=IfCondition(LaunchConfiguration('enable_visual_localization')),
-            parameters=[{
+            parameters=[LaunchConfiguration('visual_quality_config'), {
                 'enable_adaptive_visual_check': ParameterValue(LaunchConfiguration('enable_adaptive_visual_check'), value_type=bool),
                 'max_visual_candidates': ParameterValue(LaunchConfiguration('max_visual_candidates'), value_type=int),
                 'visual_check_timeout_s': ParameterValue(LaunchConfiguration('visual_check_timeout_s'), value_type=float),
@@ -314,7 +316,7 @@ def generate_launch_description():
             package='visual_landmark',
             executable='visual_landmark_node',
             name='visual_landmark_node',
-            parameters=[{
+            parameters=[LaunchConfiguration('visual_quality_config'), {
                 'enable_auto_keyframes': ParameterValue(LaunchConfiguration('enable_auto_keyframes'), value_type=bool),
                 'auto_keyframe_distance_m': ParameterValue(LaunchConfiguration('auto_keyframe_distance_m'), value_type=float),
                 'auto_keyframe_yaw_deg': ParameterValue(LaunchConfiguration('auto_keyframe_yaw_deg'), value_type=float),

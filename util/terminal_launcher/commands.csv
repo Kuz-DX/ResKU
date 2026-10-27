@@ -5,27 +5,8 @@ Side_CAM,"python3 ~/ResKU/util/terminal_launcher/remote_shell.py --setup 'cd ~/R
 ROS_Bridge,python3 ~/ResKU/util/terminal_launcher/remote_shell.py --setup 'cd ~/ResKU && sr && si' --command 'ros2 launch rosbridge_server rosbridge_websocket_launch.xml'
 Person_Detect,python3 ~/ResKU/util/terminal_launcher/remote_shell.py --setup 'cd ~/ResKU && sr && si' --command 'ros2 launch vision person_detection.launch.py'
 Supply_BOX,python3 ~/ResKU/util/terminal_launcher/remote_shell.py --setup 'cd ~/ResKU && sr && si' --command 'ros2 launch vision supply.launch.py'
-JOY_NODE,c[ROS2 humble] jecs@jecs-Default-string:~/ResKU$ ros2 launch robot_bringup manual_return_bringup.launch.py \
-  can_interface:=can_drive \
-  imu_port:=/dev/ttyACM0 \
-  reverse_return:=false \
-  enable_auto_keyframes:=true \
-  enable_visual_localization:=true \
-  enable_adaptive_visual_check:=true \
-  visual_check_on_return_start:=false \
-  visual_check_on_auto_resume:=false \
-  enable_stationary_vpr_debug:=true^C
-[ROS2 humble] jecs@jecs-Default-string:~/ResKU$ ros2 launch robot_bringup manual_return_bringup.launch.py \
-  can_interface:=can_drive \
-  imu_port:=/dev/ttyACM0 \
-  reverse_return:=false \
-  enable_auto_keyframes:=true \
-  enable_visual_localization:=true \
-  enable_adaptive_visual_check:=true \
-  visual_check_on_return_start:=false \
-  visual_check_on_auto_resume:=false \
-  enable_stationary_vpr_debug:=true
- ~/ResKU && sr && si && cd ~/DolbotZ-Center/deploy && sudo docker compose up -d && python3 -m http.server 8080
+JOY_NODE,cd ~/ResKU && sr && si && ros2 launch manual_joy_control manual_control.launch.py
+UI_Server,cd ~/ResKU && sr && si && cd ~/DolbotZ-Center/deploy && sudo docker compose up -d && python3 -m http.server 8080
 Drive_MTX,cd ~/ResKU && sr && si && python3 ~/ResKU/util/ros_compressed_to_rtsp.py --ros-args -r __node:=drive_camera_rtsp_bridge -p image_topic:=/drive/camera/color/image_raw/compressed -p rtsp_url:=rtsp://127.0.0.1:8554/main -p fps:=15 -p bitrate_kbps:=1500 -p keyframe_interval:=15
 Arm_MTX,cd ~/ResKU && sr && si && python3 ~/ResKU/util/ros_compressed_to_rtsp.py --ros-args -r __node:=arm_camera_rtsp_bridge -p image_topic:=/arm/camera/color/image_raw/compressed -p rtsp_url:=rtsp://127.0.0.1:8554/arm -p fps:=15 -p bitrate_kbps:=1500 -p keyframe_interval:=15
 Left_MTX,cd ~/ResKU && sr && si && python3 ~/ResKU/util/ros_compressed_to_rtsp.py --ros-args -r __node:=left_camera_rtsp_bridge -p image_topic:=/side/left/image_raw/compressed -p rtsp_url:=rtsp://127.0.0.1:8554/sub1 -p fps:=15 -p bitrate_kbps:=1500 -p keyframe_interval:=15

@@ -1,5 +1,10 @@
 # Adaptive Visual Correction
 
+2026-10-27 품질/UI 후속 변경: [VPR_QUALITY_UI.md](VPR_QUALITY_UI.md)를 우선한다.
+SIFT/grid/F-RANSAC/depth/PnP coverage/prior/latest-slot 및 단일 Dashboard를 추가했다.
+아래 기존 pipeline/초기값 기록 중 해당 항목은 새 문서의 before/after 표로 대체한다.
+
+
 Route-constrained Visual Landmark Matching adds an optional visual layer to the
 existing wheel vx + myAHRS gyro wz → reduced_odom → /odometry/filtered pipeline.
 Corner-aware Pure Pursuit, the estimator, mission state machine and raw odometry

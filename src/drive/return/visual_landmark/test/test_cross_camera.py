@@ -36,7 +36,8 @@ def test_different_intrinsics_resolution_and_nonzero_distortion():
     for i, (u, v) in enumerate(cp):
         x, y = np.round([u, v]).astype(int)
         if 3 < x < 636 and 3 < y < 476 and not np.any(depth[y-3:y+4, x-3:x+4]):
-            depth[y-1:y+2, x-1:x+2] = xyz[i, 2]
+            # Supply the configured 5x5 stable depth support.
+            depth[y-2:y+3, x-2:x+3] = xyz[i, 2]
             keep.append(i)
     desc = np.random.default_rng(3).normal(size=(len(keep), 128)).astype(np.float32)
     debug = {}
@@ -309,6 +310,7 @@ def test_adaptive_primary_matches_at_most_three_of_100(monkeypatch):
 def test_ambiguous_candidates_never_publish(monkeypatch):
     node, output, events, pair = live_fixture(monkeypatch, apply=True)
     node.landmarks['L2']=node.landmarks['L1']
+    node.reference_meta['L2']=node.reference_meta['L1']
     node.cached_arcs['L2']=.1
     pair(); pair()
     assert not output and events[-1]['event']=='rejected'

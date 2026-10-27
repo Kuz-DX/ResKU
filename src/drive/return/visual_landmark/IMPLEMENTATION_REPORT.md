@@ -1,5 +1,10 @@
 # Adaptive Visual Correction 구현 보고
 
+2026-10-27 품질/UI 후속 변경: [VPR_QUALITY_UI.md](VPR_QUALITY_UI.md)를 우선한다.
+SIFT/grid/F-RANSAC/depth/PnP coverage/prior/latest-slot 및 단일 Dashboard를 추가했다.
+아래 기존 pipeline/초기값 기록 중 해당 항목은 새 문서의 before/after 표로 대체한다.
+
+
 작업 기준: 로컬 main. commit/push 없음. 기존 카메라 장착 좌표·optical 기준 정정 작업을 보존했다.
 
 1. **기존 구현 재사용**

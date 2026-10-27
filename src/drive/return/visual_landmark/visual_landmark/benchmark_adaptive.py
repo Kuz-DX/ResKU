@@ -32,7 +32,7 @@ def main():
         attempts = []
         for lid, _arc in candidate_window(arcs, 50., limit=3):
             diag = {'id':lid}
-            match(reference, current, depth, k, np.zeros(5), diagnostics=diag)
+            match(reference, current, depth, k, np.zeros(5), diagnostics=diag, reference_shape=image.shape)
             attempts.append(diag)
         records.append(dict(total_s=time.perf_counter()-wall, cpu_s=time.process_time()-cpu,
                             current_sift_s=sift, candidates=len(attempts),

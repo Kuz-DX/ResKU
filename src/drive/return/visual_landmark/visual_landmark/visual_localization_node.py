@@ -17,6 +17,8 @@ import yaml
 from cv_bridge import CvBridge
 from geometry_msgs.msg import Pose, PoseStamped
 from rclpy.duration import Duration
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, qos_profile_sensor_data
 from rclpy.time import Time
@@ -29,7 +31,8 @@ from tf2_ros import Buffer, TransformListener
 
 from visual_landmark.adaptive import candidate_window, reference_arcs
 from visual_landmark.calibration import camera_model
-from visual_landmark.localization import MatchOptions, features, match, planar, transform, valid_transform, pose_fields
+from visual_landmark.localization import MatchOptions, FeatureOptions, PriorOptions, check_pose_prior, features, match, planar, transform, valid_transform, pose_fields
+from visual_landmark.latest_pair import LatestPair
 
 
 RECORDING_STATES = {'MANUAL_RECORDING', 'WAIT_RETURN_COMMAND'}
@@ -50,9 +53,10 @@ class VisualLocalizationNode(Node):
             'max_correction_m': 3.0, 'max_correction_yaw_rad': 0.7,
             'candidate_radius_m': 12.0, 'processing_period_s': 1.0,
             'enable_stationary_vpr_debug': False,
-            'publish_debug_matches': False, 'apply_correction': False, 'lock_pose_guard': True, 'expected_lock_pose_file': '',
+            'debug_max_lines': 60, 'publish_debug_matches': False, 'apply_correction': False, 'lock_pose_guard': True, 'expected_lock_pose_file': '',
             'lock_translation_tolerance_m': 0.02, 'lock_rotation_tolerance_rad': 0.035,
-            'agreement_translation_m': 0.25, 'agreement_yaw_rad': 0.1,
+            'agreement_translation_m': 0.15, 'agreement_yaw_rad': 0.05,
+            'sync_queue_size': 2, 'sync_slop_s': .04,
             'agreement_max_interval_s': 2.5, 'ambiguity_ratio': 0.85,
             'route_backtrack_m': 2.0,
             'enable_adaptive_visual_check': True, 'max_visual_candidates': 3,
@@ -65,6 +69,15 @@ class VisualLocalizationNode(Node):
         for key, value in vars(defaults).items():
             self.declare_parameter('match.'+key, value)
         self.match_options = MatchOptions(**{key: self.p('match.'+key) for key in vars(defaults)})
+        self.feature_options = FeatureOptions(**{key: self.declare_parameter(key, value).value
+                                                 for key, value in vars(FeatureOptions()).items()})
+        self.prior_options = PriorOptions(**{key: self.declare_parameter('pose_prior.'+key, value).value
+                                             for key, value in vars(PriorOptions()).items()})
+        if not 1 <= int(self.p('sync_queue_size')) <= 5 or not 0 < self.p('sync_slop_s') <= .1:
+            raise ValueError('invalid RGB-D sync queue/slop')
+        self.reference_feature_stats = {}
+        self.latest_pair = LatestPair()
+        self.pair_group = MutuallyExclusiveCallbackGroup()
         if not 1 <= int(self.p('max_visual_candidates')) <= 7:
             raise ValueError('max_visual_candidates must be between 1 and 7')
         if self.p('visual_check_max_frames') < 2 or self.p('visual_check_timeout_s') <= 0:
@@ -76,6 +89,9 @@ class VisualLocalizationNode(Node):
         self.debug_odom = None
         self.last_auto_progress = None
         self.debug_enabled = bool(self.p('publish_debug_matches'))
+        self.debug_max_lines = int(self.p('debug_max_lines'))
+        if not 1 <= self.debug_max_lines <= 150:
+            raise ValueError('debug_max_lines must be 1..150')
         self.check = None
         self.check_frames = 0
         self.check_expansion = 0
@@ -101,6 +117,8 @@ class VisualLocalizationNode(Node):
         latched = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
                              durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.pub = self.create_publisher(PoseStamped, '/visual_landmark/correction', 10)
+        self.reference_pub = self.create_publisher(CompressedImage, '/visual_landmark/debug/reference/compressed',
+            QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
         self.debug_pub = self.create_publisher(CompressedImage, '/visual_landmark/debug/matches/compressed', 1)
         self.status = self.create_publisher(String, '/visual_landmark/localization_event', 10)
         self.create_subscription(RoutePath, '/return_path', self.on_route, latched)
@@ -111,18 +129,34 @@ class VisualLocalizationNode(Node):
         self.create_subscription(CameraInfo, self.p('camera_info_topic'), self.on_info,
                                  qos_profile_sensor_data)
         self.color_sub = message_filters.Subscriber(self, CompressedImage, self.p('color_topic'),
-                                                    qos_profile=qos_profile_sensor_data)
+                                                    qos_profile=QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT),
+                                                    callback_group=self.pair_group)
         self.depth_sub = message_filters.Subscriber(self, Image, self.p('depth_topic'),
-                                                    qos_profile=qos_profile_sensor_data)
+                                                    qos_profile=QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT),
+                                                    callback_group=self.pair_group)
         self.sync = message_filters.ApproximateTimeSynchronizer(
-            [self.color_sub, self.depth_sub], queue_size=5, slop=0.04)
-        self.sync.registerCallback(self.on_pair)
+            [self.color_sub, self.depth_sub], queue_size=int(self.p('sync_queue_size')), slop=float(self.p('sync_slop_s')))
+        self.sync.registerCallback(self.enqueue_pair)
+        # Default callback group serializes worker + mission/request mutations.
+        # Only reception has a separate group/thread; it touches the slot, never mission state.
+        self.create_timer(.02, self.process_latest_pair)
         self.create_subscription(String, '/visual_landmark/check_request', self.on_check_request, 10)
         self.create_subscription(String, '/visual_landmark/route_progress', self.on_progress, 1)
         if self.stationary_debug_enabled:
             self.create_subscription(Bool, '/visual_landmark/debug_check', self.on_debug_check, 10)
             self.create_subscription(Odometry, '/odometry/filtered', self.on_debug_odom, qos_profile_sensor_data)
         self.create_timer(.1, self.check_timeout)
+
+    def enqueue_pair(self, color, depth):
+        self.latest_pair.put(color, depth, time.monotonic(),
+                             color.header.stamp.sec*1_000_000_000+color.header.stamp.nanosec)
+
+    def process_latest_pair(self):
+        pair = self.latest_pair.take()
+        if pair is not None:
+            color, depth, received = pair
+            self.pair_queue_wait_s = time.monotonic()-received
+            self.on_pair(color, depth)
 
     def on_route(self, msg):
         self.route = [Pose2D.from_ros_pose(p.pose) for p in msg.poses]
@@ -254,11 +288,14 @@ class VisualLocalizationNode(Node):
             self.pending = None
             self.check = None
             if msg.data in RECORDING_STATES and self.state not in RECORDING_STATES:
+                if hasattr(self, 'reference_pub'):
+                    self.reference_pub.publish(CompressedImage())
                 self.landmarks.clear()
                 getattr(self, 'reference_images', {}).clear()
                 self.correction = None
                 self.lock_pose = None
                 self.reference_meta.clear()
+                getattr(self, 'reference_feature_stats', {}).clear()
                 self.cached_arcs = None
                 self.route_progress = None
                 self.last_auto_progress = None
@@ -275,21 +312,31 @@ class VisualLocalizationNode(Node):
             self.route_progress = None
             self.last_auto_progress = None
             self.cached_arcs = None
+            if hasattr(self, 'reference_pub'):
+                self.reference_pub.publish(CompressedImage())
             self.landmarks.clear()
             getattr(self, 'reference_images', {}).clear()
             self.correction = None
             self.pending = None
             self.lock_pose = None
             self.reference_meta.clear()
+            getattr(self, 'reference_feature_stats', {}).clear()
             self.last_reference_arc = None
 
     def event(self, kind, **fields):
+        if kind in {'candidates', 'debug_frame_result', 'no_match', 'rejected', 'validated', 'localized', 'agreement_pending'}:
+            for key, value in getattr(self, 'frame_diagnostics', {}).items():
+                fields.setdefault(key, value)
         check = getattr(self, 'check', None)
         if check:
+            if kind == 'check_started':
+                fields.setdefault('timeout_s', max(0., check['deadline']-self.get_clock().now().nanoseconds*1e-9))
             fields.setdefault('check_request', check['request'])
             fields.setdefault('trigger', check.get('trigger'))
             if kind in {'validated', 'localized'}:
                 fields['check_complete'] = True
+            elif kind == 'agreement_pending':
+                fields.setdefault('check_complete', self.check_frames >= self.p('visual_check_max_frames'))
             elif kind in {'no_match', 'rejected'}:
                 self.check_expansion = 2
                 self.pending = None
@@ -321,15 +368,25 @@ class VisualLocalizationNode(Node):
             camera_model(ci['width'], ci['height'], ci['k'], ci['d'], ci['distortion_model'], image.shape)
             if not valid_transform(meta['mission_camera_transform']):
                 raise ValueError('invalid reference camera transform')
+            feature_options = getattr(self, 'feature_options', FeatureOptions())
+            feature_stats = {}
+            cache_reused = False
             cache = directory / 'features.npz'
             if cache.is_file():
                 with np.load(cache, allow_pickle=False) as stored:
                     points, descriptors = stored['points'], stored['descriptors']
+                    signature = str(stored['feature_config'].item()) if 'feature_config' in stored else None
+                    cache_reused = signature == feature_options.signature()
+                    raw_count = int(stored['feature_count_raw']) if 'feature_count_raw' in stored else len(points)
                 if (points.ndim != 2 or points.shape[1] != 2 or descriptors.shape != (len(points), 128)
                         or not np.all(np.isfinite(points)) or not np.all(np.isfinite(descriptors))):
                     raise ValueError('invalid cached reference SIFT')
+            if not cache_reused:
+                # Old schema/unversioned/config-mismatched caches remain readable;
+                # recompute once at load rather than use incompatible dense descriptors.
+                points, descriptors = features(image, feature_options, feature_stats)
             else:
-                points, descriptors = features(image)
+                feature_stats.update(feature_count_raw=raw_count, feature_count_grid_filtered=len(points))
             if descriptors is None or len(points) < 20:
                 raise ValueError('reference has fewer than 20 usable features')
             self.landmarks[meta['id']] = (
@@ -337,9 +394,12 @@ class VisualLocalizationNode(Node):
                 np.array(meta['mission_camera_transform'], dtype=float))
             if getattr(self, 'debug_enabled', False):
                 self.reference_images[meta['id']] = image
+            if hasattr(self, 'reference_feature_stats'):
+                self.reference_feature_stats[meta['id']] = feature_stats
             self.reference_meta[meta['id']] = meta
             self.cached_arcs = None
-            self.event('reference_loaded', id=meta['id'], features=len(points),
+            self.event('reference_loaded', id=meta['id'], features=len(points), cache_reused=cache_reused,
+                       **feature_stats,
                        x=float(meta['mission_pose']['x']), y=float(meta['mission_pose']['y']))
         except (ValueError, KeyError, OSError, cv2.error, TypeError) as exc:
             self.event('reference_rejected', reason=str(exc))
@@ -354,14 +414,18 @@ class VisualLocalizationNode(Node):
         canvas = np.zeros((h, w+image.shape[1], 3), np.uint8)
         canvas[:reference.shape[0], :w] = cv2.cvtColor(reference, cv2.COLOR_GRAY2BGR)
         canvas[:image.shape[0], w:] = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
-        for x, y in current[0]:
-            cv2.circle(canvas, (int(x)+w, int(y)), 2, (255, 180, 0), 1)
-        for cp, rp in debug.get('pairs', [])[:150]:
+        limit = getattr(self, 'debug_max_lines', 60)
+        def sample(items):
+            return [items[i] for i in np.linspace(0, len(items)-1, min(limit, len(items)), dtype=int)] if items else []
+        for cp, rp in sample(debug.get('pairs', [])):
             cv2.line(canvas, tuple(map(int, rp)), (int(cp[0])+w, int(cp[1])), (0, 150, 220), 1)
         pairs = debug.get('depth_pairs', [])
-        for i in debug.get('inlier_indices', [])[:150]:
+        for i in sample(debug.get('inlier_indices', [])):
             cp, rp = pairs[i]
-            cv2.line(canvas, tuple(map(int, rp)), (int(cp[0])+w, int(cp[1])), (0, 255, 0), 1)
+            ref_pixel, cur_pixel = tuple(map(int, rp)), (int(cp[0])+w, int(cp[1]))
+            cv2.line(canvas, ref_pixel, cur_pixel, (0, 255, 0), 1)
+            cv2.circle(canvas, ref_pixel, 3, (0, 255, 0), 1)
+            cv2.circle(canvas, cur_pixel, 3, (0, 255, 0), 1)
         label = f"rear ref {lid} | front current | pairs={diagnostics.get('mutual_ratio_matches', 0)} inliers={diagnostics.get('inliers', 0)}"
         cv2.rectangle(canvas, (0, 0), (canvas.shape[1], 65), (0, 0, 0), -1)
         cv2.putText(canvas, label, (10, 23), cv2.FONT_HERSHEY_SIMPLEX, .5, (255,255,255), 1)
@@ -371,9 +435,23 @@ class VisualLocalizationNode(Node):
         msg.format = 'jpeg'
         msg.data = cv2.imencode('.jpg', canvas, [cv2.IMWRITE_JPEG_QUALITY, 75])[1].tobytes()
         self.debug_pub.publish(msg)
+        # Same selected candidate as Matches; stamp belongs to the current check.
+        reference_msg = CompressedImage()
+        reference_msg.header = header
+        reference_msg.format = 'jpeg'
+        reference_view = cv2.cvtColor(reference, cv2.COLOR_GRAY2BGR)
+        cv2.putText(reference_view, f'STORED REAR REF {lid}', (8, 22),
+                    cv2.FONT_HERSHEY_SIMPLEX, .5, (255, 255, 0), 1)
+        reference_msg.data = cv2.imencode('.jpg', reference_view,
+            [cv2.IMWRITE_JPEG_QUALITY, 80])[1].tobytes()
+        self.reference_pub.publish(reference_msg)
 
     def on_pair(self, color, depth):
         started = time.perf_counter()
+        self.frame_diagnostics = dict(pair_queue_wait_s=getattr(self, 'pair_queue_wait_s', 0.),
+            pairs_overwritten=getattr(getattr(self, 'latest_pair', None), 'overwritten', 0),
+            rgbd_stamp_skew_s=abs((color.header.stamp.sec+color.header.stamp.nanosec*1e-9)
+                                 -(depth.header.stamp.sec+depth.header.stamp.nanosec*1e-9)))
         now = self.get_clock().now()
         if self.state not in {'FOLLOW_RETURN_PATH', 'RETURN_MANUAL', 'RETURN_RESUME_STOP', 'RETURN_INTERVENTION', 'RETURN_LANDMARK_SEARCH'} or self.origin is None or not self.landmarks or self.info is None:
             return
@@ -426,11 +504,14 @@ class VisualLocalizationNode(Node):
             self.check_lock_pose(bc)
             self.event('frame', stamp_ns=stamp.nanoseconds)
             sift_started = time.perf_counter()
-            current = features(image)
+            feature_stats = {}
+            current = features(image, getattr(self, 'feature_options', FeatureOptions()), feature_stats)
+            self.frame_diagnostics.update(feature_stats)
             sift_time = time.perf_counter()-sift_started
             prior = self.correction if self.correction is not None else np.linalg.inv(self.origin)
             ranked = []
             attempts = []
+            debug_frames = {}
             if self.state == 'RETURN_LANDMARK_SEARCH' and self.search is not None:
                 selected = [(self.search.get('id'), None)] if self.search.get('id') in self.landmarks else []
             else:
@@ -448,22 +529,35 @@ class VisualLocalizationNode(Node):
                     selected = candidate_window(self.cached_arcs, progress[0], self.last_reference_arc,
                     self.p('route_backtrack_m'), self.p('max_visual_candidates'),
                     getattr(self, 'check_expansion', 0))
+            self.frame_diagnostics.update(current_sift_s=sift_time, candidate_ids=[lid for lid, _ in selected],
+                                          input_frame_age_s=(now-stamp).nanoseconds*1e-9)
             self.event('candidates', candidate_ids=[lid for lid, _ in selected], current_sift_s=sift_time)
             for lid, arc in selected:
+                if self.check and self.get_clock().now().nanoseconds*1e-9 >= self.check['deadline']:
+                    raise ValueError('check deadline exceeded during processing')
+                if (self.get_clock().now()-stamp).nanoseconds*1e-9 > 1.5:
+                    raise ValueError('localization processing too slow')
                 reference, mc = self.landmarks[lid]
                 if self.state == 'RETURN_LANDMARK_SEARCH' and self.search is not None and lid != self.search.get('id'):
                     continue
                 if np.linalg.norm((prior @ oc)[:2, 3] - mc[:2, 3]) > self.p('candidate_radius_m'):
                     continue
-                diagnostics = {'id': lid}
-                debug = {} if getattr(self, 'debug_enabled', False) and self.debug_pub.get_subscription_count() else None
-                result = match(reference, current, z, k, d, options=self.match_options, diagnostics=diagnostics, debug=debug)
-                if debug is not None:
-                    try:
-                        self.publish_matches(lid, image, current, debug, diagnostics, color.header)
-                    except Exception as exc:
-                        self.get_logger().warning(f'Debug image failed: {exc}')
+                diagnostics = dict(id=lid, **feature_stats)
+                diagnostics['reference_feature_count_raw'] = getattr(self, 'reference_feature_stats', {}).get(lid, {}).get('feature_count_raw')
+                debug = {} if getattr(self, 'debug_enabled', False) and (self.debug_pub.get_subscription_count() or self.reference_pub.get_subscription_count()) else None
+                result = match(reference, current, z, k, d, options=self.match_options, diagnostics=diagnostics, debug=debug,
+                               reference_shape=(self.reference_meta[lid]['camera_info']['height'],
+                                                self.reference_meta[lid]['camera_info']['width']))
                 attempts.append(diagnostics)
+                if result is not None:
+                    relative, count, error = result
+                    predicted = np.linalg.inv(mc) @ prior @ oc
+                    if not check_pose_prior(relative, predicted, bc,
+                            getattr(self, 'prior_options', PriorOptions()), diagnostics):
+                        diagnostics['reject_reason'] = 'pose_prior_mismatch'
+                        result = None
+                if debug is not None:
+                    debug_frames[lid] = (debug, diagnostics)
                 if result is None:
                     continue
                 relative, count, error = result
@@ -478,7 +572,14 @@ class VisualLocalizationNode(Node):
                     ranked.append((count, -error, lid, correction, relative, diagnostics, arc))
                 else:
                     diagnostics['reject_reason'] = 'correction_step_limit'
-            ranked.sort(key=lambda item: item[:2], reverse=True)
+            ranked.sort(key=lambda item: (-item[0], -item[1], str(item[2])))
+            if debug_frames:
+                display_id = ranked[0][2] if ranked else max(debug_frames,
+                    key=lambda key: debug_frames[key][1].get('inliers', 0))
+                try:
+                    self.publish_matches(display_id, image, current, *debug_frames[display_id], color.header)
+                except Exception as exc:
+                    self.get_logger().warning(f'Debug image failed: {exc}')
             if stationary_debug:
                 self.event('debug_frame_result', attempts=attempts, current_features=len(current[0]),
                            current_sift_s=sift_time)
@@ -503,12 +604,16 @@ class VisualLocalizationNode(Node):
             if self.pending is None or self.pending[0] != lid or self.pending_stamp is None or not 0 < (stamp.nanoseconds-self.pending_stamp)*1e-9 <= self.p('agreement_max_interval_s'):
                 self.pending = (lid, correction)
                 self.pending_stamp = stamp.nanoseconds
+                self.event('agreement_pending', attempts=attempts, id=lid, diagnostics=diagnostics,
+                           processing_latency_s=time.perf_counter()-started)
                 return
             previous = self.pending[1]
             delta = correction @ np.linalg.inv(previous)
             self.pending = (lid, correction)
             self.pending_stamp = stamp.nanoseconds
             if np.linalg.norm((correction @ ob)[:2, 3] - (previous @ ob)[:2, 3]) > self.p('agreement_translation_m') or abs(np.arctan2(delta[1, 0], delta[0, 0])) > self.p('agreement_yaw_rad'):
+                self.event('agreement_pending', attempts=attempts, id=lid, diagnostics=diagnostics,
+                           reason='temporal_agreement_mismatch', processing_latency_s=time.perf_counter()-started)
                 return
             # Processing can be slow; never publish an old-frame result into live control.
             if (self.get_clock().now()-stamp).nanoseconds*1e-9 > 1.5:
@@ -551,11 +656,15 @@ class VisualLocalizationNode(Node):
 
 def main(args=None):
     rclpy.init(args=args)
+    cv2.setNumThreads(1)
     node = VisualLocalizationNode()
+    executor = MultiThreadedExecutor(num_threads=2)
+    executor.add_node(node)
     try:
-        rclpy.spin(node)
+        executor.spin()
     except KeyboardInterrupt:
         pass
     finally:
+        executor.shutdown()
         node.destroy_node()
         rclpy.try_shutdown()

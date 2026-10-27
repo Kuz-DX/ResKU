@@ -56,7 +56,7 @@ from std_msgs.msg import Bool, String
 from tf2_ros import Buffer, TransformException, TransformListener
 
 from return_navigation.se2 import Pose2D
-from visual_landmark.localization import transform, features, valid_transform
+from visual_landmark.localization import transform, features, valid_transform, FeatureOptions
 from visual_landmark.calibration import camera_model
 from visual_landmark.adaptive import AutoKeyframes
 import cv2
@@ -108,6 +108,8 @@ class VisualLandmarkNode(Node):
                                 auto_keyframe_retry_s=1., auto_keyframe_min_features=20,
                                 auto_keyframe_blur_min=0.).items():
             self.declare_parameter(name, value)
+        self.feature_options = FeatureOptions(**{key: self.declare_parameter(key, value).value
+                                                 for key, value in vars(FeatureOptions()).items()})
         self.auto_enabled = self.get_parameter('enable_auto_keyframes').value
         self.auto_policy = AutoKeyframes(
             self.get_parameter('auto_keyframe_distance_m').value,
@@ -293,17 +295,20 @@ class VisualLandmarkNode(Node):
             blur = float(cv2.Laplacian(image, cv2.CV_64F).var())
             if blur < float(self.get_parameter('auto_keyframe_blur_min').value):
                 raise ValueError('automatic blur gate')
-            points, descriptors = features(image)
+            feature_stats = {}
+            points, descriptors = features(image, getattr(self, 'feature_options', FeatureOptions()), feature_stats)
             minimum = max(20, int(self.get_parameter('auto_keyframe_min_features').value))
             if descriptors is None or len(points) < minimum:
                 raise ValueError('automatic insufficient SIFT features')
             self._capture_source, self._capture_reason = 'automatic', reason
-            self._capture_quality = dict(usable_features=len(points), laplacian_variance=blur)
+            self._capture_quality = dict(usable_features=len(points), laplacian_variance=blur, **feature_stats)
             info = self._save_landmark(msg)
             if not info['localization_ready'] or not info['extrinsic_ok']:
                 raise ValueError('automatic timestamped camera/base TF missing (archive retained)')
             np.savez_compressed(os.path.join(info['dir'], 'features.npz'),
-                                points=points, descriptors=descriptors)
+                                points=points, descriptors=descriptors,
+                                feature_config=np.asarray(getattr(self, 'feature_options', FeatureOptions()).signature()),
+                                feature_count_raw=np.asarray(feature_stats.get('feature_count_raw', len(points))))
             self.auto_policy.accept(now, self.odometer.s, info['yaw'])
             self._event('captured', capture_source='automatic', capture_reason=reason, **info)
         except Exception as exc:
