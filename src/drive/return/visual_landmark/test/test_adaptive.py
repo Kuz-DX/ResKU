@@ -9,6 +9,7 @@ def test_keyframes_distance_heading_timeout_and_stationary():
     auto = AutoKeyframes()
     assert auto.reason(0, 0, 0) == 'initial'
     auto.accept(0, 0, 0)
+    assert auto.reason(1, 1.24, 0) is None
     assert auto.reason(1, 1.25, 0) == 'distance'
     assert auto.reason(1, .1, math.radians(12)) == 'yaw'
     assert auto.reason(20, 0, 0) is None

@@ -310,3 +310,15 @@ ros2 run visual_landmark vpr_viewer
 
 종료: UI에 포커스를 주고 `Q`, 또는 이 명령을 실행한 터미널에서 `Ctrl+C`.
 재실행: 같은 명령을 다시 실행한다. 잘못된 인터페이스를 지정하는 `sr`은 실행하지 않는다.
+
+
+## 현재 운용 기본값
+
+캡처 거리 1.25m, `visual_apply_correction=true` / `apply_correction=true`.
+연속 UI SIFT preview는 `live_features=false`가 기본이다. 실시간 영상에는 특징점을
+다시 계산하지 않는다. 하단은 실제 요청 검사에서 생성한 정지 비교 사진을 다음 결과까지
+유지한다. F 키로 연속 preview를 켜면 UI SIFT 연산이 다시 발생한다.
+보정 활성화 시에도 기존 TF/LOCK/기하/두 프레임/보정량 제한은 유지한다.
+`stationary_debug`는 observation 전용이므로 보정이 켜져 있으면 debug_check가 거부된다.
+실제 보정 검증은 AUTO 복귀의 adaptive check에서 한다. 이 변경은 실행 중인 노드의
+파라미터를 바꾸지 않으며 수정 코드 빌드와 launch 재시작이 필요하다.

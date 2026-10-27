@@ -47,3 +47,19 @@ def test_frozen_frame_keeps_refreshing_stale_indicator_and_missing_front(monkeyp
     monkeypatch.setattr(viewer.time, 'monotonic', lambda: 5.)
     assert viewer.Viewer.show(node)
     assert any('STALE' in text and '4.0s' in text for text in captured)
+
+
+def test_return_never_falls_back_to_live_rear_and_explains_missing_matches(monkeypatch):
+    from types import SimpleNamespace
+    import visual_landmark.viewer as viewer
+    texts = []
+    monkeypatch.setattr(cv2, 'imshow', lambda *_: None)
+    monkeypatch.setattr(cv2, 'waitKey', lambda *_: -1)
+    monkeypatch.setattr(cv2, 'putText', lambda image, text, *args: texts.append(text))
+    node = SimpleNamespace(pending={}, frames={'Rear live': (np.zeros((100,200,3), np.uint8), 1.)},
+        mission_state='RETURN_MANUAL', image_stamps={}, feature_counts={}, receive_counts={}, lines={},
+        get_clock=lambda: SimpleNamespace(now=lambda: SimpleNamespace(nanoseconds=0)))
+    viewer.Viewer.show(node)
+    assert any('WAITING FOR VPR CHECK / SELECTED REFERENCE' in text for text in texts)
+    assert any('comparison appears only during a VPR check' in text for text in texts)
+    assert not any(text.startswith('Rear live:') for text in texts)

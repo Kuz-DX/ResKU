@@ -53,7 +53,7 @@ class VisualLocalizationNode(Node):
             'max_correction_m': 3.0, 'max_correction_yaw_rad': 0.7,
             'candidate_radius_m': 12.0, 'processing_period_s': 1.0,
             'enable_stationary_vpr_debug': False,
-            'debug_max_lines': 60, 'publish_debug_matches': False, 'apply_correction': False, 'lock_pose_guard': True, 'expected_lock_pose_file': '',
+            'debug_max_lines': 60, 'publish_debug_matches': True, 'apply_correction': True, 'lock_pose_guard': True, 'expected_lock_pose_file': '',
             'lock_translation_tolerance_m': 0.02, 'lock_rotation_tolerance_rad': 0.035,
             'agreement_translation_m': 0.15, 'agreement_yaw_rad': 0.05,
             'sync_queue_size': 2, 'sync_slop_s': .04,
@@ -119,7 +119,8 @@ class VisualLocalizationNode(Node):
         self.pub = self.create_publisher(PoseStamped, '/visual_landmark/correction', 10)
         self.reference_pub = self.create_publisher(CompressedImage, '/visual_landmark/debug/reference/compressed',
             QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
-        self.debug_pub = self.create_publisher(CompressedImage, '/visual_landmark/debug/matches/compressed', 1)
+        self.debug_pub = self.create_publisher(CompressedImage, '/visual_landmark/debug/matches/compressed',
+            QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
         self.status = self.create_publisher(String, '/visual_landmark/localization_event', 10)
         self.create_subscription(RoutePath, '/return_path', self.on_route, latched)
         self.create_subscription(Pose, '/mission/origin_pose', self.on_origin, latched)
@@ -290,6 +291,7 @@ class VisualLocalizationNode(Node):
             if msg.data in RECORDING_STATES and self.state not in RECORDING_STATES:
                 if hasattr(self, 'reference_pub'):
                     self.reference_pub.publish(CompressedImage())
+                    self.debug_pub.publish(CompressedImage())
                 self.landmarks.clear()
                 getattr(self, 'reference_images', {}).clear()
                 self.correction = None
@@ -314,6 +316,7 @@ class VisualLocalizationNode(Node):
             self.cached_arcs = None
             if hasattr(self, 'reference_pub'):
                 self.reference_pub.publish(CompressedImage())
+                self.debug_pub.publish(CompressedImage())
             self.landmarks.clear()
             getattr(self, 'reference_images', {}).clear()
             self.correction = None

@@ -88,7 +88,7 @@ class Viewer(Node):
         self.declare_parameter('pause_preview_during_check', True)
         self.frames = {}
         self.pending = {}
-        self.declare_parameter('live_features', True)
+        self.declare_parameter('live_features', False)
         self.declare_parameter('preview_rate_hz', 2.0)
         self.declare_parameter('preview_max_width', 480)
         self.declare_parameter('preview_max_features', 120)
@@ -119,7 +119,8 @@ class Viewer(Node):
             'Matches': '/visual_landmark/debug/matches/compressed',
         }.items():
             self.create_subscription(CompressedImage, topic,
-                lambda msg, key=key: self.receive(key, msg), image_qos)
+                lambda msg, key=key: self.receive(key, msg),
+                QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL) if key == 'Matches' else image_qos)
         for key, topic in {
             'mission': '/mission/return/state',
             'localization': '/visual_landmark/localization_event',
@@ -130,7 +131,7 @@ class Viewer(Node):
                 lambda msg, key=key: self.status(key, msg), 10)
 
     def receive(self, key, msg):
-        if key == 'Stored rear reference' and not msg.data:
+        if key in {'Stored rear reference', 'Matches'} and not msg.data:
             self.frames.pop(key, None)
             self.pending.pop(key, None)
             self.frames.pop('Matches', None)
@@ -194,7 +195,10 @@ class Viewer(Node):
                     busy = (self.get_parameter('pause_preview_during_check').value
                             and now < self.preview_pause_until)
                     enabled = bool(self.get_parameter('live_features').value) and not busy
-                    frame, count = self.preview.render(frame, enabled)
+                    if enabled:
+                        frame, count = self.preview.render(frame, True)
+                    else:
+                        count = 0
                     self.feature_counts[key] = count
                     self.preview_modes[key] = 'PAUSED for VPR' if busy else ('ON' if enabled else 'OFF')
                 self.frames[key] = frame, arrival
@@ -223,9 +227,9 @@ class Viewer(Node):
                 mode = getattr(self, 'preview_modes', {}).get(key, 'ON')
                 title = (f'{key}: SIFT={count} preview only' if mode == 'ON' else f'{key}: preview {mode}') if count is not None else key
                 detail = f'RX age {age:.1f}s | source age {source_age} | RX #{self.receive_counts.get(key, 0)}'
-                stored = key == 'Stored rear reference'
+                stored = key in {'Stored rear reference', 'Matches'}
                 if stored:
-                    detail = f'STORED image | last checked candidate {age:.1f}s ago | same reference as Matches'
+                    detail = f'SNAPSHOT result | last check {age:.1f}s ago | held until next check'
                 if age > 2. and not stored:
                     detail = 'STALE / NO NEW DISPLAY FRAME | '+detail
                 cv2.rectangle(view, (0, 0), (view.shape[1], 48), (0, 0, 0), -1)
@@ -237,6 +241,17 @@ class Viewer(Node):
                 view = np.zeros((360, 640, 3), np.uint8)
                 message = ('WAITING FOR VPR CHECK / SELECTED REFERENCE' if key == 'Stored rear reference' else key+': WAITING FOR IMAGE TOPIC')
                 cv2.putText(view, message, (15,165), cv2.FONT_HERSHEY_SIMPLEX, .55, (0,200,255), 1)
+                if key == 'Matches':
+                    state = getattr(self, 'mission_state', 'IDLE')
+                    hints = ['STILL IMAGE comparison: stored rear / current front',
+                             'Record: collect reference snapshots (distance 1.25m).',
+                             'Return: comparison appears only during a VPR check.',
+                             'Manual: /visual_landmark/debug_check after stopping.',
+                             'Check localization status for missing inputs / rejection.',
+                             'Publisher: visual_debug_matches:=true']
+                    for row, hint in enumerate(hints):
+                        cv2.putText(view, hint, (12, 195+row*24),
+                                    cv2.FONT_HERSHEY_SIMPLEX, .43, (210,210,210), 1)
                 lines.append(message)
             x, y, width, height = slots[key]
             panel[y:y+height, x:x+width] = fit_panel(view, width, height)

@@ -214,7 +214,7 @@ def test_quality_yaml_matches_feature_and_gate_defaults():
     for k,v in asdict(FeatureOptions()).items():assert capture[k]==local[k]==v
     for k,v in asdict(MatchOptions()).items():assert local['match.'+k]==v
     for k,v in asdict(PriorOptions()).items():assert local['pose_prior.'+k]==v
-    assert local['apply_correction'] is False
+    assert local['apply_correction'] is True
 
 
 def test_viewer_has_no_control_or_mission_publishers():

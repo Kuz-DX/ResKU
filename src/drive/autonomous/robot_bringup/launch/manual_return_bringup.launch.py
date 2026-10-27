@@ -139,7 +139,7 @@ def generate_launch_description():
         DeclareLaunchArgument('diagnostics_timeout_s', default_value='2.0'),
         DeclareLaunchArgument('visual_check_on_auto_resume', default_value='false'),
         DeclareLaunchArgument('enable_stationary_vpr_debug', default_value='false'),
-        DeclareLaunchArgument('visual_debug_matches', default_value='false'),
+        DeclareLaunchArgument('visual_debug_matches', default_value='true'),
         DeclareLaunchArgument('visual_check_on_return_start', default_value='false'),
         DeclareLaunchArgument('correction_min_translation_m', default_value='0.03'),
         DeclareLaunchArgument('correction_min_yaw_rad', default_value='0.01'),
@@ -193,7 +193,7 @@ def generate_launch_description():
         DeclareLaunchArgument('landmark_capture_mode', default_value='stop'),
         DeclareLaunchArgument('enable_visual_localization', default_value='true'),
         DeclareLaunchArgument('enable_landmark_recovery', default_value='false'),
-        DeclareLaunchArgument('visual_apply_correction', default_value='false'),
+        DeclareLaunchArgument('visual_apply_correction', default_value='true'),
         DeclareLaunchArgument('visual_quality_config', default_value=os.path.join(
             get_package_share_directory('visual_landmark'), 'config', 'vpr_quality.yaml')),
         DeclareLaunchArgument('visual_lock_pose_guard', default_value='true'),
