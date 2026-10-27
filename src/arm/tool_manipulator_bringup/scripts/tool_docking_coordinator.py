@@ -18,7 +18,8 @@ from std_srvs.srv import Trigger
 from tf2_ros import Buffer, TransformException, TransformListener
 
 from tool_trajectory_joy import ToolTrajectoryJoy, ARM_JOINTS
-from tool_docking_core import load_settings, transform, pose_errors, bounded_target, tag_pose
+from tool_docking_core import (load_settings, transform, pose_errors, bounded_target,
+                               tag_pose, camera_normal_target)
 
 
 class ToolDockingCoordinator(ToolTrajectoryJoy):
@@ -67,6 +68,12 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         self.last_joy_time = -math.inf
         self.deadman_held = False
         self.last_preview_report = -math.inf
+        self.camera_alignment_distance = None
+        self.camera_reference_x = None
+        self.tcp_camera = None
+        self.advance_locked = False
+        self.advance_target = None
+        self.advance_plan = None
 
     def on_joy(self, msg: Joy):
         self.last_joy_time = time.monotonic()
@@ -95,7 +102,7 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             self.camera = (matrix, distortion)
 
     def on_tag(self, msg):
-        if not self.active:
+        if not self.active or getattr(self, 'advance_locked', False):
             return
         self.observation = None
         try:
@@ -108,7 +115,9 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                     or stamp_ns <= self.last_image_stamp):
                 raise ValueError('stale tag image or camera calibration unavailable')
             self.last_image_stamp = stamp_ns
-            detections = [d for d in data['detections'] if d['id'] == self.cfg['tag_id']]
+            detections = [d for d in data['detections'] if d['id'] == self.cfg['tag_id']
+                          and ('tag_family' not in self.cfg
+                               or d.get('family') == self.cfg['tag_family'])]
             if len(detections) != 1:
                 raise ValueError('expected exactly one matching tag')
             camera_tag = tag_pose(detections[0], *self.camera, self.cfg)
@@ -166,6 +175,17 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         if not self.active:
             super().path_completed()
             return
+        if getattr(self, 'advance_locked', False):
+            q = np.asarray([self.full_state[j] for j in ARM_JOINTS])
+            distance, angle = pose_errors(self.model.fk(q), self.advance_target)
+            if (distance > self.cfg['position_tolerance_m']
+                    or angle > self.cfg['angle_tolerance_rad']
+                    or np.max(np.abs(self.velocity)) > self.cfg['stopped_speed_rad_s']):
+                raise RuntimeError('advance endpoint feedback outside tolerance; remain HOLD')
+            self.report('completed', 'tag-normal advance %.1f mm completed; HOLD; no actuation' %
+                        (self.cfg['advance_distance_m']*1000.))
+            self.reset()
+            return
         if self.docking_started is None:
             self.docking_started = time.monotonic()
             self.stage = 'dock_acquire'
@@ -205,6 +225,10 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
 
     def tick(self):
         try:
+            if self.active and self.docking_started is None:
+                if (time.monotonic()-self.last_joy_time >= self.deadman_timeout
+                        or not self.deadman_held):
+                    raise RuntimeError('docking deadman released or joystick stream stale')
             if self.active and self.docking_started is not None:
                 now = time.monotonic()
                 self.guard(now)
@@ -215,22 +239,106 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                         return
                     self.fresh_observation(now)
                     self.stage = 'dock_observe'
-                else:
+                elif not getattr(self, 'advance_locked', False):
                     # Tag loss also cancels a correction while it is being checked/executed.
                     self.fresh_observation(now)
+                if self.stage == 'dock_advance_plan':
+                    self.plan_advance_step()
+                    return
                 if self.stage in ('dock_observe', 'dock_actuate'):
                     self.observe(now)
                     return
             super().tick()
-        except (ValueError, RuntimeError, KeyError, np.linalg.LinAlgError) as exc:
+        except (ValueError, RuntimeError, KeyError, TransformException, np.linalg.LinAlgError) as exc:
             self.fail(str(exc))
+
+    def camera_target(self, base_tag, current):
+        if self.tcp_camera is None:
+            # Camera is rigidly mounted on the wrist; get the optical-frame
+            # extrinsic, not the mounting/body frame. No saved endpoint is used.
+            tf = self.tf_buffer.lookup_transform(
+                'tcp_link', self.camera_frame, Time(),
+                timeout=Duration(seconds=self.cfg['tf_timeout_s'])).transform
+            p, q = tf.translation, tf.rotation
+            self.tcp_camera = transform([p.x, p.y, p.z], [q.x, q.y, q.z, q.w])
+        camera = current @ self.tcp_camera
+        if self.camera_reference_x is None:
+            self.camera_reference_x = camera[:3, 0].copy()
+        target, distance = camera_normal_target(
+            base_tag, camera, self.camera_reference_x, self.camera_alignment_distance)
+        if distance <= self.cfg['advance_distance_m']+self.cfg['position_tolerance_m']:
+            raise RuntimeError('tag stand-off too short for the requested fixed advance')
+        self.camera_alignment_distance = distance
+        return target @ np.linalg.inv(self.tcp_camera), target
+
+    def start_advance(self, q, current, camera_target):
+        """Latch one relative line after visual alignment; never re-anchor it."""
+        self.advance_locked = True
+        self.advance_origin = current.copy()
+        self.advance_target = current.copy()
+        self.advance_target[:3, 3] += (
+            camera_target[:3, 2]*self.cfg['advance_distance_m'])
+        self.advance_seed = q.copy()
+        self.advance_count = math.ceil(self.cfg['advance_distance_m']/self.cfg['step_m'])
+        self.advance_plan = dict(waypoints=[], durations=[], total=0., start_error=0.,
+                                 cartesian_line=True)
+        self.advance_snapshot = dict(self.full_state)
+        self.stage = 'dock_advance_plan'
+        self.report('advance_planning',
+                    'alignment confirmed; planning fixed %.1f mm tag-normal advance; '
+                    'tag visibility no longer required, L2 remains required' %
+                    (self.cfg['advance_distance_m']*1000.))
+
+    def plan_advance_step(self):
+        # One bounded IK solve per timer tick keeps feedback/cancel callbacks live.
+        tolerances = self.snapshot_tolerances(validation=True)
+        if (self.full_state.keys() != self.advance_snapshot.keys()
+                or any(abs(value-self.advance_snapshot[j]) > tolerances.get(j, .001)
+                       for j, value in self.full_state.items())):
+            raise RuntimeError('robot moved during fixed advance planning')
+        index = len(self.advance_plan['waypoints'])+1
+        target = self.advance_origin.copy()
+        target[:3, 3] += ((self.advance_target[:3, 3]-self.advance_origin[:3, 3])
+                         * index/self.advance_count)
+        solved = self.model.solve(target, self.advance_seed, self.margin,
+                                  max_iterations=100, max_time_s=.03)
+        delta = np.abs(solved-self.advance_seed)
+        if (not self.model.within_limits(solved, self.margin)
+                or np.max(delta) > self.cfg['joint_step_rad']):
+            raise RuntimeError('advance IK exceeds joint step/limits')
+        residual = self.model.pose_error(solved, target)
+        if np.linalg.norm(residual[:3]) > 1e-4 or np.linalg.norm(residual[3:]) > 1e-3:
+            raise RuntimeError('advance IK residual too large')
+        duration = max(.02, float(np.max(delta))/self.cfg['joint_speed_rad_s'],
+                       self.cfg['advance_distance_m']/self.advance_count
+                       / self.cfg['linear_speed_m_s'])
+        # Preserve the Cartesian line instead of isolating shoulder motion;
+        # retain its conservative speed cap on every segment.
+        if self.shoulder_isolation_enabled:
+            duration = max(duration, float(delta[1])/self.shoulder_isolation_speed)
+        self.advance_plan['waypoints'].append(solved.copy())
+        self.advance_plan['durations'].append(duration)
+        self.advance_plan['total'] += duration
+        self.advance_seed = solved
+        if index == self.advance_count:
+            self.advance_plan['stop_at_waypoints'] = [False]*(index-1)+[True]
+            self.begin(self.path_id, self.advance_plan)
 
     def observe(self, now):
         stamp, base_tag = self.fresh_observation(now)
         q = np.asarray([self.full_state[j] for j in ARM_JOINTS])
-        target = base_tag @ self.cfg['targets'][self.dock_stage]
         current = self.model.fk(q)
-        distance, angle = pose_errors(current, target)
+        camera_mode = self.cfg.get('alignment_mode') == 'camera_normal_advance'
+        if camera_mode:
+            target, camera_target = self.camera_target(base_tag, current)
+        else:
+            target = base_tag @ self.cfg['targets'][self.dock_stage]
+        if camera_mode:
+            distance, angle = pose_errors(current @ self.tcp_camera, camera_target)
+            if pose_errors(current, target)[0] > self.cfg['max_position_error_m']:
+                raise RuntimeError('camera alignment TCP target beyond permitted correction envelope')
+        else:
+            distance, angle = pose_errors(current, target)
         stopped = np.max(np.abs(self.velocity)) <= self.cfg['stopped_speed_rad_s']
         aligned = (distance <= self.cfg['position_tolerance_m']
                    and angle <= self.cfg['angle_tolerance_rad'])
@@ -267,6 +375,9 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             if self.stable < self.cfg['stable_samples']:
                 return
             self.stable = 0
+            if camera_mode:
+                self.start_advance(q, current, camera_target)
+                return
             if self.dock_stage < 2:
                 self.dock_stage += 1
                 self.observe_after_ns = self.get_clock().now().nanoseconds

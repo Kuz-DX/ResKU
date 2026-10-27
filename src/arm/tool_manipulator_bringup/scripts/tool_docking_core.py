@@ -36,6 +36,30 @@ def bounded_target(current, target, translation_step, rotation_step):
     return result
 
 
+def camera_normal_target(base_tag, base_camera, reference_x, stand_off=None):
+    """Centre the optical axis on the tag, preserving roll and normal distance.
+
+    Optical +Z looks toward the tag. Choose the tag-normal sign from the
+    observed camera side rather than assuming a particular PnP normal sign.
+    """
+    normal = base_tag[:3, 2].copy()
+    separation = base_tag[:3, 3]-base_camera[:3, 3]
+    if np.dot(normal, separation) < 0:
+        normal = -normal
+    distance = float(np.dot(normal, separation)) if stand_off is None else float(stand_off)
+    if not math.isfinite(distance) or distance <= 0:
+        raise ValueError('camera must remain in front of the tag plane')
+    x_axis = np.asarray(reference_x)-normal*np.dot(reference_x, normal)
+    norm = float(np.linalg.norm(x_axis))
+    if norm < .1:
+        raise ValueError('camera roll reference nearly parallel to tag normal')
+    x_axis /= norm
+    target = np.eye(4)
+    target[:3, :3] = np.column_stack((x_axis, np.cross(normal, x_axis), normal))
+    target[:3, 3] = base_tag[:3, 3]-normal*distance
+    return target, distance
+
+
 def tag_pose(detection, camera_matrix, distortion, settings):
     """PnP uses detector corner ordering, matching measure_apriltag_docking.py."""
     if (detection.get('hamming') != 0
@@ -76,7 +100,15 @@ def tag_pose(detection, camera_matrix, distortion, settings):
         raise ValueError('tag reprojection error too large')
     if (len(candidates) > 1
             and candidates[1][0]-error < settings['min_pnp_solution_gap_px']):
-        raise ValueError('ambiguous planar tag pose')
+        # At the requested front-on alignment IPPE can return the same pose
+        # twice. Reject distinct mirror solutions, not equivalent duplicates.
+        _, other_rotation, other_translation = candidates[1]
+        turn = float(np.linalg.norm(cv2.Rodrigues(
+            cv2.Rodrigues(other_rotation)[0] @ cv2.Rodrigues(rotation)[0].T)[0]))
+        shift = float(np.linalg.norm(other_translation-translation))
+        if (turn > settings.get('angle_tolerance_rad', .02)
+                or shift > settings.get('position_tolerance_m', .002)):
+            raise ValueError('ambiguous planar tag pose')
     result = np.eye(4)
     result[:3, :3], result[:3, 3] = cv2.Rodrigues(rotation)[0], translation.reshape(3)
     return result
@@ -94,6 +126,12 @@ def load_settings(filename):
         if raw.get('enabled') is not True:
             continue
         item = dict(raw)
+        mode = item.setdefault('alignment_mode', 'tag_tcp_stages')
+        if mode not in ('tag_tcp_stages', 'camera_normal_advance'):
+            raise ValueError('unknown docking alignment_mode')
+        if 'tag_family' in item and (not isinstance(item['tag_family'], str)
+                                     or not item['tag_family'].strip()):
+            raise ValueError('tag_family must be a nonempty string')
         if type(item.get('tag_id')) is not int or item['tag_id'] < 0:
             raise ValueError('enabled docking requires tag_id')
         # Physical transforms and timing are deliberately mandatory.
@@ -108,8 +146,11 @@ def load_settings(filename):
                       joint_step_rad=(0, .10), joint_speed_rad_s=(0, .05),
                       linear_speed_m_s=(0, .02), angular_speed_rad_s=(0, .1),
                       stopped_speed_rad_s=(0, .02), joint_tolerance_rad=(0, .02),
-                      acquire_timeout_s=(0, 30), sequence_timeout_s=(0, 600),
-                      actuation_timeout_s=(0, 120))
+                      acquire_timeout_s=(0, 30), sequence_timeout_s=(0, 600))
+        if mode == 'tag_tcp_stages':
+            limits['actuation_timeout_s'] = (0, 120)
+        else:
+            limits['advance_distance_m'] = (0, .10)
         for name, (low, high) in limits.items():
             value = item.get(name)
             if (type(value) not in (int, float) or not math.isfinite(value)
@@ -119,6 +160,11 @@ def load_settings(filename):
             raise ValueError('stable_samples must be 3..100 distinct observations')
         if type(item.get('actuation_enabled')) is not bool:
             raise ValueError('explicit actuation_enabled required')
+        if mode == 'camera_normal_advance':
+            if item['actuation_enabled']:
+                raise ValueError('camera-normal advance ends in HOLD; actuation must be disabled')
+            result[tool_id] = item
+            continue
         if type(item.get('desired_docked')) is not bool:
             raise ValueError('explicit desired_docked state required')
         stages = item.get('stages')

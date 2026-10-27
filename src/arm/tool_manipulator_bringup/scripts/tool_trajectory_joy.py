@@ -442,7 +442,7 @@ class ToolTrajectoryJoy(Node):
                                       self.max_start_delta, self.approach_speed)
             else:
                 path = planned_path
-            if self.shoulder_isolation_enabled:
+            if self.shoulder_isolation_enabled and not path.get('cartesian_line', False):
                 path = isolate_shoulder_zero_crossings(
                     path, self.shoulder_isolation_half_width,
                     self.shoulder_isolation_speed)

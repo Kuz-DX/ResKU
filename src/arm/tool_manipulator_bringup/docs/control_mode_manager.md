@@ -123,12 +123,25 @@ L2 (axis 2 below -0.5) reserves buttons 2/3/4 for physical 1/2/3, selecting
 path 0/1/2. While L2 is held, the TCP producer suppresses L1 and square HOME
 handling so one combination cannot start both a path and TCP/HOME motion.
 Paths must contain reviewed captured points and have `execution_enabled: true`.
-Path 0 is enabled. Path 1 retains original points 1/2/5/7/9 and their timestamps;
-intermediate points 3/4/6/8 were removed at the user's request because they
-violated joint limits or margins. The final docking coordinates are unchanged.
-Path 1 remains disabled because the final elbow angle 1.532573574 rad exceeds
-the 0.02-rad margin ceiling of 1.522 rad. Removing intermediate points changes
-the connecting segments, which must pass collision validation before execution.
+Path 0 is enabled. Path 1 is enabled for approach-only testing and retains
+original points 1/2/5/7 and their timestamps, ending at 129.10062 s in the recorded
+path before HOLD (actual execution can take longer under runtime limits).
+Intermediate points 3/4/6/8 were removed at the user's request because they
+violated joint limits or margins. The user reports collision simulation of the
+intermediate path is complete; runtime collision validation still applies.
+Original final point 9 is excluded from execution. Its joint values and FK-derived
+`base_actuator` -> `tcp_link` pose are preserved as comments in
+`config/tool1_trajectory.yaml`. That original joint pose exceeds the elbow margin;
+the Cartesian reference is not an approved descent command and is not read by
+the docking coordinator. Tool 1 now uses `camera_normal_advance`: after the path
+and HOLD, align the camera optical axis through live tag 1 (`tag36h11`, 20 mm)
+at the initial observed normal distance, then translate 75 mm toward the tag
+along the latched normal and HOLD without Arduino actuation. This is relative
+travel, not a 75 mm final stand-off. The whole advance is IK/collision checked
+before execution. Tag visibility is required through alignment; after the
+advance is latched, tag loss is allowed but L2, feedback and ownership checks
+remain mandatory. Both launch switches `enable_tool_docking` and
+`enable_docking_motion` must be true for actual alignment/advance motion.
 Path 2 is excluded and remains disabled.
 
 TCP-ready and entry checks allow the same bounded 0.02-rad DXL/EE encoder

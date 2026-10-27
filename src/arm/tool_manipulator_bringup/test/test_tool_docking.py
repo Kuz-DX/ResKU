@@ -14,7 +14,8 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'scripts'))
-from tool_docking_core import load_settings, transform, bounded_target, pose_errors, tag_pose
+from tool_docking_core import (load_settings, transform, bounded_target, pose_errors,
+                               tag_pose, camera_normal_target)
 from tool_docking_coordinator import ToolDockingCoordinator
 from tool_trajectory_joy import ToolTrajectoryJoy, ARM_JOINTS
 
@@ -60,8 +61,15 @@ def sample(n):
     ToolDockingCoordinator.observe(n, 1.)
 
 
-def test_shipped_config_disables_every_docking_path():
-    assert load_settings(ROOT/'config/tool_docking.yaml') == {}
+def test_shipped_config_only_enables_tool1_camera_alignment_and_relative_advance():
+    cfg = load_settings(ROOT/'config/tool_docking.yaml')
+    assert set(cfg) == {1}
+    assert cfg[1]['alignment_mode'] == 'camera_normal_advance'
+    assert cfg[1]['advance_distance_m'] == .075
+    assert cfg[1]['tag_family'] == 'tag36h11'
+    assert cfg[1]['tag_id'] == 1
+    assert not cfg[1]['actuation_enabled']
+    assert 'targets' not in cfg[1]
 
 
 def test_enabling_unmeasured_config_is_rejected(tmp_path):
@@ -347,3 +355,220 @@ def test_launch_selects_exactly_one_path_input_owner(enabled, script):
                   'tool_docking_coordinator.py' in a for a in n.get('arguments', []))]
     assert len(path_nodes) == 1
     assert Path(path_nodes[0]['arguments'][0]).name == script
+
+
+def camera_node(tmp_path):
+    n = node(tmp_path)
+    n.cfg = load_settings(ROOT/'config/tool_docking.yaml')[1]
+    n.path_id = 1
+    n.camera_alignment_distance = None
+    n.camera_reference_x = None
+    n.tcp_camera = np.eye(4)
+    n.advance_locked = False
+    n.advance_target = None
+    n.advance_plan = None
+    n.validation_rmd_drift = .005
+    n.shoulder_isolation_enabled = True
+    n.shoulder_isolation_speed = .015
+    n.observation = (1, 0., transform([0, 0, .2], [0, 0, 0, 1]))
+    return n
+
+
+def camera_sample(n):
+    n.feedback_sequence += 1
+    n.observation = (n.observation[0]+1, 0., n.observation[2])
+    n.observe(1.)
+
+
+@pytest.mark.parametrize('flip', [False, True])
+def test_camera_normal_alignment_uses_camera_side_and_centres_optical_axis(flip):
+    rotation = cv2.Rodrigues(np.array([0., math.radians(55), 0.]))[0]
+    tag = np.eye(4)
+    tag[:3, :3] = rotation
+    tag[:3, 3] = [.1, .2, .3]
+    camera = np.eye(4)
+    camera[:3, 3] = tag[:3, 3]-.2*rotation[:, 2]+.03*rotation[:, 0]
+    if flip:
+        tag[:3, :3] = tag[:3, :3] @ np.diag([1., -1., -1.])
+    goal, distance = camera_normal_target(tag, camera, camera[:3, 0])
+    assert distance == pytest.approx(.2)
+    np.testing.assert_allclose(goal[:3, 2], rotation[:, 2], atol=1e-12)
+    np.testing.assert_allclose(tag[:3, 3]-goal[:3, 3], .2*goal[:3, 2])
+    np.testing.assert_allclose(goal[:3, :3].T @ goal[:3, :3], np.eye(3), atol=1e-12)
+    assert np.linalg.det(goal[:3, :3]) == pytest.approx(1.)
+
+
+def test_alignment_converts_optical_goal_to_tcp_with_mount_offset(tmp_path):
+    n = camera_node(tmp_path)
+    n.tcp_camera = transform([.03, .04, -.01], [0, 0, np.sin(.2), np.cos(.2)])
+    tcp_goal, camera_goal = n.camera_target(n.observation[2], np.eye(4))
+    np.testing.assert_allclose(tcp_goal @ n.tcp_camera, camera_goal, atol=1e-12)
+    assert n.camera_alignment_distance == pytest.approx(.21)
+    np.testing.assert_allclose(camera_goal[:3, 3], [0, 0, -.01], atol=1e-12)
+
+
+def test_aligned_camera_latches_relative_75mm_only_after_distinct_stable_samples(tmp_path):
+    n = camera_node(tmp_path)
+    for _ in range(n.cfg['stable_samples']-1):
+        camera_sample(n)
+        assert not n.advance_locked
+    camera_sample(n)
+    assert n.advance_locked and n.stage == 'dock_advance_plan'
+    np.testing.assert_allclose(n.advance_target[:3, 3], [0., 0., .075])
+    assert n.camera_alignment_distance == pytest.approx(.2)  # final gap is .125, not .075
+    n.begin.assert_not_called()  # no partial motion before whole-line validation
+    n.docking_command.publish.assert_not_called()
+
+
+def test_preview_never_latches_or_executes_fixed_advance(tmp_path):
+    n = camera_node(tmp_path)
+    n.motion_enabled = False
+    for _ in range(10):
+        camera_sample(n)
+    assert not n.advance_locked
+    n.begin.assert_not_called()
+
+
+def test_too_close_tag_rejects_advance_instead_of_crossing_plane(tmp_path):
+    n = camera_node(tmp_path)
+    n.observation[2][:3, 3] = [0., 0., .07]
+    with pytest.raises(RuntimeError, match='stand-off too short'):
+        camera_sample(n)
+    n.begin.assert_not_called()
+
+
+def test_complete_line_is_solved_before_collision_checked_submission(tmp_path):
+    n = camera_node(tmp_path)
+    for _ in range(n.cfg['stable_samples']):
+        camera_sample(n)
+    n.model.solve.side_effect = lambda target, seed, *a, **k: seed+0.0001
+    n.model.within_limits.return_value = True
+    n.model.pose_error.return_value = np.zeros(6)
+    for _ in range(n.advance_count-1):
+        n.plan_advance_step()
+        n.begin.assert_not_called()
+    n.plan_advance_step()
+    path_id, plan = n.begin.call_args.args
+    assert path_id == 1 and plan['cartesian_line']
+    assert len(plan['waypoints']) == n.advance_count
+    assert plan['total'] >= .075/.005-1e-10
+    assert plan['stop_at_waypoints'] == [False]*(n.advance_count-1)+[True]
+    calls = n.model.solve.call_args_list
+    np.testing.assert_allclose(calls[-1].args[0][:3, 3], [0., 0., .075])
+    for i, call in enumerate(calls, 1):
+        np.testing.assert_allclose(call.args[0][:3, 3], [0, 0, .075*i/n.advance_count])
+        np.testing.assert_allclose(call.args[0][:3, :3], np.eye(3))
+
+
+def test_failed_advance_ik_never_submits_partial_path(tmp_path):
+    n = camera_node(tmp_path)
+    for _ in range(n.cfg['stable_samples']):
+        camera_sample(n)
+    n.model.solve.side_effect = ValueError('IK iteration would violate soft limits')
+    with pytest.raises(ValueError, match='soft limits'):
+        n.plan_advance_step()
+    n.begin.assert_not_called()
+
+
+@pytest.mark.parametrize('locked', [False, True])
+def test_tag_loss_only_permitted_after_advance_direction_is_locked(tmp_path, locked):
+    n = camera_node(tmp_path)
+    n.docking_started = 0.
+    n.stage = 'executing'
+    n.advance_locked = locked
+    n.guard = Mock()
+    n.fresh_observation = Mock(side_effect=RuntimeError('target tag missing'))
+    with patch.object(ToolTrajectoryJoy, 'tick') as parent:
+        n.tick()
+        assert parent.called == locked
+    assert n.fail.called != locked
+    assert n.fresh_observation.called != locked
+
+
+def test_deadman_still_cancels_blind_advance(tmp_path):
+    n = camera_node(tmp_path)
+    n.docking_started = 0.
+    n.stage = 'executing'
+    n.advance_locked = True
+    n.deadman_held = False
+    with patch.object(ToolTrajectoryJoy, 'tick') as parent:
+        n.tick()
+        parent.assert_not_called()
+    assert 'deadman' in n.fail.call_args.args[0]
+
+
+@pytest.mark.parametrize('endpoint_error', [0., .004])
+def test_advance_completion_checks_fk_endpoint_without_actuation(tmp_path, endpoint_error):
+    n = camera_node(tmp_path)
+    n.advance_locked = True
+    n.advance_target = transform([0., 0., .075], [0., 0., 0., 1.])
+    measured = n.advance_target.copy()
+    measured[2, 3] += endpoint_error
+    n.model.fk.return_value = measured
+    if endpoint_error:
+        with pytest.raises(RuntimeError, match='endpoint feedback'):
+            n.path_completed()
+        n.reset.assert_not_called()
+    else:
+        n.path_completed()
+        n.reset.assert_called_once()
+        assert '75.0 mm completed' in n.report.call_args.args[1]
+    n.docking_command.publish.assert_not_called()
+
+
+def test_front_on_tag_accepts_equivalent_ippe_solutions():
+    cfg = load_settings(ROOT/'config/tool_docking.yaml')[1]
+    k = np.array([[600., 0, 320], [0, 600., 240], [0, 0, 1]])
+    h = cfg['tag_size_m']/2
+    square = np.array([[-h,h,0],[h,h,0],[h,-h,0],[-h,-h,0]])
+    pixels = cv2.projectPoints(square, np.zeros(3), np.array([0., 0., .2]),
+                              k, np.zeros(5))[0].reshape(4, 2)
+    detection = dict(hamming=0, decision_margin=100,
+                     corners_px=[dict(u=u, v=v) for u, v in pixels])
+    pose = tag_pose(detection, k, np.zeros(5), cfg)
+    np.testing.assert_allclose(pose, transform([0, 0, .2], [0, 0, 0, 1]), atol=1e-10)
+
+
+def test_distinct_equally_scored_ippe_solutions_remain_rejected():
+    cfg = load_settings(ROOT/'config/tool_docking.yaml')[1]
+    pixels = np.array([[290., 270.], [350., 270.], [350., 210.], [290., 210.]])
+    detection = dict(hamming=0, decision_margin=100,
+                     corners_px=[dict(u=u, v=v) for u, v in pixels])
+    with patch('tool_docking_core.cv2.solvePnPGeneric', return_value=(
+            True, [np.array([.1, 0, 0]), np.array([-.1, 0, 0])],
+            [np.array([0, 0, .2]), np.array([0, 0, .2])])), \
+            patch('tool_docking_core.cv2.projectPoints', return_value=(pixels, None)):
+        with pytest.raises(ValueError, match='ambiguous'):
+            tag_pose(detection, np.eye(3), np.zeros(5), cfg)
+
+
+def test_cartesian_advance_keeps_line_and_still_builds_collision_requests(tmp_path):
+    n = camera_node(tmp_path)
+    n.healthy_hold = Mock(return_value={'epoch': 'hold'})
+    n.collision = Mock()
+    n.mode = Mock()
+    n.collision_step = .005
+    n.collision_timeout = 10.
+    n.start_tolerance = .03
+    n.begin_failed = Mock()
+    plan = dict(waypoints=[np.ones(6)*.01, np.ones(6)*.02], durations=[1., 1.],
+                total=2., start_error=0., cartesian_line=True,
+                stop_at_waypoints=[False, True])
+    with patch('tool_trajectory_joy.isolate_shoulder_zero_crossings') as isolate:
+        ToolTrajectoryJoy.begin(n, 1, plan)
+        isolate.assert_not_called()
+    n.begin_failed.assert_not_called()
+    assert n.stage == 'checking'
+    assert len(n.requests) == 6  # both segment endpoints are checked
+    n.collision.call_async.assert_called_once_with(n.requests[0])
+    assert n.path is plan
+
+
+@pytest.mark.parametrize('distance', [None, 0., -.075, float('nan'), .11])
+def test_invalid_fixed_advance_distance_is_rejected(tmp_path, distance):
+    data = yaml.safe_load((ROOT/'config/tool_docking.yaml').read_text())
+    data['tools'][1]['advance_distance_m'] = distance
+    file = tmp_path/'bad_advance.yaml'
+    file.write_text(yaml.safe_dump(data))
+    with pytest.raises(ValueError, match='advance_distance_m'):
+        load_settings(file)

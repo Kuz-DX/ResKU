@@ -1,6 +1,7 @@
 # Opt-in only. Existing L2 paths remain unchanged until launch AND path are enabled.
 # Before enabling, teach the stored trajectory to end BEFORE contact, with tag visible.
-# All xyz/xyzw values are TCP poses in the TAG frame (metres, quaternion x y z w).
+# tag_tcp_stages xyz/xyzw values are TCP poses in the TAG frame (m, quaternion x y z w).
+# camera_normal_advance derives alignment from live tag/optical-frame TF instead.
 # Never substitute camera pixel centre or raw camera depth for a calibrated 6D pose.
 tools:
   0:
@@ -41,6 +42,46 @@ tools:
     acquire_timeout_s: 10.0
     sequence_timeout_s: 180.0
   1:
-    enabled: false
+    enabled: true
+    # Confirmed physical rack tag for tool 1 (2026-10-28).
+    # Detector family: tag36h11, matching the vision.apriltag default.
+    # Tag plane is 55 degrees to the horizontal circuit-box top.
+    # Camera image plane should align parallel to the tag plane on approach.
+    # Align the optical axis through the tag centre at the first observed
+    # normal distance; preserve camera roll. Then advance RELATIVE 75 mm
+    # toward the tag along its observed normal, freeze direction, and HOLD.
+    # This is NOT a final camera-to-tag distance of 75 mm.
+    # No FK endpoint from tool1_trajectory.yaml is read or used.
+    # Tag loss cancels alignment; after alignment the checked advance may
+    # finish without tag visibility. L2 and healthy feedback remain mandatory.
+    alignment_mode: camera_normal_advance
+    tag_family: tag36h11
+    tag_id: 1
+    tag_size_m: 0.020             # measured outer black square, excluding white margin
+    advance_distance_m: 0.075
+    actuation_enabled: false     # finish in HOLD, no attach/release command
+    tag_max_age_s: 0.25
+    min_decision_margin: 40.0
+    max_reprojection_px: 1.5
+    min_tag_edge_px: 30.0
+    min_pnp_solution_gap_px: 0.05
+    tf_timeout_s: 0.10
+    max_tag_position_jump_m: 0.005
+    max_tag_angle_jump_rad: 0.05
+    position_tolerance_m: 0.002
+    angle_tolerance_rad: 0.02
+    step_m: 0.002
+    step_rad: 0.01
+    max_position_error_m: 0.05
+    max_angle_error_rad: 0.25
+    joint_step_rad: 0.03
+    joint_speed_rad_s: 0.025
+    linear_speed_m_s: 0.005
+    angular_speed_rad_s: 0.05
+    stopped_speed_rad_s: 0.01
+    joint_tolerance_rad: 0.005
+    stable_samples: 5
+    acquire_timeout_s: 10.0
+    sequence_timeout_s: 180.0
   2:
     enabled: false
