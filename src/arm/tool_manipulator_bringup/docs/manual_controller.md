@@ -1,10 +1,12 @@
 # 메인 수동 제어: manual
 
-`Resku_arm` → `manual.launch.py` → `manual_collision.py`.
+`manual.launch.py`는 현재 임시로 `manual.py`를 실행한다. 충돌 검사 장면과
+`manual_collision.py`는 시작하지 않는다. 기존 충돌 검사 구현은 복구를 위해 보존했다.
 기존 manual_controller 협조·독립 수동 제어는 `~/Resku_arm_backup`으로 옮겼다.
 메인은 `manual_control_common.py`의 Servo 없는 FK·IK·입력 공통 코드를 사용한다.
-`manual_collision.py`는 기존 `Manual` 제어에 충돌 검사 게이트를 추가한다.
-MoveIt Servo 없이 MoveIt 상태 유효성 서비스를 사용하며, 메인 수동 launch에만 적용한다.
+`manual_collision.py`는 기존 `Manual` 제어에 충돌 검사 게이트를 추가하지만,
+현재 수동 launch에서는 비활성화돼 있다. 기본 하드웨어 제한, 피드백 확인,
+시작 복귀와 입력 중단 시 위치 유지는 `manual.py`에서 계속 수행한다.
 
 ### 실행과 키 매핑
 
@@ -63,6 +65,8 @@ O를 누르면 EE·손목 Pitch·수직 이동 매핑만 동작하며 기존 롤
 O + D-pad 좌우로 별도 EE 속도 명령을 내며 신규 경로는 이 구현을 유지한다.
 
 ### 구현과 진단
+
+**아래 충돌 검사 설명은 현재 비활성화된 구현에 대한 기록이다.**
 
 수동 충돌 검사는 `/manual/check_state_validity`를 사용한다. 같은 URDF/SRDF로 실행하는
 `/manual/collision_scene`의 궤적 실행은 비활성화돼 있다. 수동 전용 SRDF 그룹은 팔 6축과

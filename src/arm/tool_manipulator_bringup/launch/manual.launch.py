@@ -1,9 +1,8 @@
-"""Main Servo-free manual control with a MoveIt collision scene."""
+"""Main Servo-free manual control; collision gate temporarily disabled."""
 import fcntl
 import importlib.util
 import os
 from pathlib import Path
-import xml.etree.ElementTree as ET
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
@@ -12,7 +11,6 @@ from launch.event_handlers import OnProcessExit, OnProcessIO
 from launch.events import Shutdown
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-from launch_ros.parameter_descriptions import ParameterValue
 
 
 def _load_common():
@@ -76,35 +74,18 @@ def _bringup(context):
     jsb = base.spawner('joint_state_broadcaster')
     ee = base.spawner('ee_velocity_controller')
     manual_spawner = base.spawner('manual_position_controller', inactive=True)
-    manual = Node(package='tool_manipulator_bringup', executable='manual_collision.py',
-                  parameters=[description, {'hardware_config': hardware, 'servo_mode': False,
-                      'collision_check_rate_hz': ParameterValue(LaunchConfiguration('collision_check_rate_hz'), value_type=float),
-                      'collision_lookahead_sec': ParameterValue(LaunchConfiguration('collision_lookahead_sec'), value_type=float),
-                      'collision_timeout_sec': ParameterValue(LaunchConfiguration('collision_timeout_sec'), value_type=float)}],
+    # Temporary manual-only bypass: keep manual_collision.py available, but do
+    # not start its collision gate or the MoveIt state-validity scene.
+    manual = Node(package='tool_manipulator_bringup', executable='manual.py',
+                  parameters=[description, {'hardware_config': hardware, 'servo_mode': False}],
                   output='screen', sigterm_timeout='3', sigkill_timeout='3')
-    # Check every moving arm/tool link against the rest of the robot. Static
-    # fixtures mounted on each other are outside this group. Keep this group
-    # local to manual; the automatic stack's SRDF is not modified.
-    semantic = ET.fromstring(base.moveit_config.robot_description_semantic['robot_description_semantic'])
-    collision_group = ET.SubElement(semantic, 'group', name='manual_collision')
-    for joint in ('base_joint', 'shoulder_joint', 'elbow_joint', 'wrist_pitch_joint',
-                  'wrist_roll_joint', 'wrist_yaw_joint', 'ee_joint'):
-        ET.SubElement(collision_group, 'joint', name=joint)
-    # MoveIt owns only the planning scene/state-validity service, never arm execution.
-    scene = Node(package='moveit_ros_move_group', executable='move_group',
-                 namespace='manual', name='collision_scene',
-                 remappings=[('joint_states', '/joint_states')],
-                 parameters=[base.moveit_config.to_dict(), description,
-                             {'allow_trajectory_execution': False,
-                              'robot_description_semantic': ET.tostring(semantic, encoding='unicode'),
-                              'publish_robot_description_semantic': True}], output='screen')
     joy = Node(package='joy', executable='joy_node',
                parameters=[{'device_id': 0, 'deadzone': .05, 'autorepeat_rate': 50.}],
                output='log', respawn=True, respawn_delay=2.)
     joy_log = JoystickConnectionLog()
     joy_events = RegisterEventHandler(OnProcessIO(
         target_action=joy, on_stdout=joy_log.stdout, on_stderr=joy_log.stderr))
-    ready = [scene, manual]
+    ready = [manual]
     if LaunchConfiguration('launch_joy').perform(context) == 'true':
         ready.append(joy)
     if LaunchConfiguration('launch_rviz').perform(context) == 'true':
@@ -112,12 +93,12 @@ def _bringup(context):
                           arguments=['-d', str(share/'config/joint_rviz.rviz')], output='screen'))
     # No JTC/Servo/recover-only process; the new node owns its startup ramp.
     return [_after(jsb, [ee]), _after(ee, [manual_spawner]), _after(manual_spawner, ready),
-            _shutdown_on_exit(control), _shutdown_on_exit(state), _shutdown_on_exit(scene),
+            _shutdown_on_exit(control), _shutdown_on_exit(state),
             _shutdown_on_exit(manual),
             # Joystick is optional: its absence or driver restart must never
             # shut down the hardware/controller processes or startup recovery.
             joy_events,
-            LogInfo(msg='Servo-free manual control: MoveIt collision checks guard manual steps and startup recovery.'),
+            LogInfo(msg='Servo-free manual control: collision checking temporarily disabled.'),
             state, control, jsb]
 
 
@@ -142,8 +123,5 @@ def generate_launch_description():
         DeclareLaunchArgument('launch_rviz', default_value='false', choices=['true', 'false']),
         DeclareLaunchArgument('launch_joy', default_value='true', choices=['true', 'false']),
         DeclareLaunchArgument('mock_initial_positions_file', default_value=''),
-        DeclareLaunchArgument('collision_check_rate_hz', default_value='10.0'),
-        DeclareLaunchArgument('collision_lookahead_sec', default_value='0.35'),
-        DeclareLaunchArgument('collision_timeout_sec', default_value='0.15'),
         OpaqueFunction(function=_preflight),
     ])

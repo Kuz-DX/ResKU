@@ -16,6 +16,8 @@
 
 `manual`은 오늘 pull 받은 Servo 없는 수동 제어 구현이다. 세부 버튼 매핑, 시작 복귀,
 안전 조건과 rosbag 진단 방법은 [manual_controller.md](docs/manual_controller.md)를 따른다.
+현재 `manual.launch.py`의 충돌 검사는 임시로 비활성화돼 있다. 수동 입력과 시작 복귀는
+`manual.py`를 사용하며, 충돌 검사용 MoveIt 장면은 실행하지 않는다.
 
 ## 제어 모드 기반 구조
 
@@ -159,15 +161,28 @@ ros2 launch tool_manipulator_bringup manual.launch.py launch_rviz:=true
 
 ### 실기, 시각화 없음
 
-잭스의 작업공간(`~/dolbotZ`)에서 매뉴얼을 실행하는 터미널은 ROS domain을 99로 맞춘다.
+잭스의 작업공간(`~/ResKU`)에서 매뉴얼을 실행하는 터미널은 ROS domain을 99로 맞춘다.
 `hardware_config`를 생략하면 이 터미널에서 source한 패키지의
 `config/hardware.yaml`을 자동으로 사용한다.
 
+잭스의 기존 셸에는 `dolbotZ` 패키지 경로가 먼저 잡힐 수 있다. 실기와 원격 조이스틱은
+`cau`로 CAN을 켠 뒤 아래 스크립트로 실행한다. 스크립트가 깨끗한 ROS 환경을 만들고
+두 필수 패키지가 `ResKU`에서 선택되는지 검사한다.
+소스를 새로 동기화한 뒤에는 잭스에서 `tool_manipulator_bringup`을 한 번 빌드한다.
+매번 실행할 때 다시 빌드할 필요는 없다.
+
 ```bash
-cd ~/dolbotZ
+cau
+bash ~/ResKU/util/start_manual_arm_remote_joy.bash
+```
+
+아래 직접 실행 예제는 ROS 환경에 다른 작업공간이 섞이지 않은 터미널에서만 사용한다.
+
+```bash
+cd ~/ResKU
 export ROS_DOMAIN_ID=99
 source /opt/ros/humble/setup.bash
-source install/setup.bash
+source install/local_setup.bash
 ros2 launch tool_manipulator_bringup manual.launch.py real_hardware:=true
 ```
 
@@ -186,11 +201,11 @@ export ROS_LOCALHOST_ONLY=0
 ros2 launch tool_manipulator_bringup remote_joy.launch.py joy_dev:=/dev/input/js0
 
 # 잭스
-cd ~/dolbotZ
+cd ~/ResKU
 export ROS_DOMAIN_ID=99
 export ROS_LOCALHOST_ONLY=0
 source /opt/ros/humble/setup.bash
-source install/setup.bash
+source install/local_setup.bash
 ros2 launch tool_manipulator_bringup manual.launch.py \
   real_hardware:=true launch_joy:=false
 ```

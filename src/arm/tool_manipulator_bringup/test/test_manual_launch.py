@@ -46,7 +46,6 @@ def test_manual_mode_uses_common_base_and_inactive_seed_controller():
             RegisterEventHandler=lambda handler: {"kind": "handler", **handler},
             OnProcessExit=lambda **kwargs: kwargs,
             OnProcessIO=lambda **kwargs: kwargs,
-            ParameterValue=lambda value, value_type: value,
             LogInfo=lambda **kwargs: {"kind": "log", **kwargs}):
         result = module._bringup(None)
 
@@ -61,13 +60,9 @@ def test_manual_mode_uses_common_base_and_inactive_seed_controller():
     assert spawner.call_args_list[1].args == ("ee_velocity_controller",)
     assert spawner.call_args_list[2].args == ("manual_position_controller",)
     assert spawner.call_args_list[2].kwargs == {"inactive": True}
-    manual = next(item for item in nodes if item.get("executable") == "manual_collision.py")
+    manual = next(item for item in nodes if item.get("executable") == "manual.py")
     assert manual["parameters"][0] == base.description
-    scene = next(item for item in nodes if item.get('executable') == 'move_group')
-    assert scene['namespace'] == 'manual'
-    assert scene['parameters'][-1]['allow_trajectory_execution'] is False
-    assert 'manual_collision' in scene['parameters'][-1]['robot_description_semantic']
-    assert 'ee_joint' in scene['parameters'][-1]['robot_description_semantic']
+    assert not any(item.get('executable') == 'move_group' for item in nodes)
     assert base.moveit_config.robot_description_semantic['robot_description_semantic'] == '<robot name="test"/>'
 
 
