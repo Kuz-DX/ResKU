@@ -27,6 +27,43 @@ def test_only_owner_and_current_epoch_can_command():
     assert max(c.tick(.12, .02)) <= .12*.02
 
 
+def test_first_arm_focus_aligns_dxl_before_managed_mode_entry():
+    c = ModeCore([(-2., 2.)]*6, [.12]*6)
+    c.entry_alignment_enabled = True
+    c.entry_alignment_complete = False
+    c.ready, c.focus = True, 'arm'
+    measured = [.06, .4, -.3, -.5, -.04, .02]
+    c.feedback(measured, [0.]*6, 1.)
+    with pytest.raises(ValueError, match='DXL entry alignment'):
+        c.request('tcp_ik', 1.)
+    for step in range(1, 130):
+        now = 1.+step*.02
+        c.feedback(measured, [0.]*6, now)
+        previous = list(c.target)
+        target = c.tick(now, .02)
+        if c.entry_alignment_started == now:
+            assert c.entry_alignment_deadline-now == pytest.approx(17.)
+        assert max(abs(target[i]-previous[i]) for i in (0, 4, 5)) <= .0006+1e-12
+        assert [target[i] for i in (1, 2, 3)] == [previous[i] for i in (1, 2, 3)]
+        measured = list(target)
+        if c.entry_alignment_complete:
+            break
+    assert c.entry_alignment_complete
+    assert [c.target[i] for i in (0, 4, 5)] == [0.]*3
+    assert c.mode == 'hold'
+    assert c.tick(now+.02, .02) == c.target  # no return to the pre-alignment goal
+
+
+def test_managed_dxl_entry_aligns_beyond_old_start_limit():
+    c = ModeCore([(-2., 2.)]*6, [.12]*6)
+    c.entry_alignment_enabled = True
+    c.entry_alignment_complete = False
+    c.ready, c.focus = True, 'arm'
+    c.feedback([.36, 0., 0., 0., 0., 0.], [0.]*6, 1.)
+    assert c.tick(1.02, .02)[0] < .36
+    assert c.mode == 'hold' and not c.entry_alignment_complete
+
+
 def test_transition_blocks_commands_and_invalidates_pending_messages():
     c = ready()
     old = c.epoch

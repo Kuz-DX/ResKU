@@ -99,6 +99,13 @@ class ModeCore:
         self.startup_timeout = 60.
         self.startup_stall_timeout = 15.
         self.startup_progress_epsilon = .0005
+        # Managed first arm entry uses the same DXL zero ramp as manual.py.
+        self.entry_alignment_enabled = False
+        self.entry_alignment_complete = True
+        self.entry_alignment_started = None
+        self.entry_alignment_deadline = None
+        self.entry_alignment_speed = .03
+        self.entry_alignment_timeout_margin = 15.
         self.tcp_entry_required = False
         self.tcp_entry = None
         self.entry_stable_since = None
@@ -207,6 +214,44 @@ class ModeCore:
             math.isfinite(v) and lo <= v <= hi
             for v, (lo, hi) in zip(values, self.limits)))
 
+    def run_entry_alignment(self, now, dt):
+        """First arm focus: ramp only DXL base/roll/yaw to zero in HOLD."""
+        indexes = (0, 4, 5)
+        self.ee = 0.
+        if not self.fresh(now) or not self.valid(self.position) or dt <= 0 or dt > .2:
+            self.fault('DXL entry alignment requires fresh valid feedback and timer')
+            return list(self.target)
+        if self.entry_alignment_started is None:
+            if any(not self.limits[i][0] <= 0 <= self.limits[i][1] for i in indexes):
+                self.fault('DXL zero outside joint limits')
+                return list(self.target)
+            self.target = list(self.position)
+            self.entry_alignment_started = now
+            self.entry_alignment_deadline = (now + max(
+                abs(self.position[i])/min(self.speeds[i], self.entry_alignment_speed)
+                for i in indexes) + self.entry_alignment_timeout_margin)
+        if now > self.entry_alignment_deadline:
+            self.fault('DXL entry alignment timed out; inspect feedback')
+            return list(self.target)
+        if max(abs(a-b) for a, b in zip(self.target, self.position)) > .10:
+            self.fault('DXL entry alignment following error')
+            return list(self.target)
+        candidate = list(self.target)
+        for i in indexes:
+            step = min(self.speeds[i], self.entry_alignment_speed)*min(dt, .02)
+            candidate[i] += max(-step, min(step, -candidate[i]))
+        if max(abs(candidate[i]-self.position[i]) for i in indexes) <= .10:
+            self.target = candidate
+        self.goal = list(self.target)
+        self.reason = 'aligning DXL base/roll/yaw to zero'
+        if (max(abs(self.target[i]) for i in indexes) <= 1e-9 and
+                max(abs(self.position[i]) for i in indexes) <= .005):
+            self.entry_alignment_complete = True
+            self.entry_alignment_started = None
+            self.entry_alignment_deadline = None
+            self.reason = 'DXL entry alignment verified; HOLD'
+        return list(self.target)
+
     def feedback(self, position, velocity, now):
         if not self.feedback_allowed(position):
             names = ('base_joint', 'shoulder_joint', 'elbow_joint', 'wrist_pitch_joint',
@@ -302,6 +347,8 @@ class ModeCore:
                 self.fault('startup recovery cancelled; restart required')
                 return
             raise ValueError('startup recovery must complete before mode requests')
+        if mode != 'hold' and self.entry_alignment_enabled and not self.entry_alignment_complete:
+            raise ValueError('DXL entry alignment must complete before mode requests')
         if mode != 'hold' and (self.focus != 'arm' or not self.ready or not self.fresh(now)):
             raise ValueError('arm focus, active controller and fresh feedback required')
         if mode == 'tcp_ik':
@@ -568,6 +615,10 @@ class ModeCore:
             if self.startup_recovering:
                 return self.run_startup(now, dt)
             return None
+        if (self.entry_alignment_enabled and not self.entry_alignment_complete and
+                self.focus == 'arm' and self.ready and self.mode == 'hold' and
+                not self.transitioning):
+            return self.run_entry_alignment(now, dt)
         if not self.fresh(now):
             self.fault('joint feedback timeout')
             return None

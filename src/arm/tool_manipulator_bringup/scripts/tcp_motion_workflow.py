@@ -24,6 +24,7 @@ class TcpMotionWorkflow:
                 and s.get('mode') == 'hold' and not s.get('transitioning')
                 and s.get('focus') == 'arm' and s.get('ready')
                 and s.get('startup_complete') and now-self.status_time < .3
+                and s.get('entry_alignment_complete', True)
                 and now-self.state_time < .3 and not np.any(self.twist)):
             self._reset_ready()
             self.ready_goal = self.default_ready_goal.copy()
@@ -58,7 +59,8 @@ class TcpMotionWorkflow:
                 self._fail_ready('TCP transition timed out; release and press L1 to retry')
                 return
         if (now-self.status_time >= .3 or now-self.state_time >= .3 or self.measured is None
-                or not s.get('ready') or not s.get('startup_complete') or s.get('focus') != 'arm'):
+                or not s.get('ready') or not s.get('startup_complete')
+                or not s.get('entry_alignment_complete', True) or s.get('focus') != 'arm'):
             return
         if self.ready_state == 'idle':
             if s.get('mode') != 'hold' or s.get('transitioning'):

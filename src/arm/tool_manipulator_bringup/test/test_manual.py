@@ -22,13 +22,18 @@ def harness():
     node.phase, node.status = 'ready', 'operator control'
     node.controller_ready, node.hardware_fault = True, False
     node.stop_target, node.neutral_required = None, False
+    node.entry_alignment_goal = None
+    node.entry_alignment_started = None
+    node.entry_alignment_deadline = None
+    node.entry_alignment_complete = True
     node.stop_pose_active, node.previous_stop_pose = False, False
     node.last_dt = .02
     node.diagnostics = Mock()
     node.joy = Joy(axes=[0.]*8, buttons=[0]*11)
     node.params.update(forward_axis=4, wrist_yaw_axis=0, wrist_roll_axis=6,
                        ee_velocity_axis=6, wrist_pitch_axis=7, vertical_axis=1, base_ccw_button=4, base_cw_button=5,
-                       ee_enable_button=1, focus_button=9, stop_pose_button=3, deadzone=.12, manage_focus=True)
+                       ee_enable_button=1, focus_button=9, stop_pose_button=3, deadzone=.12, manage_focus=True,
+                       entry_alignment_speed_rad_s=.03, entry_alignment_timeout_margin_sec=15.)
     node.poll_controller = Mock()
     node.axis = lambda name: 0.
     node.list_client = Mock()
@@ -316,6 +321,51 @@ def test_storage_pose_recovery_reaches_two_degree_inset_without_dxl_or_ik():
     np.testing.assert_allclose(node.target[1:4], expected, atol=1e-12)
     assert node.valid_measured(now)
     assert node.neutral_required
+
+
+def test_first_arm_entry_aligns_only_dxl_to_zero_once():
+    node = harness()
+    node.entry_alignment_complete = False
+    node.positions.update(zip(JOINTS, [.06, .4, -.3, -.5, -.04, .02]))
+    node.target = node.measured()
+    node.chain.pose_and_jacobian = Mock(side_effect=AssertionError('entry alignment must not use IK'))
+    node.focus = 'arm'
+    node.joy_time = None  # Options authorizes the one-shot alignment.
+    now = 1.
+    for _ in range(130):
+        now += .02
+        node.now_seconds = lambda: now
+        node.state_times = dict.fromkeys(JOINTS, now)
+        node.last_time = now-.02
+        before = node.target.copy()
+        node.on_timer()
+        delta = node.target-before
+        if node.entry_alignment_started == now:
+            assert node.entry_alignment_deadline-now == pytest.approx(17., abs=1e-9)
+        assert np.max(np.abs(delta[[0, 4, 5]])) <= .03*.02+1e-12
+        np.testing.assert_array_equal(delta[1:4], [0.]*3)
+        node.positions = dict(zip(JOINTS, node.target))
+        if node.entry_alignment_complete:
+            break
+    assert node.entry_alignment_complete
+    np.testing.assert_allclose(node.target[[0, 4, 5]], [0.]*3, atol=1e-12)
+    assert node.neutral_required
+    node.positions[JOINTS[0]] = .03
+    node.target[0] = .03
+    tick(node)
+    assert node.entry_alignment_complete and node.target[0] == .03
+
+
+def test_first_arm_entry_aligns_dxl_beyond_old_start_limit():
+    node = harness()
+    node.entry_alignment_complete = False
+    node.positions[JOINTS[0]] = .36
+    node.target = node.measured()
+    before = node.target.copy()
+    tick(node)
+    assert node.phase == 'ready'
+    assert node.target[0] < before[0]
+    assert not node.entry_alignment_complete
 
 
 @pytest.mark.parametrize('blocked', ['dxl_outside', 'rmd_far_outside'])

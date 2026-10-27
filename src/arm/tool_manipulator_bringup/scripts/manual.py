@@ -54,6 +54,8 @@ class Manual(ManualController):
         'startup_recovery_speed_rad_s': .03,
         'startup_recovery_max_excursion_rad': math.radians(5.),
         'startup_recovery_timeout_sec': 15.,
+        'entry_alignment_speed_rad_s': .03,
+        'entry_alignment_timeout_margin_sec': 15.,
     }
 
     def __init__(self):
@@ -79,6 +81,10 @@ class Manual(ManualController):
         self.startup_recovering = False
         self.startup_recovery_started = None
         self.startup_complete = False
+        self.entry_alignment_goal = None
+        self.entry_alignment_started = None
+        self.entry_alignment_deadline = None
+        self.entry_alignment_complete = False
         self.rmd_limit_blocked_joints = []
         self.rmd_lead_blocked_joints = []
         self.rmd_requested_velocity = np.zeros(3)
@@ -91,6 +97,12 @@ class Manual(ManualController):
         if (self.params['startup_recovery_margin_rad'] < self.params['limit_margin_rad'] or
                 np.any(2*self.params['startup_recovery_margin_rad'] >= self.upper[1:4]-self.lower[1:4])):
             raise ValueError('startup recovery margin must fit RMD limits and cover manual margin')
+        for name in ('entry_alignment_speed_rad_s', 'entry_alignment_timeout_margin_sec'):
+            if not math.isfinite(self.params[name]) or self.params[name] <= 0:
+                raise ValueError(f'{name} must be finite and positive')
+        if np.any(self.lower[[0, 4, 5]] + self.params['limit_margin_rad'] > 0) or np.any(
+                self.upper[[0, 4, 5]] - self.params['limit_margin_rad'] < 0):
+            raise ValueError('DXL zero must fit manual limits')
         if self.params['servo_mode']:
             raise ValueError('manual requires servo_mode:=false')
         if self.params['command_topic'] != '/manual_position_controller/commands':
@@ -168,6 +180,9 @@ class Manual(ManualController):
             # Hardware/controller failures require a reviewed full restart.
             if message.data != 'arm' and not self.hardware_fault and self.phase != 'failed':
                 self.fault = False
+            if message.data != 'arm':
+                self.entry_alignment_started = None
+                self.entry_alignment_deadline = None
         self.focus = message.data
 
     def on_joy(self, message):
@@ -440,7 +455,49 @@ class Manual(ManualController):
             self.stop_target = None
             self.status = 'startup RMD recovery verified'
             self.get_logger().info('Startup RMD recovery verified from joint feedback; '
-                                   'normal manual input is now available. Options selects arm.')
+                                   'Options selects arm and starts one-time DXL zero alignment.')
+
+    def run_entry_alignment(self, now, dt):
+        """On first arm focus, move only the three DXL joints to joint zero."""
+        self.publish_ee_velocity(0.)
+        self.neutral_required = True
+        if not self.valid_measured(now):
+            self.fail_controller('DXL entry alignment requires valid joint feedback')
+            return
+        measured = self.measured()
+        indexes = [0, 4, 5]
+        if self.entry_alignment_goal is None:
+            self.target = measured.copy()
+            self.entry_alignment_goal = measured.copy()
+            self.entry_alignment_goal[indexes] = 0.
+            self.get_logger().info('First arm entry: aligning DXL base/roll/yaw to zero')
+        if self.entry_alignment_started is None:
+            self.entry_alignment_started = now
+            speeds = np.minimum(self.speeds[indexes], self.params['entry_alignment_speed_rad_s'])
+            self.entry_alignment_deadline = (now + np.max(np.abs(measured[indexes])/speeds)
+                                             + self.params['entry_alignment_timeout_margin_sec'])
+        if now > self.entry_alignment_deadline:
+            self.fail_controller('DXL entry alignment timed out; inspect feedback')
+            return
+        if np.max(np.abs(self.target-measured)) > self.params['max_target_lead_rad']:
+            self.fail_controller('DXL entry alignment following error')
+            return
+        step = np.minimum(self.speeds[indexes], self.params['entry_alignment_speed_rad_s'])*dt
+        candidate = self.target.copy()
+        candidate[indexes] += np.clip(-self.target[indexes], -step, step)
+        if np.max(np.abs(candidate[indexes]-measured[indexes])) <= self.params['max_target_lead_rad']:
+            self.apply_motion(candidate, 0., 'entry_alignment', dt, goal=self.entry_alignment_goal)
+        else:
+            self.hold()
+        self.status = 'aligning DXL base/roll/yaw to zero'
+        if (np.max(np.abs(self.target[indexes])) <= 1e-9 and
+                np.max(np.abs(measured[indexes])) <= .005):
+            self.entry_alignment_complete = True
+            self.entry_alignment_goal = None
+            self.entry_alignment_started = None
+            self.entry_alignment_deadline = None
+            self.status = 'DXL entry alignment verified'
+            self.get_logger().info('DXL entry alignment verified; neutralize controls for manual input')
 
     def apply_motion(self, candidate, ee_velocity, source, dt, goal=None):
         """Direct path used by the managed producer; main manual overrides the gate."""
@@ -478,6 +535,7 @@ class Manual(ManualController):
                     position_limit_violations=position_limit_violations(self.positions, self.lower, self.upper),
                     startup_recovering=getattr(self, 'startup_recovering', False),
                     startup_complete=getattr(self, 'startup_complete', False),
+                    entry_alignment_complete=getattr(self, 'entry_alignment_complete', False),
                     startup_goal_rad=None if getattr(self, 'startup_goal', None) is None else self.startup_goal.tolist(),
                     rmd_requested_velocity_rad_s=getattr(self, 'rmd_requested_velocity', np.zeros(3)).tolist(),
                     rmd_applied_velocity_rad_s=getattr(self, 'rmd_applied_velocity', np.zeros(3)).tolist(),
@@ -523,6 +581,13 @@ class Manual(ManualController):
                 self.hold()
             else:
                 self.run_startup_recovery(now, dt)
+        elif self.focus == 'arm' and not getattr(self, 'entry_alignment_complete', False):
+            if elapsed <= 0 or elapsed > self.params['joint_state_timeout_sec']:
+                self.status = 'DXL entry alignment paused: timer discontinuity'
+                self.publish_ee_velocity(0.)
+                self.hold()
+            else:
+                self.run_entry_alignment(now, dt)
         elif not self.fresh_state(now):
             self.stop('feedback timeout', dt)
         elif not self.valid_measured(now):

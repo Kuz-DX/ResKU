@@ -54,6 +54,8 @@ class ControlModeManager(Node):
                              joint_names=JOINTS, path_speeds=path_speeds,
                              path_feedback_leads=path_feedback_leads,
                              path_jerks=path_jerks)
+        self.core.entry_alignment_enabled = True
+        self.core.entry_alignment_complete = False
         self.core.tcp_entry_required = True
         self.ee = self.create_publisher(Float64MultiArray, '/ee_velocity_controller/commands', 1)
         self.position = self.create_publisher(Float64MultiArray, '/manual_position_controller/commands', 1)
@@ -115,6 +117,8 @@ class ControlModeManager(Node):
                 self.focus_activation_pending = True
         else:
             self.focus_activation_pending = False
+            self.core.entry_alignment_started = None
+            self.core.entry_alignment_deadline = None
         if msg.data != 'arm' and self.core.mode != 'fault' and self.core.startup_complete:
             self.core.request('hold', time.monotonic())
 
@@ -138,7 +142,7 @@ class ControlModeManager(Node):
             self.focus_activation_pending = False
             return
         if (c.focus == 'arm' and c.mode == 'hold' and not c.transitioning and
-                c.ready and c.startup_complete and c.fresh(now)):
+                c.ready and c.startup_complete and c.entry_alignment_complete and c.fresh(now)):
             try:
                 c.request(self.focus_arm_mode, now)
             except ValueError as exc:
@@ -280,6 +284,8 @@ class ControlModeManager(Node):
             blocker = '; '.join(self.activation_blockers) or 'waiting for controller activation confirmation'
         elif not c.startup_complete:
             blocker = c.reason or 'startup recovery pending'
+        elif c.focus == 'arm' and not c.entry_alignment_complete:
+            blocker = c.reason or 'DXL entry alignment pending'
         elif c.focus != 'arm':
             blocker = 'select arm with Options'
         elif c.transitioning:
@@ -309,6 +315,7 @@ class ControlModeManager(Node):
             positions_rad=c.position, velocities_rad_s=c.velocity,
             epoch=c.epoch, ready=c.ready, reason=c.reason, controllers=self.controllers,
             startup_recovering=c.startup_recovering, startup_complete=c.startup_complete,
+            entry_alignment_complete=c.entry_alignment_complete,
             startup_goal_rad=c.startup_goal,
             focus_arm_mode=self.focus_arm_mode,
             focus_activation_pending=self.focus_activation_pending,

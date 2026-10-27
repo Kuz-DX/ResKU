@@ -17,6 +17,8 @@ class ManagedManual(Manual):
         self.manager_epoch = None
         self.pending_ee = 0.
         super().__init__()
+        # TCP-ready alignment is owned by the managed workflow, not this producer.
+        self.entry_alignment_complete = True
         # Base construction does not publish before feedback initialization.
         self.destroy_publisher(self.publisher)
         self.destroy_publisher(self.ee_velocity_publisher)

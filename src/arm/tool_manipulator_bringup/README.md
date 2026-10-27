@@ -18,6 +18,8 @@
 안전 조건과 rosbag 진단 방법은 [manual_controller.md](docs/manual_controller.md)를 따른다.
 현재 `manual.launch.py`의 충돌 검사는 임시로 비활성화돼 있다. 수동 입력과 시작 복귀는
 `manual.py`를 사용하며, 충돌 검사용 MoveIt 장면은 실행하지 않는다.
+`manual.launch.py`는 기본적으로 실기(`real_hardware:=true`)를 사용한다.
+모의 하드웨어로 실행할 때는 `real_hardware:=false`를 명시한다.
 
 ## 제어 모드 기반 구조
 
@@ -40,6 +42,9 @@
 세 launch는 같은 공통 base를 사용한다. `ik_manual.launch.py` 안에서는 Mode Manager가
 MANUAL/TCP_IK/TOOL_AUTO를 중재하지만, 다른 launch와의 동시 실행은 지원하지 않는다.
 반드시 기존 팔 launch를 완전히 종료한 뒤 다른 모드를 실행한다.
+`ik_manual.launch.py`도 첫 Options arm 진입에서 RMD 시작 복구 완료 후 DXL
+base/roll/yaw를 0 rad로 정렬한다. 이후 TCP-ready 경로를 검사하고, 필요한 RMD
+준비 자세 이동은 L1로 승인한다.
 
 ```bash
 # 빌드 전에는 소스 launch를 직접 지정한다.
@@ -150,13 +155,13 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider \
 ```bash
 source /opt/ros/humble/setup.bash
 source ~/ResKU/install/setup.bash
-ros2 launch tool_manipulator_bringup manual.launch.py
+ros2 launch tool_manipulator_bringup manual.launch.py real_hardware:=false
 ```
 
 ### mock, RViz 포함
 
 ```bash
-ros2 launch tool_manipulator_bringup manual.launch.py launch_rviz:=true
+ros2 launch tool_manipulator_bringup manual.launch.py real_hardware:=false launch_rviz:=true
 ```
 
 ### 실기, 시각화 없음
@@ -183,12 +188,15 @@ cd ~/ResKU
 export ROS_DOMAIN_ID=99
 source /opt/ros/humble/setup.bash
 source install/local_setup.bash
-ros2 launch tool_manipulator_bringup manual.launch.py real_hardware:=true
+ros2 launch tool_manipulator_bringup manual.launch.py
 ```
 
 실기에서는 `hardware.yaml` 사전 검사를 통과해야 하며, 시작 시 RMD 3축을 각 소프트
-리밋 안쪽 2도로 저속 복귀한다. 수동 경로는 충돌 검사를 하지 않는다. 다른 hardware
+리밋 안쪽 2도로 저속 복귀한다. 처음 Options로 arm을 선택하면 DXL의 base/roll/yaw
+3축을 현재 자세에서 0 rad로 저속 정렬한다. 정렬 중 수동 입력은 차단되며, 완료 후
+조작 입력을 중립으로 놓아야 수동 제어가 열린다. 수동 경로는 충돌 검사를 하지 않는다. 다른 hardware
 launch나 읽기 전용 bridge와 동시에 실행하지 않는다.
+DXL 정렬 제한 시간은 시작 각도와 0.03 rad/s 속도로 계산한 예상 시간에 15초를 더한다.
 
 로봇이 아닌 조이스틱 연결 PC에서 `/joy`만 발행하려면 두 PC의 ROS domain을 99로
 맞추고 `ROS_LOCALHOST_ONLY=0`을 설정한다. 이때 잭스의 `manual.launch.py`에는
@@ -207,7 +215,7 @@ export ROS_LOCALHOST_ONLY=0
 source /opt/ros/humble/setup.bash
 source install/local_setup.bash
 ros2 launch tool_manipulator_bringup manual.launch.py \
-  real_hardware:=true launch_joy:=false
+  launch_joy:=false
 ```
 
 ## MoveIt 구동

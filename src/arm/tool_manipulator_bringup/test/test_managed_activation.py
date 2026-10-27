@@ -79,3 +79,20 @@ def test_focus_activation_waits_for_controller_readiness():
     node.core.ready = True
     ControlModeManager.activate_pending_focus(node, 1.)
     assert not node.focus_activation_pending and node.core.requested == 'tcp_ik'
+
+
+def test_focus_activation_waits_for_first_dxl_alignment():
+    node = SimpleNamespace()
+    node.core = ModeCore([(-2., 2.)]*6, [.12]*6)
+    node.core.feedback([0.]*6, [0.]*6, 1.)
+    node.core.focus, node.core.ready = 'arm', True
+    node.core.entry_alignment_enabled = True
+    node.core.entry_alignment_complete = False
+    node.focus_arm_mode = 'tcp_ik'
+    node.focus_activation_pending = True
+    ControlModeManager.activate_pending_focus(node, 1.)
+    assert node.focus_activation_pending and node.core.mode == 'hold'
+    node.core.tick(1.02, .02)
+    assert node.core.entry_alignment_complete
+    ControlModeManager.activate_pending_focus(node, 1.02)
+    assert not node.focus_activation_pending

@@ -7,8 +7,8 @@ tcp_ready:
   tool_id: 0
   joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
   # Fixed, measured TCP-capable pose; also the start of tool path 0.
-  # Options drive->arm alignment moves the three Dynamixels to their calibrated
-  # joint zeros while the three RMD joints move to the TCP-ready posture.
+  # First Options arm entry aligns the three Dynamixels to joint zero in HOLD.
+  # This path then moves the three RMD joints to the TCP-ready posture.
   positions_rad: [0.0, 1.3056807708063805, 1.3669418648356366,
     -1.2812461346468489, 0.0, 0.0]
   duration_sec: 10.0

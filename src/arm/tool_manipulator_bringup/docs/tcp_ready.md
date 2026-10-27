@@ -1,15 +1,18 @@
 # TCP ready candidate and entry policy
 
 Evaluated 2026-10-25; candidate values are in `config/tcp_ready.yaml`.
-`ik_manual.launch.py` loads this file. After startup recovery and an explicit
-drive-to-arm focus edge, the TCP producer samples the live joint-space approach,
+`ik_manual.launch.py` loads this file. After startup recovery, the first explicit
+drive-to-arm focus edge aligns Dynamixel base/roll/yaw to zero in HOLD, at up to
+0.03 rad/s from the measured pose within joint limits. The TCP producer
+waits for this alignment; its timeout is the longest expected DXL travel time
+at that speed plus 15 seconds. It then samples the live joint-space approach,
 requires every MoveIt state-validity response to pass, and executes the target
 through Mode Manager `tool_auto` ownership. Recovery remains separate.
 
 The executable TCP-ready target is stored in `config/tcp_ready.yaml`. On the
 Options drive-to-arm workflow, its RMD shoulder/elbow/wrist-pitch values define
-the ready posture while the Dynamixel base/wrist-roll/wrist-yaw targets are
-exactly `0.0` rad. Candidate A below is an earlier evaluated candidate, not an
+the ready posture. The Dynamixel base/wrist-roll/wrist-yaw targets remain
+`0.0` rad after the preceding alignment. Candidate A below is an earlier evaluated candidate, not an
 approved hardware pose or a certified workspace.
 
 | Candidate | RMD positions (rad) | Minimum joint margin (rad) | Scaled condition | IK directions passed |

@@ -122,6 +122,7 @@ class TcpJoy(TcpMotionWorkflow, Node):
         s = self.status
         eligible = (now-self.status_time < .3 and s.get('mode') == 'hold'
                     and s.get('ready') and s.get('startup_complete')
+                    and s.get('entry_alignment_complete', True)
                     and now-self.state_time < .3 and self.measured is not None)
         if not eligible:
             if self.entry_pending:
