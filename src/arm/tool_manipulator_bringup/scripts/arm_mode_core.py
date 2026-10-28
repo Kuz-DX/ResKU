@@ -469,6 +469,7 @@ class ModeCore:
         """Drop command lead at measured position while retaining TCP ownership."""
         if self.mode != 'tcp_ik' or epoch != self.epoch or self.transitioning:
             return False
+        self.ee = 0.
         if not self.ready or not self.fresh(now) or not self.valid(self.position):
             self.fault('TCP pause without healthy controller/feedback')
             return True

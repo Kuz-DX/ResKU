@@ -357,8 +357,10 @@ def test_tcp_full_input_is_acceleration_bounded_without_packet_dropping():
 def test_tcp_pause_immediately_discards_stream_velocity():
     c = ready('tcp_ik')
     c.tcp_velocity = [.1]*6
+    c.ee = .08
     assert c.pause_tcp(c.epoch, .11)
     assert c.tcp_velocity == [0.]*6
+    assert c.ee == 0.
 
 
 def test_focus_and_controller_gates():

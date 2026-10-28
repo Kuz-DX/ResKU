@@ -1,5 +1,20 @@
 # Arm Control Mode Manager
 
+## IK joystick EE jog (Dynamixel ID 4)
+
+In TCP_IK with arm focus, D-pad up/down (axis 7) adjusts the EE jog speed
+by 0.02 rad/s per press. Default is 0.06 rad/s, bounded to 0.02..0.12 rad/s;
+holding up/down does not auto-repeat and restarting resets the selection.
+With L1 held and rearmed, D-pad left/right (axis 6) commands positive/negative
+ee_joint velocity (CCW/CW under the calibrated `raw_increases_ccw: true`
+convention). Release left/right to stop. Release L1 or lose fresh joystick
+input to stop through the manager. Diagonal presses change speed only.
+The arm sticks are suppressed while D-pad is active. R1 does not change this
+mapping; L2 path selection suppresses all D-pad EE commands. This applies to
+`ik_manual.launch.py`; standalone manual retains its existing tool layer.
+EE feedback and calibrated gripper travel bounds gate rotation. The selected
+speed is published as `ee_speed_rad_s` on `/arm/tcp_joy/status`.
+
 ## Tool 2 pick/place continuation (opt-in, calibration pending)
 
 The `enable_tool2_pick_place` launch option replaces the path/docking producer

@@ -25,7 +25,7 @@ try:
     from tool_change_min.kinematics import ArmKinematics, ARM_JOINTS
 except ImportError:
     from arm_shared_kinematics import ArmKinematics, ARM_JOINTS
-from tcp_joy_core import TcpStepper, joy_twist, LimitBlocked, SafetyError, TcpMetrics
+from tcp_joy_core import TcpStepper, joy_twist, LimitBlocked, SafetyError, TcpMetrics, EeDpad
 from arm_mode_core import TCP_ENTRY_TOLERANCE, non_arm_feedback_changed
 from tcp_motion_workflow import TcpMotionWorkflow
 
@@ -41,6 +41,9 @@ class TcpJoy(TcpMotionWorkflow, Node):
         tip = param('controlled_link', 'tcp_link')
         self.model = ArmKinematics('', hardware, base, tip, description=description)
         config = yaml.safe_load(Path(hardware).read_text())
+        self.ee_dpad = EeDpad()
+        # Same calibrated rack travel as ModeCore.close_ee and the gripper URDF.
+        self.ee_limits = (-2.351592547829, 2.839398438376)
         self.stepper = TcpStepper(self.model,
             [float(config['joints'][j]['velocity_limit_rad_s'])/2 for j in ARM_JOINTS],
             linear=float(param('linear_speed_mps', .02)), angular=float(param('angular_speed_rad_s', .15)),
@@ -259,6 +262,14 @@ class TcpJoy(TcpMotionWorkflow, Node):
         valid = (len(msg.axes) >= 5 and len(msg.buttons) >= 6
                  and np.all(np.isfinite(msg.axes))
                  and all(b in (0, 1) for b in msg.buttons))
+        if hasattr(self, 'ee_dpad'):
+            previous_direction = self.ee_dpad.direction
+            self.ee_dpad.update(msg.axes, enabled=bool(valid and msg.axes[2] >= -.5
+                                and self.status.get('focus') == 'arm'
+                                and self.status.get('mode') == 'tcp_ik'))
+            if previous_direction != self.ee_dpad.direction:
+                self.discard()
+                self.stepper.q = self.stepper.pose = None
         # L2 owns tool-path selection: triangle, circle and X face buttons.
         # Quiesce TCP preparation before the path producer requests HOLD.
         if valid and msg.axes[2] < -.5:
@@ -294,6 +305,8 @@ class TcpJoy(TcpMotionWorkflow, Node):
                     value = float(np.clip(msg.axes[axis], -1., 1.))
                     self.twist[joint] = (0. if abs(value) <= .12 else
                         math.copysign((abs(value)-.12)/.88, value))
+        if hasattr(self, 'ee_dpad') and (self.ee_dpad.direction or self.ee_dpad.vertical):
+            self.twist = np.zeros(6)
         self.joy_time = time.monotonic()
         home = valid and bool(msg.buttons[3])
         if (home and not vars(self).get('previous_home', False)
@@ -372,8 +385,19 @@ class TcpJoy(TcpMotionWorkflow, Node):
             self.pub.publish(String(data=json.dumps(dict(epoch=self.epoch, pause=True))))
             return
         if self.stepper.q is not None and not self.blocked:
+            ee = 0.
+            control = vars(self).get('ee_dpad')
+            if (control is not None and self.deadman and self.rearmed
+                    and time.monotonic()-self.joy_time < .25
+                    and time.monotonic()-self.state_time < .3):
+                position = (self.full_state or {}).get('ee_joint')
+                if position is not None and math.isfinite(position):
+                    lo, hi = self.ee_limits
+                    if ((control.direction > 0 and lo <= position < hi-.01)
+                            or (control.direction < 0 and lo+.01 < position <= hi)):
+                        ee = control.direction*control.speed
             self.pub.publish(String(data=json.dumps(dict(epoch=self.epoch,
-                positions=self.stepper.q.tolist(), ee_velocity=0.))))
+                positions=self.stepper.q.tolist(), ee_velocity=ee))))
 
     def submit_collision(self, q, pose, now):
         if not self.check.service_is_ready():
@@ -516,6 +540,7 @@ class TcpJoy(TcpMotionWorkflow, Node):
                     self.fail(str(exc))
                     self.publish()
         self.diag.publish(String(data=json.dumps(dict(reason=self.reason, failures=self.failures,
+            ee_speed_rad_s=(self.ee_dpad.speed if vars(self).get('ee_dpad') is not None else None),
             deadman=self.deadman, rearmed=self.rearmed, pending=self.pending is not None,
             condition=self.stepper.condition if math.isfinite(self.stepper.condition) else None,
             singularity_scale=self.stepper.scale, velocity_scale=self.stepper.velocity_scale,

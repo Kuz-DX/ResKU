@@ -9,6 +9,25 @@ class LimitBlocked(ValueError):
     """All bounded attempts hit a joint limit; keep the last accepted target."""
 
 
+class EeDpad:
+    """PS axes 6/7: left CCW, right CW; up/down adjust once per press."""
+    def __init__(self):
+        self.speed = .06
+        self.vertical = 0
+        self.direction = 0
+
+    def update(self, axes, enabled=True):
+        if not enabled or len(axes) < 8 or not np.all(np.isfinite(axes)):
+            self.vertical = self.direction = 0
+            return
+        vertical = int(axes[7] > .5)-int(axes[7] < -.5)
+        if vertical and vertical != self.vertical:
+            self.speed = round(float(np.clip(self.speed+vertical*.02, .02, .12)), 2)
+        self.vertical = vertical
+        # Do not rotate on diagonal presses used to change speed.
+        self.direction = 0 if vertical else int(axes[6] > .5)-int(axes[6] < -.5)
+
+
 class SafetyError(ValueError):
     """Invalid feedback/command state: stop immediately, not after five IK failures."""
     def __init__(self, reason, fault=True):
