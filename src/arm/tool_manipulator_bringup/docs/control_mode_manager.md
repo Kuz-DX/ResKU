@@ -12,7 +12,7 @@ input to stop through the manager. Diagonal presses change speed only.
 The arm sticks are suppressed while D-pad is active. R1 does not change this
 mapping; L2 path selection suppresses all D-pad EE commands. This applies to
 `ik_manual.launch.py`; standalone manual retains its existing tool layer.
-EE feedback and calibrated gripper travel bounds gate rotation. The selected
+The EE jog uses velocity control without a position cutoff. The selected
 speed is published as `ee_speed_rad_s` on `/arm/tcp_joy/status`.
 
 R2 (`axes[5]`, pressed below -0.5) requests the nearest TCP-entry candidate.

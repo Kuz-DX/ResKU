@@ -111,6 +111,7 @@ class ModeCore:
         self.path_best_error = math.inf
         self.last_execution_id = None
         self.last_execution_result = None
+        self.last_execution_reason = None
         self.started = 0.
         self.settled = 0
         self.startup_enabled = startup_recovery_enabled
@@ -416,6 +417,7 @@ class ModeCore:
                     self.request('hold', now)
                     self.last_execution_id = completed
                     self.last_execution_result = 'succeeded'
+                    self.last_execution_reason = 'ee goal reached'
                     self.reason = 'ee goal reached'
             elif now-self.ee_progress_time > 3.:
                 self.abort_path_to_hold('ee motion stalled', now)
@@ -429,6 +431,7 @@ class ModeCore:
         if self.execution_id is not None:
             self.last_execution_id = self.execution_id
             self.last_execution_result = 'aborted'
+            self.last_execution_reason = 'execution cancelled by mode or ownership change'
         self.epoch = uuid.uuid4().hex
         self.goal, self.queue, self.execution_id, self.ee = None, [], None, 0.
         self.ee_goal = None
@@ -449,7 +452,10 @@ class ModeCore:
 
     def abort_path_to_hold(self, reason, now):
         """Abort only managed path ownership; healthy stopped hardware remains reusable."""
+        active = self.execution_id is not None
         self.invalidate()
+        if active:
+            self.last_execution_reason = reason
         if self.position is None or not self.fresh(now):
             self.fault(reason+'; feedback unavailable')
             return
@@ -460,7 +466,10 @@ class ModeCore:
         self.reason = reason
 
     def fault(self, reason):
+        active = self.execution_id is not None
         self.invalidate()
+        if active:
+            self.last_execution_reason = reason
         # ForwardCommandController retains its last sample.  Replace an
         # in-flight recovery/trajectory sample with the measured position so a
         # fault means HOLD, rather than continuing toward the previous goal.
@@ -639,6 +648,7 @@ class ModeCore:
                 or self.execution_id != execution_id or execution_id is None):
             return False
         self.request('hold', now)
+        self.last_execution_reason = 'path cancelled by operator'
         if self.fresh(now):
             self.target = self.goal = list(self.position)
         return True
@@ -878,5 +888,6 @@ class ModeCore:
                 self.request('hold', now)
                 self.last_execution_id = completed
                 self.last_execution_result = 'succeeded'
+                self.last_execution_reason = 'path completed'
                 self.reason = 'path completed'
         return list(self.target)

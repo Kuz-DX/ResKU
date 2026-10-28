@@ -82,7 +82,9 @@ class Tool2PickPlaceCoordinator(ToolDockingCoordinator):
     def fail(self, reason):
         if self.pick_sequence is not None:
             self.pick_sequence.fail()
-            if self.cancel.service_is_ready():
+            if (self.status.get('mode') == 'tool_auto'
+                    and getattr(self, 'execution_id', None) is None
+                    and self.cancel.service_is_ready()):
                 self.cancel.call_async(Trigger.Request())
         super().fail(reason)
 

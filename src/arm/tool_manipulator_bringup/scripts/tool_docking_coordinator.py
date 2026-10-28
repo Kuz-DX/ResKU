@@ -209,7 +209,8 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             super().begin_failed(reason)
 
     def fail(self, reason):
-        if self.active:
+        if (self.active and self.status.get('mode') == 'tool_auto'
+                and getattr(self, 'execution_id', None) is None):
             if self.cancel.service_is_ready():
                 self.cancel.call_async(Trigger.Request())
         super().fail(reason)

@@ -293,6 +293,8 @@ def test_tag_timeout_is_checked_using_image_and_arrival_time(tmp_path):
 
 def test_failure_cancels_arm_without_sending_an_opposite_actuation(tmp_path):
     n = node(tmp_path)
+    n.status = {'mode': 'tool_auto'}
+    n.execution_id = None
     n.cancel = Mock()
     n.cancel.service_is_ready.return_value = True
     with patch.object(ToolTrajectoryJoy, 'fail') as parent:
@@ -300,6 +302,17 @@ def test_failure_cancels_arm_without_sending_an_opposite_actuation(tmp_path):
         parent.assert_called_once_with('cancelled')
     n.docking_command.publish.assert_not_called()
     n.cancel.call_async.assert_called_once()
+
+
+def test_failure_after_manager_abort_does_not_overwrite_hold_reason(tmp_path):
+    n = node(tmp_path)
+    n.status = {'mode': 'hold', 'last_execution_result': 'aborted'}
+    n.execution_id = 'already-aborted'
+    n.cancel = Mock()
+    with patch.object(ToolTrajectoryJoy, 'fail') as parent:
+        ToolDockingCoordinator.fail(n, 'waypoint stalled')
+        parent.assert_called_once_with('waypoint stalled')
+    n.cancel.call_async.assert_not_called()
 
 
 def test_non_docking_path_completion_keeps_old_behavior(tmp_path):
@@ -614,15 +627,17 @@ def test_opt_in_deadman_still_cancels_blind_advance(tmp_path):
 
 
 @pytest.mark.parametrize('stage', ['planning_entry', 'checking', 'executing'])
-def test_tool1_approach_continues_after_l2_release_and_joy_stops(tmp_path, stage):
+def test_tool1_approach_cancels_on_l2_release(tmp_path, stage):
     n = camera_node(tmp_path)
     n.stage = stage
     n.docking_started = None
-    n.deadman_held, n.last_joy_time = False, -math.inf
-    with patch.object(ToolTrajectoryJoy, 'tick') as parent:
+    n.deadman_held, n.last_joy_time = False, 1.1
+    n.request_index, n.requests = 0, []
+    with patch('tool_docking_coordinator.time.monotonic', return_value=1.1), \
+            patch.object(ToolTrajectoryJoy, 'tick') as parent:
         n.tick()
-    parent.assert_called_once()
-    n.fail.assert_not_called()
+    parent.assert_not_called()
+    assert 'docking deadman L2 released' in n.fail.call_args.args[0]
 
 
 def test_tool1_completion_automatically_aligns_and_plans_advance_without_joy(tmp_path):
@@ -631,7 +646,7 @@ def test_tool1_completion_automatically_aligns_and_plans_advance_without_joy(tmp
     n.docking_started = None
     n.stage, n.execution_id = 'executing', 'tool1'
     n.path, n.execution_timeout, n.started = dict(total=10.), 40., 0.
-    n.deadman_held, n.last_joy_time = False, -math.inf
+    n.deadman_held, n.last_joy_time = True, 1.1
     n.status_time = n.state_time = 1.
     n.status = dict(mode='tool_auto', epoch='path-epoch', ready=True,
                     startup_complete=True, focus='arm')
@@ -834,11 +849,13 @@ def test_l2_circle_from_tcp_mode_keeps_docking_through_entry_plan_and_execution(
         n.tick()
         assert n.active
         if entry_offset:
-            assert n.stage == 'planning_entry'
-            n.tick()
+            # The current base is already close to the first taught segment,
+            # so resume at its projection instead of planning back to point 0.
+            assert n.entry_path['start'][0] > n.paths[1]['start'][0]
+            n.planner.call_async.assert_not_called()
         assert n.stage == 'checking'
-        # Releasing both controls does not remove the docking continuation.
-        n.on_joy(Joy(axes=[0., 0., 1.], buttons=[0]*5))
+        # Releasing the face button keeps the path active while L2 stays held.
+        n.on_joy(Joy(axes=[0., 0., -1.], buttons=[0]*5))
         for _ in n.requests:
             n.tick()
         assert n.stage == 'request_mode'
@@ -868,7 +885,7 @@ def test_automatic_tool1_keeps_docking_guards(tmp_path, failure):
     n.docking_started = 1.
     n.stage = 'executing'
     n.advance_locked = True
-    n.deadman_held, n.last_joy_time = False, -math.inf
+    n.deadman_held, n.last_joy_time = True, 1.1
     n.status_time = n.state_time = 1.
     n.status = dict(mode='tool_auto', ready=True, startup_complete=True, focus='arm', epoch='e')
     if failure == 'feedback': n.state_time = 0.

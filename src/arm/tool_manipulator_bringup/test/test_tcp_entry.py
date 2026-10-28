@@ -459,13 +459,22 @@ def test_fresh_l1_retry_resets_entry_settling_deadline():
 def test_home_completion_stays_hold_and_restores_tcp_ready_target():
     n = ready_node()
     n.default_ready_goal = n.ready_goal.copy()
-    n.ready_goal = np.radians([0., 85., 87., -89., 0., 0.])
+    n.home_goal = n.ready_goal = n.measured.copy()
+    n.home_leg = 'planned'
+    n.home_waypoints = [n.measured.tolist()]
+    n.ready_snapshot = n.measured.copy()
     n.returning_home = True
     n.ready_state = 'executing'
     n.ready_execution_id = 'home'
-    n.status.update(last_execution_id='home', last_execution_result='succeeded')
+    n.status.update(last_execution_id='home', last_execution_result='succeeded',
+                    velocities_rad_s=[0.]*6)
     TcpJoy.drive_ready(n, 1.)
-    assert not n.returning_home and n.auto_entry_armed
+    assert n.returning_home and n.ready_state == 'home_settle'
+    n.status_time = n.state_time = 1.6
+    TcpJoy.drive_ready(n, 1.6)
+    n.status_time = n.state_time = 2.2
+    TcpJoy.drive_ready(n, 2.2)
+    assert not n.returning_home and not n.auto_entry_armed
     assert n.ready_state == 'idle'
     np.testing.assert_array_equal(n.ready_goal, n.default_ready_goal)
     n.tcp_mode.call_async.assert_not_called()
@@ -475,12 +484,27 @@ def test_home_executes_without_l1_and_does_not_cancel_on_release():
     n = ready_node()
     n.returning_home = True
     n.default_ready_goal = n.ready_goal.copy()
-    n.ready_goal = np.radians([0., 85., 87., -89., 0., 0.])
+    n.home_goal = n.ready_goal = n.measured.copy()
+    n.home_goal[0] = n.ready_goal[0] = .1
+    n.home_leg = 'planned'
+    n.home_planner, n.model = Mock(), Mock()
+    n.home_planner.service_is_ready.return_value = True
+    n.model.within_limits.return_value = True
+    n.home_planner.call_async.return_value.done.return_value = True
+    n.home_planner.call_async.return_value.result.return_value = SimpleNamespace(
+        motion_plan_response=SimpleNamespace(error_code=SimpleNamespace(val=1),
+            trajectory=SimpleNamespace(joint_trajectory=SimpleNamespace(
+                joint_names=['base_joint', 'shoulder_joint', 'elbow_joint',
+                             'wrist_pitch_joint', 'wrist_roll_joint', 'wrist_yaw_joint'],
+                points=[SimpleNamespace(positions=n.ready_goal.tolist(),
+                    time_from_start=SimpleNamespace(sec=2, nanosec=0))]))))
     n.deadman = False
     n.joy_time = 0.
     n.check.call_async.return_value.done.return_value = True
     n.check.call_async.return_value.result.return_value = SimpleNamespace(valid=True)
     TcpJoy.drive_ready(n, 1.)
+    assert n.ready_state == 'planning_home'
+    TcpJoy.drive_ready(n, 1.1)
     for _ in range(len(n.ready_requests)+1):
         if n.ready_state == 'checking':
             TcpJoy.drive_ready(n, 1.1)
@@ -497,14 +521,18 @@ def test_home_executes_without_l1_and_does_not_cancel_on_release():
     n.tool_pub.publish.assert_not_called()
 
 
-def test_explicit_home_uses_separate_larger_distance_limit():
+def test_explicit_home_requests_collision_aware_planner_for_large_move():
     n = ready_node()
     n.returning_home = True
+    n.home_leg = 'planned'
+    n.home_planner = Mock()
+    n.home_planner.service_is_ready.return_value = True
     n.ready_goal = n.measured.copy()
     n.ready_goal[1] -= .6
     n.check.call_async.return_value.done.return_value = False
     TcpJoy.drive_ready(n, 1.)
-    assert n.ready_state == 'checking'
+    assert n.ready_state == 'planning_home'
+    n.home_planner.call_async.assert_called_once()
     assert n.auto_entry_armed
 
 

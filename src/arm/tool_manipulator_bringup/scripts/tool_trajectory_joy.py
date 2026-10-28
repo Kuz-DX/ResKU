@@ -143,13 +143,29 @@ def execution_plan(path, measured, tolerance=.03, max_delta=.10, approach_speed=
 
 
 def nearest_path_suffix(path, measured):
-    """Keep the taught direction, starting at the point nearest current feedback."""
+    """Resume forward from the closest point on a taught joint-space segment."""
     points = [np.asarray(path['start'], dtype=float), *path['waypoints']]
     measured = np.asarray(measured, dtype=float)
-    index = min(range(len(points)),
-                key=lambda i: float(np.max(np.abs(points[i]-measured))))
-    durations = list(path['durations'][index:])
-    return dict(start=points[index], waypoints=points[index+1:], durations=durations,
+    candidates = []
+    for index, (start, end) in enumerate(zip(points, points[1:])):
+        delta = end-start
+        length_sq = float(np.dot(delta, delta))
+        fraction = (float(np.clip(np.dot(measured-start, delta)/length_sq, 0., 1.))
+                    if length_sq > 1e-12 else 0.)
+        projected = start+fraction*delta
+        candidates.append((float(np.max(np.abs(projected-measured))),
+                           -index-fraction, index, fraction, projected))
+    _, _, index, fraction, projected = min(candidates, key=lambda item: item[:2])
+    if fraction >= 1.-1e-9:
+        index += 1
+        projected = points[index]
+        waypoints = points[index+1:]
+        durations = list(path['durations'][index:])
+    else:
+        waypoints = points[index+1:]
+        durations = [max(.02, path['durations'][index]*(1.-fraction)),
+                     *path['durations'][index+1:]]
+    return dict(start=projected, waypoints=waypoints, durations=durations,
                 total=sum(durations), entry_index=index)
 
 
@@ -378,7 +394,9 @@ class ToolTrajectoryJoy(Node):
             self.get_logger().info(reason)
 
     def fail(self, reason):
-        if self.execution_id is not None and self.status.get('epoch') is not None:
+        if (self.execution_id is not None and self.status.get('mode') == 'tool_auto'
+                and self.status.get('execution_id') == self.execution_id
+                and self.status.get('epoch') is not None):
             self.publisher.publish(String(data=json.dumps(dict(
                 epoch=self.status['epoch'], execution_id=self.execution_id, cancel=True))))
         elif self.stage in ('request_mode', 'wait_mode') and self.cancel.service_is_ready():
@@ -410,7 +428,7 @@ class ToolTrajectoryJoy(Node):
             self.l2_threshold, self.first_button, self.third_button, self.second_button)
         if request is None:
             return
-        self.request_path(request)
+        self.request_path(request, nearest_entry=True)
 
     def on_ui_request(self, msg, path_id, desired_docked):
         key = (path_id, desired_docked)
@@ -553,9 +571,14 @@ class ToolTrajectoryJoy(Node):
             self.future = self.collision.call_async(self.requests[0])
             approach = ('; approaching taught start from %.4f rad' % path['start_error']
                         if path['start_error'] > self.start_tolerance else '')
+            entry = getattr(self, 'entry_path', None)
+            resume = ('; resuming from segment %d' % (entry['entry_index']+1)
+                      if (getattr(self, 'use_nearest_entry', False) and isinstance(entry, dict)
+                          and 'entry_index' in entry and 'ee_target_rad' not in path)
+                      else '')
             self.report('checking',
                         f'checking tool path {path_id} ({len(self.requests)} samples, '
-                        f'{budget:.1f}s budget){approach}')
+                        f'{budget:.1f}s budget){resume}{approach}')
         except (ValueError, RuntimeError, KeyError) as exc:
             self.path_id = path_id
             self.begin_failed(str(exc))

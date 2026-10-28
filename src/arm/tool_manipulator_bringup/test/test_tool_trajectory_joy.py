@@ -173,12 +173,11 @@ def test_tool2_slow_timing_avoids_feedback_guard_in_tracking_simulation(retimed)
         c.tick(now, .02)
         if c.mode == 'fault' or c.last_execution_result is not None:
             break
+    assert c.last_execution_result == 'succeeded', c.reason
+    assert c.mode == 'hold'
+    np.testing.assert_allclose(measured, loaded['waypoints'][-1], atol=.01)
     if retimed:
-        assert c.last_execution_result == 'succeeded', c.reason
-        np.testing.assert_allclose(measured, loaded['waypoints'][-1], atol=.01)
-    else:
-        assert c.mode == 'fault'
-        assert 'moving outward near soft limit: wrist_pitch_joint' in c.reason
+        assert loaded['durations'][0] > .02
 
 
 def test_tool2_current_limit_covers_measured_approach_peak_and_retains_release_gap():
@@ -418,6 +417,15 @@ def test_ui_request_uses_one_rising_edge_and_nearest_entry():
     node.request_path.assert_called_with(0, True, nearest_entry=True)
 
 
+def test_joystick_request_uses_nearest_entry():
+    node = SimpleNamespace(combos=[False]*3, l2_axis=2, l2_threshold=-.5,
+                           first_button=2, third_button=0, second_button=1,
+                           request_path=Mock())
+    ToolTrajectoryJoy.on_joy(node, SimpleNamespace(
+        axes=[0., 0., -1.], buttons=[0, 0, 1, 0, 0, 0]))
+    node.request_path.assert_called_once_with(0, nearest_entry=True)
+
+
 def test_docking_command_publishes_requested_state_once():
     node = SimpleNamespace(docking_command=Mock())
     from tool_trajectory_joy import ToolTrajectoryJoy
@@ -460,11 +468,29 @@ def test_nearest_entry_keeps_only_forward_suffix():
                 waypoints=[np.ones(6), np.ones(6)*2, np.ones(6)*3],
                 durations=[1., 2., 3.], total=6.)
     result = nearest_path_suffix(path, np.ones(6)*1.8)
-    assert result['entry_index'] == 2
-    np.testing.assert_array_equal(result['start'], np.ones(6)*2)
-    assert [q.tolist() for q in result['waypoints']] == [[3.]*6]
-    assert result['durations'] == [3.]
-    assert result['total'] == 3.
+    assert result['entry_index'] == 1
+    np.testing.assert_allclose(result['start'], np.ones(6)*1.8)
+    assert [q.tolist() for q in result['waypoints']] == [[2.]*6, [3.]*6]
+    assert result['durations'] == pytest.approx([.4, 3.])
+    assert result['total'] == pytest.approx(3.4)
+
+
+def test_tool0_resume_from_stalled_base_pose_skips_earlier_waypoints():
+    from tool_trajectory_joy import ArmKinematics
+    arm = SCRIPTS.parents[1]
+    model = ArmKinematics(arm/'tool_manipulator_description/urdf/tool_manipulator.urdf.xacro',
+                          SCRIPTS.parent/'config/hardware.yaml')
+    path = load_path(SCRIPTS.parent/'config/tool0_trajectory.yaml', model)
+    measured = np.array([1.0569127628529995, .726929593508222,
+                         1.233249580217005, -1.2543680481871697,
+                         .03681553890904876, -.11044661672755929])
+    suffix = nearest_path_suffix(path, measured)
+    assert suffix['entry_index'] >= 7
+    assert suffix['start'][0] > 1.
+    assert float(np.max(np.abs(suffix['start']-measured))) < .04
+    assert suffix['waypoints'][0][0] > suffix['start'][0]
+    resumed = execution_plan(suffix, measured)
+    assert all(goal[0] >= 1. for goal in resumed['waypoints'])
 
 
 def test_nearest_final_point_still_creates_safe_hold_target():

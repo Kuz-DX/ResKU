@@ -378,6 +378,7 @@ class ControlModeManager(Node):
             controller_age_sec=now-self.controller_time if self.controllers else None,
             command_subscribers=self.position.get_subscription_count(),
             last_execution_id=c.last_execution_id, last_execution_result=c.last_execution_result,
+            last_execution_reason=c.last_execution_reason,
             execution_id=c.execution_id, remaining_waypoints=len(c.queue), last_error=self.last_error,
             path_reference_error_rad=c.path_reference_error,
             path_command_error_rad=c.path_command_error,

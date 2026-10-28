@@ -3,6 +3,8 @@
 팔의 실기·모의 구동, 조이스틱 수동 구동, 설정 점검과 캘리브레이션 도구를 모아 둔
 패키지다. Managed 경로 재생과 AprilTag 도킹 실행기를 제공한다.
 
+HOLD·FAULT 발생 시 상태 판독과 운용 절차는 [HOLD 대응표](docs/hold_recovery_runbook.md)를 따른다.
+
 ## 남긴 실행 경로
 
 | 목적 | 실행 파일 | 모터 명령 | 시각화 |
@@ -66,7 +68,7 @@ L2+동그라미를 한 번 누르면 툴 1 접근 경로 → 정지 상태의 �
 UI는 `std_msgs/msg/Bool`의 `/arm/tool0_docking` 또는 `/arm/tool0_release`를
 `true`로 올려 경로 0 작업을 한 번 요청한다. 다시 요청하려면 먼저 해당 토픽을
 `false`로 내려 상승 에지를 재무장해야 한다. UI 요청은 현재 관절값과 가장 가까운
-기록 지점을 골라 그 지점까지 MoveIt으로 진입한 뒤, 기록된 순방향 경로만 이어서
+기록 경로 구간을 골라 해당 구간까지 MoveIt으로 진입한 뒤, 기록된 순방향 경로만 이어서
 실행한다. 마지막 도킹 준비 자세에서 docking은 `/arm/docking`에 `true -> false`,
 release는 `false -> true`를 즉시 발행하고, 이후 새 `/arm/docked` 피드백이 각각
 `true` 또는 `false`가 될 때까지 HOLD를 유지한다. 같은 계약을 tool1/tool2에도

@@ -299,7 +299,11 @@ def test_tool_path_following_error_aborts_to_reusable_hold_not_global_fault():
     assert c.mode == c.requested == 'hold'
     assert c.last_execution_id == 'bad'
     assert c.last_execution_result == 'aborted'
+    assert c.last_execution_reason.startswith('following error:')
     assert c.target == c.goal == [0.]*6
+    remembered = c.last_execution_reason
+    c.request('hold', .12)
+    assert c.last_execution_reason == remembered
 
 
 def test_loaded_shoulder_can_use_tighter_path_limits():
