@@ -57,6 +57,7 @@ ros2 topic echo /arm/docked --once
 | `hardware fault: <joint>`, RMD 통신/전류 오류, DXL 패킷 오류 | 해당 모터의 전원·버스·온도·전류·관절 구동 상태 확인. `/control/hardware_fault`가 `ok`이고 피드백이 신선한지 확인 |
 | `joint feedback timeout`, `invalid joint velocity`, `controller ...`, activation 오류 | `/joint_states`와 controller 상태 복구. 다른 launch/controller 중복 여부 확인 |
 | `startup_complete=false`인 fault 또는 `incomplete startup recovery requires inspection and restart` | `/arm/reset_fault`로 복구 불가. 시작 복구의 기구·통신 원인을 점검하고 노드를 재시작해 복구를 처음부터 수행 |
+| 시작 직후 `joint cannot stop before soft limit`이면서 RMD가 이미 소프트리밋 밖 | 정상 가동 범위와 소프트리밋을 구분. 시작 복구는 실측 안전 끝점까지의 정지 가능 거리를 확인한 뒤 안쪽으로만 이동한다. 시작 전에 fault가 났다면 복구가 시작되지 않은 것이며 Options/R2로 우회할 수 없음 | `positions_rad`, `velocities_rad_s`, 측정된 안전 끝점, `startup_complete`를 대조. 실측 범위 밖이거나 정지거리 부족이면 기구를 점검하고 재시작. 범위 안이면 수정된 시작 복구를 적용해 재시작하고 실제 복구 방향을 확인 |
 | `/arm/reset_fault`: `healthy controllers and stopped fresh feedback required` | controller 활성, 새 관절 피드백, 정지 속도를 충족한 뒤 다시 요청. 움직이는 관절을 강제로 reset하지 않음 |
 | 시작 직후 `ee_joint/velocity Not available` + Dynamixel `Rejecting position command ... wrist_roll_joint` | EE 컨트롤러 설정 문제로 단정하지 않음. 앞선 wrist_roll 명령 거부로 공유 Dynamixel 하드웨어가 사용 불가가 된 결과 | 같은 로그의 wrist_roll 실측과 `hardware.yaml` 소프트리밋을 비교. 영점은 실측 없이 바꾸지 않고, 확인된 안전 끝점 안쪽으로 소프트리밋을 설정 |
 

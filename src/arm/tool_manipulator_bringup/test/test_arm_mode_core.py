@@ -528,6 +528,9 @@ def test_measured_elbow_startup_pose_recovers_despite_small_outward_feedback():
     c.tick(.02, .02)
     assert c.mode == 'hold' and c.startup_recovering
     assert c.target[2] < initial[2] and c.target[3] > initial[3]
+    c.startup_complete = True
+    c.feedback(initial, [0.]*6, .04)
+    assert c.mode == 'fault' and 'invalid joint position' in c.reason
 
 
 def test_measured_elbow_startup_still_rejects_unsafe_outward_speed_and_position():
