@@ -1,5 +1,7 @@
 # Opt-in only. null fields are measurements, not guessed motor commands.
 enabled: false
+# Repository publisher: std_msgs/String JSON, not a bare /person topic.
+# Change together with CameraInfo if the deployed detector is remapped.
 person_topic: /arm/person/detections
 person_camera_info_topic: /arm/camera/color/camera_info
 floor_frame: world  # user confirmed world z=0 placement, 115 mm above actual ground
@@ -10,8 +12,11 @@ ee_speed_rad_s: null  # upper bound, reduced near the target; maximum 0.12
 placement_mode: chassis_edge
 chassis_frame: chassis  # box dimensions read from the active robot_description
 edge_clearance_m: 0.0  # requested vehicle edge; no invented outward offset
-tcp_to_object_bottom_m: null  # [x,y,z] in tcp_link for the held object
-place_orientation_xyzw: null  # TCP orientation in floor frame when bearing is +X
+# User supplied 95/2 mm from tcp_link to the object's bottom along tool +Z.
+tcp_to_object_bottom_m: [0.0, 0.0, 0.0475]
+# Tool +Z points straight down (world -Z). ROS quaternion [x,y,z,w].
+# Person-bearing yaw is applied about world Z, preserving the downward axis.
+place_orientation_xyzw: [1.0, 0.0, 0.0, 0.0]
 preplace_height_m: 0.10
 person_clearance_m: 0.70
 min_confidence: 0.80

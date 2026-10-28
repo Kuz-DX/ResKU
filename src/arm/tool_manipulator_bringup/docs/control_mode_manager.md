@@ -40,9 +40,16 @@ become stale, invalid or too close. This is an estimate, not depth measurement
 or a safety-rated human detector. A proper environment/payload collision scene
 and motor-free simulation are needed before live use.
 
-`config/tool2_pick_place.yaml` is disabled by default. Measured close/open angles,
-gripper speed, held-object offset and placement orientation are deliberately
-unset; turning on the launch option before completing calibration fails startup.
+`config/tool2_pick_place.yaml` is disabled by default. The user-specified
+TCP-to-object-bottom offset is 95/2 = 47.5 mm along tool +Z. Placement maps
+tool +Z to world -Z (quaternion [1,0,0,0], followed by person-bearing yaw).
+Thus final tcp_link world Z is +47.5 mm and the object bottom is world Z=0;
+the 100 mm preplace clearance gives TCP world Z=147.5 mm.
+Close/open angles and gripper speed remain unset; turning on the launch option
+before completing calibration fails startup. The repository's arm person
+publisher is `/arm/person/detections` (String JSON), paired with arm CameraInfo.
+A deployed `/person` remap must be verified for message type and camera frame
+before substituting it; the source does not declare a bare `/person` publisher.
 After configuration and simulation review, use `enable_tool2_pick_place:=true`
 with `ik_manual.launch.py`; one L2+X request then selects the full continuation.
 Robot startup alone never initiates this sequence. ROS packages were not built

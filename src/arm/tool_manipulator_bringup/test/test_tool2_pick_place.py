@@ -58,6 +58,19 @@ def test_object_bottom_not_tcp_reaches_floor_and_prepose_is_above():
         placement_targets([1.1, 2., 0.], floor_base, cfg)
 
 
+@pytest.mark.parametrize('bearing', [0., .7, -1.2, 2.8])
+def test_measured_half_height_and_vertical_downward_placement(bearing):
+    cfg = yaml.safe_load((ROOT/'config/tool2_pick_place.yaml').read_text())
+    cfg.update(placement_mode='radius', place_radius_m=.4)
+    person = [2*np.cos(bearing), 2*np.sin(bearing), 0.]
+    pre, final = placement_targets(person, np.eye(4), cfg)
+    np.testing.assert_allclose(final[:3, 2], [0., 0., -1.], atol=1e-12)
+    assert final[2, 3] == pytest.approx(.0475)
+    assert pre[2, 3] == pytest.approx(.1475)
+    bottom = final @ np.r_[cfg['tcp_to_object_bottom_m'], 1.]
+    assert bottom[2] == pytest.approx(0.)
+
+
 def test_foot_ray_uses_full_box_and_calibrated_floor():
     camera = np.diag([1., -1., -1., 1.])
     camera[2, 3] = 1.
