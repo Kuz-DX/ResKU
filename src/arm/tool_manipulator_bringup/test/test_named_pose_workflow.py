@@ -146,6 +146,25 @@ def test_missing_home_and_fault_do_not_command_motion():
     node.cancel.call_async.assert_not_called()
 
 
+def test_r2_current_pose_entry_checks_hold_without_requesting_motion():
+    node = workflow()
+    node.status.update(mode='hold', requested='hold', transitioning=False,
+                       entry_alignment_complete=True)
+    node.ready_state = 'idle'
+    node.auto_entry_armed = False
+    accepted, reason = node.request_current_tcp_entry(10.)
+    assert accepted and 'measured pose' in reason
+    assert node.ready_state == 'await_entry' and node.auto_entry_armed
+    assert node.entry_deadline == 13.
+    node.cancel.call_async.assert_not_called()
+    np.testing.assert_array_equal(node.measured, np.zeros(6))
+
+    node.status['mode'] = 'fault'
+    accepted, reason = node.request_current_tcp_entry(10.1)
+    assert not accepted and 'manager fault' in reason
+    node.cancel.call_async.assert_not_called()
+
+
 def test_aborted_ready_leg_never_starts_home():
     node = workflow()
     node.request_named_pose(True, 10.)

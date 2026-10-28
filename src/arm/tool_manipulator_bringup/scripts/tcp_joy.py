@@ -26,7 +26,7 @@ try:
 except ImportError:
     from arm_shared_kinematics import ArmKinematics, ARM_JOINTS
 from tcp_joy_core import (TcpStepper, joy_twist, joy_joint_jog, LimitBlocked, SafetyError,
-                          TcpMetrics, EeDpad, nearest_tcp_entry)
+                          TcpMetrics, EeDpad)
 from arm_mode_core import TCP_ENTRY_TOLERANCE, non_arm_feedback_changed
 from tcp_motion_workflow import TcpMotionWorkflow
 
@@ -297,6 +297,7 @@ class TcpJoy(TcpMotionWorkflow, Node):
                  and np.all(np.isfinite(msg.axes))
                  and all(b in (0, 1) for b in msg.buttons))
         nearest = valid and len(msg.axes) > 5 and msg.axes[5] < -.5
+        nearest_pressed = nearest and not self.previous_nearest
         if hasattr(self, 'ee_dpad'):
             previous_direction = self.ee_dpad.direction
             self.ee_dpad.update(msg.axes, enabled=bool(valid and msg.axes[2] >= -.5
@@ -308,7 +309,7 @@ class TcpJoy(TcpMotionWorkflow, Node):
         # L2 owns tool-path selection: triangle, circle and X face buttons.
         # Quiesce TCP preparation before the path producer requests HOLD.
         if valid and msg.axes[2] < -.5:
-            if nearest and not self.previous_nearest:
+            if nearest_pressed:
                 self.get_logger().warning('R2 blocked by L2 path selection; release L2 and R2, then press R2 alone')
             self.joy_time = time.monotonic()
             self.discard()
@@ -329,18 +330,14 @@ class TcpJoy(TcpMotionWorkflow, Node):
                 self.pub.publish(String(data=json.dumps(dict(epoch=self.epoch, pause=True))))
             self.reason = 'L2 path selection; TCP input paused'
             return
-        if nearest and not self.previous_nearest:
+        if nearest_pressed:
             try:
-                if self.measured is None or time.monotonic()-self.state_time >= .3:
-                    raise ValueError('R2 nearest entry requires fresh joint feedback')
-                goal = nearest_tcp_entry(self.model, self.measured, self.default_ready_goal)
-                accepted, reason = self.request_named_pose(
-                    False, time.monotonic(), goal=goal, label='nearest TCP entry pose')
+                accepted, reason = self.request_current_tcp_entry(time.monotonic())
                 if not accepted:
                     raise ValueError(reason)
                 self.reason = reason
             except ValueError as exc:
-                self.reason = 'R2 nearest TCP entry blocked: '+str(exc)
+                self.reason = 'R2 current-pose TCP entry blocked: '+str(exc)
                 self.get_logger().warning(self.reason)
         self.previous_nearest = nearest
         self.deadman, self.twist = joy_twist(msg.axes, msg.buttons)
@@ -375,7 +372,8 @@ class TcpJoy(TcpMotionWorkflow, Node):
                 and self.status.get('mode') != 'fault'):
             _, self.reason = self.request_named_pose(True, self.joy_time)
         self.previous_home = home
-        TcpMotionWorkflow.retry_ready(self, valid, was_pressed, home, self.joy_time)
+        if not nearest_pressed:
+            TcpMotionWorkflow.retry_ready(self, valid, was_pressed, home, self.joy_time)
         if valid and self.deadman and not was_pressed and self.rearmed and not self.blocked:
             self.discard()
             self.stepper.q = self.stepper.pose = None

@@ -56,6 +56,21 @@ def test_l2_path_buttons_never_request_home_or_tcp_ready(button):
     assert messages(n) == [dict(epoch='e', pause=True)]
 
 
+def test_r2_requests_current_pose_entry_without_nearest_ready_motion():
+    n = node()
+    n.status.update(mode='hold', requested='hold')
+    n.epoch = None
+    n.deadman = n.rearmed = False
+    n.previous_nearest = False
+    n.request_current_tcp_entry = Mock(return_value=(True, 'checking measured pose'))
+    msg = joy(False)
+    msg.axes[5] = -1.
+    send(n, msg)
+    n.request_current_tcp_entry.assert_called_once()
+    assert n.reason == 'checking measured pose'
+    assert n.previous_nearest
+
+
 def test_wrist_modifier_moves_only_wrist_and_skips_ik():
     n = node()
     msg = joy(True)

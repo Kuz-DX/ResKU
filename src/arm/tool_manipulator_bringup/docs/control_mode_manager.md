@@ -15,9 +15,11 @@ mapping; L2 path selection suppresses all D-pad EE commands. This applies to
 The EE jog uses velocity control without a position cutoff. The selected
 speed is published as `ee_speed_rad_s` on `/arm/tcp_joy/status`.
 
-R2 (`axes[5]`, pressed below -0.5) requests the nearest TCP-entry candidate.
-Its target uses a 0.121-rad joint margin, leaving 0.02 rad beyond the
-0.101-rad entry check for settling. Rejections are logged immediately.
+R2 (`axes[5]`, pressed below -0.5) requests TCP entry at the stopped measured
+pose in HOLD. It does not move to a TCP-ready posture. The existing 0.10-rad
+joint margin, Jacobian condition, MoveIt collision check, fresh feedback and
+0.20-second stopped-feedback checks still apply. Rejections remain in HOLD and
+are logged immediately.
 Square (`buttons[3]`) in arm focus while FAULT requests `/arm/reset_fault` once
 per press (L2 path selection still takes priority). The manager's hardware,
 controller and stopped-feedback checks remain authoritative. Success returns
@@ -35,12 +37,7 @@ Each endpoint must be within 0.01 rad with all measured speeds at most
 0.01 rad/s for 0.5 s (5 s settling deadline). This software guard does not establish physical
 circuit-box clearance; the collision model and loaded settling require
 supervised verification before reuse. Current limits are unchanged.
-The current joints are first projected into the required 0.10-rad margin. If
-that pose has scaled Jacobian condition above 20, the search moves only as far
-as needed along the corridor toward the reviewed TCP-ready pose. The candidate
-then uses the same sampled MoveIt state/collision check and managed tool-auto
-execution as named returns. Failure remains HOLD. R2 is disabled during L2 path
-selection and while any hardware fault is latched.
+R2 is disabled during L2 path selection and while any hardware fault is latched.
 
 ## RMD feedback-fault recovery
 

@@ -16,6 +16,29 @@ except ImportError:
 
 
 class TcpMotionWorkflow:
+    def request_current_tcp_entry(self, now):
+        """R2: validate the stopped measured pose, without a ready-pose path."""
+        s = self.status
+        if s.get('mode') == 'fault':
+            return False, 'manager fault: '+s.get('reason', 'inspect control_status')
+        if (not self.ready_enabled or now-self.status_time >= .3
+                or now-self.state_time >= .3 or self.measured is None
+                or not s.get('ready') or not s.get('startup_complete')
+                or not s.get('entry_alignment_complete', True)
+                or s.get('focus') != 'arm' or s.get('mode') != 'hold'
+                or s.get('requested', 'hold') != 'hold' or s.get('transitioning')):
+            return False, 'R2 current-pose TCP entry requires stopped ready HOLD and fresh feedback'
+        self._reset_ready()
+        self.returning_home = self.explicit_ready = self.named_one_shot = False
+        self.auto_entry_armed = True
+        self.ready_safe_at = None
+        self.entry_deadline = now+3.
+        self.entry_retry_count = 0
+        self.ready_state = 'await_entry'
+        self.discard()
+        self.reason = 'R2 checking TCP entry at measured pose; no ready motion'
+        return True, self.reason
+
     def request_named_pose(self, home, now, goal=None, label=None):
         """Explicit recovery request: stop first, then validate each leg."""
         s = self.status
