@@ -6,6 +6,7 @@ import json
 import math
 import sys
 import time
+from pathlib import Path
 
 import numpy as np
 import yaml
@@ -41,6 +42,7 @@ def position_limit_violations(positions, lower, upper):
 class Manual(ManualController):
     node_name = 'manual'
     collision_guarded = False
+    local_tool_paths = True
     # Legacy Servo-mode on_timer gates only the joint at a directional limit.
     # Keep the same DLS velocity coupling, but do not freeze all three RMDs
     # because one position target reaches its boundary or lead budget.
@@ -205,19 +207,17 @@ class Manual(ManualController):
         super().on_joy(message)
         l2 = len(message.axes) > 2 and message.axes[2] < -.5
         # Same Linux PlayStation mapping as ik_manual: triangle=tool0,
-        # square=tool1, X=tool2. Tool2 remains deliberately disabled.
-        combos = [l2 and bool(message.buttons[i]) for i in (2, 3, 0)]
-        edges = [i for i, held in enumerate(combos) if held and not self.path_combos[i]]
+        # square=tool1, X=tool2. Managed mode delegates all three to its producer.
+        from tool_trajectory_joy import requested_path
+        request, combos = requested_path(message.axes, message.buttons, self.path_combos)
         self.path_combos = combos
         self.path_l2_held = l2
         if self.path_points is not None and not l2:
             self.path_points = None
             self.neutral_required = True
-        if len(edges) == 1 and self.path_points is None and not self.stop_pose_active:
-            if edges[0] in (0, 1):
-                self.start_tool_path(edges[0])
-            # elif edges[0] == 2:
-            #     self.start_tool_path(2)  # Tool2: enable only after validation.
+        if (self.local_tool_paths and request is not None and
+                self.path_points is None and not self.stop_pose_active):
+            self.start_tool_path(request)
         if l2:
             self.previous_stop_pose = bool(message.buttons[3])
             return
@@ -235,38 +235,54 @@ class Manual(ManualController):
         self.previous_stop_pose = pressed
 
     def start_tool_path(self, path_id):
+        if not self.local_tool_paths:
+            return
         if (not self.controller_ready or self.focus != 'arm' or self.neutral_required or
                 self.hardware_fault or self.fault or self.startup_recovering or
                 not self.entry_alignment_complete or not self.valid_measured(self.now_seconds())):
+            self.get_logger().warning(f'Tool{path_id} path blocked: ready arm focus, neutral controls and fresh feedback required')
             return
         path_file = Path(__file__).resolve().parents[1]/'config'/f'tool{path_id}_trajectory.yaml'
         try:
-            data = yaml.safe_load(path_file.read_text())
-            if data.get('execution_enabled') is not True or data.get('joint_names') != list(JOINTS):
-                raise ValueError('path disabled or joint order mismatch')
-            raw = data['points']
-            if not 2 <= len(raw) <= 1000:
-                raise ValueError('invalid point count')
-            points = [np.asarray(p['positions_rad'], dtype=float) for p in raw]
-            margin = self.params['limit_margin_rad']
-            if any(q.shape != (6,) or not np.all(np.isfinite(q)) or
-                   np.any(q < self.lower+margin) or np.any(q > self.upper-margin) for q in points):
-                raise ValueError('path violates joint limits')
+            from types import SimpleNamespace
+            from tool_trajectory_joy import load_path
+            model = SimpleNamespace(within_limits=lambda q, margin: bool(
+                np.all(q >= self.lower+margin) and np.all(q <= self.upper-margin)))
+            path = load_path(path_file, model, self.params['limit_margin_rad'])
+            if path is None:
+                raise ValueError('path disabled')
+            if path['after_path'] is not None:
+                raise ValueError('close/return sequence requires ik_manual.launch.py')
+            points = [path['start'], *path['waypoints']]
             if np.max(np.abs(self.measured()-points[0])) > .10:
                 raise ValueError('start differs from measured position by more than 0.10 rad')
-        except (OSError, KeyError, TypeError, ValueError) as exc:
+        except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as exc:
             self.get_logger().error(f'Tool{path_id} path rejected: {exc}')
             return
         self.path_points = points
         self.path_index = 0
+        self.path_durations = [.02, *path['durations']]
+        self.path_segment_index = None
         self.stop_target = None
         self.get_logger().warning(f'Tool{path_id} path started; keep L2 held')
 
     def run_tool_path(self, dt):
         goal = self.path_points[self.path_index]
-        candidate = self.target + np.clip(goal-self.target, -self.speeds*dt, self.speeds*dt)
-        allowed = np.abs(candidate-self.measured()) <= self.params['max_target_lead_rad']
-        candidate = np.where(allowed, candidate, self.target)
+        if self.path_segment_index != self.path_index:
+            self.path_segment_index = self.path_index
+            duration = max(self.path_durations[self.path_index],
+                           float(np.max(np.abs(goal-self.target)/self.speeds)))
+            self.path_segment_speeds = np.abs(goal-self.target)/max(duration, .02)
+            self.path_deadline = self.now_seconds()+duration+30.
+        if self.now_seconds() > self.path_deadline:
+            self.get_logger().error(f'Tool path point {self.path_index+1} feedback timeout')
+            self.stop('tool path feedback timeout', dt)
+            return
+        candidate = self.target + np.clip(goal-self.target,
+            -self.path_segment_speeds*dt, self.path_segment_speeds*dt)
+        # Pace every joint together when one falls behind; retain the taught line.
+        if np.any(np.abs(candidate-self.measured()) > self.params['max_target_lead_rad']):
+            candidate = self.target.copy()
         self.status = f'tool path point {self.path_index+1}/{len(self.path_points)}'
         self.apply_motion(candidate, 0., 'tool_path', dt, goal=goal)
         if (np.allclose(self.target, goal, atol=1e-9, rtol=0.) and

@@ -11,6 +11,7 @@ from manual import Manual
 
 
 class ManagedManual(Manual):
+    local_tool_paths = False
     def __init__(self):
         self.manager_status = {}
         self.manager_time = -float('inf')
@@ -40,12 +41,14 @@ class ManagedManual(Manual):
                    status.get('mode') == 'manual' and not status.get('transitioning'))
         self.controllers = status.get('controllers', {})
         if not allowed or not self.valid_measured(now):
+            self.path_points = None
             self.controller_ready = False
             self.phase = 'waiting'
             self.neutral_required = True
             self.manager_epoch = None
             return
         if self.manager_epoch != status.get('epoch'):
+            self.path_points = None
             self.manager_epoch = status['epoch']
             self.target = self.measured()
             self.stop_target = None

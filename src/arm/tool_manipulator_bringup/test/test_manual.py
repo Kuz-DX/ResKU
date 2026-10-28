@@ -27,6 +27,9 @@ def harness():
     node.entry_alignment_deadline = None
     node.entry_alignment_complete = True
     node.stop_pose_active, node.previous_stop_pose = False, False
+    node.path_points = None
+    node.path_combos = [False]*3
+    node.path_l2_held = False
     node.last_dt = .02
     node.diagnostics = Mock()
     node.joy = Joy(axes=[0.]*8, buttons=[0]*11)
@@ -52,6 +55,83 @@ def harness():
 def tick(node):
     node.last_time = .98
     node.on_timer()
+
+
+@pytest.mark.parametrize('button,path_id', [(2, 0), (3, 1), (0, 2)])
+def test_all_tool_buttons_dispatch_once_and_managed_never_dispatches_locally(button, path_id):
+    from managed_manual import ManagedManual
+    node = harness()
+    node.start_tool_path = Mock()
+    msg = Joy(axes=[0., 0., -1., 0., 0., 0., 0., 0.], buttons=[0]*11)
+    msg.buttons[button] = 1
+    node.on_joy(msg)
+    node.on_joy(msg)
+    node.start_tool_path.assert_called_once_with(path_id)
+    node.local_tool_paths = ManagedManual.local_tool_paths
+    node.path_combos = [False]*3
+    node.start_tool_path.reset_mock()
+    node.on_joy(msg)
+    node.start_tool_path.assert_not_called()
+    assert not node.stop_pose_active
+
+
+@pytest.mark.parametrize('path_id', [0, 1, 2])
+def test_local_paths_complete_with_yaml_timing_and_synchronized_feedback_pacing(path_id):
+    import yaml
+    config = Path(__file__).resolve().parents[1]/'config'
+    data = yaml.safe_load((config/f'tool{path_id}_trajectory.yaml').read_text())
+    hardware = yaml.safe_load((config/'hardware.yaml').read_text())['joints']
+    node = harness()
+    node.startup_recovering = False
+    node.lower, node.upper = np.asarray([hardware[j]['soft_limit_rad'] for j in JOINTS]).T
+    node.target = np.asarray(data['points'][0]['positions_rad'])
+    node.positions = dict(zip(JOINTS, node.target))
+    node.start_tool_path(path_id)
+    assert node.path_points is not None
+    now = [1.]
+    node.now_seconds = lambda: now[0]
+    caps = np.minimum(node.speeds, data.get('joint_speed_limits_rad_s', node.speeds))
+    for _ in range(60000):
+        now[0] += .02
+        before = node.target.copy()
+        node.positions = dict(zip(JOINTS, before))
+        node.run_tool_path(.02)
+        assert np.all(np.abs(node.target-before)/.02 <= caps+1e-9)
+        if node.path_points is None:
+            break
+    assert node.status == 'tool path reached'
+    np.testing.assert_allclose(node.target, data['points'][-1]['positions_rad'], atol=1e-9)
+
+
+def test_managed_mode_change_discards_local_path():
+    from managed_manual import ManagedManual
+    node = harness()
+    node.manager_status = {'ready': True, 'mode': 'tool_auto', 'epoch': 2}
+    node.manager_time, node.manager_epoch = 1., 1
+    node.path_points = [node.target.copy()]
+    ManagedManual.poll_controller(node, 1.)
+    assert node.path_points is None
+    node.manager_status = {'ready': True, 'mode': 'manual', 'epoch': 3}
+    node.path_points = [node.target.copy()]
+    ManagedManual.poll_controller(node, 1.)
+    assert node.path_points is None
+    assert node.neutral_required
+
+
+def test_local_path_feedback_lead_pauses_all_joints_and_times_out():
+    node = harness()
+    node.path_points = [node.target+np.array([.5, .2, 0., 0., 0., 0.])]
+    node.path_index, node.path_segment_index = 0, None
+    node.path_durations = [10.]
+    node.run_tool_path(.02)
+    node.positions[JOINTS[0]] = node.target[0]-.1
+    before = node.target.copy()
+    node.run_tool_path(.02)
+    np.testing.assert_array_equal(node.target, before)
+    node.now_seconds = lambda: 100.
+    node.run_tool_path(.02)
+    assert node.path_points is None
+    assert node.status == 'tool path feedback timeout'
 
 
 @pytest.mark.parametrize('name,index', [('base', 0), ('wrist_roll_axis', 4), ('wrist_yaw_axis', 5)])

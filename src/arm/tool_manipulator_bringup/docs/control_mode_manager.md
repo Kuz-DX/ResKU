@@ -124,6 +124,17 @@ or X (`buttons[0]`) selects tool path 0, 1, or 2 respectively. L2+L1 does not
 select a tool path. While L2 is held, the TCP producer suppresses L1 and square HOME
 handling so one combination cannot start both a path and TCP/HOME motion.
 Paths must contain reviewed captured points and have `execution_enabled: true`.
+Standalone `manual.launch.py` accepts the same three L2 combinations and uses
+the shared path loader, including timing and optional joint speed caps. Keep L2
+held during standalone playback; release stops it. Start feedback must be within
+0.10 rad of the first point. Segment targets retain joint travel ratios and pause
+together at the feedback lead limit; failure to finish within nominal travel
+time plus 30 seconds cancels the path. Rejected selections report a reason.
+This standalone launch has no MoveIt collision gate or docking continuation;
+use `ik_manual.launch.py` for planned entry, collision checking and tool-1 docking.
+Its managed manual producer never starts local paths, and discards local path
+state on mode ownership/epoch changes. All three managed paths remain owned by
+the trajectory producer and mode manager.
 Path 2 is enabled for an approach-only phase-1 test: original taught point 8
 (TCP_ready) -> 7 -> ... -> 1, then HOLD. Original point numbers refer to the
 user's capture order, not YAML list indices. Capture timestamps are discarded;
@@ -154,8 +165,8 @@ The four captured values outside the 0.02-rad joint margin are set to its
 boundaries: point 1 elbow to 1.522 rad and wrist pitch at points 1/3/7 to
 -1.572 rad. All other captured joint values remain exact. The path is enabled
 for `tool_trajectory_joy`, which checks collision and manager limits before
-execution. The manual L2+X dispatch remains disabled because it does not run
-that collision check. The old five-point FK/IK evidence in
+execution. Standalone manual L2+X uses the same local playback as tools 0/1,
+without that collision check. The old five-point FK/IK evidence in
 `config/tool2_ik_reference.yaml` is historical and does not describe this path.
 Live collision validation is required by the existing execution pipeline.
 Path 0 is enabled. Path 1 is enabled for approach-only testing and retains
@@ -163,6 +174,14 @@ original points 1/2/5/7. Its `timing_mode: joint_limits` keeps capture timestamp
 as metadata and lets the manager derive segment timing from joint travel and
 existing speed limits, with acceleration, jerk and feedback pacing still applied.
 The recorded 102-second gap between points 5 and 7 no longer slows that segment.
+Measured docking geometry (2026-10-28): the docking origin is 58.4 mm below
+the AprilTag center. In the operator's camera convention (+X left, +Y up,
++Z forward), the tag-to-docking offset is [0, -0.0584, 0] m. In a standard
+camera optical frame (+X right, +Y down, +Z forward), it is [0, +0.0584, 0] m.
+This is a lateral target offset, not the tag-normal advance distance. The current
+fixed-normal advance does not yet apply this calibration or seek that origin.
+Conversion to the robot base must use the actual camera TF and the tag pose
+from the same observation; do not substitute 58.4 mm for the advance distance.
 Paths without this setting retain recorded timing. MoveIt entry and docking
 correction/advance durations keep their own timing.
 Intermediate points 3/4/6/8 were removed at the user's request because they
