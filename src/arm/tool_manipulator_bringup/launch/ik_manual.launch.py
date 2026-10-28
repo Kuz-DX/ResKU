@@ -31,6 +31,11 @@ def bringup(context):
     base = common.build_arm_base(
         real_hardware=real,
         hardware_file=LaunchConfiguration('hardware_config').perform(context), mock_ee_velocity=True,
+        # tool0/1/2 trajectories approach a rack tool before it is attached.
+        # A selected-tool model here would validate the approach with geometry
+        # that is not physically on the wrist yet.  This acquisition stack
+        # therefore always starts with the explicit empty-wrist model.
+        tool_id='99',
         mock_initial_positions_file=initial,
         manual_controller_file=str(source_config) if source_config.is_file() else '')
     scripts = Path(__file__).resolve().parents[1]/'scripts'

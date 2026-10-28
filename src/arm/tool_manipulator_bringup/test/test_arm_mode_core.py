@@ -37,11 +37,11 @@ def test_manual_ee_accepts_decimal_400_but_rejects_higher_speed():
         c.command('manual', c.epoch, [0.]*6, 401 * 0.0239691227, .14)
 
 
-def test_tcp_ee_keeps_012_speed_limit():
+def test_tcp_ee_accepts_configured_maximum_speed():
     c = ready('tcp_ik')
-    assert c.command('tcp_ik', c.epoch, [0.]*6, .12, .1)
+    assert c.command('tcp_ik', c.epoch, [0.]*6, 16.7, .1)
     with pytest.raises(ValueError, match='limits exceeded'):
-        c.command('tcp_ik', c.epoch, [0.]*6, .121, .12)
+        c.command('tcp_ik', c.epoch, [0.]*6, 16.701, .12)
 
 
 def test_managed_ee_reaches_feedback_goal_then_holds_arm():

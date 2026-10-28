@@ -3,7 +3,7 @@
 ## IK joystick EE jog (Dynamixel ID 4)
 
 In TCP_IK with arm focus, D-pad up/down (axis 7) adjusts the EE jog speed
-by 0.02 rad/s per press. Default is 0.06 rad/s, bounded to 0.02..0.12 rad/s;
+by 1 rad/s per press. Default is 3 rad/s, bounded to 0.02..16.7 rad/s;
 holding up/down does not auto-repeat and restarting resets the selection.
 With L1 held and rearmed, D-pad left/right (axis 6) commands positive/negative
 ee_joint velocity (CCW/CW under the calibrated `raw_increases_ccw: true`

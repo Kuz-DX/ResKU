@@ -11,6 +11,7 @@ TCP_ENTRY_TOLERANCE = (.02, .001, .001, .001, .02, .02)
 # MX-106(2.0): one Goal Velocity count is 0.229 rpm (0.0239691227 rad/s).
 # Tool-specific commanded speeds remain separate from this manual safety ceiling.
 MANUAL_EE_MAX_VELOCITY_RAD_S = 400 * 0.0239691227
+TCP_EE_MAX_VELOCITY_RAD_S = 16.7
 # A stopped DXL can settle several encoder counts off the zero command
 # (observed base residual: 0.00767 rad). Keep this below the 0.02-rad
 # TCP snapshot tolerance; the command must still finish its ramp to zero.
@@ -483,7 +484,8 @@ class ModeCore:
                 epoch != self.epoch or self.transitioning or not self.ready or
                 self.focus != 'arm' or not self.fresh(now)):
             return False
-        ee_speed_limit = MANUAL_EE_MAX_VELOCITY_RAD_S if source == 'manual' else .12
+        ee_speed_limit = (MANUAL_EE_MAX_VELOCITY_RAD_S if source == 'manual'
+                          else TCP_EE_MAX_VELOCITY_RAD_S)
         if not self.valid(positions) or not math.isfinite(ee) or abs(ee) > ee_speed_limit:
             raise ValueError('invalid command or limits exceeded')
         if max(abs(a-b) for a, b in zip(positions, self.position)) > .10:

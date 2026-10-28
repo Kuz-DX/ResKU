@@ -433,6 +433,7 @@ def test_launch_selects_exactly_one_path_input_owner(enabled, motion, script):
             patch.object(launch, 'RegisterEventHandler', return_value=Mock()), \
             patch.object(launch, 'OnProcessExit', return_value=Mock()):
         launch.bringup(None)
+    assert common.build_arm_base.call_args.kwargs['tool_id'] == '99'
     path_nodes = [n for n in nodes if any('tool_trajectory_joy.py' in a or
                   'tool_docking_coordinator.py' in a for a in n.get('arguments', []))]
     assert len(path_nodes) == 1

@@ -12,7 +12,7 @@ class LimitBlocked(ValueError):
 class EeDpad:
     """PS axes 6/7: left CCW, right CW; up/down adjust once per press."""
     def __init__(self):
-        self.speed = .06
+        self.speed = 3.
         self.vertical = 0
         self.direction = 0
 
@@ -22,7 +22,7 @@ class EeDpad:
             return
         vertical = int(axes[7] > .5)-int(axes[7] < -.5)
         if vertical and vertical != self.vertical:
-            self.speed = round(float(np.clip(self.speed+vertical*.02, .02, .12)), 2)
+            self.speed = round(float(np.clip(self.speed+vertical, .02, 16.7)), 2)
         self.vertical = vertical
         # Do not rotate on diagonal presses used to change speed.
         self.direction = 0 if vertical else int(axes[6] > .5)-int(axes[6] < -.5)
