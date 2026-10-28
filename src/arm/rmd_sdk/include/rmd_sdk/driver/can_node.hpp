@@ -140,8 +140,28 @@ namespace rmd_sdk {
   std::array<std::uint8_t,8> CanNode<SEND_ID_OFFSET,RECEIVE_ID_OFFSET>::sendRecv(Message const& request, std::uint32_t const actuator_id) {
     auto const can_send_id {getCanSendId(actuator_id)};
     write(can_send_id, request.getData());
-    can::Frame const frame {can::Node::read()};
-    return frame.getData();
+    auto const expected_command {request.getData().at(0)};
+
+    // SocketCAN filters the response CAN id, but it cannot distinguish the
+    // command byte carried by frames from the same actuator.  A delayed or
+    // duplicated response can therefore remain queued after a timed-out
+    // transaction.  Returning that stale frame permanently shifts subsequent
+    // request/response pairs by one (for example B5 -> B3 -> 9C -> 92), which
+    // used to make lifecycle activation fail with "Unexpected response".
+    // Discard responses for older commands. The socket receive timeout bounds
+    // an idle bus; the stale-frame limit also bounds a continuously noisy bus.
+    constexpr std::size_t max_stale_responses {32};
+    for (std::size_t stale_responses {0}; stale_responses < max_stale_responses;
+         ++stale_responses) {
+      can::Frame const frame {can::Node::read()};
+      auto const data {frame.getData()};
+      if (data.at(0) == expected_command) {
+        return data;
+      }
+    }
+    throw Exception(
+      "Too many stale CAN responses while waiting for command '" +
+      std::to_string(expected_command) + "'");
   }
 
   template <std::uint32_t SEND_ID_OFFSET, std::uint32_t RECEIVE_ID_OFFSET>
