@@ -128,7 +128,23 @@ Path 2 is enabled for an approach-only phase-1 test: original taught point 8
 (TCP_ready) -> 7 -> ... -> 1, then HOLD. Original point numbers refer to the
 user's capture order, not YAML list indices. Capture timestamps are discarded;
 nominal 0..7 metadata and `timing_mode: joint_limits` derive motion timing from
-joint limits. The `after_path` block is commented out, so ID 4 does not close
+joint limits. Tool 2 additionally sets `joint_speed_limits_rad_s` to
+`[0.08, 0.04, 0.006, 0.006, 0.08, 0.08]` in arm joint order. Each taught segment
+gets a minimum duration from the slowest joint's travel/cap, so elbow/pitch
+approach at nominal speeds no greater than 0.006 rad/s. The manager may slow
+these segments further. Captured coordinates are unchanged by this timing.
+The original fastest timing demanded 0.052..0.060 rad/s in wrist-pitch approach
+segments, whereas tool 1's near-limit approach is approximately 0.0064 rad/s.
+This retiming addresses the separate measured-motion guard: within 0.05 rad of
+a joint limit, outward measured speed above 0.02 rad/s still faults. That guard,
+position limits, acceleration/jerk limits and feedback-lead checks remain active.
+The optional caps apply only to `joint_limits` timing; other paths keep their
+previous timing. A resulting segment of 120 s or longer is rejected at load.
+Reverse traversal reuses the durations in reverse order; entry planning keeps
+its existing separate timing. An offline 80-ms tracking-lag regression reproduces
+the original guard fault and completes the retimed approach; actual actuator
+stiction, encoder noise and load response still need a hardware trial.
+The `after_path` block is commented out, so ID 4 does not close
 and the arm does not return in this test. The commented block connects the
 existing sequence: stop at original point 1, close independent Dynamixel ID 4
 (`ee_joint`) to 1.251728 rad, confirm completion, then reverse the approach

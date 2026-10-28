@@ -41,6 +41,13 @@ def load_path(path, model, margin=.02):
     timing_mode = data.get('timing_mode', 'recorded')
     if timing_mode not in ('recorded', 'joint_limits'):
         raise ValueError(f'{path}: timing_mode must be recorded or joint_limits')
+    segment_limits = data.get('joint_speed_limits_rad_s')
+    if segment_limits is not None:
+        if (timing_mode != 'joint_limits' or not isinstance(segment_limits, list)
+                or len(segment_limits) != len(ARM_JOINTS)
+                or not all(type(v) in (int, float) and math.isfinite(v)
+                           and 0 < v <= .12 for v in segment_limits)):
+            raise ValueError(f'{path}: invalid joint_speed_limits_rad_s for joint_limits timing')
     raw = data.get('points')
     if not isinstance(raw, list) or len(raw) < 2 or len(raw) > 1000:
         raise ValueError(f'{path}: expected 2..1000 points')
@@ -72,6 +79,14 @@ def load_path(path, model, margin=.02):
         # Acceleration, jerk and feedback pacing remain owned by the manager.
         # Capture pauses must not become commanded travel times.
         durations = [.02]*len(durations)
+        if segment_limits is not None:
+            # Slow the whole taught segment together. This retains waypoint
+            # geometry and the existing manager acceleration/jerk/lead guards.
+            # Reverse paths reuse these durations in reverse order.
+            durations = [max(.02, float(np.max(np.abs(b-a)/segment_limits)))
+                         for a, b in zip(points, points[1:])]
+            if any(d >= 120. for d in durations):
+                raise ValueError(f'{path}: speed-limited segment time must be <120s')
     after = data.get('after_path')
     if after is not None:
         if (not isinstance(after, dict) or

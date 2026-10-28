@@ -108,7 +108,9 @@ def test_tool2_approach_runs_from_ready_to_pickup_within_joint_margin():
     np.testing.assert_array_equal(points[[7, 5, 1], 3], [-1.572]*3)
     loaded = load_path(path, model)
     np.testing.assert_array_equal([loaded['start'], *loaded['waypoints']], points)
-    assert loaded['durations'] == [.02]*7
+    speeds = np.abs(np.diff(points, axis=0))/np.asarray(loaded['durations'])[:, None]
+    assert np.all(speeds <= np.asarray(data['joint_speed_limits_rad_s'])+1e-12)
+    assert all(.02 <= d < 120. for d in loaded['durations'])
     assert loaded['after_path'] is None
 
     # Phase 1 completes at pickup without dispatching EE or return motion.
@@ -118,6 +120,54 @@ def test_tool2_approach_runs_from_ready_to_pickup_within_joint_margin():
     ToolTrajectoryJoy.path_completed(node)
     node.begin.assert_not_called()
     node.reset.assert_called_once()
+
+
+@pytest.mark.parametrize('retimed', [False, True])
+def test_tool2_slow_timing_avoids_feedback_guard_in_tracking_simulation(retimed):
+    from arm_mode_core import ModeCore
+    from tool_trajectory_joy import ARM_JOINTS, ArmKinematics
+    model = ArmKinematics(
+        SCRIPTS.parent.parent/'tool_manipulator_description/urdf/tool_manipulator.urdf.xacro',
+        SCRIPTS.parent/'config/hardware.yaml')
+    loaded = load_path(SCRIPTS.parent/'config/tool2_trajectory.yaml', model)
+    c = ModeCore([model.limits[j] for j in ARM_JOINTS], [.12]*6,
+                 joint_names=ARM_JOINTS, path_speeds=[.08, .04, .06, .06, .08, .08],
+                 path_accelerations=[.08, .03, .06, .06, .08, .08],
+                 path_jerks=[.30, .04, .15, .15, .30, .30],
+                 path_feedback_leads=[.04, .015, .025, .025, .04, .04])
+    measured = loaded['start'].copy()
+    c.ready, c.focus = True, 'arm'
+    c.feedback(measured, [0.]*6, 0.)
+    c.mode = c.requested = 'tool_auto'
+    durations = loaded['durations'] if retimed else [.02]*7
+    assert c.path(c.epoch, 'tool2-test', loaded['waypoints'], 0., durations)
+    # A simple 80-ms tracking lag exercises measured-velocity guards, not just
+    # YAML validity. This is not a model of hardware stiction or box loading.
+    for step in range(1, 30001):
+        now = step*.02
+        previous = measured.copy()
+        measured += (np.asarray(c.target)-measured)*(.02/.08)
+        c.feedback(measured, (measured-previous)/.02, now)
+        c.tick(now, .02)
+        if c.mode == 'fault' or c.last_execution_result is not None:
+            break
+    if retimed:
+        assert c.last_execution_result == 'succeeded', c.reason
+        np.testing.assert_allclose(measured, loaded['waypoints'][-1], atol=.01)
+    else:
+        assert c.mode == 'fault'
+        assert 'moving outward near soft limit: wrist_pitch_joint' in c.reason
+
+
+@pytest.mark.parametrize('limits', [[.01]*5, [.01]*5+[0.], [.01]*5+[float('nan')],
+                                    [.01]*5+[True], [.01]*5+[.13]])
+def test_invalid_segment_speed_limits_are_rejected(tmp_path, limits):
+    path = write_path(tmp_path)
+    data = yaml.safe_load(path.read_text())
+    data.update(timing_mode='joint_limits', joint_speed_limits_rad_s=limits)
+    path.write_text(yaml.safe_dump(data))
+    with pytest.raises(ValueError, match='joint_speed_limits_rad_s'):
+        load_path(path, Mock())
 
 
 def test_tool2_commented_close_and_return_connects_to_ready(tmp_path):

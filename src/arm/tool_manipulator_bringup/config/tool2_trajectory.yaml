@@ -7,6 +7,11 @@
 # tool2_ik_reference.yaml describes the superseded five-point path only.
 execution_enabled: true
 timing_mode: joint_limits
+# Tool 1 approaches the wrist-pitch lower guard at about 0.0064 rad/s.
+# Retiming tool 2 to 0.006 rad/s on elbow/pitch avoids a fast commanded
+# approach into the 0.05-rad guard band (outward feedback trip: 0.02 rad/s).
+# These caps set segment durations; the manager still owns all motion guards.
+joint_speed_limits_rad_s: [0.08, 0.04, 0.006, 0.006, 0.08, 0.08]
 joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
 # PHASE 2 DISABLED: uncomment this block after approach validation.
 # Existing close-and-return sequencing holds the arm at original point 1,
