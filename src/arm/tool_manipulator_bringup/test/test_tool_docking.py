@@ -749,7 +749,7 @@ def test_main_spins_tf_concurrently_and_shuts_executor_down_before_node():
 
 
 @pytest.mark.parametrize('entry_offset', [0., .272])
-def test_l2_square_from_tcp_mode_keeps_docking_through_entry_plan_and_execution(tmp_path, entry_offset):
+def test_l2_circle_from_tcp_mode_keeps_docking_through_entry_plan_and_execution(tmp_path, entry_offset):
     from sensor_msgs.msg import Joy
     from tool_trajectory_joy import load_path
     n = camera_node(tmp_path)
@@ -759,6 +759,7 @@ def test_l2_square_from_tcp_mode_keeps_docking_through_entry_plan_and_execution(
     n.active, n.stage, n.docking_started = False, 'idle', None
     n.combos, n.l2_axis, n.l2_threshold, n.first_button, n.third_button = (
         [False]*3, 2, -.5, 2, 0)
+    n.second_button = 1
     n.requested_docked_state, n.use_nearest_entry = None, False
     measured = n.paths[1]['start'].copy()
     measured[0] += entry_offset
@@ -789,7 +790,7 @@ def test_l2_square_from_tcp_mode_keeps_docking_through_entry_plan_and_execution(
         n.tick()
         assert n.stage == 'idle' and not n.active
         n.publisher.publish.assert_not_called()
-        n.on_joy(Joy(axes=[0., 0., -1.], buttons=[0, 0, 0, 1, 0]))
+        n.on_joy(Joy(axes=[0., 0., -1.], buttons=[0, 1, 0, 0, 0]))
         assert n.stage == 'request_hold'
         n.tick()
         n.status.update(mode='hold', epoch='hold')

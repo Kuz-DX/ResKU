@@ -358,7 +358,7 @@ def test_l2_plus_first_button_has_one_rising_edge():
     assert requested_path(axes, buttons, held)[0] == 0
 
 
-@pytest.mark.parametrize('path_id,button_index', [(0, 2), (1, 3), (2, 0)])
+@pytest.mark.parametrize('path_id,button_index', [(0, 2), (1, 1), (2, 0)])
 def test_each_l2_face_button_selects_its_path_once(path_id, button_index):
     buttons = [0]*13
     buttons[button_index] = 1
@@ -368,7 +368,7 @@ def test_each_l2_face_button_selects_its_path_once(path_id, button_index):
 
 
 def test_simultaneous_path_buttons_are_ignored():
-    request, held = requested_path([0., 0., -1.], [0, 0, 1, 1, 0], [False]*3)
+    request, held = requested_path([0., 0., -1.], [0, 1, 1, 0, 0], [False]*3)
     assert request is None and held == [True, True, False]
 
 
@@ -379,9 +379,9 @@ def test_l2_plus_l1_does_not_select_tool2():
     assert request is None and held == [False]*3
 
 
-def test_l2_plus_x_selects_tool2_without_changing_triangle_or_square():
+def test_triangle_circle_x_select_paths_and_square_is_reserved_for_home():
     buttons = [0]*13
-    for index, expected in ((2, 0), (3, 1), (0, 2)):
+    for index, expected in ((2, 0), (1, 1), (0, 2), (3, None)):
         buttons[index] = 1
         assert requested_path([0., 0., -1.], buttons, [False]*3)[0] == expected
         buttons[index] = 0

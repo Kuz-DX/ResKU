@@ -15,6 +15,38 @@ except ImportError:
 
 
 class TcpMotionWorkflow:
+    def request_named_pose(self, home, now):
+        """Explicit recovery request: stop first, then validate each leg."""
+        s = self.status
+        if (not self.ready_enabled or now-self.status_time >= .3
+                or not s.get('ready') or not s.get('startup_complete')
+                or s.get('focus') != 'arm' or s.get('mode') == 'fault'):
+            return False, 'named pose requires ready arm focus, completed startup and no fault'
+        goal = np.asarray(s.get('startup_goal_rad'), dtype=float)
+        if home and (goal.shape != (6,) or not np.all(np.isfinite(goal))):
+            return False, 'startup home pose is unavailable'
+        if not self.cancel.service_is_ready():
+            return False, 'HOLD service unavailable'
+        self._reset_ready()
+        self.returning_home = home
+        self.home_goal = goal.copy() if home else None
+        if home:
+            # Home retains recovered RMD joints; the three Dynamixels align
+            # to joint zero regardless of their pose at process startup.
+            self.home_goal[[0, 4, 5]] = 0.
+        self.home_leg = 'ready'
+        self.explicit_ready = True
+        self.named_one_shot = True
+        self.ready_goal = self.default_ready_goal.copy()
+        self.auto_entry_armed = True
+        self.discard()
+        self.blocked = True
+        self.ready_future = self.cancel.call_async(Trigger.Request())
+        self.ready_started = now
+        self.ready_state = 'stopping'
+        self.reason = 'stopping before TCP ready'+(' then startup home' if home else '')
+        return True, self.reason
+
     def retry_ready(self, valid, was_pressed, home, now):
         """A fresh neutral L1 press retries validation, never bypasses it."""
         s = self.status
@@ -29,6 +61,8 @@ class TcpMotionWorkflow:
                 and now-self.state_time < .3 and not np.any(self.twist)):
             self._reset_ready()
             self.ready_goal = self.default_ready_goal.copy()
+            self.explicit_ready = True
+            self.named_one_shot = False
             self.entry_retry_count = 0
             self.auto_entry_armed = True
             self.reason = 'L1 requested fresh TCP entry/ready validation'
@@ -48,6 +82,7 @@ class TcpMotionWorkflow:
         self.ready_state = 'failed'
         self.auto_entry_armed = False
         self.reason = reason
+        self.explicit_ready = False
         if vars(self).get('returning_home', False):
             self.returning_home = False
             self.ready_goal = self.default_ready_goal.copy()
@@ -56,6 +91,19 @@ class TcpMotionWorkflow:
         """Collision-check and execute one explicit-focus TCP-ready entry."""
         s = self.status
         if not self.ready_enabled or not self.auto_entry_armed:
+            return
+        if s.get('mode') == 'fault':
+            self._fail_ready('named pose cancelled by manager fault')
+            return
+        if self.ready_state == 'stopping':
+            if now-self.ready_started > 15.:
+                self._fail_ready('HOLD timed out before named pose')
+            elif self.ready_future.done():
+                response = self.ready_future.result()
+                if response is None or not response.success:
+                    self._fail_ready('HOLD rejected before named pose')
+                elif s.get('mode') == 'hold' and not s.get('transitioning'):
+                    self.ready_state = 'idle'
             return
         deadline = vars(self).get('entry_deadline')
         if (self.ready_state in ('await_entry', 'request_tcp')
@@ -83,7 +131,7 @@ class TcpMotionWorkflow:
             delta = float(differences[limiting_joint])
             limit = (self.home_max_delta if vars(self).get('returning_home', False)
                      else self.ready_max_delta)
-            if delta > limit:
+            if delta > limit and not vars(self).get('explicit_ready', False):
                 self._fail_ready(
                     '%s move blocked: %s %.3f rad exceeds %.3f rad limit '
                     '(measured %.3f, goal %.3f rad)' %
@@ -94,6 +142,7 @@ class TcpMotionWorkflow:
             count = max(1, math.ceil(float(np.max(np.abs(self.ready_goal-self.measured))) /
                                      self.ready_step))
             self.ready_snapshot = self.measured.copy()
+            self.ready_check_epoch = s.get('epoch')
             self.ready_full_state = dict(self.full_state)
             self.ready_started = now
             self.ready_checks = []
@@ -111,6 +160,10 @@ class TcpMotionWorkflow:
             self.reason = 'checking path to TCP ready'
             return
         if self.ready_state == 'checking':
+            if (s.get('mode') != 'hold' or s.get('transitioning')
+                    or s.get('epoch') != vars(self).get('ready_check_epoch', s.get('epoch'))):
+                self._fail_ready('arm ownership changed during named pose collision check')
+                return
             if non_arm_feedback_changed(self.full_state, self.ready_full_state, ARM_JOINTS):
                 self._fail_ready('non-arm feedback changed during TCP ready check; remain HOLD')
                 return
@@ -149,7 +202,7 @@ class TcpMotionWorkflow:
                     self.ready_requests[len(self.ready_checks)]))
                 self.ready_started = now
                 return
-            if not vars(self).get('returning_home', False) and (not self.deadman or now-self.joy_time >= .25):
+            if not (vars(self).get('returning_home', False) or vars(self).get('named_one_shot', False)) and (not self.deadman or now-self.joy_time >= .25):
                 self.reason = 'TCP ready path verified; hold L1 to move'
                 return
             if not self.tool_mode.service_is_ready():
@@ -171,7 +224,7 @@ class TcpMotionWorkflow:
         if self.ready_state == 'wait_tool':
             if s.get('mode') != 'tool_auto' or s.get('transitioning'):
                 return
-            if not vars(self).get('returning_home', False) and (not self.deadman or now-self.joy_time >= .25):
+            if not (vars(self).get('returning_home', False) or vars(self).get('named_one_shot', False)) and (not self.deadman or now-self.joy_time >= .25):
                 self._fail_ready('L1 released before TCP ready motion; remain HOLD')
                 if self.cancel.service_is_ready():
                     self.cancel.call_async(Trigger.Request())
@@ -194,13 +247,19 @@ class TcpMotionWorkflow:
                 self.entry_retry_count = 0
                 self.reason = 'TCP ready reached; verifying entry'
                 if vars(self).get('returning_home', False):
-                    self.returning_home = False
-                    self.ready_goal = self.default_ready_goal.copy()
-                    # HOME is intentionally outside the TCP-entry joint margin.
-                    # Prepare the fixed, bounded ready path again and wait for L1.
-                    self.auto_entry_armed = True
-                    self.ready_state = 'idle'
-                    self.reason = 'manual Stop_pose reached; release then hold L1 for TCP ready'
+                    self._reset_ready()
+                    if self.home_leg == 'ready':
+                        self.home_leg = 'home'
+                        self.ready_goal = self.home_goal.copy()
+                        self.reason = 'TCP ready reached; validating startup home leg'
+                    else:
+                        self.returning_home = False
+                        self.explicit_ready = False
+                        self.ready_goal = self.default_ready_goal.copy()
+                        self.auto_entry_armed = False
+                        self.reason = 'startup home reached; remain HOLD'
+                else:
+                    self.explicit_ready = False
             elif s.get('mode') == 'fault' or (s.get('last_execution_id') == self.ready_execution_id
                                               and s.get('last_execution_result') == 'aborted'):
                 self._fail_ready('TCP ready execution failed: '+s.get('reason', 'inspect arm'))

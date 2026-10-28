@@ -8,6 +8,38 @@ manager. This check is not a distributed lock against simultaneous launches.
 
 ## Run from source without building
 
+### Uniform path files and named returns (2026-10-28)
+
+`ik_manual.launch.py` reads `config/resampled/tool{0,1,2}_trajectory.yaml`.
+The original files in `config/` remain the teaching source. Generated files
+use a common nominal 0.5-second period: tool 0 has 130 points (64.5 s), tool 1
+85 points (42 s), and tool 2 527 points (263 s). Every taught corner is retained
+exactly, with linear joint interpolation and speed-limited segment timing.
+Tool 2 retains its 0.006 rad/s elbow/pitch caps. Capture delays are discarded.
+The manager still applies acceleration, jerk, feedback pacing and reversal
+stops, so these timestamps are not guaranteed wall-clock arrival times.
+The sampled paths do not add the live AprilTag docking tail.
+
+Regenerate a file with `python3 scripts/resample_tool_paths.py
+config/tool0_trajectory.yaml` (prints YAML to stdout; repeat for tools 1/2).
+After modifying teaching points, regenerate the corresponding execution file.
+
+Explicit return services are `/arm/go_tcp_ready` and `/arm/go_home`, both
+`std_srvs/srv/Trigger`. They stop active motion through the manager's HOLD
+gateway before validating a new move. Arm focus, healthy fresh feedback,
+completed startup/alignment and MoveIt state validity remain required.
+Explicit requests are not restricted by the small automatic-entry distance
+limit. A service success means accepted, not motion completed.
+
+HOME (also square without L2) always visits TCP ready first, then checks and
+executes a second leg to startup home. Its shoulder/elbow/wrist-pitch values
+come from `startup_goal_rad`; base/wrist-roll/wrist-yaw are all zero.
+Successful HOME remains in HOLD. Pressing square again cancels HOME.
+Neutral L1 in HOLD can request TCP ready; keep L1 held until motion starts.
+Each leg currently checks a direct joint-space line. If that line collides,
+the request fails in HOLD; it does not claim reachability from every pose or
+bypass faults. Inspect `/arm/tcp_joy/status` and `/arm/control_status`.
+
 ```bash
 source /opt/ros/humble/setup.bash
 source ~/ResKU/install/setup.bash
@@ -119,12 +151,16 @@ then requests TCP_IK. Options back to drive requests HOLD. Collision/check/servi
 execution failure, cancel, command timeout, and fault do not automatically retry
 while focus stays on arm; inspect first, then toggle drive and back to arm.
 
-L2 (axis 2 below -0.5) plus triangle (`buttons[2]`), square (`buttons[3]`),
+L2 (axis 2 below -0.5) plus triangle (`buttons[2]`), circle (`buttons[1]`),
 or X (`buttons[0]`) selects tool path 0, 1, or 2 respectively. L2+L1 does not
 select a tool path. While L2 is held, the TCP producer suppresses L1 and square HOME
 handling so one combination cannot start both a path and TCP/HOME motion.
 Paths must contain reviewed captured points and have `execution_enabled: true`.
 Standalone `manual.launch.py` accepts the same three L2 combinations and uses
+square alone for TCP-ready then startup HOME (base/roll/yaw zero); pressing
+square again cancels. This standalone mode retains its existing feedback and
+limit checks and does not add MoveIt collision checking.
+For tool paths it uses
 the shared path loader, including timing and optional joint speed caps. Keep L2
 held during standalone playback; release stops it. Start feedback must be within
 0.10 rad of the first point. Segment targets retain joint travel ratios and pause
@@ -228,7 +264,7 @@ advance is latched, tag loss is allowed but feedback and ownership checks
 remain mandatory. Both launch switches `enable_tool_docking` and
 `enable_docking_motion` default to true in `ik_manual.launch.py`, with
 `docking_camera_frame=arm_camera_color_optical_frame`. Plain IK launch therefore
-enables the full tool-1 sequence on L2 + square; launch itself submits no tool
+enables the full tool-1 sequence on L2 + circle; launch itself submits no tool
 request. Set `enable_tool_docking:=false` for path-only playback or
 `enable_docking_motion:=false` for alignment preview after the approach.
 Path 2 has its close-and-return settings commented out for approach-only testing; no tag alignment.

@@ -61,6 +61,7 @@ class TcpJoy(TcpMotionWorkflow, Node):
         self.ready_goal = np.asarray(ready_data.get('positions_rad', []), dtype=float)
         self.default_ready_goal = self.ready_goal.copy()
         self.returning_home = False
+        self.explicit_ready = False
         self.previous_home = False
         self.ready_duration = float(ready_data.get('duration_sec', 10.))
         self.ready_max_delta = float(ready_data.get('max_start_delta_rad', .35))
@@ -110,7 +111,15 @@ class TcpJoy(TcpMotionWorkflow, Node):
         self.create_subscription(String, '/arm/control_status', self.on_status, qos)
         self.create_subscription(JointState, '/joint_states', self.on_state, 1)
         self.create_subscription(Joy, '/joy', self.on_joy, 1)
+        self.create_service(Trigger, '/arm/go_tcp_ready',
+                            lambda req, res: self.named_pose_service(False, res))
+        self.create_service(Trigger, '/arm/go_home',
+                            lambda req, res: self.named_pose_service(True, res))
         self.create_timer(.02, self.tick)
+
+    def named_pose_service(self, home, response):
+        response.success, response.message = self.request_named_pose(home, time.monotonic())
+        return response
 
     def discard(self):
         if self.pending:
@@ -138,7 +147,8 @@ class TcpJoy(TcpMotionWorkflow, Node):
             self.entry_pub.publish(String(data=json.dumps(dict(
                 epoch=s.get('epoch'), safe=safe, reason=reason, positions=q.tolist()))))
             if (safe and self.auto_entry_armed and self.ready_state in ('idle', 'await_entry')
-                    and not vars(self).get('returning_home', False)):
+                    and not vars(self).get('returning_home', False)
+                    and not vars(self).get('explicit_ready', False)):
                 self.ready_state = 'await_entry'
                 if self.ready_safe_at is None:
                     self.ready_safe_at = now
@@ -203,6 +213,7 @@ class TcpJoy(TcpMotionWorkflow, Node):
             elif focus != 'arm':
                 self._reset_ready()
                 self.returning_home = False
+                self.explicit_ready = False
                 self.ready_goal = self.default_ready_goal.copy()
                 self.auto_entry_armed = False
                 self.entry_retry_count = 0
@@ -248,7 +259,7 @@ class TcpJoy(TcpMotionWorkflow, Node):
         valid = (len(msg.axes) >= 5 and len(msg.buttons) >= 6
                  and np.all(np.isfinite(msg.axes))
                  and all(b in (0, 1) for b in msg.buttons))
-        # L2 owns tool-path selection: triangle, square and X face buttons.
+        # L2 owns tool-path selection: triangle, circle and X face buttons.
         # Quiesce TCP preparation before the path producer requests HOLD.
         if valid and msg.axes[2] < -.5:
             self.joy_time = time.monotonic()
@@ -263,6 +274,7 @@ class TcpJoy(TcpMotionWorkflow, Node):
                 self._reset_ready()
                 self.auto_entry_armed = False
                 self.returning_home = False
+                self.explicit_ready = False
                 self.ready_goal = self.default_ready_goal.copy()
             if self.epoch is not None and not self.blocked:
                 self.pub.publish(String(data=json.dumps(dict(epoch=self.epoch, pause=True))))
@@ -296,17 +308,8 @@ class TcpJoy(TcpMotionWorkflow, Node):
         if (home and not vars(self).get('previous_home', False)
                 and vars(self).get('ready_enabled', False)
                 and self.status.get('focus') == 'arm'
-                and self.status.get('mode') in ('tcp_ik', 'hold')
-                and self.ready_state not in ('request_tool', 'wait_tool', 'executing')):
-            self._reset_ready()
-            self.returning_home = True
-            self.ready_goal = np.radians([0., 85., 87., -89., 0., 0.])
-            self.auto_entry_armed = True
-            self.discard()
-            self.blocked = True
-            if self.cancel.service_is_ready():
-                self.cancel.call_async(Trigger.Request())
-            self.reason = 'manual Stop_pose requested; checking path'
+                and self.status.get('mode') != 'fault'):
+            _, self.reason = self.request_named_pose(True, self.joy_time)
         self.previous_home = home
         TcpMotionWorkflow.retry_ready(self, valid, was_pressed, home, self.joy_time)
         if valid and self.deadman and not was_pressed and self.rearmed and not self.blocked:

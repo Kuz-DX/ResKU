@@ -7,6 +7,7 @@ install(DIRECTORY launch DESTINATION share/${PROJECT_NAME}
   PATTERN "__pycache__" EXCLUDE)
 install(PROGRAMS scripts/capture_arm_pose.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/capture_tool_trajectory.py DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS scripts/resample_tool_paths.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/enter_teach_mode.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/capture_arm_raw.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/print_motor_currents.py DESTINATION lib/${PROJECT_NAME})

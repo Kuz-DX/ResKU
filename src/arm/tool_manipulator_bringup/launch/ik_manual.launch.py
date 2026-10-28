@@ -18,7 +18,9 @@ def bringup(context):
     spec.loader.exec_module(common)
     source_config = Path(__file__).resolve().parents[1]/'config/manual_controllers.yaml'
     ready_config = source_config.parent/'tcp_ready.yaml'
-    trajectory_dir = source_config.parent
+    trajectory_dir = source_config.parent/'resampled'
+    if not trajectory_dir.is_dir():
+        trajectory_dir = Path(get_package_share_directory('tool_manipulator_bringup'))/'config/resampled'
     real = LaunchConfiguration('real_hardware').perform(context) == 'true'
     tcp_enabled = LaunchConfiguration('launch_tcp_joy').perform(context) == 'true'
     initial = LaunchConfiguration('mock_initial_positions_file').perform(context)
