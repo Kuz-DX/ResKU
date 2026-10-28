@@ -304,6 +304,8 @@ class TcpJoy(TcpMotionWorkflow, Node):
         # L2 owns tool-path selection: triangle, circle and X face buttons.
         # Quiesce TCP preparation before the path producer requests HOLD.
         if valid and msg.axes[2] < -.5:
+            if nearest and not self.previous_nearest:
+                self.get_logger().warning('R2 blocked by L2 path selection; release L2 and R2, then press R2 alone')
             self.joy_time = time.monotonic()
             self.discard()
             self.deadman = self.deadman_engaged = self.rearmed = False

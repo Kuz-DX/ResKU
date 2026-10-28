@@ -31,12 +31,13 @@ def test_checked_in_tool0_respects_real_joint_margins():
     t = np.array([p['time_from_start_sec'] for p in data['points']])
     assert all(model.within_limits(p, .02) for p in q)
     np.testing.assert_allclose(np.diff(t), .5)
-    assert np.all(np.diff(q[:, 0]) >= -1e-12)
+    assert np.all(np.diff(q[t <= 132.5, 0]) >= -1e-12)
     assert q[0, 0] == 0.
-    np.testing.assert_array_equal(q[:, 4:], 0.)
+    np.testing.assert_array_equal(q[t <= 132.5, 4:], 0.)
     assert np.all(np.abs(np.diff(q, axis=0)/.5) <= np.array([.08,.04,.06,.06,.08,.08])+1e-9)
     np.testing.assert_allclose(q[-1],
-        [np.pi, .03944444092862428, 1.0808824110864104, -1.2381364808173003, 0., 0.],
+        [3.0710295373468464, .5921902205279982, 1.517, -1.0670942940166888,
+         -.0843689433339172, .06902913545505918],
         rtol=0., atol=1e-12)
 
 

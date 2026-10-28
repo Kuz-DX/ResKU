@@ -19,6 +19,10 @@ class TcpMotionWorkflow:
     def request_named_pose(self, home, now, goal=None, label=None):
         """Explicit recovery request: stop first, then validate each leg."""
         s = self.status
+        if s.get('mode') == 'fault':
+            return False, 'manager fault: '+s.get('reason', 'inspect control_status')
+        if not s.get('entry_alignment_complete', True):
+            return False, 'DXL entry alignment incomplete: '+s.get('blocker', '')
         if (not self.ready_enabled or now-self.status_time >= .3
                 or not s.get('ready') or not s.get('startup_complete')
                 or s.get('focus') != 'arm' or s.get('mode') == 'fault'):

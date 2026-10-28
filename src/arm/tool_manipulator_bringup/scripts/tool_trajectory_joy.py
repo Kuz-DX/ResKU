@@ -459,7 +459,12 @@ class ToolTrajectoryJoy(Node):
                      and s.get('requested', s.get('mode')) == s.get('mode'))
         if not available:
             self.path_id = request
-            self.report('blocked', 'fresh ready arm focus is required')
+            self.report('blocked', 'fresh ready arm focus is required: '+
+                'mode=%s ready=%s focus=%s startup=%s alignment=%s transitioning=%s '
+                'status_age=%.3fs feedback_age=%.3fs; %s' %
+                (s.get('mode'), s.get('ready'), s.get('focus'), s.get('startup_complete'),
+                 s.get('entry_alignment_complete'), s.get('transitioning'),
+                 now-self.status_time, now-self.state_time, s.get('blocker') or s.get('reason', '')))
             self.path_id = None
             return
         if s.get('mode') == 'hold':

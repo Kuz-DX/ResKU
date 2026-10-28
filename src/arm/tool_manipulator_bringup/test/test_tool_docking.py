@@ -36,6 +36,7 @@ def test_position_mode_requires_measured_size_but_not_actuator_timeout(tmp_path)
     data = yaml.safe_load((ROOT/'config/tool_docking.yaml').read_text())
     raw = data['tools'][0]
     raw['enabled'] = True
+    raw['tag_size_m'] = None
     path = tmp_path/'position.yaml'
     path.write_text(yaml.safe_dump(data))
     with pytest.raises(ValueError, match='tag_size_m'):
@@ -97,7 +98,9 @@ def sample(n):
 
 def test_shipped_config_only_enables_tool1_camera_alignment_and_relative_advance():
     cfg = load_settings(ROOT/'config/tool_docking.yaml')
-    assert set(cfg) == {1}
+    assert set(cfg) == {0, 1}
+    assert cfg[0]['tag_size_m'] == .020
+    assert cfg[0]['alignment_mode'] == 'tag_tcp_position'
     assert cfg[1]['alignment_mode'] == 'camera_normal_advance'
     assert cfg[1]['advance_distance_m'] == .030
     assert cfg[1]['tag_family'] == 'tag36h11'
@@ -124,6 +127,7 @@ def test_other_docking_configs_keep_continuous_l2_by_default(tmp_path):
 def test_enabling_unmeasured_config_is_rejected(tmp_path):
     data = yaml.safe_load((ROOT/'config/tool_docking.yaml').read_text())
     data['tools'][0]['enabled'] = True
+    data['tools'][0]['tag_size_m'] = None
     path = tmp_path/'bad.yaml'
     path.write_text(yaml.safe_dump(data))
     with pytest.raises(ValueError):
@@ -437,7 +441,7 @@ def test_launch_selects_exactly_one_path_input_owner(enabled, motion, script):
         parameters = path_nodes[0]['parameters'][-1]
         assert parameters['docking_motion_enabled'] is (motion != 'false')
         assert parameters['docking_camera_frame'] == 'arm_camera_color_optical_frame'
-        assert set(load_settings(parameters['docking_config'])) == {1}
+        assert set(load_settings(parameters['docking_config'])) == {0, 1}
 
 
 def camera_node(tmp_path):

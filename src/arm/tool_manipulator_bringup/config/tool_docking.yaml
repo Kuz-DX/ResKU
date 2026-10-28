@@ -6,13 +6,12 @@
 # Never substitute camera pixel centre or raw camera depth for a calibrated 6D pose.
 tools:
   0:
-    # Keep disabled until physical tag size/frame mapping and a within-margin
-    # approach endpoint have been verified; the supplied elbow=1.542 has no margin.
-    enabled: false
+    # User confirmed 20 mm tag and elbow approach correction to 1.517 rad.
+    enabled: true
     alignment_mode: tag_tcp_position
     tag_family: tag36h11
     tag_id: 0
-    tag_size_m: null               # measured black square edge length
+    tag_size_m: 0.020              # user-confirmed black square edge length
     # PnP corners 0=bottom-left, 1=bottom-right, 2=top-right, 3=top-left:
     # user +X up, +Y left, +Z out; confirm against live frame before enabling.
     tag_from_user_axes: [[0, -1, 0], [-1, 0, 0], [0, 0, -1]]
