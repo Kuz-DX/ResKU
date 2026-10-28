@@ -24,6 +24,7 @@ DXL_BASE_ALIGNMENT_TOLERANCE = .0125
 # which could abruptly fault a trajectory that was already braking safely.
 LIMIT_STOP_REACTION_SEC = .10
 LIMIT_STOP_CLEARANCE_RAD = .005
+STARTUP_SAFE_ENDPOINT_TOLERANCE_RAD = .001
 
 
 def non_arm_feedback_changed(current, snapshot, arm_joints):
@@ -36,8 +37,18 @@ def non_arm_feedback_changed(current, snapshot, arm_joints):
 class ModeCore:
     def __init__(self, limits, speeds, startup_recovery_enabled=False, path_accelerations=None,
                  tcp_accelerations=None, joint_names=None, path_speeds=None,
-                 path_feedback_leads=None, path_jerks=None):
+                 path_feedback_leads=None, path_jerks=None, startup_safe_endpoints=None):
         self.limits, self.speeds = limits, speeds
+        self.startup_safe_endpoints = (list(startup_safe_endpoints)
+                                       if startup_safe_endpoints is not None else [None]*len(limits))
+        if len(self.startup_safe_endpoints) != len(limits):
+            raise ValueError('invalid startup safe endpoint count')
+        for endpoints, (lower, upper) in zip(self.startup_safe_endpoints, limits):
+            if endpoints is not None and (not isinstance(endpoints, (list, tuple))
+                    or len(endpoints) != 2 or not all(isinstance(v, (int, float))
+                    and math.isfinite(v) for v in endpoints)
+                    or not endpoints[0] <= lower < upper <= endpoints[1]):
+                raise ValueError('startup safe endpoints must enclose software limits')
         self.joint_names = (list(joint_names) if joint_names is not None else
                             [f'joint_{index}' for index in range(len(speeds))])
         if len(self.joint_names) != len(speeds) or len(set(self.joint_names)) != len(speeds):
@@ -163,12 +174,22 @@ class ModeCore:
             return 'TCP entry waiting for 0.20 sec stable feedback'
         return ''
 
+    def feedback_bounds(self, index):
+        lo, hi = self.limits[index]
+        if self.startup_enabled and not self.startup_complete and 1 <= index <= 3:
+            lo -= self.startup_allowance
+            hi += self.startup_allowance
+            endpoints = self.startup_safe_endpoints[index]
+            if endpoints is not None:
+                lo = max(lo, endpoints[0]-STARTUP_SAFE_ENDPOINT_TOLERANCE_RAD)
+                hi = min(hi, endpoints[1]+STARTUP_SAFE_ENDPOINT_TOLERANCE_RAD)
+        return lo, hi
+
     def feedback_allowed(self, position):
         if self.startup_enabled and not self.startup_complete:
             return (len(position) == len(self.limits) and all(
-                math.isfinite(v) and lo-(self.startup_allowance if 1 <= i <= 3 else 0.) <= v
-                <= hi+(self.startup_allowance if 1 <= i <= 3 else 0.)
-                for i, (v, (lo, hi)) in enumerate(zip(position, self.limits))))
+                math.isfinite(v) and self.feedback_bounds(i)[0] <= v <= self.feedback_bounds(i)[1]
+                for i, v in enumerate(position)))
         return self.valid(position)
 
     def begin_startup(self, now):
@@ -302,11 +323,10 @@ class ModeCore:
             names = ('base_joint', 'shoulder_joint', 'elbow_joint', 'wrist_pitch_joint',
                      'wrist_roll_joint', 'wrist_yaw_joint')
             detail = []
-            for i, (v, (lo, hi)) in enumerate(zip(position, self.limits)):
-                allowance = (self.startup_allowance if self.startup_enabled and
-                             not self.startup_complete and 1 <= i <= 3 else 0.)
-                if not math.isfinite(v) or not lo-allowance <= v <= hi+allowance:
-                    detail.append(f'{names[i]}={v:.6f}, allowed=[{lo-allowance:.6f}, {hi+allowance:.6f}]')
+            for i, v in enumerate(position):
+                lo, hi = self.feedback_bounds(i)
+                if not math.isfinite(v) or not lo <= v <= hi:
+                    detail.append(f'{names[i]}={v:.6f}, allowed=[{lo:.6f}, {hi:.6f}]')
             self.fault('invalid joint position: '+('; '.join(detail) or 'joint count mismatch'))
             return
         if len(velocity) != len(position) or not all(map(math.isfinite, velocity)):
@@ -333,6 +353,17 @@ class ModeCore:
                 distance = value-lower
             else:
                 continue
+            startup_outward = (self.startup_enabled and not self.startup_complete
+                               and 1 <= index <= 3 and
+                               ((value > upper and speed > 0.)
+                                or (value < lower and speed < 0.)))
+            safe_endpoints = self.startup_safe_endpoints[index]
+            if startup_outward and safe_endpoints is not None:
+                # The measured pose is already beyond the software boundary.
+                # During inward startup recovery, test whether residual outward
+                # velocity can stop before the independently measured safe end.
+                distance = (safe_endpoints[1]-value if speed > 0.
+                            else value-safe_endpoints[0])
             stopping_distance = (self._jerk_braking_distance(
                 abs(speed), 0., self.path_accelerations[index], self.path_jerks[index])
                 + abs(speed)*LIMIT_STOP_REACTION_SEC + LIMIT_STOP_CLEARANCE_RAD)
@@ -343,12 +374,15 @@ class ModeCore:
                 self.position = list(position)
                 self.velocity = list(velocity)
                 self.state_time = now
+                boundary = ('measured startup safe endpoint' if startup_outward
+                            and safe_endpoints is not None else 'soft limit')
+                reported_limits = safe_endpoints if boundary != 'soft limit' else (lower, upper)
                 self.fault(
-                    'joint cannot stop before soft limit: %s position=%.6f '
+                    'joint cannot stop before %s: %s position=%.6f '
                     'velocity=%.6f distance=%.6f required_stop=%.6f '
                     'allowed=[%.6f, %.6f]' %
-                    (self.joint_names[index], value, speed, distance,
-                     stopping_distance, lower, upper))
+                    (boundary, self.joint_names[index], value, speed, distance,
+                     stopping_distance, *reported_limits))
                 return
         if (not self.fresh(now) or self.entry_anchor is None
                 or max(map(abs, velocity)) > .02

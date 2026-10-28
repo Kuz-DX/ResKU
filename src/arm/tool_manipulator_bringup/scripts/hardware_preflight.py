@@ -90,6 +90,12 @@ def validate(config: dict) -> list[str]:
                 errors.append(f'joints.{name}.sign must be measured as -1 or +1')
             if not bounded_pair(joint.get('soft_limit_rad')):
                 errors.append(f'joints.{name}.soft_limit_rad must be [min, max]')
+            endpoints = joint.get('startup_safe_endpoints_rad')
+            soft = joint.get('soft_limit_rad')
+            if endpoints is not None and (not bounded_pair(endpoints)
+                    or not bounded_pair(soft)
+                    or not endpoints[0] <= soft[0] < soft[1] <= endpoints[1]):
+                errors.append(f'joints.{name}.startup_safe_endpoints_rad must enclose soft limits')
         else:
             errors.append(f'joints.{name}.vendor must be dynamixel or rmd')
     expected_dynamixel = {

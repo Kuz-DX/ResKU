@@ -512,6 +512,41 @@ def test_startup_outside_pitch_limit_still_rejects_fast_outward_motion():
     assert c.reason == reason
 
 
+def test_measured_elbow_startup_pose_recovers_despite_small_outward_feedback():
+    c = ModeCore([(-3.503, 3.614), (-1.592, 1.518), (-1.497, 1.542),
+                  (-1.592, 1.470), (-.93, .65), (-5.76, 6.5)], [.12]*6,
+                 startup_recovery_enabled=True,
+                 startup_safe_endpoints=[None, None, (-1.521229, 1.581094),
+                                         (-1.600990, 1.515993), None, None],
+                 path_accelerations=[.08, .03, .06, .06, .08, .08],
+                 path_jerks=[.30, .04, .15, .15, .30, .30])
+    initial = [0., 1.473058, 1.564339, -1.601514, .044485, -.194816]
+    c.feedback(initial, [0., 0., .007685, 0., 0., 0.], 0.)
+    assert c.mode != 'fault'
+    c.begin_startup(0.)
+    c.ready = True
+    c.tick(.02, .02)
+    assert c.mode == 'hold' and c.startup_recovering
+    assert c.target[2] < initial[2] and c.target[3] > initial[3]
+
+
+def test_measured_elbow_startup_still_rejects_unsafe_outward_speed_and_position():
+    limits = [(-3.503, 3.614), (-1.592, 1.518), (-1.497, 1.542),
+              (-1.592, 1.470), (-.93, .65), (-5.76, 6.5)]
+    endpoints = [None, None, (-1.521229, 1.581094),
+                 (-1.600990, 1.515993), None, None]
+    c = ModeCore(limits, [.12]*6, startup_recovery_enabled=True,
+                 startup_safe_endpoints=endpoints)
+    initial = [0., 0., 1.564339, 0., 0., 0.]
+    c.feedback(initial, [0., 0., .08, 0., 0., 0.], 0.)
+    assert c.mode == 'fault' and 'measured startup safe endpoint' in c.reason
+    c = ModeCore(limits, [.12]*6, startup_recovery_enabled=True,
+                 startup_safe_endpoints=endpoints)
+    initial[2] = 1.583
+    c.feedback(initial, [0.]*6, 0.)
+    assert c.mode == 'fault' and 'invalid joint position' in c.reason
+
+
 @pytest.mark.parametrize('index,value', [(0, 3.7), (4, .7), (5, 6.6),
                                        (1, 1.7), (2, float('nan'))])
 def test_recovery_rejects_dxl_excursions_large_rmd_errors_and_nan(index, value):

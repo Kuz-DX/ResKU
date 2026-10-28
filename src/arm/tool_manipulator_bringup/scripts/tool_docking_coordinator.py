@@ -22,6 +22,8 @@ from tool_docking_core import (load_settings, transform, pose_errors, bounded_ta
                                tag_pose, tag_normal_from_camera_side,
                                direction_angle, interpolate_direction, tcp_offset_target)
 
+L2_RELEASE_CONFIRM_SEC = 0.04
+
 
 class ToolDockingCoordinator(ToolTrajectoryJoy):
     def __init__(self):
@@ -311,7 +313,7 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                 f'docking joystick stream stale ({detail}, limit={self.deadman_timeout:.3f}s)')
         if not self.deadman_held:
             release_started = self.l2_release_started
-            if release_started is None or now-release_started >= .04:
+            if release_started is None or now-release_started >= L2_RELEASE_CONFIRM_SEC:
                 release_age = ('unknown' if release_started is None
                                else f'{now-release_started:.3f}s')
                 raise RuntimeError(

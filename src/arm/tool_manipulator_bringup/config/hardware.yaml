@@ -69,6 +69,7 @@ joints:
     # Confirmed safe endpoints 2026-10-29: raw -90.589996 deg
     # (joint +1.581094 rad), raw +87.159996 deg (joint -1.521229 rad).
     # The software bounds remain inside these measured endpoints.
+    startup_safe_endpoints_rad: [-1.521229, 1.581094]
     soft_limit_rad:
     - -1.497
     - 1.542
@@ -89,6 +90,7 @@ joints:
     # Confirmed safe endpoints 2026-10-29: raw -91.729996 deg
     # (joint -1.600990 rad), raw +86.860001 deg (joint +1.515993 rad).
     # The software bounds remain inside these measured endpoints.
+    startup_safe_endpoints_rad: [-1.600990, 1.515993]
     soft_limit_rad:
     - -1.592
     - 1.470

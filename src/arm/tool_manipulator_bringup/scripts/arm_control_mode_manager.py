@@ -71,6 +71,8 @@ class ControlModeManager(Node):
             'tcp_acceleration_rad_s2', .25).value)]*len(JOINTS)
         self.core = ModeCore([limits[j] for j in JOINTS], speeds,
                              startup_recovery_enabled=True,
+                             startup_safe_endpoints=[config['joints'][j].get(
+                                 'startup_safe_endpoints_rad') for j in JOINTS],
                              path_accelerations=path_accelerations,
                              tcp_accelerations=tcp_accelerations,
                              joint_names=JOINTS, path_speeds=path_speeds,
