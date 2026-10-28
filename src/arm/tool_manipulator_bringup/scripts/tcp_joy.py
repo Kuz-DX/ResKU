@@ -54,6 +54,12 @@ class TcpJoy(TcpMotionWorkflow, Node):
         self.entry_pub = self.create_publisher(String, '/arm/tcp_joy/entry_status', 1)
         self.entry_pending = None
         self.check = self.create_client(GetStateValidity, '/check_state_validity')
+        # A delayed MoveIt response pauses new commands.  Keep this below the
+        # feedback freshness window only for the feedback itself, not for the
+        # independent planning service response.
+        self.collision_check_timeout = float(param('collision_check_timeout_sec', .3))
+        if not .15 <= self.collision_check_timeout <= 1.:
+            raise ValueError('collision_check_timeout_sec must be in [0.15, 1.0]')
         from moveit_msgs.srv import GetMotionPlan
         self.home_planner = self.create_client(GetMotionPlan, '/plan_kinematic_path')
         self.cancel = self.create_client(Trigger, '/arm/cancel')
@@ -524,7 +530,7 @@ class TcpJoy(TcpMotionWorkflow, Node):
                         p = self.pending
                         if p['epoch'] != self.epoch:
                             self.discard()
-                        elif now-p['started'] > .15:
+                        elif now-p['started'] > self.collision_check_timeout:
                             self.fail('collision check timeout')
                         elif all(f.done() for f in p['futures']):
                             responses = [f.result() for f in p['futures']]
