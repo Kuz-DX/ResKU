@@ -35,7 +35,7 @@ ros2 topic echo /arm/docked --once
 
 | 최초 원인 문구 | 발생 단계·추론 | 다음 조치 |
 | --- | --- | --- |
-| `docking deadman L2 released` | 검증·실행·태그 확인·도킹 중 받은 Joy 메시지의 L2 축이 눌림 임계값을 벗어남. `joy_age`가 짧으면 통신 지연이 아니라 실제 수신값 판정 | L2를 시퀀스 종료까지 유지. 누르고 있었는데도 재발하면 오류 로그의 `axes[2]`, 임계값, `/joy` 수신값을 비교. UI/카메라 요청과 조이스틱 입력 혼동도 확인 |
+| `docking deadman L2 released` | 검증·실행·태그 확인·도킹 중 받은 Joy 메시지의 L2 축이 눌림 임계값을 40 ms 이상 연속해서 벗어남. `joy_age`가 짧으면 통신 지연이 아니라 실제 수신값 판정 | L2를 시퀀스 종료까지 유지. 누르고 있었는데도 재발하면 오류 로그의 `axes[2]`, 임계값, `release_age`, `/joy` 수신값을 비교. UI/카메라 요청과 조이스틱 입력 혼동도 확인 |
 | `docking joystick stream stale` | Joy heartbeat가 설정 시간(기본 0.3초)을 넘김 | 조이스틱 연결과 `/joy` 발행 주기를 복구하고 새 요청 |
 | `waypoint stalled: <joint>` | 관절 명령 lead가 남았고 2초 동안 해당 목표 쪽 진행이 부족 | 해당 축의 접촉·하중·전류·엔코더·명령 대 실측을 점검. 특히 목표를 지나친 뒤 역방향 보정이 막힌 사례를 구분. 원인 없이 같은 점을 반복 통과시키지 않음 |
 | `following error: <joint>` | 명령과 실측 차이가 0.15 rad 초과 | 기구부 간섭, 부하, motor protection, feedback를 확인하고 필요하면 속도·경로를 재검토. 자동 재시도 금지 |
