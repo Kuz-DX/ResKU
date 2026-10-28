@@ -23,6 +23,28 @@ JOINTS = ('base_joint', 'shoulder_joint', 'elbow_joint', 'wrist_pitch_joint',
           'wrist_roll_joint', 'wrist_yaw_joint')
 
 
+def update_hardware_faults(faults, message):
+    """Apply one per-joint latched status; return a new mapping."""
+    result = dict(faults)
+    text = message.strip()
+    if not text:
+        return result
+    if ':' not in text:
+        if text.lower() in ('ok', 'false', '0', 'none'):
+            result.pop('unknown', None)
+        else:
+            result['unknown'] = text
+        return result
+    joint, reason = (part.strip() for part in text.split(':', 1))
+    if not joint:
+        result['unknown'] = text
+    elif reason.lower() in ('ok', 'false', '0', 'none'):
+        result.pop(joint, None)
+    else:
+        result[joint] = reason
+    return result
+
+
 class ControlModeManager(Node):
     def __init__(self):
         super().__init__('arm_control_mode_manager')
@@ -66,6 +88,7 @@ class ControlModeManager(Node):
         self.create_subscription(JointState, '/joint_states', self.on_state, 1)
         self.create_subscription(String, '/control/active_target', self.on_focus, qos)
         self.hardware_fault = False
+        self.hardware_faults = {}
         self.create_subscription(String, '/control/hardware_fault', self.on_fault, qos)
         self.create_subscription(String, '/arm/rmd_diagnostics', self.on_rmd_diagnostic, 10)
         self.create_subscription(String, '/arm/tcp_joy/entry_status', self.on_tcp_entry, 1)
@@ -153,9 +176,13 @@ class ControlModeManager(Node):
             self.focus_activation_pending = False
 
     def on_fault(self, msg):
-        if msg.data.strip() and msg.data.lower() not in ('ok', 'false', '0', 'none'):
-            self.hardware_fault = True
-            self.core.fault('hardware fault: '+msg.data)
+        previous = dict(self.hardware_faults)
+        self.hardware_faults = update_hardware_faults(self.hardware_faults, msg.data)
+        self.hardware_fault = bool(self.hardware_faults)
+        if self.hardware_faults != previous and self.hardware_fault:
+            detail = '; '.join(f'{joint}: {reason}'
+                               for joint, reason in sorted(self.hardware_faults.items()))
+            self.core.fault('hardware fault: '+detail)
 
     def on_rmd_diagnostic(self, msg):
         """Stop an automatic path as soon as an RMD target is being relaxed."""
@@ -189,7 +216,8 @@ class ControlModeManager(Node):
     def reset_fault(self, req, res):
         try:
             if self.hardware_fault:
-                raise ValueError('hardware fault requires inspection and full restart')
+                detail = ', '.join(sorted(self.hardware_faults)) or 'unknown'
+                raise ValueError('hardware fault components still latched: '+detail)
             self.core.reset(time.monotonic())
             res.success, res.message = True, 'reset to hold'
         except ValueError as exc:

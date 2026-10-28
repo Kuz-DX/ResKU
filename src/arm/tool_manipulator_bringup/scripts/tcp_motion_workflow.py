@@ -15,21 +15,21 @@ except ImportError:
 
 
 class TcpMotionWorkflow:
-    def request_named_pose(self, home, now):
+    def request_named_pose(self, home, now, goal=None, label=None):
         """Explicit recovery request: stop first, then validate each leg."""
         s = self.status
         if (not self.ready_enabled or now-self.status_time >= .3
                 or not s.get('ready') or not s.get('startup_complete')
                 or s.get('focus') != 'arm' or s.get('mode') == 'fault'):
             return False, 'named pose requires ready arm focus, completed startup and no fault'
-        goal = np.asarray(s.get('startup_goal_rad'), dtype=float)
-        if home and (goal.shape != (6,) or not np.all(np.isfinite(goal))):
+        startup_goal = np.asarray(s.get('startup_goal_rad'), dtype=float)
+        if home and (startup_goal.shape != (6,) or not np.all(np.isfinite(startup_goal))):
             return False, 'startup home pose is unavailable'
         if not self.cancel.service_is_ready():
             return False, 'HOLD service unavailable'
         self._reset_ready()
         self.returning_home = home
-        self.home_goal = goal.copy() if home else None
+        self.home_goal = startup_goal.copy() if home else None
         if home:
             # Home retains recovered RMD joints; the three Dynamixels align
             # to joint zero regardless of their pose at process startup.
@@ -37,14 +37,19 @@ class TcpMotionWorkflow:
         self.home_leg = 'ready'
         self.explicit_ready = True
         self.named_one_shot = True
-        self.ready_goal = self.default_ready_goal.copy()
+        self.ready_goal = (self.default_ready_goal.copy() if goal is None
+                           else np.asarray(goal, dtype=float).copy())
+        if (self.ready_goal.shape != (6,) or not np.all(np.isfinite(self.ready_goal))
+                or (goal is not None and not self.model.within_limits(self.ready_goal, .101))):
+            self.returning_home = self.explicit_ready = self.named_one_shot = False
+            return False, 'named pose goal violates TCP entry margin'
         self.auto_entry_armed = True
         self.discard()
         self.blocked = True
         self.ready_future = self.cancel.call_async(Trigger.Request())
         self.ready_started = now
         self.ready_state = 'stopping'
-        self.reason = 'stopping before TCP ready'+(' then startup home' if home else '')
+        self.reason = 'stopping before '+(label or 'TCP ready')+(' then startup home' if home else '')
         return True, self.reason
 
     def retry_ready(self, valid, was_pressed, home, now):

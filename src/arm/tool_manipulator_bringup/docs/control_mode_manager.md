@@ -15,6 +15,35 @@ mapping; L2 path selection suppresses all D-pad EE commands. This applies to
 EE feedback and calibrated gripper travel bounds gate rotation. The selected
 speed is published as `ee_speed_rad_s` on `/arm/tcp_joy/status`.
 
+R2 (`axes[5]`, pressed below -0.5) requests the nearest TCP-entry candidate.
+The current joints are first projected into the required 0.10-rad margin. If
+that pose has scaled Jacobian condition above 20, the search moves only as far
+as needed along the corridor toward the reviewed TCP-ready pose. The candidate
+then uses the same sampled MoveIt state/collision check and managed tool-auto
+execution as named returns. Failure remains HOLD. R2 is disabled during L2 path
+selection and while any hardware fault is latched.
+
+## RMD feedback-fault recovery
+
+An RMD CAN/watchdog fault intentionally stops retries and freezes the last safe
+command. Repeated logs now include the preserved first cause instead of only
+`Feedback fault is latched`. A fresh lifecycle activation publishes
+`<joint>: ok` only after valid position feedback. The mode manager tracks these
+statuses per joint, so recovering shoulder cannot hide an elbow/pitch fault.
+
+After inspecting power/CAN wiring and the first error, recover explicitly:
+
+```bash
+ros2 control set_hardware_component_state rmd_shoulder_joint inactive
+ros2 control set_hardware_component_state rmd_shoulder_joint active
+ros2 service call /arm/reset_fault std_srvs/srv/Trigger '{}'
+```
+
+Use the exact component name from `ros2 control list_hardware_components`.
+Activation failure keeps the fault latched. Do not issue R2, TCP-ready, HOME or
+path commands until reset succeeds. The C++ reason/recovery publication needs a
+future package rebuild; no ROS package build was run for this change.
+
 ## Tool 2 pick/place continuation (opt-in, calibration pending)
 
 The `enable_tool2_pick_place` launch option replaces the path/docking producer

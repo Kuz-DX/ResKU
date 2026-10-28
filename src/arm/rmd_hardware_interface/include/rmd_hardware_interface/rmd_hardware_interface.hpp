@@ -14,6 +14,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -325,6 +326,10 @@ namespace rmd_hardware_interface {
       // read and copied into the command buffer.
       std::atomic<bool> position_state_valid_;
       std::atomic<bool> communication_fault_;
+      // Preserve the first cause across the async/read threads so the
+      // once-per-second latched message remains actionable.
+      std::mutex communication_fault_reason_mutex_;
+      std::string communication_fault_reason_;
       std::atomic<bool> hardware_safety_fault_;
       std::atomic<bool> fault_published_;
       std::atomic<std::int64_t> last_valid_feedback_ns_;

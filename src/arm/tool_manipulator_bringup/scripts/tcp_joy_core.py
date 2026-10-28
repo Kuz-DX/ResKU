@@ -28,6 +28,51 @@ class EeDpad:
         self.direction = 0 if vertical else int(axes[6] > .5)-int(axes[6] < -.5)
 
 
+def nearest_tcp_entry(model, measured, reference, margin=.101,
+                      condition_limit=20., samples=100):
+    """Nearest point on the limit-projection -> reviewed-ready corridor.
+
+    Collision checking remains the managed workflow's responsibility. This
+    function only establishes joint margin and numerical IK conditioning.
+    """
+    measured = np.asarray(measured, dtype=float)
+    reference = np.asarray(reference, dtype=float)
+    if measured.shape != (6,) or reference.shape != (6,) or not (
+            np.isfinite(measured).all() and np.isfinite(reference).all()):
+        raise ValueError('nearest TCP entry requires finite six-joint poses')
+    limits = np.asarray(list(model.limits.values()), dtype=float)
+    lower, upper = limits[:, 0]+margin, limits[:, 1]-margin
+    if np.any(lower >= upper) or not model.within_limits(reference, margin):
+        raise ValueError('reviewed TCP ready pose does not satisfy entry margin')
+    projected = np.clip(measured, lower, upper)
+
+    def acceptable(q):
+        if not model.within_limits(q, margin):
+            return False
+        jacobian = model.jacobian(q).copy()
+        jacobian[:3] /= .2
+        condition = float(np.linalg.cond(jacobian))
+        return math.isfinite(condition) and condition <= condition_limit
+
+    if acceptable(projected):
+        return projected
+    previous_fraction = 0.
+    for index in range(1, samples+1):
+        fraction = index/samples
+        candidate = projected+fraction*(reference-projected)
+        if acceptable(candidate):
+            low, high = previous_fraction, fraction
+            for _ in range(20):
+                middle = (low+high)/2
+                if acceptable(projected+middle*(reference-projected)):
+                    high = middle
+                else:
+                    low = middle
+            return projected+high*(reference-projected)
+        previous_fraction = fraction
+    raise ValueError('no TCP entry pose with condition <= %.1f on ready corridor' % condition_limit)
+
+
 class SafetyError(ValueError):
     """Invalid feedback/command state: stop immediately, not after five IK failures."""
     def __init__(self, reason, fault=True):

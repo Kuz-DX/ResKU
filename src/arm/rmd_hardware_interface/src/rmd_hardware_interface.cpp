@@ -270,6 +270,10 @@ namespace rmd_hardware_interface {
     }
     position_state_valid_.store(false);
     communication_fault_.store(false);
+    {
+      std::lock_guard<std::mutex> lock(communication_fault_reason_mutex_);
+      communication_fault_reason_.clear();
+    }
     hardware_safety_fault_.store(false);
     fault_published_.store(false);
     last_valid_feedback_ns_.store(0);
@@ -302,6 +306,11 @@ namespace rmd_hardware_interface {
         initial_feedback_timeout_.count());
       stopAsyncThread();
       return CallbackReturn::ERROR;
+    }
+    if (fault_publisher_) {
+      std_msgs::msg::String recovered {};
+      recovered.data = info_.joints.at(0).name + ": ok";
+      fault_publisher_->publish(recovered);
     }
     RCLCPP_INFO(getLogger(), "Actuator started with fresh initial position feedback.");
     return CallbackReturn::SUCCESS;
@@ -356,6 +365,10 @@ namespace rmd_hardware_interface {
     async_effort_command_.store(0.0);
     position_state_valid_.store(false);
     communication_fault_.store(false);
+    {
+      std::lock_guard<std::mutex> lock(communication_fault_reason_mutex_);
+      communication_fault_reason_.clear();
+    }
     hardware_safety_fault_.store(false);
     fault_published_.store(false);
     last_valid_feedback_ns_.store(0);
@@ -659,9 +672,15 @@ namespace rmd_hardware_interface {
       if (now_ns >= next_log_ns && next_fault_log_ns_.compare_exchange_strong(
           next_log_ns, now_ns + std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::seconds(1)).count())) {
+        std::string reason;
+        {
+          std::lock_guard<std::mutex> lock(communication_fault_reason_mutex_);
+          reason = communication_fault_reason_;
+        }
         RCLCPP_ERROR(getLogger(),
-          "Feedback fault is latched; CAN retries are stopped. Restore communication and "
+          "Feedback fault is latched (%s); CAN retries are stopped. Restore communication and "
           "reactivate hardware component '%s'.",
+          reason.empty() ? "cause unavailable; inspect the first preceding error" : reason.c_str(),
           info_.name.c_str());
       }
       // Keep the controller alive so healthy joints can receive the latched
@@ -679,6 +698,11 @@ namespace rmd_hardware_interface {
           "RMD feedback watchdog expired for joint '%s': no valid feedback for %ld ms.",
           info_.joints.at(0).name.c_str(), feedback_timeout_.count());
         communication_fault_.store(true);
+        {
+          std::lock_guard<std::mutex> lock(communication_fault_reason_mutex_);
+          communication_fault_reason_ = "feedback watchdog expired: no valid feedback for " +
+            std::to_string(feedback_timeout_.count()) + " ms";
+        }
         stop_async_thread_.store(true);
         if (position_interface_running_.load()) {
           publishHardwareFault("feedback watchdog expired");
@@ -807,6 +831,10 @@ namespace rmd_hardware_interface {
         }
         if (std::chrono::steady_clock::now() >= setup_deadline) {
           communication_fault_.store(true);
+          {
+            std::lock_guard<std::mutex> lock(communication_fault_reason_mutex_);
+            communication_fault_reason_ = std::string("activation setup failed: ") + exception.what();
+          }
           RCLCPP_ERROR(getLogger(),
             "Failed to configure actuator after %ld ms; activation aborted: %s",
             initial_feedback_timeout_.count(), exception.what());
@@ -1085,6 +1113,10 @@ namespace rmd_hardware_interface {
         if (failed_for_ns >= std::chrono::duration_cast<std::chrono::nanoseconds>(
             feedback_timeout_).count()) {
           communication_fault_.store(true);
+          {
+            std::lock_guard<std::mutex> lock(communication_fault_reason_mutex_);
+            communication_fault_reason_ = std::string("continuous CAN failure: ") + exception.what();
+          }
           RCLCPP_ERROR(getLogger(),
             "CAN communication failed continuously for %ld ms; retries stopped: %s",
             feedback_timeout_.count(), exception.what());
