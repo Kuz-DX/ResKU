@@ -4,7 +4,7 @@
 // MG996R signal wire only on D9. Power must come from a suitable external supply.
 const uint8_t SERVO_PIN = 9;
 const int UNDOCKED_ANGLE = 180;
-const int DOCKED_ANGLE = 90;
+const int DOCKED_ANGLE = 0;
 const unsigned long SETTLE_MS = 3000;
 
 Servo motor;

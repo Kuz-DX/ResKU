@@ -160,6 +160,6 @@ joints:
     velocity_limit_rad_s: 0.48
     current_limit_ma: 6877.92
     current_limit_raw: 2047
-    velocity_limit_raw: 20
+    velocity_limit_raw: 40
     profile_acceleration_raw: 5
     profile_velocity_raw: 10
