@@ -57,6 +57,8 @@ class TcpJoy(TcpMotionWorkflow, Node):
         self.entry_pending = None
         self.check = self.create_client(GetStateValidity, '/check_state_validity')
         self.cancel = self.create_client(Trigger, '/arm/cancel')
+        self.fault_reset = self.create_client(Trigger, '/arm/reset_fault')
+        self.fault_reset_future = None
         self.tool_mode = self.create_client(Trigger, '/arm/set_mode/tool_auto')
         self.tcp_mode = self.create_client(Trigger, '/arm/set_mode/tcp_ik')
         ready_path = Path(param('tcp_ready_yaml', ''))
@@ -121,6 +123,30 @@ class TcpJoy(TcpMotionWorkflow, Node):
         self.create_service(Trigger, '/arm/go_home',
                             lambda req, res: self.named_pose_service(True, res))
         self.create_timer(.02, self.tick)
+
+    def request_fault_reset(self):
+        if self.fault_reset_future is not None and not self.fault_reset_future.done():
+            return
+        if not self.fault_reset.service_is_ready():
+            self.reason = 'square reset blocked: /arm/reset_fault unavailable'
+            return
+        self.discard()
+        self.deadman = self.deadman_engaged = self.rearmed = False
+        self.twist = np.zeros(6)
+        self._reset_ready()
+        self.returning_home = self.explicit_ready = self.auto_entry_armed = False
+        self.reason = 'square requested fault reset'
+        self.fault_reset_future = self.fault_reset.call_async(Trigger.Request())
+        self.fault_reset_future.add_done_callback(self.on_fault_reset)
+
+    def on_fault_reset(self, future):
+        try:
+            result = future.result()
+            self.reason = ('reset to HOLD; release L1 then press again' if result.success
+                           else 'square reset rejected: '+result.message)
+        except Exception as exc:
+            self.reason = 'square reset failed: '+str(exc)
+        self.get_logger().info(self.reason)
 
     def named_pose_service(self, home, response):
         response.success, response.message = self.request_named_pose(home, time.monotonic())
@@ -326,6 +352,11 @@ class TcpJoy(TcpMotionWorkflow, Node):
             self.twist = np.zeros(6)
         self.joy_time = time.monotonic()
         home = valid and bool(msg.buttons[3])
+        if (home and not vars(self).get('previous_home', False)
+                and self.status.get('focus') == 'arm'
+                and self.status.get('mode') == 'fault'):
+            self.request_fault_reset()
+            self.previous_home = True
         if (home and not vars(self).get('previous_home', False)
                 and vars(self).get('returning_home', False)):
             if self.ready_execution_id is not None:

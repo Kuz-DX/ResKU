@@ -36,6 +36,42 @@ def test_deadman_modifier_and_vector_speed_bound():
     assert not joy_twist([float('nan')]*8, buttons)[0]
 
 
+def test_square_fault_reset_calls_guarded_service_and_disarms_motion():
+    from concurrent.futures import Future
+    node = Mock()
+    node.fault_reset_future = None
+    node.fault_reset.service_is_ready.return_value = True
+    pending = Future()
+    node.fault_reset.call_async.return_value = pending
+    TcpJoy.request_fault_reset(node)
+    node.fault_reset.call_async.assert_called_once()
+    assert not node.rearmed and not node.deadman and not node.auto_entry_armed
+    assert not node.returning_home
+    np.testing.assert_array_equal(node.twist, np.zeros(6))
+    TcpJoy.request_fault_reset(node)
+    node.fault_reset.call_async.assert_called_once()
+
+
+@pytest.mark.parametrize('success', [True, False])
+def test_square_reset_reports_service_rejection_without_bypassing_manager(success):
+    from concurrent.futures import Future
+    from types import SimpleNamespace
+    node = Mock()
+    future = Future()
+    future.set_result(SimpleNamespace(success=success, message='hardware fault still latched'))
+    TcpJoy.on_fault_reset(node, future)
+    assert ('reset to HOLD' if success else 'hardware fault still latched') in node.reason
+
+
+def test_square_reset_unavailable_does_not_send_request():
+    node = Mock()
+    node.fault_reset_future = None
+    node.fault_reset.service_is_ready.return_value = False
+    TcpJoy.request_fault_reset(node)
+    node.fault_reset.call_async.assert_not_called()
+    assert 'unavailable' in node.reason
+
+
 def test_actual_urdf_fk_matches_manual_chain(model):
     xml = xacro.process_file(str(ARM/'tool_manipulator_description/urdf/tool_manipulator.urdf.xacro')).toxml()
     manual = ArmChain(xml)

@@ -16,6 +16,11 @@ EE feedback and calibrated gripper travel bounds gate rotation. The selected
 speed is published as `ee_speed_rad_s` on `/arm/tcp_joy/status`.
 
 R2 (`axes[5]`, pressed below -0.5) requests the nearest TCP-entry candidate.
+Square (`buttons[3]`) in arm focus while FAULT requests `/arm/reset_fault` once
+per press (L2 path selection still takes priority). The manager's hardware,
+controller and stopped-feedback checks remain authoritative. Success returns
+to HOLD without requesting HOME; release L1 and press it again to resume.
+Outside FAULT, square retains its existing HOME/Stop_pose behavior.
 The current joints are first projected into the required 0.10-rad margin. If
 that pose has scaled Jacobian condition above 20, the search moves only as far
 as needed along the corridor toward the reviewed TCP-ready pose. The candidate
