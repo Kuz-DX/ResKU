@@ -550,6 +550,30 @@ def test_measured_elbow_startup_still_rejects_unsafe_outward_speed_and_position(
     assert c.mode == 'fault' and 'invalid joint position' in c.reason
 
 
+def test_near_measured_pitch_endpoint_uses_actual_stopping_distance_at_startup():
+    limits = [(-3.503, 3.614), (-1.592, 1.518), (-1.497, 1.542),
+              (-1.592, 1.470), (-.93, .65), (-5.76, 6.5)]
+    endpoints = [None, None, (-1.521229, 1.581094),
+                 (-1.600990, 1.515993), None, None]
+    kwargs = dict(startup_recovery_enabled=True, startup_safe_endpoints=endpoints,
+                  path_accelerations=[.08, .03, .06, .06, .08, .08],
+                  path_jerks=[.30, .04, .15, .15, .30, .30])
+    c = ModeCore(limits, [.12]*6, **kwargs)
+    pose = [0., 1.473058, 1.564164, -1.600292, .044485, -.194816]
+    c.feedback(pose, [0., 0., 0., -.002036, 0., 0.], 0.)
+    assert c.mode != 'fault'
+    c.begin_startup(0.)
+    c.ready = True
+    c.tick(.02, .02)
+    assert c.startup_recovering and c.target[3] > pose[3]
+
+    # A larger outward speed still cannot stop within the measured endpoint.
+    c = ModeCore(limits, [.12]*6, **kwargs)
+    c.feedback(pose, [0., 0., 0., -.005, 0., 0.], 0.)
+    assert c.mode == 'fault'
+    assert 'measured startup safe endpoint' in c.reason
+
+
 @pytest.mark.parametrize('index,value', [(0, 3.7), (4, .7), (5, 6.6),
                                        (1, 1.7), (2, float('nan'))])
 def test_recovery_rejects_dxl_excursions_large_rmd_errors_and_nan(index, value):

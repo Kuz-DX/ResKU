@@ -364,9 +364,11 @@ class ModeCore:
                 # velocity can stop before the independently measured safe end.
                 distance = (safe_endpoints[1]-value if speed > 0.
                             else value-safe_endpoints[0])
+            measured_startup_boundary = startup_outward and safe_endpoints is not None
             stopping_distance = (self._jerk_braking_distance(
                 abs(speed), 0., self.path_accelerations[index], self.path_jerks[index])
-                + abs(speed)*LIMIT_STOP_REACTION_SEC + LIMIT_STOP_CLEARANCE_RAD)
+                + abs(speed)*LIMIT_STOP_REACTION_SEC
+                + (0. if measured_startup_boundary else LIMIT_STOP_CLEARANCE_RAD))
             if distance <= stopping_distance:
                 # Capture the feedback that actually tripped the guard. Using
                 # the previous sample as the HOLD target caused a small reverse
@@ -374,8 +376,8 @@ class ModeCore:
                 self.position = list(position)
                 self.velocity = list(velocity)
                 self.state_time = now
-                boundary = ('measured startup safe endpoint' if startup_outward
-                            and safe_endpoints is not None else 'soft limit')
+                boundary = ('measured startup safe endpoint' if measured_startup_boundary
+                            else 'soft limit')
                 reported_limits = safe_endpoints if boundary != 'soft limit' else (lower, upper)
                 self.fault(
                     'joint cannot stop before %s: %s position=%.6f '
