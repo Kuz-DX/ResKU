@@ -264,8 +264,9 @@ overrides it. Real hardware continues to start from measured feedback.
 With `launch_tcp_joy:=true`, an Options drive-to-arm edge first aligns the DXL
 axes in HOLD. Alignment waits for position convergence and 0.20 seconds of
 stopped feedback. The DXL command must reach zero; measured base/roll/yaw must
-each be within 0.01 rad of zero, allowing the observed 0.00767-rad stopped base
-residual. Larger residuals still time out. An accepted `/arm/reset_fault` clears
+be within 0.0125 rad (base) and 0.01 rad (roll/yaw) of zero, allowing the
+observed 0.010738-rad stopped base residual. Larger residuals still time out.
+An accepted `/arm/reset_fault` clears
 the old alignment deadline and stability history so an incomplete alignment can
 retry from measured feedback when arm focus is active. Reset can therefore
 restart the DXL zero ramp; it does not bypass hardware faults or stopped-feedback

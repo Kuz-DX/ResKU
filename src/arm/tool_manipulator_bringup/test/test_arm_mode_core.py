@@ -154,7 +154,8 @@ def test_first_arm_focus_aligns_dxl_before_managed_mode_entry():
     assert c.tick(now+.02, .02) == c.target  # no return to the pre-alignment goal
 
 
-@pytest.mark.parametrize('base, completes', [(-.00766990393963507, True), (-.012, False)])
+@pytest.mark.parametrize('base, completes', [(-.00766990393963507, True),
+    (-.010737865515406675, True), (-.013, False)])
 def test_dxl_entry_stopped_residual_is_bounded(base, completes):
     c = ModeCore([(-2., 2.)]*6, [.12]*6)
     c.entry_alignment_enabled = True

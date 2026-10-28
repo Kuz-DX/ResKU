@@ -15,6 +15,9 @@ MANUAL_EE_MAX_VELOCITY_RAD_S = 400 * 0.0239691227
 # (observed base residual: 0.00767 rad). Keep this below the 0.02-rad
 # TCP snapshot tolerance; the command must still finish its ramp to zero.
 DXL_ENTRY_ALIGNMENT_TOLERANCE = .01
+# Base has settled at -0.0107378655 rad (seven encoder counts) on hardware.
+# Keep roll/yaw unchanged; bound the base allowance below the TCP snapshot limit.
+DXL_BASE_ALIGNMENT_TOLERANCE = .0125
 
 
 def non_arm_feedback_changed(current, snapshot, arm_joints):
@@ -260,8 +263,9 @@ class ModeCore:
                       max(0., now-self.entry_stable_since))
             self.fault(
                 'DXL entry alignment timed out; inspect feedback: '+detail+
-                '; tolerance=%.6f max_joint_speed=%.6f stable_sec=%.3f' %
-                (DXL_ENTRY_ALIGNMENT_TOLERANCE, max(map(abs, self.velocity)), stable))
+                '; base_tolerance=%.6f wrist_tolerance=%.6f max_joint_speed=%.6f stable_sec=%.3f' %
+                (DXL_BASE_ALIGNMENT_TOLERANCE, DXL_ENTRY_ALIGNMENT_TOLERANCE,
+                 max(map(abs, self.velocity)), stable))
             return list(self.target)
         if max(abs(a-b) for a, b in zip(self.target, self.position)) > .10:
             self.fault('DXL entry alignment following error')
@@ -275,7 +279,8 @@ class ModeCore:
         self.goal = list(self.target)
         self.reason = 'aligning DXL base/roll/yaw to zero'
         if (max(abs(self.target[i]) for i in indexes) <= 1e-9 and
-                max(abs(self.position[i]) for i in indexes) <= DXL_ENTRY_ALIGNMENT_TOLERANCE and
+                abs(self.position[0]) <= DXL_BASE_ALIGNMENT_TOLERANCE and
+                max(abs(self.position[i]) for i in (4, 5)) <= DXL_ENTRY_ALIGNMENT_TOLERANCE and
                 max(map(abs, self.velocity)) <= .02 and
                 self.entry_stable_since is not None and
                 now-self.entry_stable_since >= .2):
