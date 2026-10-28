@@ -19,6 +19,11 @@ DXL_ENTRY_ALIGNMENT_TOLERANCE = .01
 # Base has settled at -0.0107378655 rad (seven encoder counts) on hardware.
 # Keep roll/yaw unchanged; bound the base allowance below the TCP snapshot limit.
 DXL_BASE_ALIGNMENT_TOLERANCE = .0125
+# Allow for feedback/command latency in addition to the jerk-aware physical
+# stopping distance.  This replaces the old fixed 0.05-rad / 0.02-rad/s gate,
+# which could abruptly fault a trajectory that was already braking safely.
+LIMIT_STOP_REACTION_SEC = .10
+LIMIT_STOP_CLEARANCE_RAD = .005
 
 
 def non_arm_feedback_changed(current, snapshot, arm_joints):
@@ -308,12 +313,28 @@ class ModeCore:
             return
         for index, (value, speed, (lower, upper)) in enumerate(
                 zip(position, velocity, self.limits)):
-            if ((value > upper-.05 and speed > .02)
-                    or (value < lower+.05 and speed < -.02)):
+            if speed > 0.:
+                distance = upper-value
+            elif speed < 0.:
+                distance = value-lower
+            else:
+                continue
+            stopping_distance = (self._jerk_braking_distance(
+                abs(speed), 0., self.path_accelerations[index], self.path_jerks[index])
+                + abs(speed)*LIMIT_STOP_REACTION_SEC + LIMIT_STOP_CLEARANCE_RAD)
+            if distance <= stopping_distance:
+                # Capture the feedback that actually tripped the guard. Using
+                # the previous sample as the HOLD target caused a small reverse
+                # kick immediately after a limit fault.
+                self.position = list(position)
+                self.velocity = list(velocity)
+                self.state_time = now
                 self.fault(
-                    'joint moving outward near soft limit: %s position=%.6f '
-                    'velocity=%.6f allowed=[%.6f, %.6f]' %
-                    (self.joint_names[index], value, speed, lower, upper))
+                    'joint cannot stop before soft limit: %s position=%.6f '
+                    'velocity=%.6f distance=%.6f required_stop=%.6f '
+                    'allowed=[%.6f, %.6f]' %
+                    (self.joint_names[index], value, speed, distance,
+                     stopping_distance, lower, upper))
                 return
         if (not self.fresh(now) or self.entry_anchor is None
                 or max(map(abs, velocity)) > .02

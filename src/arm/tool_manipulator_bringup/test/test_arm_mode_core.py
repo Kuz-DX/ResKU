@@ -314,13 +314,22 @@ def test_loaded_shoulder_can_use_tighter_path_limits():
     assert c.path_feedback_leads[1] == .015
 
 
-def test_outward_motion_near_soft_limit_faults_before_crossing_limit():
+def test_safe_braking_motion_near_soft_limit_does_not_fault():
     c = ModeCore([(-2., 2.)]*6, [.12]*6,
                  joint_names=['base', 'shoulder', 'elbow', 'pitch', 'roll', 'yaw'])
     c.feedback([0., 1.96, 0., 0., 0., 0.], [0., .03, 0., 0., 0., 0.], 0.)
+    assert c.mode == 'hold'
+
+
+def test_outward_motion_faults_when_stopping_distance_reaches_limit():
+    c = ModeCore([(-2., 2.)]*6, [.12]*6,
+                 joint_names=['base', 'shoulder', 'elbow', 'pitch', 'roll', 'yaw'])
+    measured = [0., 1.995, 0., 0., 0., 0.]
+    c.feedback(measured, [0., .03, 0., 0., 0., 0.], 0.)
     assert c.mode == 'fault'
     assert 'shoulder' in c.reason
-    assert 'moving outward near soft limit' in c.reason
+    assert 'cannot stop before soft limit' in c.reason
+    assert c.target == measured
 
 
 def test_path_continues_through_intermediate_waypoint_without_stopping():
