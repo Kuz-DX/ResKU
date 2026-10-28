@@ -1,9 +1,9 @@
-# Offline candidate; collision clearance NOT verified. Requires MoveIt review before enabling.
+# Enabled after user-reported collision check; runtime MoveIt checks remain required.
 # Reverse capture, monotone base 0 -> pi, roll/yaw zero; 0.025 rad joint margin.
 # Polyline simplification <=0.003 rad; quintic timing sampled every 0.5 s.
 # Timing bounds: speed [0.08,0.04,0.06,0.06,0.08,0.08], accel 0.10, jerk 0.5.
 # Capture points: 28; retained knots: 26; output points: 269; duration: 134.0s.
-execution_enabled: false
+execution_enabled: true
 joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
 points:
   - time_from_start_sec: 0.0

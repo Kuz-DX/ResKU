@@ -25,8 +25,8 @@ def test_checked_in_tool0_respects_real_joint_margins():
                           SCRIPTS.parent/'config/hardware.yaml')
     filename = SCRIPTS.parent/'config/tool0_trajectory.yaml'
     data = yaml.safe_load(filename.read_text())
-    assert data['execution_enabled'] is False  # offline, not collision-certified
-    assert load_path(filename, model) is None
+    assert data['execution_enabled'] is True
+    assert load_path(filename, model) is not None
     q = np.array([p['positions_rad'] for p in data['points']])
     t = np.array([p['time_from_start_sec'] for p in data['points']])
     assert all(model.within_limits(p, .02) for p in q)
