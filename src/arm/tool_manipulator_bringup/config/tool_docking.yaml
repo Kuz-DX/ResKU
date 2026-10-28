@@ -17,7 +17,7 @@ tools:
     tag_from_user_axes: [[0, -1, 0], [-1, 0, 0], [0, 0, -1]]
     actuation_enabled: true
     desired_docked: true           # true=attach pulse, false=release pulse
-    actuation_timeout_s: null      # use docking_feedback_timeout_sec until measured
+    actuation_timeout_s: 8.0
     stages:
       - {name: coarse, xyz_m: [-0.050, 0.0, 0.090]}
       - {name: fine, xyz_m: [-0.050, 0.0, 0.080]}
@@ -76,7 +76,7 @@ tools:
     advance_distance_m: 0.030
     actuation_enabled: true      # command Arduino only after checked 30 mm advance
     desired_docked: true
-    actuation_timeout_s: null    # use docking_feedback_timeout_sec until measured
+    actuation_timeout_s: 8.0
     tag_max_age_s: 0.25
     min_decision_margin: 40.0
     max_reprojection_px: 1.5

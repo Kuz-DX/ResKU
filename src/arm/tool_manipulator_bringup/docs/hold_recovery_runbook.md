@@ -58,6 +58,7 @@ ros2 topic echo /arm/docked --once
 | `joint feedback timeout`, `invalid joint velocity`, `controller ...`, activation 오류 | `/joint_states`와 controller 상태 복구. 다른 launch/controller 중복 여부 확인 |
 | `startup_complete=false`인 fault 또는 `incomplete startup recovery requires inspection and restart` | `/arm/reset_fault`로 복구 불가. 시작 복구의 기구·통신 원인을 점검하고 노드를 재시작해 복구를 처음부터 수행 |
 | `/arm/reset_fault`: `healthy controllers and stopped fresh feedback required` | controller 활성, 새 관절 피드백, 정지 속도를 충족한 뒤 다시 요청. 움직이는 관절을 강제로 reset하지 않음 |
+| 시작 직후 `ee_joint/velocity Not available` + Dynamixel `Rejecting position command ... wrist_roll_joint` | EE 컨트롤러 설정 문제로 단정하지 않음. 앞선 wrist_roll 명령 거부로 공유 Dynamixel 하드웨어가 사용 불가가 된 결과 | 같은 로그의 wrist_roll 실측과 `hardware.yaml` 소프트리밋을 비교. 영점은 실측 없이 바꾸지 않고, 확인된 안전 끝점 안쪽으로 소프트리밋을 설정 |
 
 시작 복구가 완료된 fault에서만, 원인을 해결하고 실측이 정지한 뒤 다음을 시도한다. 응답 `success=true`는 HOLD 복귀일 뿐 경로 재실행 허가가 아니다.
 
@@ -94,3 +95,5 @@ tool2 픽앤플레이스를 **실측 보정 후 별도로 활성화한 경우에
 `enable_docking_motion:=false`이면 태그 목표 오차를 `preview`로 계속 출력하지만 보정 이동과 Arduino 명령은 실행하지 않는다. 이는 물리적 도킹 완료가 아니다. 관측/시퀀스 제한시간이 지나면 실패로 종료할 수 있다.
 
 현재 설정에서 tool0·tool1은 각각 마지막 보정 이동의 실측 도착을 확인한 뒤 `/arm/docking=true`를 한 번 발행한다. **새로 도착한** `/arm/docking_status` 또는 `/arm/docked`가 도킹 상태를 보고할 때까지 기다린다. `DOCKED`는 Arduino가 보고한 구동 상태이며 실제 체결력 센서가 아니므로 운용자가 카메라로 도킹 상태를 확인한다. `UNKNOWN`·`MOVING`·`ERROR` 상태나 통신 끊김에서 성공으로 판정하지 않는다. 명령 발행 후 L2가 풀리거나 timeout이 나도 Arduino 모터가 이미 움직였을 수 있으므로, 카메라와 새 상태 피드백으로 기구 상태를 확인하기 전 같은 경로를 재실행하지 않는다.
+
+tool0·tool1의 UI docking 요청도 태그 보정을 거친다. 두 툴에는 해제 경로가 없으므로 UI release 요청은 `blocked`로 끝난다. 도킹 명령 후 Arduino 응답 대기 한계는 요청값 8초다.

@@ -100,6 +100,23 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             and msg.axes[self.l2_axis] < self.l2_threshold)
         super().on_joy(msg)
 
+    def on_ui_request(self, msg, path_id, desired_docked):
+        if path_id not in self.settings:
+            super().on_ui_request(msg, path_id, desired_docked)
+            return
+        key = (path_id, desired_docked)
+        rising = bool(msg.data) and not self.ui_held[key]
+        self.ui_held[key] = bool(msg.data)
+        if not rising:
+            return
+        if not desired_docked:
+            self.report('blocked', f'tool {path_id} release path is not configured')
+            return
+        # The tag continuation owns Arduino actuation after a verified endpoint.
+        # Passing desired_docked into the base class would pulse Arduino directly
+        # after the taught path and bypass tag alignment.
+        self.request_path(path_id, nearest_entry=True)
+
     def on_state(self, msg):
         super().on_state(msg)
         velocities = dict(zip(msg.name, msg.velocity))
@@ -514,6 +531,7 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         self.lock_goal = q.copy()
         self.expected_docked = self.cfg['desired_docked']
         self.command_feedback_sequence = self.docked_feedback_sequence
+        self.command_status_sequence = self.docking_status_sequence
         self.actuation_deadline = now+(self.cfg.get('actuation_timeout_s')
                                        or self.actuation_timeout)
         self.send_docking_pulse(self.expected_docked)
@@ -528,6 +546,9 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             raise RuntimeError('arm departed measured docking pose during Arduino actuation')
         if now >= self.actuation_deadline:
             raise RuntimeError('Arduino docking completion timeout')
+        if (self.docking_status_sequence > self.command_status_sequence
+                and self.docking_status in ('UNKNOWN', 'ERROR')):
+            raise RuntimeError('Arduino docking status '+self.docking_status)
         if (self.docked_feedback_sequence > self.command_feedback_sequence
                 and self.docked_state == self.expected_docked):
             state = 'docked' if self.expected_docked else 'released'

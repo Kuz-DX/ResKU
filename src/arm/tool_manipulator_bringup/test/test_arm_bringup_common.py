@@ -1,12 +1,31 @@
 """Offline checks for the common arm launch construction path."""
 import importlib.util
+import math
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+import xml.etree.ElementTree as ET
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_wrist_roll_limits_remain_inside_measured_safe_endpoints():
+    spec = yaml.safe_load((ROOT/'config/hardware.yaml').read_text())['joints']['wrist_roll_joint']
+    raw_low, raw_high = spec['soft_limit_raw']
+    assert -628 < raw_low < -572 < raw_high < 443
+    scale = 2*math.pi/4096
+    assert abs((raw_low-spec['zero_raw'])*scale-spec['soft_limit_rad'][0]) < .001
+    assert abs((raw_high-spec['zero_raw'])*scale-spec['soft_limit_rad'][1]) < .002
+    measured_start = (-572-spec['zero_raw'])*scale
+    assert spec['soft_limit_rad'][0]+.02 < measured_start < spec['soft_limit_rad'][1]-.02
+    urdf = ET.parse(ROOT.parent/'tool_manipulator_description/urdf/tool_manipulator.urdf.xacro')
+    joint = urdf.find(".//joint[@name='wrist_roll_joint']")
+    assert joint is not None
+    bounds = joint.find('limit')
+    assert [float(bounds.get(k)) for k in ('lower', 'upper')] == spec['soft_limit_rad']
 spec = importlib.util.spec_from_file_location(
     "arm_bringup_common", ROOT / "launch/arm_bringup_common.py")
 common = importlib.util.module_from_spec(spec)

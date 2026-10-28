@@ -108,12 +108,14 @@ joints:
     operating_mode: 4
     raw_increases_ccw: true
     zero_raw: -1
+    # Measured safe endpoints: raw -628 / 443 with zero_raw -1.
+    # Keep about 0.032 rad inside each endpoint; do not change the zero.
     soft_limit_raw:
-    - -489
-    - 409
+    - -607
+    - 422
     soft_limit_rad:
-    - -0.75
-    - 0.63
+    - -0.93
+    - 0.65
     velocity_limit_rad_s: 0.24
     current_limit_ma: 6877.92
     current_limit_raw: 2047

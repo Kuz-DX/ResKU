@@ -68,11 +68,11 @@ L2+동그라미를 한 번 누르면 툴 1 접근 경로 → 정지 상태의 �
 UI는 `std_msgs/msg/Bool`의 `/arm/tool0_docking` 또는 `/arm/tool0_release`를
 `true`로 올려 경로 0 작업을 한 번 요청한다. 다시 요청하려면 먼저 해당 토픽을
 `false`로 내려 상승 에지를 재무장해야 한다. UI 요청은 현재 관절값과 가장 가까운
-기록 경로 구간을 골라 해당 구간까지 MoveIt으로 진입한 뒤, 기록된 순방향 경로만 이어서
-실행한다. 마지막 도킹 준비 자세에서 docking은 `/arm/docking`에 `true -> false`,
-release는 `false -> true`를 즉시 발행하고, 이후 새 `/arm/docked` 피드백이 각각
-`true` 또는 `false`가 될 때까지 HOLD를 유지한다. 같은 계약을 tool1/tool2에도
-적용한다.
+기록 경로 구간을 골라 해당 구간까지 MoveIt으로 진입한 뒤, 기록된 순방향 경로를 이어서
+실행한다. 도킹 코디네이터가 활성화된 tool0·tool1의 docking 요청은 태그 보정과
+최종 정지 자세 검증을 거친 후 `/arm/docking=true`를 발행하고 새 Arduino 응답을
+기다린다. 이 두 툴의 release 경로는 정의되지 않아 UI release 요청을 거부한다.
+도킹 코디네이터가 비활성인 경로 재생 모드의 직접 Arduino 명령은 별도의 동작이다.
 
 `enable_docking_motion:=false`를 명시하면 활성 경로의 저장 궤적 이후 태그와 목표 오차를
 `preview` 상태로 출력하며 보정 이동이나 Arduino 구동은 실행하지 않는다.

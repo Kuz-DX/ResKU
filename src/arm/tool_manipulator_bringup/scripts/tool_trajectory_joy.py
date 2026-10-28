@@ -356,6 +356,7 @@ class ToolTrajectoryJoy(Node):
         self.docked_state = None
         self.docking_status = 'UNKNOWN'
         self.docked_feedback_sequence = 0
+        self.docking_status_sequence = 0
         self.actuation_timeout = float(param('docking_feedback_timeout_sec', 10.))
         if not .5 <= self.actuation_timeout <= 60.:
             raise ValueError('docking_feedback_timeout_sec must be in [0.5, 60]')
@@ -661,6 +662,7 @@ class ToolTrajectoryJoy(Node):
 
     def on_docking_status(self, msg):
         self.docking_status = msg.data
+        self.docking_status_sequence += 1
         if msg.data == 'DOCKED':
             self.docked_state = True
             self.docked_feedback_sequence += 1

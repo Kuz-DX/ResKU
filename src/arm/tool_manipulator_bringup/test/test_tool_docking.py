@@ -2,6 +2,7 @@
 import importlib.util
 import json
 import math
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -49,7 +50,7 @@ def test_position_mode_requires_measured_size_and_accepts_actuation_with_default
     raw['actuation_enabled'] = True
     path.write_text(yaml.safe_dump(data))
     assert load_settings(path)[0]['actuation_enabled'] is True
-    assert load_settings(path)[0]['actuation_timeout_s'] is None
+    assert load_settings(path)[0]['actuation_timeout_s'] == 8.0
 
 
 def settings(tmp_path):
@@ -74,6 +75,8 @@ def node(tmp_path):
         feedback_sequence=1, observed_feedback=-1, observed_image=-1,
         observe_after_ns=0, stable=0, lock_goal=None, docked_state=None,
         docked_feedback_sequence=0, command_feedback_sequence=None,
+        docking_status='UNKNOWN', docking_status_sequence=0,
+        command_status_sequence=None,
         expected_docked=None, actuation_deadline=None,
         last_joy_time=1., deadman_timeout=.3, deadman_held=True,
         motion_enabled=True, last_preview_report=-math.inf,
@@ -110,6 +113,7 @@ def test_shipped_config_enables_tool0_and_tool1_auto_actuation_after_alignment()
     assert cfg[1]['tag_id'] == 1
     assert cfg[0]['actuation_enabled'] and cfg[1]['actuation_enabled']
     assert cfg[0]['desired_docked'] and cfg[1]['desired_docked']
+    assert cfg[0]['actuation_timeout_s'] == cfg[1]['actuation_timeout_s'] == 8.0
     assert cfg[1]['require_l2_hold'] is True
     assert 'targets' not in cfg[1]
 
@@ -200,10 +204,10 @@ def test_three_stages_then_attach_command_and_fresh_docked_response(tmp_path):
     # A pre-command matching state is not completion; a fresh opposite state is not either.
     ToolDockingCoordinator.observe(n, 1.1)
     n.reset.assert_not_called()
-    ToolDockingCoordinator.on_docked(n, SimpleNamespace(data=False))
+    ToolTrajectoryJoy.on_docking_status(n, SimpleNamespace(data='RELEASED'))
     ToolDockingCoordinator.observe(n, 1.1)
     n.reset.assert_not_called()
-    ToolDockingCoordinator.on_docked(n, SimpleNamespace(data=True))
+    ToolTrajectoryJoy.on_docking_status(n, SimpleNamespace(data='DOCKED'))
     ToolDockingCoordinator.observe(n, 1.2)
     n.reset.assert_called_once()
     assert n.docking_command.publish.call_count == 1
@@ -216,7 +220,7 @@ def test_release_uses_explicit_false_command_and_waits_for_false(tmp_path):
     for _ in range(n.cfg['stable_samples']*3):
         sample(n)
     assert [call.args[0].data for call in n.docking_command.publish.call_args_list] == [False]
-    ToolDockingCoordinator.on_docked(n, SimpleNamespace(data=False))
+    ToolTrajectoryJoy.on_docking_status(n, SimpleNamespace(data='RELEASED'))
     ToolDockingCoordinator.observe(n, 1.1)
     n.reset.assert_called_once()
 
@@ -267,6 +271,33 @@ def test_tool1_auto_actuation_starts_only_after_verified_advance_endpoint(tmp_pa
     assert n.docking_command.publish.call_count == 1
     assert n.docking_command.publish.call_args.args[0].data is True
     n.reset.assert_not_called()
+
+
+def test_ui_docking_uses_tag_continuation_and_blocks_unconfigured_release(tmp_path):
+    n = node(tmp_path)
+    n.settings = load_settings(ROOT/'config/tool_docking.yaml')
+    n.ui_held = {(0, True): False, (0, False): False}
+    n.request_path = Mock()
+    n.on_ui_request(SimpleNamespace(data=True), 0, True)
+    n.request_path.assert_called_once_with(0, nearest_entry=True)
+    n.on_ui_request(SimpleNamespace(data=True), 0, False)
+    assert n.report.call_args.args[0] == 'blocked'
+    assert 'release path is not configured' in n.report.call_args.args[1]
+    assert n.request_path.call_count == 1
+
+
+def test_fresh_arduino_error_aborts_actuation_without_opposite_pulse(tmp_path):
+    n = camera_node(tmp_path)
+    n.advance_locked = True
+    n.advance_local_axis = n.advance_direction = np.array([0., 0., 1.])
+    n.advance_target = np.eye(4)
+    n.model.fk.return_value = np.eye(4)
+    n.path_completed()
+    n.docking_status = 'ERROR'
+    n.docking_status_sequence += 1
+    with pytest.raises(RuntimeError, match='Arduino docking status ERROR'):
+        n.check_actuation(time.monotonic())
+    assert n.docking_command.publish.call_count == 1
 
 
 @pytest.mark.parametrize('speed', [.011, .1])
