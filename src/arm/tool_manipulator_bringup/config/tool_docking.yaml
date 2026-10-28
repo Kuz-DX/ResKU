@@ -15,7 +15,10 @@ tools:
     stages:
       - {name: coarse, xyz_m: null, xyzw: null}
       - {name: fine, xyz_m: null, xyzw: null}
-      - {name: dock, xyz_m: null, xyzw: null}
+      # Tool TCP target, not camera centre. User-defined tag axes:
+      # +X up, +Y left, +Z out of the tag toward the camera.
+      # Confirm detector-frame mapping and orientation before enabling motion.
+      - {name: dock, xyz_m: [-0.050, 0.0, 0.070], xyzw: null}
     # Conservative starting limits, NOT measured docking accuracy guarantees.
     tag_max_age_s: 0.25
     min_decision_margin: 40.0
