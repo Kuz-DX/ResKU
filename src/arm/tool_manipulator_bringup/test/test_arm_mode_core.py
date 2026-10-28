@@ -484,6 +484,30 @@ def test_reported_hardware_pose_recovers_inward_without_joystick():
     assert c.mode == 'fault'
 
 
+def test_startup_outside_pitch_limit_ignores_tiny_outward_velocity_noise():
+    c = ModeCore([(-3.503, 3.614), (-1.592, 1.518), (-1.497, 1.542),
+                  (-1.592, 1.470), (-.75, .63), (-5.76, 6.5)], [.12]*6,
+                 startup_recovery_enabled=True)
+    initial = [0., 0., 0., -1.594184, 0., 0.]
+    c.feedback(initial, [0.]*6, 0.)
+    c.begin_startup(0.)
+    c.ready = True
+    c.feedback(initial, [0., 0., 0., -.000103, 0., 0.], .02)
+    assert c.mode == 'hold' and c.startup_recovering
+    c.tick(.02, .02)
+    assert c.mode == 'hold' and c.target[3] > initial[3]
+
+
+def test_startup_outside_pitch_limit_still_rejects_fast_outward_motion():
+    c, initial = recovery_core()
+    initial[3] = -1.594184
+    c.feedback(initial, [0., 0., 0., -.03, 0., 0.], .02)
+    assert c.mode == 'fault'
+    reason = c.reason
+    c.feedback(initial, [0., 0., 0., -.000103, 0., 0.], .04)
+    assert c.reason == reason
+
+
 @pytest.mark.parametrize('index,value', [(0, 3.7), (4, .7), (5, 6.6),
                                        (1, 1.7), (2, float('nan'))])
 def test_recovery_rejects_dxl_excursions_large_rmd_errors_and_nan(index, value):

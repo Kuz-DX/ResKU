@@ -313,6 +313,19 @@ class ModeCore:
             return
         for index, (value, speed, (lower, upper)) in enumerate(
                 zip(position, velocity, self.limits)):
+            if self.mode == 'fault':
+                # Keep the original latched fault reason while feedback remains
+                # available for inspection and reset.
+                break
+            if (self.startup_enabled and not self.startup_complete and 1 <= index <= 3
+                    and (abs(speed) <= .002
+                         or (value < lower and speed > 0.)
+                         or (value > upper and speed < 0.))):
+                # Startup recovery explicitly accepts an RMD slightly outside
+                # its soft limit and commands it inward. Tiny filtered velocity
+                # noise there must not abort recovery; real outward movement
+                # still passes through the stopping-distance guard below.
+                continue
             if speed > 0.:
                 distance = upper-value
             elif speed < 0.:

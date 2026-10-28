@@ -8,7 +8,7 @@ import pytest
 ARM = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ARM/'tool_change_min'))
 sys.path.insert(0, str(ARM/'tool_manipulator_bringup/scripts'))
-from tcp_joy_core import TcpStepper, joy_twist, LimitBlocked, TcpMetrics
+from tcp_joy_core import TcpStepper, joy_twist, joy_joint_jog, LimitBlocked, TcpMetrics
 from tcp_joy import TcpJoy
 from tool_change_min.kinematics import ArmKinematics
 from manual_control_common import ArmChain
@@ -34,6 +34,21 @@ def test_deadman_modifier_and_vector_speed_bound():
     np.testing.assert_array_equal(twist[:3], 0.)
     assert np.linalg.norm(twist[3:]) == pytest.approx(1.)
     assert not joy_twist([float('nan')]*8, buttons)[0]
+
+
+def test_l1_r1_stick_jog_maps_vertical_pitch_and_base_without_other_arm_joints(model):
+    buttons = [0]*13
+    buttons[4] = buttons[5] = 1
+    axes = [0., 1., 1., 0., -1., 0., 0., 0.]
+    direction = joy_joint_jog(axes, buttons)
+    np.testing.assert_array_equal(direction, [-1., 0., 0., 1., 0., 0.])
+    stepper = TcpStepper(model, [.12]*6)
+    measured = np.zeros(6)
+    stepper.reset(measured)
+    goal, _ = stepper.joint_jog_candidate(measured, direction, .02)
+    np.testing.assert_allclose(goal, [-.0024, 0., 0., .0024, 0., 0.])
+    buttons[5] = 0
+    np.testing.assert_array_equal(joy_joint_jog(axes, buttons), np.zeros(6))
 
 
 def test_square_fault_reset_calls_guarded_service_and_disarms_motion():

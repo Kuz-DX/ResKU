@@ -121,6 +121,19 @@ def joy_twist(axes, buttons, deadzone=.12):
     return True, result
 
 
+def joy_joint_jog(axes, buttons, deadzone=.12):
+    """L1+R1: right vertical base, left vertical pitch, horizontals roll/yaw."""
+    direction = np.zeros(6)
+    if (len(axes) < 5 or len(buttons) < 6 or not buttons[4] or not buttons[5]
+            or not np.all(np.isfinite(axes))):
+        return direction
+    for joint, axis in ((0, 4), (3, 1), (4, 0), (5, 3)):
+        value = float(np.clip(axes[axis], -1., 1.))
+        if abs(value) > deadzone:
+            direction[joint] = math.copysign((abs(value)-deadzone)/(1.-deadzone), value)
+    return direction
+
+
 class TcpStepper:
     def __init__(self, model, speeds, linear=.02, angular=.15, margin=.02,
                  lead=.08, iterations=30, budget=.030):
@@ -144,20 +157,30 @@ class TcpStepper:
         self.q = np.asarray(measured).copy()
         self.pose = self.model.fk(self.q)
 
-    def wrist_candidate(self, measured, direction, dt):
-        """Direct roll/yaw proposal; caller must collision-check before commit."""
+    def joint_jog_candidate(self, measured, direction, dt):
+        """Direct base/pitch/roll/yaw proposal; caller collision-checks it."""
         direction = np.asarray(direction, dtype=float)
-        if direction.shape != (2,) or not np.all(np.isfinite(direction)) or not 0 < dt <= .1:
-            raise ValueError('invalid wrist increment')
+        if (direction.shape != (6,) or not np.all(np.isfinite(direction))
+                or np.any(direction[[1, 2]]) or not 0 < dt <= .1):
+            raise ValueError('invalid joint jog increment')
         if self.q is None or not self.model.within_limits(measured, self.margin):
-            raise SafetyError('wrist feedback violates soft limits')
+            raise SafetyError('joint jog feedback violates soft limits')
         q = self.q.copy()
-        q[4:6] += np.clip(direction, -1., 1.) * self.speeds[4:6] * dt
+        q += np.clip(direction, -1., 1.) * self.speeds * dt
         if not self.model.within_limits(q, self.margin):
-            raise LimitBlocked('wrist joint limit')
+            raise LimitBlocked('joint jog limit')
         if np.max(np.abs(q-measured)) > self.lead:
-            raise LimitBlocked('wrist feedback lead limit')
+            raise LimitBlocked('joint jog feedback lead limit')
         return q, self.model.fk(q)
+
+    def wrist_candidate(self, measured, direction, dt):
+        """Keep the existing roll/yaw API for callers of direct wrist jog."""
+        direction = np.asarray(direction, dtype=float)
+        if direction.shape != (2,) or not np.all(np.isfinite(direction)):
+            raise ValueError('invalid wrist increment')
+        jog = np.zeros(6)
+        jog[4:6] = direction
+        return self.joint_jog_candidate(measured, jog, dt)
 
     def candidate(self, measured, twist, dt):
         """Propose base-frame translation and target-TCP-local rotation."""

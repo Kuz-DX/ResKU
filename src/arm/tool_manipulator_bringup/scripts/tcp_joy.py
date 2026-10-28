@@ -25,7 +25,7 @@ try:
     from tool_change_min.kinematics import ArmKinematics, ARM_JOINTS
 except ImportError:
     from arm_shared_kinematics import ArmKinematics, ARM_JOINTS
-from tcp_joy_core import (TcpStepper, joy_twist, LimitBlocked, SafetyError,
+from tcp_joy_core import (TcpStepper, joy_twist, joy_joint_jog, LimitBlocked, SafetyError,
                           TcpMetrics, EeDpad, nearest_tcp_entry)
 from arm_mode_core import TCP_ENTRY_TOLERANCE, non_arm_feedback_changed
 from tcp_motion_workflow import TcpMotionWorkflow
@@ -43,8 +43,6 @@ class TcpJoy(TcpMotionWorkflow, Node):
         self.model = ArmKinematics('', hardware, base, tip, description=description)
         config = yaml.safe_load(Path(hardware).read_text())
         self.ee_dpad = EeDpad()
-        # Same calibrated rack travel as ModeCore.close_ee and the gripper URDF.
-        self.ee_limits = (-2.351592547829, 2.839398438376)
         self.stepper = TcpStepper(self.model,
             [float(config['joints'][j]['velocity_limit_rad_s'])/2 for j in ARM_JOINTS],
             linear=float(param('linear_speed_mps', .02)), angular=float(param('angular_speed_rad_s', .15)),
@@ -346,13 +344,7 @@ class TcpJoy(TcpMotionWorkflow, Node):
             self.stepper.q = self.stepper.pose = None
         self.wrist_mode = wrist_mode
         if wrist_mode:
-            self.twist = np.zeros(6)
-            if self.deadman:
-                # Left horizontal: roll; right horizontal: yaw.
-                for joint, axis in ((4, 0), (5, 3)):
-                    value = float(np.clip(msg.axes[axis], -1., 1.))
-                    self.twist[joint] = (0. if abs(value) <= .12 else
-                        math.copysign((abs(value)-.12)/.88, value))
+            self.twist = joy_joint_jog(msg.axes, msg.buttons)
         if hasattr(self, 'ee_dpad') and (self.ee_dpad.direction or self.ee_dpad.vertical):
             self.twist = np.zeros(6)
         self.joy_time = time.monotonic()
@@ -443,12 +435,9 @@ class TcpJoy(TcpMotionWorkflow, Node):
             if (control is not None and self.deadman and self.rearmed
                     and time.monotonic()-self.joy_time < .25
                     and time.monotonic()-self.state_time < .3):
-                position = (self.full_state or {}).get('ee_joint')
-                if position is not None and math.isfinite(position):
-                    lo, hi = self.ee_limits
-                    if ((control.direction > 0 and lo <= position < hi-.01)
-                            or (control.direction < 0 and lo+.01 < position <= hi)):
-                        ee = control.direction*control.speed
+                # ID 4 uses a velocity controller and has no configured
+                # position limit. Stop immediately when the D-pad is released.
+                ee = control.direction*control.speed
             self.pub.publish(String(data=json.dumps(dict(epoch=self.epoch,
                 positions=self.stepper.q.tolist(), ee_velocity=ee))))
 
@@ -562,8 +551,8 @@ class TcpJoy(TcpMotionWorkflow, Node):
                                 self.metrics.counts['accepted_commands'] += 1
                                 self.reason = 'TCP incremental command accepted'
                     elif np.any(self.twist) and vars(self).get('wrist_mode', False):
-                        q, pose = self.stepper.wrist_candidate(
-                            self.measured, self.twist[4:6], min(dt, .02))
+                        q, pose = self.stepper.joint_jog_candidate(
+                            self.measured, self.twist, min(dt, .02))
                         self.submit_collision(q, pose, now)
                     elif np.any(self.twist):
                         # No catch-up integration while IK/collision service is busy.
