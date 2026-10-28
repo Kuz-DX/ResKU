@@ -430,7 +430,7 @@
 
     <limit
         lower="-1.497"
-        upper="1.542"
+        upper="1.583188"
         effort="1.0"
         velocity="1.0"/>
 

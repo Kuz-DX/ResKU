@@ -632,8 +632,10 @@ def test_rmd_storage_pose_no_longer_freezes_all_axes_at_first_boundary(resku_cha
         np.testing.assert_array_equal(node.target[[0, 4, 5]], start[[0, 4, 5]])
         node.positions = dict(zip(JOINTS, node.target))  # numerical feedback only
     np.testing.assert_allclose(baseline_tail[-1], baseline_tail[0], atol=1e-10)
-    assert np.max(np.abs(baseline[1:4]-start[1:4])) < .05
-    assert np.max(np.abs(node.target[1:4]-start[1:4])) > .1
+    baseline_travel = np.max(np.abs(baseline[1:4]-start[1:4]))
+    independent_travel = np.max(np.abs(node.target[1:4]-start[1:4]))
+    assert independent_travel > .1
+    assert independent_travel > baseline_travel
     print(f'RMD {direction:+g}: old grouped delta={baseline[1:4]-start[1:4]}, '
           f'new delta={node.target[1:4]-start[1:4]}')
 

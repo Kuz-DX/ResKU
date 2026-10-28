@@ -66,13 +66,12 @@ joints:
     id: 5
     sign: -1
     q_offset_rad: 0.0
-    # Confirmed safe endpoints 2026-10-29: raw -90.589996 deg
-    # (joint +1.581094 rad), raw +87.159996 deg (joint -1.521229 rad).
-    # The software bounds remain inside these measured endpoints.
-    startup_safe_endpoints_rad: [-1.521229, 1.581094]
+    # Confirmed safe endpoints 2026-10-29: lower -1.521229 rad and
+    # upper +1.583188 rad (operator confirmed after an earlier +1.581094 reading).
+    startup_safe_endpoints_rad: [-1.521229, 1.583188]
     soft_limit_rad:
     - -1.497
-    - 1.542
+    - 1.583188
     velocity_limit_rad_s: 0.3
     # User-requested elbow X6-60 limit; retain release and retreat protection.
     current_limit_a: 5.0
