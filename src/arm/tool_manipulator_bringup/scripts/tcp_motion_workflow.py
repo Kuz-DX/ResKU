@@ -6,7 +6,8 @@ import uuid
 import numpy as np
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
-from moveit_msgs.srv import GetStateValidity
+from moveit_msgs.srv import GetStateValidity, GetMotionPlan
+from moveit_msgs.msg import MotionPlanRequest, Constraints, JointConstraint
 from arm_mode_core import TCP_ENTRY_TOLERANCE, non_arm_feedback_changed
 try:
     from tool_change_min.kinematics import ARM_JOINTS
@@ -74,6 +75,9 @@ class TcpMotionWorkflow:
             self.reason = 'L1 requested fresh TCP entry/ready validation'
 
     def _reset_ready(self):
+        pending = vars(self).get('ready_future')
+        if vars(self).get('ready_state') == 'planning_home' and pending is not None and not pending.done():
+            pending.cancel()
         for future in self.ready_checks:
             if not future.done():
                 future.cancel()
@@ -112,15 +116,32 @@ class TcpMotionWorkflow:
                     if self.returning_home:
                         if self.measured is None or now-self.state_time >= .3:
                             return
-                        # Fold toward the reviewed ready posture without yawing
-                        # the base through the circuit box during the lift.
-                        self.ready_goal[0] = self.measured[0]
-                        self.home_base_anchor = float(self.measured[0])
+                        # Plan the complete route; fixed ready-posture base
+                        # rotation has collided with the circuit box.
+                        self.ready_goal = self.home_goal.copy()
+                        self.home_leg = 'planned'
                     self.ready_state = 'idle'
             return
         if vars(self).get('returning_home', False):
             velocities = np.asarray(s.get('velocities_rad_s', []), dtype=float)
             fresh = now-self.status_time < .3 and now-self.state_time < .3
+            if self.home_leg == 'planned' and self.ready_state == 'executing':
+                distance = math.inf
+                if fresh and self.measured is not None and np.isfinite(self.measured).all():
+                    previous = self.ready_snapshot
+                    for waypoint in self.home_waypoints:
+                        target = np.asarray(waypoint)
+                        delta = target-previous
+                        fraction = (0. if np.dot(delta, delta) < 1e-16 else
+                                    np.clip(np.dot(self.measured-previous, delta)/np.dot(delta, delta), 0., 1.))
+                        distance = min(distance, float(np.max(np.abs(
+                            self.measured-(previous+fraction*delta)))))
+                        previous = target
+                if distance > .01:
+                    if self.cancel.service_is_ready():
+                        self.cancel.call_async(Trigger.Request())
+                    self._fail_ready('HOME stopped: measured posture left checked path or feedback stale')
+                    return
             if self.home_leg == 'rotate':
                 drift = (self.measured is None or not fresh or
                          not np.isfinite(self.measured).all() or
@@ -179,6 +200,34 @@ class TcpMotionWorkflow:
             if not self.check.service_is_ready():
                 self.reason = 'waiting for MoveIt collision service before TCP ready'
                 return
+            if vars(self).get('returning_home', False):
+                if not self.home_planner.service_is_ready():
+                    self._fail_ready('HOME planner unavailable; remain HOLD')
+                    return
+                request = MotionPlanRequest()
+                request.group_name = 'arm'
+                request.num_planning_attempts = 5
+                request.allowed_planning_time = 10.
+                request.max_velocity_scaling_factor = .1
+                request.max_acceleration_scaling_factor = .1
+                request.start_state.joint_state.name = list(self.full_state)
+                request.start_state.joint_state.position = list(self.full_state.values())
+                request.start_state.is_diff = True
+                goal = Constraints()
+                for name, value in zip(ARM_JOINTS, self.ready_goal):
+                    goal.joint_constraints.append(JointConstraint(joint_name=name,
+                        position=float(value), tolerance_above=.001,
+                        tolerance_below=.001, weight=1.))
+                request.goal_constraints = [goal]
+                self.ready_snapshot = self.measured.copy()
+                self.ready_full_state = dict(self.full_state)
+                self.ready_check_epoch = s.get('epoch')
+                self.ready_started = now
+                self.ready_future = self.home_planner.call_async(
+                    GetMotionPlan.Request(motion_plan_request=request))
+                self.ready_state = 'planning_home'
+                self.reason = 'planning HOME around circuit box'
+                return
             differences = np.abs(self.ready_goal-self.measured)
             limiting_joint = int(np.argmax(differences))
             delta = float(differences[limiting_joint])
@@ -211,6 +260,48 @@ class TcpMotionWorkflow:
             self.ready_checks.append(self.check.call_async(self.ready_requests[0]))
             self.ready_state = 'checking'
             self.reason = 'checking path to TCP ready'
+            return
+        if self.ready_state == 'planning_home':
+            if now-self.ready_started > 12.:
+                self.ready_future.cancel()
+                self._fail_ready('HOME planning timed out; remain HOLD')
+                return
+            if not self.ready_future.done():
+                return
+            try:
+                from tool_trajectory_joy import planned_entry
+                response = self.ready_future.result().motion_plan_response
+                if response.error_code.val != 1:
+                    raise ValueError('MoveIt error %s' % response.error_code.val)
+                path = planned_entry(dict(start=self.ready_goal, waypoints=[], durations=[]),
+                                     response.trajectory.joint_trajectory, self.ready_snapshot)
+                if len(path['waypoints']) > 1000:
+                    raise ValueError('too many HOME waypoints')
+                self.home_waypoints = [q.tolist() for q in path['waypoints']]
+                self.home_durations = path['durations']
+                self.ready_requests = []
+                previous = self.ready_snapshot
+                for target in path['waypoints']:
+                    if not self.model.within_limits(target):
+                        raise ValueError('HOME waypoint outside limits')
+                    count = max(1, math.ceil(float(np.max(np.abs(target-previous)))/self.ready_step))
+                    if len(self.ready_requests)+count+1 > 20000:
+                        raise ValueError('HOME verification too large')
+                    for q in np.linspace(previous, target, count+1):
+                        req = GetStateValidity.Request()
+                        values = dict(self.ready_full_state)
+                        values.update(zip(ARM_JOINTS, map(float, q)))
+                        req.robot_state.joint_state.name = list(values)
+                        req.robot_state.joint_state.position = list(values.values())
+                        req.robot_state.is_diff = True
+                        self.ready_requests.append(req)
+                    previous = target
+                self.ready_checks = [self.check.call_async(self.ready_requests[0])]
+                self.ready_state = 'checking'
+                self.ready_started = now
+                self.reason = 'verifying planned HOME segments'
+            except (ValueError, RuntimeError, AttributeError, IndexError) as exc:
+                self._fail_ready('HOME plan rejected: '+str(exc))
             return
         if self.ready_state == 'checking':
             if (s.get('mode') != 'hold' or s.get('transitioning')
@@ -285,7 +376,10 @@ class TcpMotionWorkflow:
             self.ready_execution_id = 'tcp-ready-'+uuid.uuid4().hex
             self.tool_pub.publish(String(data=json.dumps(dict(
                 epoch=s['epoch'], execution_id=self.ready_execution_id,
-                waypoints=[self.ready_goal.tolist()], durations=[self.ready_duration]))))
+                waypoints=(self.home_waypoints if vars(self).get('returning_home', False)
+                           else [self.ready_goal.tolist()]),
+                durations=(self.home_durations if vars(self).get('returning_home', False)
+                           else [self.ready_duration])))))
             self.ready_state = 'executing'
             self.reason = 'moving to TCP ready'
             return

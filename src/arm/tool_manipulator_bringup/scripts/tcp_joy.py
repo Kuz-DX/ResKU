@@ -56,6 +56,8 @@ class TcpJoy(TcpMotionWorkflow, Node):
         self.entry_pub = self.create_publisher(String, '/arm/tcp_joy/entry_status', 1)
         self.entry_pending = None
         self.check = self.create_client(GetStateValidity, '/check_state_validity')
+        from moveit_msgs.srv import GetMotionPlan
+        self.home_planner = self.create_client(GetMotionPlan, '/plan_kinematic_path')
         self.cancel = self.create_client(Trigger, '/arm/cancel')
         self.fault_reset = self.create_client(Trigger, '/arm/reset_fault')
         self.fault_reset_future = None

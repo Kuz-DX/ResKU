@@ -54,16 +54,10 @@ def test_home_stops_active_path_then_visits_ready_then_startup_home():
         for stamp in (10.2, 10.8):
             node.status_time = node.state_time = stamp
             node.drive_ready(stamp)
+    node.ready_snapshot = node.measured.copy()
+    node.home_waypoints = [node.ready_goal.tolist()]
     finish_leg(node, 'ready-leg')
     assert node.ready_state == 'home_settle'
-    settle()
-    assert node.home_leg == 'rotate'
-    finish_leg(node, 'rotate-leg')
-    settle()
-    assert node.ready_state == 'idle'
-    assert node.returning_home and node.home_leg == 'home'
-    np.testing.assert_array_equal(node.ready_goal, home)
-    finish_leg(node, 'home-leg')
     settle()
     assert not node.returning_home and not node.auto_entry_armed
     assert node.status['mode'] == 'hold'
@@ -75,9 +69,9 @@ def test_home_preparation_holds_current_base_instead_of_rotating_to_ready():
     node.request_named_pose(True, 10.)
     node.status.update(mode='hold', transitioning=False)
     node.drive_ready(10.1)
-    assert node.home_leg == 'prepare'
-    assert node.ready_goal[0] == 3.1
-    np.testing.assert_array_equal(node.ready_goal[1:], node.default_ready_goal[1:])
+    assert node.home_leg == 'planned'
+    assert node.ready_goal[0] == 0.
+    np.testing.assert_array_equal(node.measured, [3.1, 0., 0., 0., 0., 0.])
 
 
 def test_home_rotation_cancels_when_shoulder_droops():
@@ -104,6 +98,43 @@ def test_home_never_rotates_without_stopped_feedback():
     assert node.home_leg == 'prepare'
     assert node.ready_state == 'failed'
     assert 'did not settle' in node.reason
+
+
+def test_home_requests_moveit_plan_and_rejects_failed_result():
+    node = workflow()
+    node.request_named_pose(True, 10.)
+    node.status.update(mode='hold', transitioning=False)
+    node.drive_ready(10.05)
+    node.full_state = dict(zip(('base_joint', 'shoulder_joint', 'elbow_joint',
+                               'wrist_pitch_joint', 'wrist_roll_joint', 'wrist_yaw_joint'), node.measured))
+    node.check = Mock()
+    node.check.service_is_ready.return_value = True
+    node.home_planner = Mock()
+    node.home_planner.service_is_ready.return_value = True
+    node.drive_ready(10.1)
+    assert node.ready_state == 'planning_home'
+    request = node.home_planner.call_async.call_args.args[0].motion_plan_request
+    assert request.group_name == 'arm'
+    assert len(request.goal_constraints[0].joint_constraints) == 6
+    node.ready_future.done.return_value = True
+    node.ready_future.result.return_value = SimpleNamespace(
+        motion_plan_response=SimpleNamespace(error_code=SimpleNamespace(val=-1)))
+    node.drive_ready(10.2)
+    assert node.ready_state == 'failed'
+    assert not node.auto_entry_armed
+
+
+def test_planned_home_cancels_off_path_motion():
+    node = workflow()
+    node.request_named_pose(True, 10.)
+    node.home_leg, node.ready_state = 'planned', 'executing'
+    node.ready_snapshot = np.zeros(6)
+    node.home_waypoints = [[1., 0., 0., 0., 0., 0.]]
+    node.measured = np.array([.5, -.02, 0., 0., 0., 0.])
+    node.cancel.reset_mock()
+    node.drive_ready(10.1)
+    node.cancel.call_async.assert_called_once()
+    assert node.ready_state == 'failed'
 
 
 def test_missing_home_and_fault_do_not_command_motion():

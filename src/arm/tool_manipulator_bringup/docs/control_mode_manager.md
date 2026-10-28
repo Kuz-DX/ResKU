@@ -23,12 +23,16 @@ per press (L2 path selection still takes priority). The manager's hardware,
 controller and stopped-feedback checks remain authoritative. Success returns
 to HOLD without requesting HOME; release L1 and press it again to resume.
 Outside FAULT, square retains its existing HOME/Stop_pose behavior.
-HOME now checks and executes three separate legs: ready posture with the
-measured base angle held, base-only rotation to home, then startup home posture.
+HOME now requests a complete MoveIt `/plan_kinematic_path` route from the
+stopped measured posture to startup home (DXL base/roll/yaw zero). The former
+ready-posture base rotation was blocked by circuit_box/elbow collision and is
+no longer used. Planning gets five attempts within a 10-second allowance;
+failure remains HOLD. Every returned joint-linear segment is sampled again
+through `/check_state_validity` before managed execution. Plans are bounded to
+1000 waypoints and 20000 verification samples. Measured deviation over 0.01 rad
+from the checked polyline, or stale feedback during HOME, requests cancellation.
 Each endpoint must be within 0.01 rad with all measured speeds at most
-0.01 rad/s for 0.5 s (5 s settling deadline). Every leg gets a fresh MoveIt
-collision check. During rotation, non-base drift above 0.01 rad or stale
-feedback cancels HOME. This software guard does not establish physical
+0.01 rad/s for 0.5 s (5 s settling deadline). This software guard does not establish physical
 circuit-box clearance; the collision model and loaded settling require
 supervised verification before reuse. Current limits are unchanged.
 The current joints are first projected into the required 0.10-rad margin. If
