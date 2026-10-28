@@ -25,7 +25,9 @@ def test_checked_in_tool0_respects_real_joint_margins():
                           SCRIPTS.parent/'config/hardware.yaml')
     path = load_path(SCRIPTS.parent/'config/tool0_trajectory.yaml', model)
     assert path is not None
-    assert path['waypoints'][-1][2] == pytest.approx(1.2847368730456703)
+    np.testing.assert_allclose(path['waypoints'][-1],
+        [np.pi, .004537855888737689, 1.0348056629073772, -1.2569860686967722, 0., 0.],
+        rtol=0., atol=1e-12)
 
 
 def write_path(tmp_path, enabled=True, times=(0., 1., 3.)):
