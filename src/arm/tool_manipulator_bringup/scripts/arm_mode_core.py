@@ -252,7 +252,16 @@ class ModeCore:
                 abs(self.position[i])/min(self.speeds[i], self.entry_alignment_speed)
                 for i in indexes) + self.entry_alignment_timeout_margin)
         if now > self.entry_alignment_deadline:
-            self.fault('DXL entry alignment timed out; inspect feedback')
+            detail = '; '.join(
+                '%s measured=%.6f target=%.6f velocity=%.6f' %
+                (name, self.position[i], self.target[i], self.velocity[i])
+                for i, name in ((0, 'base'), (4, 'wrist_roll'), (5, 'wrist_yaw')))
+            stable = (0. if self.entry_stable_since is None else
+                      max(0., now-self.entry_stable_since))
+            self.fault(
+                'DXL entry alignment timed out; inspect feedback: '+detail+
+                '; tolerance=%.6f max_joint_speed=%.6f stable_sec=%.3f' %
+                (DXL_ENTRY_ALIGNMENT_TOLERANCE, max(map(abs, self.velocity)), stable))
             return list(self.target)
         if max(abs(a-b) for a, b in zip(self.target, self.position)) > .10:
             self.fault('DXL entry alignment following error')
