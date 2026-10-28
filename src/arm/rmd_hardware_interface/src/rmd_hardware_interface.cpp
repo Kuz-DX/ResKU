@@ -239,7 +239,12 @@ namespace rmd_hardware_interface {
   CallbackReturn MyActuatorRmdHardwareInterface::on_cleanup(rclcpp_lifecycle::State const& /*previous_state*/) {
     stopAsyncThread();
     if (actuator_interface_) {
-      actuator_interface_->shutdownMotor();
+      try {
+        actuator_interface_->shutdownMotor();
+      } catch (std::exception const& exception) {
+        RCLCPP_ERROR(getLogger(), "Could not shut down actuator during cleanup: %s", exception.what());
+        return CallbackReturn::ERROR;
+      }
     }
     return CallbackReturn::SUCCESS;
   }
@@ -247,7 +252,12 @@ namespace rmd_hardware_interface {
   CallbackReturn MyActuatorRmdHardwareInterface::on_shutdown(rclcpp_lifecycle::State const& /*previous_state*/) {
     stopAsyncThread();
     if (actuator_interface_) {
-      actuator_interface_->shutdownMotor();
+      try {
+        actuator_interface_->shutdownMotor();
+      } catch (std::exception const& exception) {
+        RCLCPP_ERROR(getLogger(), "Could not shut down actuator: %s", exception.what());
+        return CallbackReturn::ERROR;
+      }
     }
     return CallbackReturn::SUCCESS;
   }
@@ -300,7 +310,12 @@ namespace rmd_hardware_interface {
   CallbackReturn MyActuatorRmdHardwareInterface::on_deactivate(rclcpp_lifecycle::State const& /*previous_state*/) {
     stopAsyncThread();
     if (actuator_interface_) {
-      actuator_interface_->stopMotor();
+      try {
+        actuator_interface_->stopMotor();
+      } catch (std::exception const& exception) {
+        RCLCPP_ERROR(getLogger(), "Could not stop actuator while deactivating: %s", exception.what());
+        return CallbackReturn::ERROR;
+      }
     }
     RCLCPP_INFO(getLogger(), "Actuator successfully stopped!");
     return CallbackReturn::SUCCESS;
@@ -309,9 +324,14 @@ namespace rmd_hardware_interface {
   CallbackReturn MyActuatorRmdHardwareInterface::on_error(rclcpp_lifecycle::State const& /*previous_state*/) {
     stopAsyncThread();
     if (actuator_interface_) {
-      actuator_interface_->stopMotor();
-      actuator_interface_->reset();
-      RCLCPP_INFO(getLogger(), "Actuator reset!");
+      try {
+        actuator_interface_->stopMotor();
+        actuator_interface_->reset();
+        RCLCPP_INFO(getLogger(), "Actuator reset!");
+      } catch (std::exception const& exception) {
+        RCLCPP_ERROR(getLogger(), "Could not stop/reset actuator during error handling: %s", exception.what());
+        return CallbackReturn::ERROR;
+      }
     }
     return CallbackReturn::SUCCESS;
   }

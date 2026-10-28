@@ -27,11 +27,17 @@
         <param name="current_limit_duration_ms">${spec['current_limit_duration_ms']}</param>
         <param name="velocity_alpha">0.1</param>
         <param name="effort_alpha">0.1</param>
-        <param name="can_receive_timeout_ms">100</param>
+        <!-- Each cycle performs a position transaction and a separate
+             multi-turn-angle transaction. At 2 ms, three actuators generated
+             about 6000 CAN frames/s and left too little headroom on 1 Mbps CAN.
+             5 ms is still twice the 100 Hz controller update rate and reduces
+             steady bus traffic by roughly 60 percent. -->
+        <param name="cycle_time">5</param>
+        <param name="can_receive_timeout_ms">50</param>
         <param name="initial_feedback_timeout_ms">3000</param>
         <param name="feedback_timeout_ms">500</param>
-        <!-- Low-rate status/error polling; do not add 0x9A to the 2 ms loop. -->
-        <param name="status1_period_ms">100</param>
+        <!-- Low-rate status/error polling; keep 0x9A outside the motion loop. -->
+        <param name="status1_period_ms">500</param>
         <param name="position_jump_margin_factor">4.0</param>
         <param name="direction_window_ms">100</param>
         <param name="direction_command_deadband">0.001</param>

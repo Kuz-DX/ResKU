@@ -67,6 +67,7 @@ class ControlModeManager(Node):
         self.create_subscription(String, '/control/active_target', self.on_focus, qos)
         self.hardware_fault = False
         self.create_subscription(String, '/control/hardware_fault', self.on_fault, qos)
+        self.create_subscription(String, '/arm/rmd_diagnostics', self.on_rmd_diagnostic, 10)
         self.create_subscription(String, '/arm/tcp_joy/entry_status', self.on_tcp_entry, 1)
         for source in ('manual', 'tcp_ik', 'tool_auto'):
             self.create_subscription(String, '/arm/input/'+source,
@@ -155,6 +156,25 @@ class ControlModeManager(Node):
         if msg.data.strip() and msg.data.lower() not in ('ok', 'false', '0', 'none'):
             self.hardware_fault = True
             self.core.fault('hardware fault: '+msg.data)
+
+    def on_rmd_diagnostic(self, msg):
+        """Stop an automatic path as soon as an RMD target is being relaxed."""
+        try:
+            data = json.loads(msg.data)
+            if not isinstance(data, dict) or data.get('current_protection') is not True:
+                return
+            joint = data.get('joint', 'unknown RMD joint')
+            current = data.get('current_a')
+            detail = (f'{joint} at {float(current):.3f} A'
+                      if isinstance(current, (int, float)) and not isinstance(current, bool)
+                      else str(joint))
+            if self.core.mode == 'tool_auto' and self.core.execution_id is not None:
+                self.core.abort_path_to_hold(
+                    'RMD current protection active: '+detail, time.monotonic())
+        except (ValueError, TypeError, OverflowError):
+            # Diagnostics are advisory JSON. Hardware faults retain their own
+            # latched /control/hardware_fault channel.
+            return
 
     def set_mode(self, mode, res):
         self.focus_activation_pending = False

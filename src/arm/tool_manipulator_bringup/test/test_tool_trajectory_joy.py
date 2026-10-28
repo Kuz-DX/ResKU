@@ -1,4 +1,5 @@
 """Offline validation of captured path loading and joystick request edges."""
+import json
 from pathlib import Path
 import sys
 from unittest.mock import Mock
@@ -7,6 +8,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 import yaml
+from std_msgs.msg import String
 
 SCRIPTS = Path(__file__).resolve().parents[1]/'scripts'
 sys.path.insert(0, str(SCRIPTS))
@@ -157,6 +159,44 @@ def test_tool2_slow_timing_avoids_feedback_guard_in_tracking_simulation(retimed)
     else:
         assert c.mode == 'fault'
         assert 'moving outward near soft limit: wrist_pitch_joint' in c.reason
+
+
+def test_tool2_current_limit_covers_measured_approach_peak_and_retains_release_gap():
+    hardware = yaml.safe_load((SCRIPTS.parent/'config/hardware.yaml').read_text())
+    wrist = hardware['joints']['wrist_pitch_joint']
+    assert wrist['current_limit_a'] == pytest.approx(2.5)
+    assert wrist['current_limit_a'] > 2.33
+    assert wrist['current_release_threshold_a'] == pytest.approx(1.8)
+    assert wrist['current_release_threshold_a'] < wrist['current_limit_a']
+
+
+def test_rmd_current_protection_aborts_managed_path_immediately():
+    from arm_control_mode_manager import ControlModeManager
+    core = Mock(mode='tool_auto', execution_id='tool2-run')
+    node = SimpleNamespace(core=core)
+    message = String(data=json.dumps(dict(
+        joint='wrist_pitch_joint', current_a=2.51, current_protection=True)))
+    ControlModeManager.on_rmd_diagnostic(node, message)
+    core.abort_path_to_hold.assert_called_once()
+    reason = core.abort_path_to_hold.call_args.args[0]
+    assert reason == 'RMD current protection active: wrist_pitch_joint at 2.510 A'
+
+
+@pytest.mark.parametrize('payload', [
+    'not-json', '{}', '{"current_protection": false}',
+    '{"current_protection": true, "current_a": "bad"}',
+])
+def test_rmd_diagnostic_non_active_or_malformed_input_does_not_abort(payload):
+    from arm_control_mode_manager import ControlModeManager
+    core = Mock(mode='tool_auto', execution_id='tool2-run')
+    node = SimpleNamespace(core=core)
+    ControlModeManager.on_rmd_diagnostic(node, String(data=payload))
+    if '"current_protection": true' in payload:
+        core.abort_path_to_hold.assert_called_once()
+        assert core.abort_path_to_hold.call_args.args[0] == \
+            'RMD current protection active: unknown RMD joint'
+    else:
+        core.abort_path_to_hold.assert_not_called()
 
 
 @pytest.mark.parametrize('limits', [[.01]*5, [.01]*5+[0.], [.01]*5+[float('nan')],

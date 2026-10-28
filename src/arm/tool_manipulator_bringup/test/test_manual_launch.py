@@ -67,3 +67,12 @@ def test_manual_mode_uses_common_base_and_inactive_seed_controller():
 
 
 ROBOT_DESCRIPTION = "<robot name='test'/>"
+
+
+def test_real_rmd_transport_keeps_can_bus_headroom():
+    control = (ROOT.parent/'tool_manipulator_moveit_config/config/'
+               'tool_manipulator.ros2_control.xacro').read_text()
+    assert '<param name="cycle_time">5</param>' in control
+    assert '<param name="can_receive_timeout_ms">50</param>' in control
+    assert '<param name="status1_period_ms">500</param>' in control
+    assert '<param name="cycle_time">2</param>' not in control

@@ -155,6 +155,24 @@ Reverse traversal reuses the durations in reverse order; entry planning keeps
 its existing separate timing. An offline 80-ms tracking-lag regression reproduces
 the original guard fault and completes the retimed approach; actual actuator
 stiction, encoder noise and load response still need a hardware trial.
+The 2026-10-28 hardware trial showed that speed retiming alone did not solve the
+tool-2 approach: wrist pitch repeatedly crossed the former 2.0 A software limit
+at 2.02..2.33 A, target relaxation accumulated, and execution stopped at a
+0.151844-rad following error. Preserving the final pickup TCP while keeping the
+wrist substantially above -1.51 rad was not feasible within the calibrated
+joint bounds, so the reviewed path is retained. The wrist-pitch software limit
+is 2.5 A with a 1.8 A release threshold, providing measured no-load travel
+headroom without changing shoulder/elbow limits. The mode manager also consumes
+`/arm/rmd_diagnostics`: any active current protection during `tool_auto` aborts
+the path directly to HOLD instead of allowing repeated retreat/retry cycles.
+RMD transport runs each actuator at 5 ms (200 Hz), twice the 100 Hz controller
+rate. Each actuator cycle uses two request/response transactions; the previous
+2-ms setting produced about 6000 CAN frames/s across three motors and left
+little 1-Mbps bus headroom. The 5-ms setting reduces that steady traffic by
+about 60 percent, uses a 50-ms receive timeout and polls status1 every 500 ms.
+Impossible position jumps remain latched faults. Lifecycle stop/shutdown calls
+catch CAN exceptions so a disconnected bus during Ctrl+C cannot escape through
+the hardware plugin and terminate `ros2_control_node` with `std::terminate`.
 The `after_path` block is commented out, so ID 4 does not close
 and the arm does not return in this test. The commented block connects the
 existing sequence: stop at original point 1, close independent Dynamixel ID 4
