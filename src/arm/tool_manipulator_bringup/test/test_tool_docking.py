@@ -79,6 +79,8 @@ def node(tmp_path):
         command_status_sequence=None,
         expected_docked=None, actuation_deadline=None,
         last_joy_time=1., deadman_timeout=.3, deadman_held=True,
+        last_l2_value=-1., l2_axis=2, l2_threshold=-.5,
+        l2_release_started=None,
         motion_enabled=True, last_preview_report=-math.inf,
         camera_reason='CameraInfo not received',
         tag_received=0, tag_accepted=0, tag_reason='no tag messages received',
@@ -428,6 +430,26 @@ def test_released_deadman_blocks_alignment(tmp_path):
     n.deadman_held = False
     with pytest.raises(RuntimeError, match='deadman'):
         ToolDockingCoordinator.guard(n, 1.)
+
+
+def test_one_bad_l2_sample_recovers_but_sustained_release_cancels(tmp_path):
+    from sensor_msgs.msg import Joy
+    n = node(tmp_path)
+    with patch.object(ToolTrajectoryJoy, 'on_joy'):
+        with patch('tool_docking_coordinator.time.monotonic', return_value=1.0):
+            n.on_joy(Joy(axes=[0., 0., -1.]))
+        with patch('tool_docking_coordinator.time.monotonic', return_value=1.01):
+            n.on_joy(Joy(axes=[0., 0., 0.]))
+        n.check_deadman(1.03)
+        with patch('tool_docking_coordinator.time.monotonic', return_value=1.035):
+            n.on_joy(Joy(axes=[0., 0., -1.]))
+        assert n.l2_release_started is None
+        with patch('tool_docking_coordinator.time.monotonic', return_value=1.07):
+            n.on_joy(Joy(axes=[0., 0., 0.]))
+        n.check_deadman(1.09)
+        with pytest.raises(RuntimeError, match='release_age=0.050s') as error:
+            n.check_deadman(1.12)
+    assert 'axes[2]=0.0' in str(error.value)
 
 
 @pytest.mark.parametrize('stale', [False, True])

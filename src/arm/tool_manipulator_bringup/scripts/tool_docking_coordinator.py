@@ -71,6 +71,8 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         self.last_base_tag = None
         self.last_joy_time = -math.inf
         self.deadman_held = False
+        self.last_l2_value = None
+        self.l2_release_started = None
         self.last_preview_report = -math.inf
         self.tcp_camera = None
         self.advance_locked = False
@@ -93,11 +95,18 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             self.camera_reason))
 
     def on_joy(self, msg: Joy):
-        self.last_joy_time = time.monotonic()
+        now = time.monotonic()
+        self.last_joy_time = now
+        self.last_l2_value = (msg.axes[self.l2_axis]
+                              if len(msg.axes) > self.l2_axis else None)
         self.deadman_held = (
-            len(msg.axes) > self.l2_axis
-            and math.isfinite(msg.axes[self.l2_axis])
-            and msg.axes[self.l2_axis] < self.l2_threshold)
+            self.last_l2_value is not None
+            and math.isfinite(self.last_l2_value)
+            and self.last_l2_value < self.l2_threshold)
+        if self.deadman_held:
+            self.l2_release_started = None
+        elif self.l2_release_started is None:
+            self.l2_release_started = now
         super().on_joy(msg)
 
     def on_ui_request(self, msg, path_id, desired_docked):
@@ -292,14 +301,22 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         if not self.cfg.get('require_l2_hold', True):
             return
         age = now-self.last_joy_time
-        detail = f'stage={self.stage}, joy_age={age:.3f}s'
+        detail = (f'stage={self.stage}, joy_age={age:.3f}s, '
+                  f'axes[{self.l2_axis}]={self.last_l2_value}, '
+                  f'pressed_below={self.l2_threshold}')
         if self.stage == 'checking':
             detail += f', checked={self.request_index}/{len(self.requests)}'
         if age >= self.deadman_timeout:
             raise RuntimeError(
                 f'docking joystick stream stale ({detail}, limit={self.deadman_timeout:.3f}s)')
         if not self.deadman_held:
-            raise RuntimeError(f'docking deadman L2 released ({detail}); hold L2 through checking and motion')
+            release_started = self.l2_release_started
+            if release_started is None or now-release_started >= .04:
+                release_age = ('unknown' if release_started is None
+                               else f'{now-release_started:.3f}s')
+                raise RuntimeError(
+                    f'docking deadman L2 released ({detail}, release_age={release_age}); '
+                    'hold L2 through checking and motion')
 
     def guard(self, now):
         self.check_deadman(now)
