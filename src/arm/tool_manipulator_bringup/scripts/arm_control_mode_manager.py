@@ -214,7 +214,8 @@ class ControlModeManager(Node):
                     accepted = self.core.cancel_path(data['epoch'], data['execution_id'], time.monotonic())
                 elif 'ee_target_rad' in data:
                     accepted = self.core.close_ee(data['epoch'], data['execution_id'],
-                                                  data['ee_target_rad'], time.monotonic())
+                                                  data['ee_target_rad'], time.monotonic(),
+                                                  speed=data.get('ee_speed_rad_s', .12))
                 else:
                     accepted = self.core.path(data['epoch'], data['execution_id'], data['waypoints'],
                                               time.monotonic(), durations=data.get('durations'),

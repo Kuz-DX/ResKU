@@ -1,0 +1,23 @@
+# Opt-in only. null fields are measurements, not guessed motor commands.
+enabled: false
+person_topic: /arm/person/detections
+person_camera_info_topic: /arm/camera/color/camera_info
+floor_frame: world  # user confirmed world z=0 placement, 115 mm above actual ground
+person_ground_frame: ground  # actual foot-contact plane, distinct from placement plane
+close_rad: null
+open_rad: null
+ee_speed_rad_s: null  # upper bound, reduced near the target; maximum 0.12
+placement_mode: chassis_edge
+chassis_frame: chassis  # box dimensions read from the active robot_description
+edge_clearance_m: 0.0  # requested vehicle edge; no invented outward offset
+tcp_to_object_bottom_m: null  # [x,y,z] in tcp_link for the held object
+place_orientation_xyzw: null  # TCP orientation in floor frame when bearing is +X
+preplace_height_m: 0.10
+person_clearance_m: 0.70
+min_confidence: 0.80
+max_detection_age_s: 0.25
+stable_samples: 5
+stable_angle_rad: 0.03
+acquire_timeout_s: 10.0
+sequence_timeout_s: 900.0
+linear_speed_m_s: 0.005

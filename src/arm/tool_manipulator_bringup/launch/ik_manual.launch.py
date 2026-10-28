@@ -64,15 +64,23 @@ def bringup(context):
                    parameters=[base.description, {'hardware_config': base.hardware_file,
                                                   'tcp_ready_yaml': str(ready_config)}], output='screen')
         docking = LaunchConfiguration('enable_tool_docking').perform(context) == 'true'
+        pick_place = LaunchConfiguration('enable_tool2_pick_place').perform(context) == 'true'
+        if pick_place and not docking:
+            raise ValueError('tool2 pick/place requires the managed docking coordinator')
         docking_parameters = ({
             'docking_config': LaunchConfiguration('docking_config').perform(context),
             'docking_camera_frame': LaunchConfiguration('docking_camera_frame').perform(context),
             'docking_motion_enabled': (
                 LaunchConfiguration('enable_docking_motion').perform(context) == 'true'),
         } if docking else {})
+        if pick_place:
+            docking_parameters.update(
+                pick_place_config=LaunchConfiguration('tool2_pick_place_config').perform(context),
+                pick_place_ready_yaml=str(ready_config))
+        tool_script = ('tool2_pick_place_coordinator.py' if pick_place else
+                       'tool_docking_coordinator.py' if docking else 'tool_trajectory_joy.py')
         tool_paths = Node(executable=sys.executable,
-                          arguments=[str(scripts/('tool_docking_coordinator.py' if docking
-                                                  else 'tool_trajectory_joy.py'))],
+                          arguments=[str(scripts/tool_script)],
                           parameters=[base.description, {'hardware_config': base.hardware_file,
                                                         'trajectory_dir': str(trajectory_dir),
                                                         'shoulder_isolation_enabled': True,
@@ -113,9 +121,11 @@ def generate_launch_description():
         DeclareLaunchArgument('launch_joy', default_value='false', choices=['true', 'false']),
         DeclareLaunchArgument('mock_initial_positions_file', default_value=''),
         DeclareLaunchArgument('launch_tcp_joy', default_value='true', choices=['true', 'false']),
-        # One L2 + square request owns the taught approach and its docking tail.
+        # One L2 + circle request owns the taught approach and its docking tail.
         # Enabling the producer does not submit a path at launch time.
         DeclareLaunchArgument('enable_tool_docking', default_value='true', choices=['true', 'false']),
+        DeclareLaunchArgument('enable_tool2_pick_place', default_value='false', choices=['true', 'false']),
+        DeclareLaunchArgument('tool2_pick_place_config', default_value=str(hardware_default.parent/'tool2_pick_place.yaml')),
         DeclareLaunchArgument('enable_docking_motion', default_value='true', choices=['true', 'false']),
         DeclareLaunchArgument('docking_config', default_value=str(hardware_default.parent/'tool_docking.yaml')),
         DeclareLaunchArgument('docking_camera_frame', default_value='arm_camera_color_optical_frame'),

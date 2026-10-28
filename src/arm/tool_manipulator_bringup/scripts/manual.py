@@ -207,7 +207,7 @@ class Manual(ManualController):
         super().on_joy(message)
         l2 = len(message.axes) > 2 and message.axes[2] < -.5
         # Same Linux PlayStation mapping as ik_manual: triangle=tool0,
-        # square=tool1, X=tool2. Managed mode delegates all three to its producer.
+        # circle=tool1, X=tool2. Managed mode delegates all three to its producer.
         from tool_trajectory_joy import requested_path
         request, combos = requested_path(message.axes, message.buttons, self.path_combos)
         self.path_combos = combos
@@ -221,16 +221,44 @@ class Manual(ManualController):
         if l2:
             self.previous_stop_pose = bool(message.buttons[3])
             return
+        if not self.local_tool_paths:
+            # TcpJoy owns HOME in the mode-managed stack.
+            return
         pressed = self.button('stop_pose_button')
+        if pressed and not self.previous_stop_pose and self.stop_pose_active:
+            self.stop_pose_active = False
+            self.neutral_required = True
+            self.previous_stop_pose = True
+            return
         if (pressed and not self.previous_stop_pose and self.controller_ready and
                 self.focus == 'arm' and not self.neutral_required and
                 not self.hardware_fault and not self.fault and
                 not getattr(self, 'startup_recovering', False)):
-            goal = np.array(STOP_POSE_RAD)
+            home = getattr(self, 'startup_goal', None)
+            if home is None:
+                self.get_logger().error('HOME rejected: startup pose unavailable')
+                self.previous_stop_pose = pressed
+                return
+            home = np.asarray(home, dtype=float).copy()
+            home[[0, 4, 5]] = 0.
+            config = Path(__file__).resolve().parents[1]/'config/tcp_ready.yaml'
+            try:
+                if not config.is_file():
+                    from ament_index_python.packages import get_package_share_directory
+                    config = Path(get_package_share_directory('tool_manipulator_bringup'))/'config/tcp_ready.yaml'
+                ready = np.asarray(yaml.safe_load(config.read_text())['tcp_ready']['positions_rad'], dtype=float)
+            except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as exc:
+                self.get_logger().error(f'HOME rejected: TCP ready configuration unavailable: {exc}')
+                self.previous_stop_pose = pressed
+                return
             margin = self.params['limit_margin_rad']
-            if np.any(goal < self.lower+margin) or np.any(goal > self.upper-margin):
-                self.get_logger().error('Stop_pose rejected: requested joint angles outside manual limits')
+            if any(goal.shape != (6,) or not np.isfinite(goal).all() or
+                   np.any(goal < self.lower+margin) or np.any(goal > self.upper-margin)
+                   for goal in (ready, home)):
+                self.get_logger().error('HOME rejected: requested joint angles outside manual limits')
             else:
+                self.home_goals = [ready, home]
+                self.home_stage = 0
                 self.stop_pose_active = True
         self.previous_stop_pose = pressed
 
@@ -295,17 +323,21 @@ class Manual(ManualController):
 
     def run_stop_pose(self, dt):
         """Ramp to the exact pose with existing speed and feedback lead limits."""
-        goal = np.array(STOP_POSE_RAD)
+        goal = self.home_goals[self.home_stage]
         candidate = self.target + np.clip(goal-self.target, -self.speeds*dt, self.speeds*dt)
         allowed = np.abs(candidate-self.measured()) <= self.params['max_target_lead_rad']
         candidate = np.where(allowed, candidate, self.target)
-        self.status = 'aligning Stop_pose'
+        self.status = 'HOME: moving to '+('TCP ready' if self.home_stage == 0 else 'startup home')
         self.apply_motion(candidate, 0., 'stop_pose', dt, goal=goal)
         if (np.allclose(self.target, goal, atol=1e-9, rtol=0.) and
                 np.max(np.abs(self.measured()-goal)) <= .005):
-            self.stop_pose_active = False
-            self.neutral_required = True
-            self.status = 'Stop_pose reached'
+            if self.home_stage == 0:
+                self.home_stage = 1
+                self.status = 'TCP ready reached; returning to startup home'
+            else:
+                self.stop_pose_active = False
+                self.neutral_required = True
+                self.status = 'startup home reached'
 
     def neutral(self):
         return (all(self.axis(n) == 0. for n in

@@ -56,7 +56,7 @@ ros2 launch src/arm/tool_manipulator_bringup/launch/ik_manual.launch.py
 기본 `ros2 launch tool_manipulator_bringup ik_manual.launch.py`는
 `enable_tool_docking:=true`, `enable_docking_motion:=true`,
 `docking_camera_frame:=arm_camera_color_optical_frame`로 실행한다.
-L2+네모를 한 번 누르면 툴 1 접근 경로 → 정지 상태의 태그 확인 → 상대 30 mm 전진 → HOLD가
+L2+동그라미를 한 번 누르면 툴 1 접근 경로 → 정지 상태의 태그 확인 → 상대 30 mm 전진 → HOLD가
 한 시퀀스로 이어진다. launch 자체는 툴 경로를 시작하지 않는다. 카메라와 AprilTag
 검출기는 별도로 실행한다. `enable_tool_docking:=false`를 명시하면
 `tool_trajectory_joy.py`로 경로만 재생한다. 도킹을 켜면

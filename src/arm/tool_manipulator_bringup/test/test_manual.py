@@ -57,7 +57,7 @@ def tick(node):
     node.on_timer()
 
 
-@pytest.mark.parametrize('button,path_id', [(2, 0), (3, 1), (0, 2)])
+@pytest.mark.parametrize('button,path_id', [(2, 0), (1, 1), (0, 2)])
 def test_all_tool_buttons_dispatch_once_and_managed_never_dispatches_locally(button, path_id):
     from managed_manual import ManagedManual
     node = harness()
@@ -679,21 +679,28 @@ def test_one_rmd_lead_budget_cannot_freeze_the_other_two():
     assert node.rmd_lead_blocked_joints == ['shoulder_joint']
 
 
-def test_square_ramps_exact_stop_pose_without_ik_and_stops_on_timeout():
+def test_square_visits_ready_then_zeroed_startup_home_and_stops_on_timeout():
     node = harness()
+    node.startup_goal = np.array([.2, .3, .4, -.5, .6, .7])
+    expected = node.startup_goal.copy()
+    expected[[0, 4, 5]] = 0.
     node.chain.pose_and_jacobian = Mock(side_effect=AssertionError('pose uses joint space'))
     node.button = lambda name: bool(node.joy.buttons[node.params[name]])
     node.previous_focus = False
     node.on_joy(Joy(axes=[0.]*8, buttons=[0, 0, 0, 1]+[0]*7))
     assert node.stop_pose_active
+    reached_ready = False
     for _ in range(2000):
         before = node.target.copy()
         tick(node)
         assert np.all(np.abs(node.target-before) <= node.speeds*.02+1e-12)
         node.positions = dict(zip(JOINTS, node.target))
+        if node.home_stage == 1:
+            reached_ready = True
         if not node.stop_pose_active:
             break
-    np.testing.assert_allclose(node.target, STOP_POSE_RAD, atol=1e-12)
+    assert reached_ready
+    np.testing.assert_allclose(node.target, expected, atol=1e-12)
     assert node.neutral_required
     node = harness()
     node.stop_pose_active = True
@@ -702,17 +709,29 @@ def test_square_ramps_exact_stop_pose_without_ik_and_stops_on_timeout():
     assert not node.stop_pose_active
 
 
-def test_square_accepts_stop_pose_within_real_hardware_limits():
+def test_square_accepts_recovered_home_within_real_hardware_limits():
     node = storage_pose_harness()
     node.startup_recovering = False
     node.button = lambda name: bool(node.joy.buttons[node.params[name]])
     node.previous_focus = False
     node.on_joy(Joy(axes=[0.]*8, buttons=[0, 0, 0, 1]+[0]*7))
     assert node.stop_pose_active
-    assert STOP_POSE_RAD[1] == pytest.approx(np.deg2rad(85.))
-    assert STOP_POSE_RAD[2] == pytest.approx(np.deg2rad(87.))
-    assert STOP_POSE_RAD[3] == pytest.approx(np.deg2rad(-89.))
+    np.testing.assert_array_equal(node.home_goals[1][1:4], node.startup_goal[1:4])
+    np.testing.assert_array_equal(node.home_goals[1][[0, 4, 5]], 0.)
     node.get_logger().error.assert_not_called()
+
+
+def test_square_cancels_home_on_second_press():
+    node = storage_pose_harness()
+    node.startup_recovering = False
+    node.button = lambda name: bool(node.joy.buttons[node.params[name]])
+    node.previous_focus = False
+    press = Joy(axes=[0.]*8, buttons=[0, 0, 0, 1]+[0]*7)
+    node.on_joy(press)
+    assert node.stop_pose_active
+    node.on_joy(Joy(axes=[0.]*8, buttons=[0]*11))
+    node.on_joy(press)
+    assert not node.stop_pose_active and node.neutral_required
 
 
 @pytest.mark.parametrize('sign', [-1., 1.])

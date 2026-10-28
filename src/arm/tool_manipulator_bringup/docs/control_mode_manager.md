@@ -1,5 +1,53 @@
 # Arm Control Mode Manager
 
+## Tool 2 pick/place continuation (opt-in, calibration pending)
+
+The `enable_tool2_pick_place` launch option replaces the path/docking producer
+with `tool2_pick_place_coordinator.py`, not a second competing motor publisher.
+It retains tool 0/1 behavior and adds the following tool-2 stages:
+captured approach -> gripper close -> full reverse captured path -> exact
+TCP ready -> stable person observation -> base-only alignment -> planned
+preplace transit -> fixed-orientation straight descent -> gripper open -> HOLD.
+Home/focus changes and cancellation invalidate ownership; failures stop without
+an automatic release or retreat. Standalone `manual.launch.py` remains local
+path playback and does not run this autonomous continuation.
+
+Responsibilities are separated into `tool2_sequence.py` (ordered stages and
+configuration), `person_place_geometry.py` (vision/placement geometry), and
+`tool2_pick_place_coordinator.py` (ROS feedback and validated motion requests).
+The existing mode manager still controls all motors. `ee_actuator` is the
+drive-gear mesh link; actual gripper motion uses `ee_joint`. Its new optional
+`ee_speed_rad_s` command is capped at 0.12 rad/s and slows near the goal.
+Angle completion does not prove that an object was grasped; physical grasp
+confirmation and the carried object's collision geometry still need validation.
+
+The user explicitly selected **world z=0**, which is 115 mm above physical
+ground in the current URDF. Person foot projection uses `ground` separately.
+Placement is on the chassis footprint boundary along the ray from the arm base
+toward the person, not at the person's feet. The active robot_description box
+dimensions and chassis TF define this boundary (default 780 x 500 mm; forward
+world X edge +390 mm). No extra outward clearance is assumed. Vehicle-edge
+contact clearance must be reviewed with the held object's size.
+
+The world-plane target describes the object bottom. The TCP target subtracts
+the rotated, measured `tcp_to_object_bottom_m` offset. A calibrated placement
+orientation is also required; moving tcp_link itself to z=0 is not substituted.
+YOLO provides only 2D boxes. The estimator uses the bottom-centre foot ray,
+CameraInfo and timestamped TF, assumes visible feet on level ground, and rejects
+clipped/multiple persons. It requires stable distinct observations, keeps the
+placement target fixed after acquisition, and stops placement when observations
+become stale, invalid or too close. This is an estimate, not depth measurement
+or a safety-rated human detector. A proper environment/payload collision scene
+and motor-free simulation are needed before live use.
+
+`config/tool2_pick_place.yaml` is disabled by default. Measured close/open angles,
+gripper speed, held-object offset and placement orientation are deliberately
+unset; turning on the launch option before completing calibration fails startup.
+After configuration and simulation review, use `enable_tool2_pick_place:=true`
+with `ik_manual.launch.py`; one L2+X request then selects the full continuation.
+Robot startup alone never initiates this sequence. ROS packages were not built
+as part of this change.
+
 `ik_manual.launch.py` starts the mode-managed IK/manual stack, initially in
 HOLD, using real hardware and an externally published `/joy` topic by default.
 It does not modify the legacy manual launch.

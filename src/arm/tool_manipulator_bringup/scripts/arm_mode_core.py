@@ -314,13 +314,15 @@ class ModeCore:
             return
         self.ee_position, self.ee_velocity, self.ee_state_time = position, velocity, now
 
-    def close_ee(self, epoch, execution_id, target, now):
+    def close_ee(self, epoch, execution_id, target, now, speed=.12):
         """Execute a collision-checked gripper goal under tool_auto ownership."""
         if (self.mode != 'tool_auto' or epoch != self.epoch or self.transitioning or
                 self.focus != 'arm' or not self.ready or not self.fresh(now)):
             return False
         if self.execution_id is not None:
             raise ValueError('execution already active; cancel first')
+        if type(speed) not in (int, float) or not math.isfinite(speed) or not 0 < speed <= .12:
+            raise ValueError('ee speed must be in (0, 0.12] rad/s')
         if (not isinstance(execution_id, str) or not execution_id or
                 type(target) not in (int, float) or not math.isfinite(target) or
                 not -2.351592547829 <= target <= 2.839398438376):
@@ -331,6 +333,7 @@ class ModeCore:
             raise ValueError('arm must be stopped before ee motion')
         self.target = self.goal = list(self.position)
         self.execution_id, self.ee_goal = execution_id, float(target)
+        self.ee_speed = float(speed)
         self.started = self.ee_progress_time = now
         self.ee_best_error = abs(target-self.ee_position)
         self.settled = 0
@@ -363,7 +366,7 @@ class ModeCore:
             else:
                 self.settled = 0
                 if abs(error) > .01:
-                    self.ee = max(-.12, min(.12, error))
+                    self.ee = max(-self.ee_speed, min(self.ee_speed, error))
         return list(self.target)
 
     def invalidate(self):

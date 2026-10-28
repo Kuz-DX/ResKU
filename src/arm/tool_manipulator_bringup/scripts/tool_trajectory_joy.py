@@ -793,6 +793,8 @@ class ToolTrajectoryJoy(Node):
                 if 'ee_target_rad' in self.path:
                     self.execution_timeout = 65.
                     command['ee_target_rad'] = self.path['ee_target_rad']
+                    if 'ee_speed_rad_s' in self.path:
+                        command['ee_speed_rad_s'] = self.path['ee_speed_rad_s']
                 else:
                     self.execution_timeout = execution_timeout(
                         self.path, [self.full_state[j] for j in ARM_JOINTS],
