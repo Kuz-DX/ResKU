@@ -11,6 +11,10 @@ TCP_ENTRY_TOLERANCE = (.02, .001, .001, .001, .02, .02)
 # MX-106(2.0): one Goal Velocity count is 0.229 rpm (0.0239691227 rad/s).
 # Tool-specific commanded speeds remain separate from this manual safety ceiling.
 MANUAL_EE_MAX_VELOCITY_RAD_S = 400 * 0.0239691227
+# A stopped DXL can settle several encoder counts off the zero command
+# (observed base residual: 0.00767 rad). Keep this below the 0.02-rad
+# TCP snapshot tolerance; the command must still finish its ramp to zero.
+DXL_ENTRY_ALIGNMENT_TOLERANCE = .01
 
 
 def non_arm_feedback_changed(current, snapshot, arm_joints):
@@ -262,7 +266,7 @@ class ModeCore:
         self.goal = list(self.target)
         self.reason = 'aligning DXL base/roll/yaw to zero'
         if (max(abs(self.target[i]) for i in indexes) <= 1e-9 and
-                max(abs(self.position[i]) for i in indexes) <= .005 and
+                max(abs(self.position[i]) for i in indexes) <= DXL_ENTRY_ALIGNMENT_TOLERANCE and
                 max(map(abs, self.velocity)) <= .02 and
                 self.entry_stable_since is not None and
                 now-self.entry_stable_since >= .2):
@@ -453,6 +457,10 @@ class ModeCore:
             raise ValueError('incomplete startup recovery requires inspection and restart')
         if not self.ready or not self.fresh(now) or max(map(abs, self.velocity)) > .02:
             raise ValueError('healthy controllers and stopped fresh feedback required')
+        self.entry_alignment_started = None
+        self.entry_alignment_deadline = None
+        self.entry_stable_since = None
+        self.entry_anchor = None
         self.mode = 'hold'
         self.request('hold', now)
 

@@ -154,6 +154,53 @@ def test_first_arm_focus_aligns_dxl_before_managed_mode_entry():
     assert c.tick(now+.02, .02) == c.target  # no return to the pre-alignment goal
 
 
+@pytest.mark.parametrize('base, completes', [(-.00766990393963507, True), (-.012, False)])
+def test_dxl_entry_stopped_residual_is_bounded(base, completes):
+    c = ModeCore([(-2., 2.)]*6, [.12]*6)
+    c.entry_alignment_enabled = True
+    c.entry_alignment_complete = False
+    c.ready, c.focus = True, 'arm'
+    measured = [base, .4, -.3, -.5, .0030679615755646594, -.001533980787678857]
+    for step in range(1, 801):
+        now = step*.02
+        c.feedback(measured, [0.]*6, now)
+        c.tick(now, .02)
+        if c.entry_alignment_complete or c.mode == 'fault':
+            break
+    assert c.entry_alignment_complete == completes
+    if completes:
+        assert c.mode == 'hold'
+        assert [c.target[i] for i in (0, 4, 5)] == [0.]*3
+    else:
+        assert c.mode == 'fault'
+        assert 'alignment timed out' in c.reason
+
+
+def test_reset_expired_alignment_starts_new_attempt_from_feedback():
+    c = ModeCore([(-2., 2.)]*6, [.12]*6)
+    c.entry_alignment_enabled = True
+    c.entry_alignment_complete = False
+    c.ready, c.focus = True, 'arm'
+    c.feedback([.03, 0., 0., 0., 0., 0.], [0.]*6, 1.)
+    c.tick(1., .02)
+    old_deadline = c.entry_alignment_deadline
+    now = old_deadline + 1.
+    c.feedback([.03, 0., 0., 0., 0., 0.], [0.]*6, now)
+    c.tick(now, .02)
+    assert c.mode == 'fault'
+    c.reset(now)
+    assert c.entry_alignment_deadline is None
+    assert c.entry_stable_since is None
+    for step in range(1, 101):
+        stamp = now+step*.02
+        c.feedback(list(c.target), [0.]*6, stamp)
+        c.tick(stamp, .02)
+        assert c.mode != 'fault'
+        if c.entry_alignment_complete:
+            break
+    assert c.entry_alignment_complete
+
+
 def test_managed_dxl_entry_aligns_beyond_old_start_limit():
     c = ModeCore([(-2., 2.)]*6, [.12]*6)
     c.entry_alignment_enabled = True

@@ -241,7 +241,13 @@ nonsingular pose near manual home. An explicit `mock_initial_positions_file`
 overrides it. Real hardware continues to start from measured feedback.
 With `launch_tcp_joy:=true`, an Options drive-to-arm edge first aligns the DXL
 axes in HOLD. Alignment waits for position convergence and 0.20 seconds of
-stopped feedback. `tcp_joy` alone requests TCP_IK after a fresh entry assessment;
+stopped feedback. The DXL command must reach zero; measured base/roll/yaw must
+each be within 0.01 rad of zero, allowing the observed 0.00767-rad stopped base
+residual. Larger residuals still time out. An accepted `/arm/reset_fault` clears
+the old alignment deadline and stability history so an incomplete alignment can
+retry from measured feedback when arm focus is active. Reset can therefore
+restart the DXL zero ramp; it does not bypass hardware faults or stopped-feedback
+requirements. `tcp_joy` alone requests TCP_IK after a fresh entry assessment;
 the manager does not race it with a separate focus-triggered request.
 If the recovery pose lacks TCP
 entry margin, `tcp_joy` collision-checks the configured `tcp_ready` joint line,
