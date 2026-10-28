@@ -71,7 +71,8 @@ joints:
     - -1.497
     - 1.542
     velocity_limit_rad_s: 0.3
-    current_limit_a: 3.0
+    # User-requested elbow X6-60 limit; retain release and retreat protection.
+    current_limit_a: 5.0
     current_release_threshold_a: 2.2
     current_retreat_velocity_rad_s: 0.1
     current_max_retreat_distance_rad: 0.052
