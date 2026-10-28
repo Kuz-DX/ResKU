@@ -48,13 +48,62 @@ def test_home_stops_active_path_then_visits_ready_then_startup_home():
     node.status.update(mode='hold', transitioning=False)
     node.drive_ready(10.1)
     assert node.ready_state == 'idle'
+    def settle():
+        node.measured = node.ready_goal.copy()
+        node.status['velocities_rad_s'] = [0.]*6
+        for stamp in (10.2, 10.8):
+            node.status_time = node.state_time = stamp
+            node.drive_ready(stamp)
     finish_leg(node, 'ready-leg')
-    assert node.ready_state == 'idle'  # next leg gets fresh collision checks
+    assert node.ready_state == 'home_settle'
+    settle()
+    assert node.home_leg == 'rotate'
+    finish_leg(node, 'rotate-leg')
+    settle()
+    assert node.ready_state == 'idle'
     assert node.returning_home and node.home_leg == 'home'
     np.testing.assert_array_equal(node.ready_goal, home)
     finish_leg(node, 'home-leg')
+    settle()
     assert not node.returning_home and not node.auto_entry_armed
     assert node.status['mode'] == 'hold'
+
+
+def test_home_preparation_holds_current_base_instead_of_rotating_to_ready():
+    node = workflow()
+    node.measured[0] = 3.1
+    node.request_named_pose(True, 10.)
+    node.status.update(mode='hold', transitioning=False)
+    node.drive_ready(10.1)
+    assert node.home_leg == 'prepare'
+    assert node.ready_goal[0] == 3.1
+    np.testing.assert_array_equal(node.ready_goal[1:], node.default_ready_goal[1:])
+
+
+def test_home_rotation_cancels_when_shoulder_droops():
+    node = workflow()
+    node.request_named_pose(True, 10.)
+    node.home_leg = 'rotate'
+    node.ready_state = 'executing'
+    node.measured[1] = -.011
+    node.cancel.reset_mock()
+    node.drive_ready(10.1)
+    node.cancel.call_async.assert_called_once()
+    assert node.ready_state == 'failed'
+    assert not node.auto_entry_armed
+
+
+def test_home_never_rotates_without_stopped_feedback():
+    node = workflow()
+    node.request_named_pose(True, 10.)
+    finish_leg(node, 'prepare')
+    node.status['velocities_rad_s'] = [0., -.02, 0., 0., 0., 0.]
+    for stamp in (10.2, 11., 16.):
+        node.status_time = node.state_time = stamp
+        node.drive_ready(stamp)
+    assert node.home_leg == 'prepare'
+    assert node.ready_state == 'failed'
+    assert 'did not settle' in node.reason
 
 
 def test_missing_home_and_fault_do_not_command_motion():

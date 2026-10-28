@@ -34,7 +34,8 @@ class TcpMotionWorkflow:
             # Home retains recovered RMD joints; the three Dynamixels align
             # to joint zero regardless of their pose at process startup.
             self.home_goal[[0, 4, 5]] = 0.
-        self.home_leg = 'ready'
+        self.home_leg = 'prepare' if home else 'ready'
+        self.home_settle_since = None
         self.explicit_ready = True
         self.named_one_shot = True
         self.ready_goal = (self.default_ready_goal.copy() if goal is None
@@ -108,8 +109,55 @@ class TcpMotionWorkflow:
                 if response is None or not response.success:
                     self._fail_ready('HOLD rejected before named pose')
                 elif s.get('mode') == 'hold' and not s.get('transitioning'):
+                    if self.returning_home:
+                        if self.measured is None or now-self.state_time >= .3:
+                            return
+                        # Fold toward the reviewed ready posture without yawing
+                        # the base through the circuit box during the lift.
+                        self.ready_goal[0] = self.measured[0]
+                        self.home_base_anchor = float(self.measured[0])
                     self.ready_state = 'idle'
             return
+        if vars(self).get('returning_home', False):
+            velocities = np.asarray(s.get('velocities_rad_s', []), dtype=float)
+            fresh = now-self.status_time < .3 and now-self.state_time < .3
+            if self.home_leg == 'rotate':
+                drift = (self.measured is None or not fresh or
+                         not np.isfinite(self.measured).all() or
+                         np.max(np.abs(self.measured[1:]-self.ready_goal[1:])) > .01)
+                if drift:
+                    if self.cancel.service_is_ready():
+                        self.cancel.call_async(Trigger.Request())
+                    self._fail_ready('HOME rotation stopped: arm posture drift or stale feedback')
+                    return
+            if self.ready_state == 'home_settle':
+                settled = (fresh and self.measured is not None and
+                           np.isfinite(self.measured).all() and
+                           np.max(np.abs(self.measured-self.ready_goal)) <= .01 and
+                           velocities.shape == (6,) and np.isfinite(velocities).all() and
+                           np.max(np.abs(velocities)) <= .01)
+                if now-self.ready_started > 5.:
+                    self._fail_ready('HOME posture did not settle; base rotation blocked')
+                    return
+                if not settled:
+                    self.home_settle_since = None
+                    return
+                if self.home_settle_since is None:
+                    self.home_settle_since = now
+                if now-self.home_settle_since < .5:
+                    return
+                self._reset_ready()
+                if self.home_leg == 'prepare':
+                    self.home_leg = 'rotate'
+                    self.ready_goal[0] = self.home_goal[0]
+                elif self.home_leg == 'rotate':
+                    self.home_leg = 'home'
+                    self.ready_goal = self.home_goal.copy()
+                else:
+                    self.returning_home = self.explicit_ready = self.auto_entry_armed = False
+                    self.ready_goal = self.default_ready_goal.copy()
+                self.reason = 'HOME stage: '+self.home_leg
+                return
         deadline = vars(self).get('entry_deadline')
         if (self.ready_state in ('await_entry', 'request_tcp')
                 and deadline is not None and now >= deadline):
@@ -252,17 +300,10 @@ class TcpMotionWorkflow:
                 self.entry_retry_count = 0
                 self.reason = 'TCP ready reached; verifying entry'
                 if vars(self).get('returning_home', False):
-                    self._reset_ready()
-                    if self.home_leg == 'ready':
-                        self.home_leg = 'home'
-                        self.ready_goal = self.home_goal.copy()
-                        self.reason = 'TCP ready reached; validating startup home leg'
-                    else:
-                        self.returning_home = False
-                        self.explicit_ready = False
-                        self.ready_goal = self.default_ready_goal.copy()
-                        self.auto_entry_armed = False
-                        self.reason = 'startup home reached; remain HOLD'
+                    self.ready_state = 'home_settle'
+                    self.ready_started = now
+                    self.home_settle_since = None
+                    self.reason = 'HOME '+self.home_leg+' reached; verifying stopped feedback'
                 else:
                     self.explicit_ready = False
             elif s.get('mode') == 'fault' or (s.get('last_execution_id') == self.ready_execution_id

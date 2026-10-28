@@ -23,6 +23,14 @@ per press (L2 path selection still takes priority). The manager's hardware,
 controller and stopped-feedback checks remain authoritative. Success returns
 to HOLD without requesting HOME; release L1 and press it again to resume.
 Outside FAULT, square retains its existing HOME/Stop_pose behavior.
+HOME now checks and executes three separate legs: ready posture with the
+measured base angle held, base-only rotation to home, then startup home posture.
+Each endpoint must be within 0.01 rad with all measured speeds at most
+0.01 rad/s for 0.5 s (5 s settling deadline). Every leg gets a fresh MoveIt
+collision check. During rotation, non-base drift above 0.01 rad or stale
+feedback cancels HOME. This software guard does not establish physical
+circuit-box clearance; the collision model and loaded settling require
+supervised verification before reuse. Current limits are unchanged.
 The current joints are first projected into the required 0.10-rad margin. If
 that pose has scaled Jacobian condition above 20, the search moves only as far
 as needed along the corridor toward the reviewed TCP-ready pose. The candidate
