@@ -8,6 +8,9 @@ MODES = ('manual', 'tcp_ik', 'tool_auto', 'hold', 'fault')
 # the tighter RMD bound, but accept only a small 0.02-rad DXL neighborhood around
 # the collision-checked snapshot so entry cannot retry forever on quantization.
 TCP_ENTRY_TOLERANCE = (.02, .001, .001, .001, .02, .02)
+# MX-106(2.0): one Goal Velocity count is 0.229 rpm (0.0239691227 rad/s).
+# Tool-specific commanded speeds remain separate from this manual safety ceiling.
+MANUAL_EE_MAX_VELOCITY_RAD_S = 400 * 0.0239691227
 
 
 def non_arm_feedback_changed(current, snapshot, arm_joints):
@@ -458,7 +461,8 @@ class ModeCore:
                 epoch != self.epoch or self.transitioning or not self.ready or
                 self.focus != 'arm' or not self.fresh(now)):
             return False
-        if not self.valid(positions) or not math.isfinite(ee) or abs(ee) > .12:
+        ee_speed_limit = MANUAL_EE_MAX_VELOCITY_RAD_S if source == 'manual' else .12
+        if not self.valid(positions) or not math.isfinite(ee) or abs(ee) > ee_speed_limit:
             raise ValueError('invalid command or limits exceeded')
         if max(abs(a-b) for a, b in zip(positions, self.position)) > .10:
             raise ValueError('streaming target exceeds 0.10 rad feedback lead')

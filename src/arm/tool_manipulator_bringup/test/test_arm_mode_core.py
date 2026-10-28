@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts'))
-from arm_mode_core import ModeCore
+from arm_mode_core import MANUAL_EE_MAX_VELOCITY_RAD_S, ModeCore
 
 
 def ready(mode='manual'):
@@ -25,6 +25,23 @@ def test_only_owner_and_current_epoch_can_command():
     assert not c.command('manual', 'old', [.05]*6, 0., .1)
     assert c.command('manual', c.epoch, [.05]*6, .1, .1)
     assert max(c.tick(.12, .02)) <= .12*.02
+
+
+def test_manual_ee_accepts_decimal_400_but_rejects_higher_speed():
+    c = ready()
+    assert c.command('manual', c.epoch, [0.]*6, MANUAL_EE_MAX_VELOCITY_RAD_S, .1)
+    assert c.ee == pytest.approx(MANUAL_EE_MAX_VELOCITY_RAD_S)
+    assert c.command('manual', c.epoch, [0.]*6, -MANUAL_EE_MAX_VELOCITY_RAD_S, .12)
+    assert c.ee == pytest.approx(-MANUAL_EE_MAX_VELOCITY_RAD_S)
+    with pytest.raises(ValueError, match='limits exceeded'):
+        c.command('manual', c.epoch, [0.]*6, 401 * 0.0239691227, .14)
+
+
+def test_tcp_ee_keeps_012_speed_limit():
+    c = ready('tcp_ik')
+    assert c.command('tcp_ik', c.epoch, [0.]*6, .12, .1)
+    with pytest.raises(ValueError, match='limits exceeded'):
+        c.command('tcp_ik', c.epoch, [0.]*6, .121, .12)
 
 
 def test_managed_ee_reaches_feedback_goal_then_holds_arm():

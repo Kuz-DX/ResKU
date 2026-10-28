@@ -8,6 +8,7 @@ Position targets go directly to a dedicated ForwardCommandController.
 from __future__ import annotations
 
 import math
+import time
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
@@ -199,6 +200,8 @@ class ManualController(Node):
         self.chain = None
         self.positions, self.state_times = {}, {}
         self.target, self.joy, self.joy_time = None, None, None
+        self._ee_drive_started_at = None
+        self._ee_drive_velocity = 0.
         self.focus, self.previous_focus, self.fault = 'drive', False, False
         self.last_direction_warning = -math.inf
         self.last_time = self.now_seconds()
@@ -282,7 +285,22 @@ class ManualController(Node):
             self.publisher.publish(Float64MultiArray(data=self.target.tolist()))
 
     def publish_ee_velocity(self, velocity):
-        self.ee_velocity_publisher.publish(Float64MultiArray(data=[float(velocity)]))
+        velocity = float(velocity)
+        self._record_ee_drive(velocity)
+        self.ee_velocity_publisher.publish(Float64MultiArray(data=[velocity]))
+
+    def _record_ee_drive(self, velocity):
+        started_at = getattr(self, '_ee_drive_started_at', None)
+        if velocity != 0.:
+            if started_at is None:
+                self._ee_drive_started_at = time.monotonic()
+                self._ee_drive_velocity = velocity
+        elif started_at is not None:
+            duration = time.monotonic() - started_at
+            self.get_logger().info(
+                f'ID4 velocity={self._ee_drive_velocity:+.6f} rad/s duration={duration:.3f} s')
+            self._ee_drive_started_at = None
+            self._ee_drive_velocity = 0.
 
     def ee_velocity(self):
         """O must remain held; the configured axis sets signed EE speed."""

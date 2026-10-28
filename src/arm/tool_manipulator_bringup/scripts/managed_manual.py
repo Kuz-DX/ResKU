@@ -64,6 +64,7 @@ class ManagedManual(Manual):
     def hold(self):
         if (self.controller_ready and self.target is not None and self.manager_epoch
                 and time.monotonic()-self.manager_time < .3):
+            self._record_ee_drive(self.pending_ee)
             self.input_pub.publish(String(data=json.dumps(dict(
                 epoch=self.manager_epoch, positions=self.target.tolist(),
                 ee_velocity=self.pending_ee, fault=bool(self.fault or self.hardware_fault)))))
