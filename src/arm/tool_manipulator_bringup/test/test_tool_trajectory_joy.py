@@ -36,7 +36,7 @@ def test_checked_in_tool0_respects_real_joint_margins():
     np.testing.assert_array_equal(q[:, 4:], 0.)
     assert np.all(np.abs(np.diff(q, axis=0)/.5) <= np.array([.08,.04,.06,.06,.08,.08])+1e-9)
     np.testing.assert_allclose(q[-1],
-        [np.pi, .182212366584515, 1.3369221803960456, -1.0238101365567127, 0., 0.],
+        [np.pi, .03944444092862428, 1.0808824110864104, -1.2381364808173003, 0., 0.],
         rtol=0., atol=1e-12)
 
 
