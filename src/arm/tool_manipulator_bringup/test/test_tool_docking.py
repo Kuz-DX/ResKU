@@ -20,10 +20,42 @@ from tool_docking_coordinator import ToolDockingCoordinator
 from tool_trajectory_joy import ToolTrajectoryJoy, ARM_JOINTS
 
 
+def test_tcp_offset_uses_user_axes_and_preserves_tcp_orientation():
+    from tool_docking_core import tcp_offset_target
+    mapping = [[0, -1, 0], [-1, 0, 0], [0, 0, -1]]
+    tag = transform([.1, .2, .3], [0., 0., 0., 1.])
+    rotation = transform([0., 0., 0.], [0., 0., 1., 0.])[:3, :3]
+    target = tcp_offset_target(tag, [-.05, 0., .07], rotation, mapping)
+    np.testing.assert_allclose(target[:3, 3], [.1, .25, .23])
+    np.testing.assert_array_equal(target[:3, :3], rotation)
+    with pytest.raises(ValueError):
+        tcp_offset_target(tag, [-.05, 0., .07], rotation, np.zeros((3, 3)))
+
+
+def test_position_mode_requires_measured_size_but_not_actuator_timeout(tmp_path):
+    data = yaml.safe_load((ROOT/'config/tool_docking.yaml').read_text())
+    raw = data['tools'][0]
+    raw['enabled'] = True
+    path = tmp_path/'position.yaml'
+    path.write_text(yaml.safe_dump(data))
+    with pytest.raises(ValueError, match='tag_size_m'):
+        load_settings(path)
+    raw['tag_size_m'] = .02
+    path.write_text(yaml.safe_dump(data))
+    cfg = load_settings(path)[0]
+    assert cfg['alignment_mode'] == 'tag_tcp_position'
+    assert cfg['stages'][-1]['xyz_m'] == [-.05, 0., .07]
+    raw['actuation_enabled'] = True
+    path.write_text(yaml.safe_dump(data))
+    with pytest.raises(ValueError, match='without actuation'):
+        load_settings(path)
+
+
 def settings(tmp_path):
     data = yaml.safe_load((ROOT/'config/tool_docking.yaml').read_text())
     raw = data['tools'][0]
-    raw.update(enabled=True, tag_id=7, tag_size_m=.04, actuation_timeout_s=5.)
+    raw.update(enabled=True, tag_id=7, tag_size_m=.04, actuation_timeout_s=5.,
+               alignment_mode='tag_tcp_stages')
     for stage in raw['stages']:
         stage.update(xyz_m=[0., 0., 0.], xyzw=[0., 0., 0., 1.])
     path = tmp_path/'docking.yaml'

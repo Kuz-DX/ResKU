@@ -25,6 +25,21 @@ def pose_errors(current, target):
             float(np.linalg.norm(cv2.Rodrigues(target[:3, :3] @ current[:3, :3].T)[0])))
 
 
+def tcp_offset_target(base_tag, xyz, reference_rotation, tag_from_user):
+    """TCP position in explicit user axes; preserve approach TCP orientation."""
+    mapping = np.asarray(tag_from_user, dtype=float)
+    offset = np.asarray(xyz, dtype=float)
+    if (mapping.shape != (3, 3) or not np.isfinite(mapping).all() or
+            not np.allclose(mapping.T @ mapping, np.eye(3), atol=1e-8) or
+            not np.isclose(np.linalg.det(mapping), 1.) or
+            offset.shape != (3,) or not np.isfinite(offset).all()):
+        raise ValueError('invalid tag offset coordinate mapping')
+    target = np.eye(4)
+    target[:3, :3] = reference_rotation
+    target[:3, 3] = base_tag[:3, 3]+base_tag[:3, :3] @ mapping @ offset
+    return target
+
+
 def direction_angle(first, second):
     first, second = np.asarray(first, dtype=float), np.asarray(second, dtype=float)
     if (first.shape != (3,) or second.shape != (3,)
@@ -159,7 +174,7 @@ def load_settings(filename):
         if type(item.setdefault('require_l2_hold', True)) is not bool:
             raise ValueError('require_l2_hold must be a boolean')
         mode = item.setdefault('alignment_mode', 'tag_tcp_stages')
-        if mode not in ('tag_tcp_stages', 'camera_normal_advance'):
+        if mode not in ('tag_tcp_stages', 'tag_tcp_position', 'camera_normal_advance'):
             raise ValueError('unknown docking alignment_mode')
         if 'tag_family' in item and (not isinstance(item['tag_family'], str)
                                      or not item['tag_family'].strip()):
@@ -179,9 +194,9 @@ def load_settings(filename):
                       linear_speed_m_s=(0, .02), angular_speed_rad_s=(0, .1),
                       stopped_speed_rad_s=(0, .02), joint_tolerance_rad=(0, .02),
                       acquire_timeout_s=(0, 30), sequence_timeout_s=(0, 600))
-        if mode == 'tag_tcp_stages':
+        if mode == 'tag_tcp_stages' and item.get('actuation_enabled'):
             limits['actuation_timeout_s'] = (0, 120)
-        else:
+        elif mode == 'camera_normal_advance':
             limits['advance_distance_m'] = (0, .10)
         for name, (low, high) in limits.items():
             value = item.get(name)
@@ -192,6 +207,17 @@ def load_settings(filename):
             raise ValueError('stable_samples must be 3..100 distinct observations')
         if type(item.get('actuation_enabled')) is not bool:
             raise ValueError('explicit actuation_enabled required')
+        if mode == 'tag_tcp_position':
+            if item['actuation_enabled']:
+                raise ValueError('TCP position docking must finish in HOLD without actuation')
+            stages = item.get('stages')
+            if not isinstance(stages, list) or len(stages) != 3:
+                raise ValueError('three TCP position stages required')
+            for stage in stages:
+                tcp_offset_target(np.eye(4), stage['xyz_m'], np.eye(3),
+                                  item.get('tag_from_user_axes'))
+            result[tool_id] = item
+            continue
         if mode == 'camera_normal_advance':
             if item['actuation_enabled']:
                 raise ValueError('camera-normal advance ends in HOLD; actuation must be disabled')

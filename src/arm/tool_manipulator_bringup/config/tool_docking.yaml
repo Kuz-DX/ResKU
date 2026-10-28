@@ -6,19 +6,26 @@
 # Never substitute camera pixel centre or raw camera depth for a calibrated 6D pose.
 tools:
   0:
+    # Keep disabled until physical tag size/frame mapping and a within-margin
+    # approach endpoint have been verified; the supplied elbow=1.542 has no margin.
     enabled: false
-    tag_id: null                   # physical tag ID; not necessarily path ID
+    alignment_mode: tag_tcp_position
+    tag_family: tag36h11
+    tag_id: 0
     tag_size_m: null               # measured black square edge length
+    # PnP corners 0=bottom-left, 1=bottom-right, 2=top-right, 3=top-left:
+    # user +X up, +Y left, +Z out; confirm against live frame before enabling.
+    tag_from_user_axes: [[0, -1, 0], [-1, 0, 0], [0, 0, -1]]
     actuation_enabled: false
     desired_docked: true           # true=attach pulse, false=release pulse
     actuation_timeout_s: null      # establish with actual Arduino firmware
     stages:
-      - {name: coarse, xyz_m: null, xyzw: null}
-      - {name: fine, xyz_m: null, xyzw: null}
+      - {name: coarse, xyz_m: [-0.050, 0.0, 0.090]}
+      - {name: fine, xyz_m: [-0.050, 0.0, 0.080]}
       # Tool TCP target, not camera centre. User-defined tag axes:
       # +X up, +Y left, +Z out of the tag toward the camera.
       # Confirm detector-frame mapping and orientation before enabling motion.
-      - {name: dock, xyz_m: [-0.050, 0.0, 0.070], xyzw: null}
+      - {name: dock, xyz_m: [-0.050, 0.0, 0.070]}
     # Conservative starting limits, NOT measured docking accuracy guarantees.
     tag_max_age_s: 0.25
     min_decision_margin: 40.0

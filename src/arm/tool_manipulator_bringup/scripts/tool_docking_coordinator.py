@@ -20,7 +20,7 @@ from tf2_ros import Buffer, TransformException, TransformListener
 from tool_trajectory_joy import ToolTrajectoryJoy, ARM_JOINTS
 from tool_docking_core import (load_settings, transform, pose_errors, bounded_target,
                                tag_pose, tag_normal_from_camera_side,
-                               direction_angle, interpolate_direction)
+                               direction_angle, interpolate_direction, tcp_offset_target)
 
 
 class ToolDockingCoordinator(ToolTrajectoryJoy):
@@ -186,6 +186,7 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                 and path_id in self.settings):
             self.active = True
             self.cfg = self.settings[path_id]
+            self.tcp_reference_rotation = None
             self.docking_started = None
             self.path_id = path_id
             continuation = ('stopped tag confirmation and fixed advance'
@@ -421,6 +422,17 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         if camera_mode:
             tag_normal, tag_distance = self.camera_advance_direction(base_tag, current)
             aligned = True  # Tool 1 uses the taught endpoint; no visual correction.
+        elif self.cfg.get('alignment_mode') == 'tag_tcp_position':
+            if getattr(self, 'tcp_reference_rotation', None) is None:
+                if np.max(np.abs(self.velocity)) > self.cfg['stopped_speed_rad_s']:
+                    self.stable = 0
+                    return
+                self.tcp_reference_rotation = current[:3, :3].copy()
+            target = tcp_offset_target(base_tag, self.cfg['stages'][self.dock_stage]['xyz_m'],
+                                       self.tcp_reference_rotation, self.cfg['tag_from_user_axes'])
+            distance, angle = pose_errors(current, target)
+            aligned = (distance <= self.cfg['position_tolerance_m']
+                       and angle <= self.cfg['angle_tolerance_rad'])
         else:
             target = base_tag @ self.cfg['targets'][self.dock_stage]
             distance, angle = pose_errors(current, target)
