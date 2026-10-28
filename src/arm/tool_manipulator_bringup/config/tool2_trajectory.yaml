@@ -1,4 +1,4 @@
-# Tool2 path from the user-provided capture, retaining valid original points 4..7.
+# Tool2 return path from the user-provided capture: original point 7 -> point 4.
 # Original points 1, 2, 3, 8 and 9 were excluded because they violate the
 # configured 0.02-rad joint margin. Capture pauses are not playback durations.
 execution_enabled: true
@@ -11,19 +11,19 @@ joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_
 #   ee_close_rad: 1.251728
 #   return_to_start: true
 points:
-  # Original point 4, captured at 22.443115 s.
-  - time_from_start_sec: 0.0
-    positions_rad: [-1.0676506283686131, 0.8117526058077906, 1.4707889020660776, -1.1695451690456555,
-      0.03834951969693412, -0.12118448224275902]
-  # Original point 5, captured at 25.107319 s.
-  - time_from_start_sec: 1.0
-    positions_rad: [-0.5752427954573225, 0.7483971353182689, 1.4728833451053704, -1.1688470213658912,
-      0.04755340442424805, -0.12118448224275902]
-  # Original point 6, captured at 28.563273 s.
-  - time_from_start_sec: 2.0
-    positions_rad: [-0.14112623248568612, 0.7759733694577123, 1.5145967035753904, -1.17041775377682,
-      0.04755340442424805, -0.12118448224275902]
   # Original point 7, captured at 30.654926 s.
-  - time_from_start_sec: 3.0
+  - time_from_start_sec: 0.0
     positions_rad: [-0.13805827090991496, 1.0372491797865522, 1.5102333804454047, -1.302364602617014,
       0.04908738521213385, -0.12118448224275902]
+  # Original point 6, captured at 28.563273 s.
+  - time_from_start_sec: 1.0
+    positions_rad: [-0.14112623248568612, 0.7759733694577123, 1.5145967035753904, -1.17041775377682,
+      0.04755340442424805, -0.12118448224275902]
+  # Original point 5, captured at 25.107319 s.
+  - time_from_start_sec: 2.0
+    positions_rad: [-0.5752427954573225, 0.7483971353182689, 1.4728833451053704, -1.1688470213658912,
+      0.04755340442424805, -0.12118448224275902]
+  # Original point 4, captured at 22.443115 s.
+  - time_from_start_sec: 3.0
+    positions_rad: [-1.0676506283686131, 0.8117526058077906, 1.4707889020660776, -1.1695451690456555,
+      0.03834951969693412, -0.12118448224275902]

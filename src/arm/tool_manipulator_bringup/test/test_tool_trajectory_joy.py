@@ -123,10 +123,10 @@ def test_tool2_filtered_capture_runs_within_joint_margin():
     assert data['timing_mode'] == 'joint_limits'
     assert 'after_path' not in data
     points = np.asarray([point['positions_rad'] for point in data['points']])
-    # Only user-provided original points 4..7 remain after margin filtering.
+    # Return path reverses the retained original points: 7 -> 4.
     np.testing.assert_array_equal(points[:, 0], [
-        -1.0676506283686131, -0.5752427954573225,
-        -0.14112623248568612, -0.13805827090991496])
+        -0.13805827090991496, -0.14112623248568612,
+        -0.5752427954573225, -1.0676506283686131])
     assert all(model.within_limits(q, .02) for q in points)
     loaded = load_path(path, model)
     np.testing.assert_array_equal([loaded['start'], *loaded['waypoints']], points)
