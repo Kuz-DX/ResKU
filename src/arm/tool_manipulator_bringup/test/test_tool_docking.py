@@ -106,7 +106,7 @@ def test_shipped_config_only_enables_tool1_camera_alignment_and_relative_advance
     assert cfg[1]['tag_family'] == 'tag36h11'
     assert cfg[1]['tag_id'] == 1
     assert not cfg[1]['actuation_enabled']
-    assert cfg[1]['require_l2_hold'] is False
+    assert cfg[1]['require_l2_hold'] is True
     assert 'targets' not in cfg[1]
 
 

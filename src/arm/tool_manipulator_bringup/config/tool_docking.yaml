@@ -65,8 +65,10 @@ tools:
     # No FK endpoint from tool1_trajectory.yaml is read or used.
     # Tag loss during confirmation cancels; after the direction is locked the
     # checked advance may finish without tag visibility. Feedback remains mandatory.
-    # One tool-1 request starts the path and its automatic docking continuation.
-    require_l2_hold: false
+    # Keep the operator deadman held for the taught approach and the unchecked
+    # physical-contact risk of the final tag-normal advance.  Releasing L2 or
+    # losing the Joy heartbeat cancels the sequence and leaves the arm in HOLD.
+    require_l2_hold: true
     alignment_mode: camera_normal_advance
     tag_family: tag36h11
     tag_id: 1

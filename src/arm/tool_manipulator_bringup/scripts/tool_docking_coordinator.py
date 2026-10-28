@@ -265,9 +265,9 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         return stamp, base_tag
 
     def check_deadman(self, now):
-        # Tool 1 is a single requested sequence, including its docking tail.
-        # The trigger authorizes the sequence; subsequent Joy messages are not
-        # its heartbeat. Feedback, ownership and explicit cancel still guard it.
+        # A configuration may explicitly authorize an automatic continuation.
+        # Otherwise Joy is a live operator heartbeat throughout path checking,
+        # execution, tag confirmation and docking motion.
         if not self.cfg.get('require_l2_hold', True):
             return
         age = now-self.last_joy_time
