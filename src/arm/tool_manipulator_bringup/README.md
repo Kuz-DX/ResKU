@@ -97,8 +97,8 @@ L2 + 경로 선택 → 기존 관절 경로 검증/재생 → 실제 완료 및 
 - 실제 `tag_id`, 검은 정사각형의 실측 `tag_size_m`.
 - `stages`의 coarse/fine/dock 각각 `xyz_m`와 `xyzw`.
   이는 `T_tag_tcp`이며 카메라 좌표나 base 좌표가 아니다. quaternion 순서는 x/y/z/w.
-- Arduino와 확인한 `actuation_timeout_s`. 최초 정렬 검증은
-  `actuation_enabled: false`로 수행한다.
+- Arduino 응답 제한 시간 `actuation_timeout_s`. 값이 `null`이면 공통
+  `docking_feedback_timeout_sec`를 사용한다. 실제 응답 시간은 실기에서 확인한다.
 - `desired_docked: true`는 체결, `false`는 해지 경로다.
 - 기구에 맞는 위치/각도/속도 허용값과 보정 범위. 제공된 값은 실기 검증값이 아니다.
 
@@ -145,9 +145,9 @@ ros2 topic echo /arm/tool_trajectory/status
 도킹 노드는 전용 취소 서비스와 기존 `/arm/cancel`에 의한 모드/epoch 변경을 감시한다.
 도킹 노드 종료 시 launch도 종료한다. 프로세스 강제 종료/통신 단절에서 Arduino의 동작을
 정지시키는 자체 watchdog은 펌웨어에 필요하다. 성공 시에도 자동 후퇴하지 않고 HOLD를 유지한다.
-툴 1은 `require_l2_hold: false`로 설정되어 한 번 요청하면 저장 경로부터 태그 확인·전진까지
-자동으로 이어진다. 시작 후 L2 해제나 `/joy` 수신 중단으로 취소되지 않는다.
-다른 도킹 설정은 기본값 `require_l2_hold: true`일 때 L2를 계속 눌러야 하며,
+툴 0·1은 `require_l2_hold: true`이며 저장 경로부터 태그 확인·전진·Arduino 응답까지
+L2를 계속 눌러야 한다.
+도킹 설정에서 `require_l2_hold: true`일 때
 L2 해제 또는 `/joy` 0.3초 이상 수신 중단 시 취소한다.
 `actuation_enabled: true`인 경로는 시작 시점부터 `/arm/docking` subscriber와
 `/arm/docked` publisher가
@@ -196,14 +196,14 @@ ros2 launch src/arm/tool_manipulator_bringup/launch/ik_manual.launch.py \
   enable_tool_docking:=true \
   enable_docking_motion:=true \
   docking_camera_frame:=arm_camera_color_optical_frame \
-  launch_docking_bridge:=false
+  launch_docking_bridge:=true
 ```
 
-기존 툴 1 선택 조합(L2 + ROS `buttons[3]`)으로 한 번 요청한다. 이후 L2를 놓아도
-툴 1 경로가 완료되면 별도 입력 없이 태그 확인과 전진까지 이어진다.
-현재 별도의 UI docking/release 요청은 기존 체결 흐름을 사용하므로 이 테스트에는 사용하지 않는다.
+툴 1 선택 조합(L2 + ROS `buttons[1]`)으로 한 번 요청하고 Arduino 응답까지 L2를 유지한다.
+툴 1 경로가 완료되면 별도 입력 없이 태그 확인, 전진, `/arm/docking=true` 발행이 이어진다.
 `tag confirmed at stopped tool-1 endpoint; planning fixed 30.0 mm ...`가 방향 고정 시점이고,
-`tag-normal advance 30.0 mm completed; HOLD; no actuation`가 최종 완료 로그다.
+`actuating`은 Arduino 명령 발행, `docked`는 새 Arduino 상태 응답을 받은 시점이다.
+운용자는 카메라로 실제 도킹 상태를 확인한다.
 이 동작은 오프라인 계약 테스트로 검증했으며 하드웨어 동작·카메라 외부 보정·실제 간섭은
 실기 확인 전이다.
 

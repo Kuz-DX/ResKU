@@ -15,9 +15,9 @@ tools:
     # PnP corners 0=bottom-left, 1=bottom-right, 2=top-right, 3=top-left:
     # user +X up, +Y left, +Z out; confirm against live frame before enabling.
     tag_from_user_axes: [[0, -1, 0], [-1, 0, 0], [0, 0, -1]]
-    actuation_enabled: false
+    actuation_enabled: true
     desired_docked: true           # true=attach pulse, false=release pulse
-    actuation_timeout_s: null      # establish with actual Arduino firmware
+    actuation_timeout_s: null      # use docking_feedback_timeout_sec until measured
     stages:
       - {name: coarse, xyz_m: [-0.050, 0.0, 0.090]}
       - {name: fine, xyz_m: [-0.050, 0.0, 0.080]}
@@ -74,7 +74,9 @@ tools:
     tag_id: 1
     tag_size_m: 0.020             # measured outer black square, excluding white margin
     advance_distance_m: 0.030
-    actuation_enabled: false     # finish in HOLD, no attach/release command
+    actuation_enabled: true      # command Arduino only after checked 30 mm advance
+    desired_docked: true
+    actuation_timeout_s: null    # use docking_feedback_timeout_sec until measured
     tag_max_age_s: 0.25
     min_decision_margin: 40.0
     max_reprojection_px: 1.5

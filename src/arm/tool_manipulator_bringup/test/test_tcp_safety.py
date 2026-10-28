@@ -140,6 +140,24 @@ def test_success_after_general_failure_resets_counter_after_collision_only():
     np.testing.assert_allclose(n.stepper.q, .001)
 
 
+@pytest.mark.parametrize('ee_drift, accepted', [(.005, True), (.025, False)])
+def test_ee_encoder_hunting_uses_shared_non_arm_tolerance(ee_drift, accepted):
+    n = node()
+    n.full_state['ee_joint'] = ee_drift
+    future = Mock()
+    future.done.return_value = True
+    future.result.return_value = SimpleNamespace(valid=True)
+    n.pending = dict(q=np.full(6, .001), pose=np.eye(4), measured=np.zeros(6),
+                     full_state={**n.full_state, 'ee_joint': 0.},
+                     started=10., epoch='e', futures=[future])
+    tick(n)
+    assert n.pending is None
+    assert (n.failures == 0) == accepted
+    assert (n.metrics.counts['accepted_commands'] == 1) == accepted
+    if not accepted:
+        assert n.reason == 'non-arm feedback changed during collision check'
+
+
 def test_mutating_solver_cannot_modify_accepted_seed_or_pose():
     s = stepper()
     before_q, before_pose = s.q.copy(), s.pose.copy()

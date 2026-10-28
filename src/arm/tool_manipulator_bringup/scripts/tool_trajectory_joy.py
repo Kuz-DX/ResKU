@@ -842,7 +842,8 @@ class ToolTrajectoryJoy(Node):
                     raise RuntimeError('feedback became stale during path execution')
                 if s.get('last_execution_id') == self.execution_id:
                     if s.get('last_execution_result') != 'succeeded':
-                        raise RuntimeError('managed tool path aborted: '+s.get('reason', 'unknown'))
+                        raise RuntimeError('managed tool path aborted: '
+                                           +(s.get('last_execution_reason') or s.get('reason') or 'unknown'))
                     if s.get('mode') == 'hold' and not s.get('transitioning'):
                         self.path_completed()
                         return

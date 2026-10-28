@@ -32,7 +32,7 @@ def test_tcp_offset_uses_user_axes_and_preserves_tcp_orientation():
         tcp_offset_target(tag, [-.05, 0., .07], rotation, np.zeros((3, 3)))
 
 
-def test_position_mode_requires_measured_size_but_not_actuator_timeout(tmp_path):
+def test_position_mode_requires_measured_size_and_accepts_actuation_with_default_timeout(tmp_path):
     data = yaml.safe_load((ROOT/'config/tool_docking.yaml').read_text())
     raw = data['tools'][0]
     raw['enabled'] = True
@@ -48,8 +48,8 @@ def test_position_mode_requires_measured_size_but_not_actuator_timeout(tmp_path)
     assert cfg['stages'][-1]['xyz_m'] == [-.05, 0., .07]
     raw['actuation_enabled'] = True
     path.write_text(yaml.safe_dump(data))
-    with pytest.raises(ValueError, match='without actuation'):
-        load_settings(path)
+    assert load_settings(path)[0]['actuation_enabled'] is True
+    assert load_settings(path)[0]['actuation_timeout_s'] is None
 
 
 def settings(tmp_path):
@@ -68,6 +68,8 @@ def node(tmp_path):
     cfg = settings(tmp_path)
     result = SimpleNamespace(
         cfg=cfg, active=True, path_id=0, stage='dock_observe', dock_stage=0,
+        status={'mode': 'hold', 'transitioning': False, 'epoch': 'hold'},
+        actuation_timeout=10.,
         full_state=dict.fromkeys(ARM_JOINTS, 0.), velocity=np.zeros(6),
         feedback_sequence=1, observed_feedback=-1, observed_image=-1,
         observe_after_ns=0, stable=0, lock_goal=None, docked_state=None,
@@ -78,7 +80,8 @@ def node(tmp_path):
         camera_reason='CameraInfo not received',
         tag_received=0, tag_accepted=0, tag_reason='no tag messages received',
         model=Mock(), report=Mock(), reset=Mock(), begin=Mock(), fail=Mock(),
-        docking_command=Mock(), get_clock=Mock(), margin=.02,
+        docking_command=Mock(), count_publishers=Mock(return_value=1),
+        get_clock=Mock(), margin=.02,
         observation=(1, 0., np.eye(4)))
     result.get_clock.return_value.now.return_value.nanoseconds = 0
     result.model.fk.return_value = np.eye(4)
@@ -96,7 +99,7 @@ def sample(n):
     ToolDockingCoordinator.observe(n, 1.)
 
 
-def test_shipped_config_only_enables_tool1_camera_alignment_and_relative_advance():
+def test_shipped_config_enables_tool0_and_tool1_auto_actuation_after_alignment():
     cfg = load_settings(ROOT/'config/tool_docking.yaml')
     assert set(cfg) == {0, 1}
     assert cfg[0]['tag_size_m'] == .020
@@ -105,7 +108,8 @@ def test_shipped_config_only_enables_tool1_camera_alignment_and_relative_advance
     assert cfg[1]['advance_distance_m'] == .030
     assert cfg[1]['tag_family'] == 'tag36h11'
     assert cfg[1]['tag_id'] == 1
-    assert not cfg[1]['actuation_enabled']
+    assert cfg[0]['actuation_enabled'] and cfg[1]['actuation_enabled']
+    assert cfg[0]['desired_docked'] and cfg[1]['desired_docked']
     assert cfg[1]['require_l2_hold'] is True
     assert 'targets' not in cfg[1]
 
@@ -219,10 +223,50 @@ def test_release_uses_explicit_false_command_and_waits_for_false(tmp_path):
 
 def test_docking_only_never_sends_lock(tmp_path):
     n = node(tmp_path)
+    n.cfg['actuation_enabled'] = False
     for _ in range(n.cfg['stable_samples']*3):
         sample(n)
     n.reset.assert_called_once()
     n.docking_command.publish.assert_not_called()
+    assert n.report.call_args.args[0] == 'completed'
+    assert 'no latch actuation' in n.report.call_args.args[1]
+
+
+def test_tool0_auto_actuation_waits_for_fresh_arduino_state_without_live_tag(tmp_path):
+    from tool_docking_core import tcp_offset_target
+    n = node(tmp_path)
+    n.cfg = load_settings(ROOT/'config/tool_docking.yaml')[0]
+    n.actuation_timeout = 10.
+    n.tcp_reference_rotation = None
+    n.model.fk.side_effect = lambda _: tcp_offset_target(
+        np.eye(4), n.cfg['stages'][n.dock_stage]['xyz_m'], np.eye(3),
+        n.cfg['tag_from_user_axes'])
+    for _ in range(n.cfg['stable_samples']*3):
+        sample(n)
+    assert n.stage == 'dock_actuate'
+    assert n.hold_epoch == 'hold'
+    assert n.docking_command.publish.call_count == 1
+    assert n.docking_command.publish.call_args.args[0].data is True
+    n.observation = None  # Camera may lose the tag while Arduino finishes.
+    n.check_actuation(2.)
+    n.reset.assert_not_called()
+    n.docked_state, n.docked_feedback_sequence = True, 1
+    n.check_actuation(2.1)
+    n.reset.assert_called_once()
+
+
+def test_tool1_auto_actuation_starts_only_after_verified_advance_endpoint(tmp_path):
+    n = camera_node(tmp_path)
+    n.advance_locked = True
+    n.advance_local_axis = n.advance_direction = np.array([0., 0., 1.])
+    n.advance_target = transform([0., 0., .030], [0., 0., 0., 1.])
+    n.model.fk.return_value = n.advance_target.copy()
+    n.status['epoch'] = 'after-advance'
+    n.path_completed()
+    assert n.stage == 'dock_actuate' and n.hold_epoch == 'after-advance'
+    assert n.docking_command.publish.call_count == 1
+    assert n.docking_command.publish.call_args.args[0].data is True
+    n.reset.assert_not_called()
 
 
 @pytest.mark.parametrize('speed', [.011, .1])
@@ -916,6 +960,7 @@ def test_operator_can_cancel_automatic_tool1(tmp_path):
 @pytest.mark.parametrize('endpoint_error', [0., .004])
 def test_advance_completion_checks_fk_endpoint_without_actuation(tmp_path, endpoint_error):
     n = camera_node(tmp_path)
+    n.cfg['actuation_enabled'] = False
     n.advance_locked = True
     n.advance_local_axis = n.advance_direction = np.array([0., 0., 1.])
     n.advance_target = transform([0., 0., .030], [0., 0., 0., 1.])
@@ -936,6 +981,7 @@ def test_advance_completion_checks_fk_endpoint_without_actuation(tmp_path, endpo
 def test_advance_completion_allows_axial_rotation_but_rejects_wrong_tilt(tmp_path):
     for rotation, passes in (([0., 0., 1.2], True), ([.1, 0., 0.], False)):
         n = camera_node(tmp_path)
+        n.cfg['actuation_enabled'] = False
         n.advance_locked = True
         n.advance_local_axis = n.advance_direction = np.array([0., 0., 1.])
         n.advance_target = np.eye(4)

@@ -538,9 +538,8 @@ class TcpJoy(TcpMotionWorkflow, Node):
                                           (': '+detail if detail else ''))
                             elif np.max(np.abs(self.measured-p['measured'])) > .01:
                                 self.fail('feedback changed during collision check')
-                            elif (self.full_state.keys() != p['full_state'].keys() or
-                                  any(abs(v-p['full_state'][j]) > .001
-                                      for j, v in self.full_state.items() if j not in ARM_JOINTS)):
+                            elif non_arm_feedback_changed(
+                                    self.full_state, p['full_state'], ARM_JOINTS):
                                 self.fail('non-arm feedback changed during collision check')
                             elif np.max(np.abs(p['q']-self.measured)) > self.stepper.lead:
                                 self.safety_stop('feedback lead exceeded', fault=False)

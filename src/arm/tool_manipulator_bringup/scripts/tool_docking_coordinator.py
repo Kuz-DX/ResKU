@@ -237,9 +237,12 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                     or angle > self.cfg['angle_tolerance_rad']
                     or np.max(np.abs(self.velocity)) > self.cfg['stopped_speed_rad_s']):
                 raise RuntimeError('advance endpoint feedback outside tolerance; remain HOLD')
-            self.report('completed', 'tag-normal advance %.1f mm completed; HOLD; no actuation' %
-                        (self.cfg['advance_distance_m']*1000.))
-            self.reset()
+            if self.cfg['actuation_enabled']:
+                self.start_actuation(q, time.monotonic())
+            else:
+                self.report('completed', 'tag-normal advance %.1f mm completed; HOLD; no actuation' %
+                            (self.cfg['advance_distance_m']*1000.))
+                self.reset()
             return
         if self.docking_started is None:
             # Do not let a noisy pose observed during approach permanently
@@ -303,6 +306,9 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             if self.active and self.docking_started is not None:
                 now = time.monotonic()
                 self.guard(now)
+                if self.stage == 'dock_actuate':
+                    self.check_actuation(now)
+                    return
                 if self.stage == 'dock_acquire':
                     if now-self.docking_started > self.cfg['acquire_timeout_s']:
                         raise RuntimeError('target tag acquisition timed out: '+self.tag_diagnostic())
@@ -319,7 +325,7 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                 if self.stage == 'dock_advance_plan':
                     self.plan_advance_step()
                     return
-                if self.stage in ('dock_observe', 'dock_actuate'):
+                if self.stage == 'dock_observe':
                     self.observe(now)
                     return
             super().tick()
@@ -416,6 +422,9 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             self.begin(self.path_id, self.advance_plan)
 
     def observe(self, now):
+        if self.stage == 'dock_actuate':
+            self.check_actuation(now)
+            return
         stamp, base_tag = self.fresh_observation(now)
         q = np.asarray([self.full_state[j] for j in ARM_JOINTS])
         current = self.model.fk(q)
@@ -440,18 +449,6 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             aligned = (distance <= self.cfg['position_tolerance_m']
                        and angle <= self.cfg['angle_tolerance_rad'])
         stopped = np.max(np.abs(self.velocity)) <= self.cfg['stopped_speed_rad_s']
-        if self.stage == 'dock_actuate':
-            if (not stopped or not aligned
-                    or np.max(np.abs(q-self.lock_goal)) > self.cfg['joint_tolerance_rad']):
-                raise RuntimeError('arm departed measured docking pose during Arduino actuation')
-            if now >= self.actuation_deadline:
-                raise RuntimeError('Arduino docking completion timeout')
-            if (self.docked_feedback_sequence > self.command_feedback_sequence
-                    and self.docked_state == self.expected_docked):
-                state = 'docked' if self.expected_docked else 'released'
-                self.report(state, f'Arduino {state} state confirmed; remain HOLD')
-                self.reset()
-            return
         if (stamp <= self.observe_after_ns or stamp == self.observed_image
                 or self.feedback_sequence == self.observed_feedback):
             return
@@ -485,19 +482,11 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                 self.report('aligning', f'confirmed alignment; advance to stage {self.dock_stage}')
                 return
             if not self.cfg['actuation_enabled']:
-                self.report('docked', 'visual docking settled; Arduino actuation disabled; remain HOLD')
+                self.report('completed',
+                            'visual alignment target reached; no latch actuation or physical docking confirmation; remain HOLD')
                 self.reset()
                 return
-            if self.docking_command.get_subscription_count() == 0:
-                raise RuntimeError('Arduino command subscriber unavailable')
-            self.lock_goal = q.copy()
-            self.expected_docked = self.cfg['desired_docked']
-            self.command_feedback_sequence = self.docked_feedback_sequence
-            self.actuation_deadline = now+self.cfg['actuation_timeout_s']
-            self.send_docking_pulse(self.expected_docked)
-            self.stage = 'dock_actuate'
-            action = 'dock' if self.expected_docked else 'release'
-            self.report('actuating', f'Arduino {action} pulse sent; waiting for /arm/docked')
+            self.start_actuation(q, now)
             return
         if camera_mode:
             return
@@ -515,6 +504,35 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                        travel/self.cfg['linear_speed_m_s'], rotation/self.cfg['angular_speed_rad_s'])
         self.begin(self.path_id, dict(start=q.copy(), waypoints=[solved], durations=[duration],
                                      total=duration, start_error=0.))
+
+    def start_actuation(self, q, now):
+        if self.docking_command.get_subscription_count() == 0:
+            raise RuntimeError('Arduino command subscriber unavailable')
+        if self.status.get('mode') != 'hold' or self.status.get('transitioning'):
+            raise RuntimeError('stopped HOLD required before Arduino actuation')
+        self.hold_epoch = self.status['epoch']
+        self.lock_goal = q.copy()
+        self.expected_docked = self.cfg['desired_docked']
+        self.command_feedback_sequence = self.docked_feedback_sequence
+        self.actuation_deadline = now+(self.cfg.get('actuation_timeout_s')
+                                       or self.actuation_timeout)
+        self.send_docking_pulse(self.expected_docked)
+        self.stage = 'dock_actuate'
+        action = 'dock' if self.expected_docked else 'release'
+        self.report('actuating', f'Arduino {action} pulse sent; waiting for fresh /arm/docked')
+
+    def check_actuation(self, now):
+        q = np.asarray([self.full_state[j] for j in ARM_JOINTS])
+        if (np.max(np.abs(self.velocity)) > self.cfg['stopped_speed_rad_s']
+                or np.max(np.abs(q-self.lock_goal)) > self.cfg['joint_tolerance_rad']):
+            raise RuntimeError('arm departed measured docking pose during Arduino actuation')
+        if now >= self.actuation_deadline:
+            raise RuntimeError('Arduino docking completion timeout')
+        if (self.docked_feedback_sequence > self.command_feedback_sequence
+                and self.docked_state == self.expected_docked):
+            state = 'docked' if self.expected_docked else 'released'
+            self.report(state, f'Arduino {state} state confirmed; remain HOLD; verify physical docking by camera')
+            self.reset()
 
 
 def main():

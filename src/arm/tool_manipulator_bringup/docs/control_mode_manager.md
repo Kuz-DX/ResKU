@@ -388,9 +388,9 @@ Original final point 9 is excluded from execution. Its joint values and FK-deriv
 the Cartesian reference is not an approved descent command and is not read by
 the docking coordinator. Tool 1 now uses `camera_normal_advance`: after the path
 and HOLD, align the camera optical axis through live tag 1 (`tag36h11`, 20 mm)
-at the initial observed normal distance, then translate 75 mm toward the tag
-along the latched normal and HOLD without Arduino actuation. This is relative
-travel, not a 75 mm final stand-off. The whole advance is IK/collision checked
+at the initial observed normal distance, then translate 30 mm toward the tag
+along the latched normal, then command Arduino docking in HOLD and wait for fresh
+DOCKED feedback. This is relative travel, not a 30 mm final stand-off. The whole advance is IK/collision checked
 before execution. Tag visibility is required through alignment; after the
 advance is latched, tag loss is allowed but feedback and ownership checks
 remain mandatory. Both launch switches `enable_tool_docking` and
@@ -400,8 +400,8 @@ enables the full tool-1 sequence on L2 + circle; launch itself submits no tool
 request. Set `enable_tool_docking:=false` for path-only playback or
 `enable_docking_motion:=false` for alignment preview after the approach.
 Path 2 has its close-and-return settings commented out for approach-only testing; no tag alignment.
-Tool 1 uses `require_l2_hold: false`: one L2 + tool-1 selection starts the path
-and automatically continues into tag alignment and the checked 75 mm advance.
+Tool 1 uses `require_l2_hold: true`: keep L2 pressed through validation, approach,
+tag confirmation, the checked 30 mm advance, and Arduino feedback.
 Releasing L2 or losing subsequent Joy messages does not cancel that sequence.
 Explicit cancel, feedback, ownership and collision checks remain active. Other
 docking configurations default to continuous L2 hold unless explicitly disabled.

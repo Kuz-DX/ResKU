@@ -297,11 +297,14 @@ def test_failed_ee_execution_does_not_start_return():
     import time
     now = time.monotonic()
     node = SimpleNamespace(stage='executing', status_time=now, state_time=now,
-                           status=dict(last_execution_id='close', last_execution_result='aborted'),
+                           status=dict(last_execution_id='close', last_execution_result='aborted',
+                                       last_execution_reason='waypoint stalled: base_joint',
+                                       reason='HOLD: request an arm control mode'),
                            execution_id='close', path_completed=Mock(), fail=Mock())
     ToolTrajectoryJoy.tick(node)
     node.path_completed.assert_not_called()
     node.fail.assert_called_once()
+    assert 'waypoint stalled: base_joint' in node.fail.call_args.args[0]
 
 
 def test_ee_collision_check_sweeps_gripper_with_arm_held():

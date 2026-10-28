@@ -194,10 +194,10 @@ def load_settings(filename):
                       linear_speed_m_s=(0, .02), angular_speed_rad_s=(0, .1),
                       stopped_speed_rad_s=(0, .02), joint_tolerance_rad=(0, .02),
                       acquire_timeout_s=(0, 30), sequence_timeout_s=(0, 600))
-        if mode == 'tag_tcp_stages' and item.get('actuation_enabled'):
-            limits['actuation_timeout_s'] = (0, 120)
-        elif mode == 'camera_normal_advance':
+        if mode == 'camera_normal_advance':
             limits['advance_distance_m'] = (0, .10)
+        if item.get('actuation_enabled') and item.get('actuation_timeout_s') is not None:
+            limits['actuation_timeout_s'] = (0, 120)
         for name, (low, high) in limits.items():
             value = item.get(name)
             if (type(value) not in (int, float) or not math.isfinite(value)
@@ -207,9 +207,9 @@ def load_settings(filename):
             raise ValueError('stable_samples must be 3..100 distinct observations')
         if type(item.get('actuation_enabled')) is not bool:
             raise ValueError('explicit actuation_enabled required')
+        if item['actuation_enabled'] and type(item.get('desired_docked')) is not bool:
+            raise ValueError('explicit desired_docked state required for actuation')
         if mode == 'tag_tcp_position':
-            if item['actuation_enabled']:
-                raise ValueError('TCP position docking must finish in HOLD without actuation')
             stages = item.get('stages')
             if not isinstance(stages, list) or len(stages) != 3:
                 raise ValueError('three TCP position stages required')
@@ -219,8 +219,6 @@ def load_settings(filename):
             result[tool_id] = item
             continue
         if mode == 'camera_normal_advance':
-            if item['actuation_enabled']:
-                raise ValueError('camera-normal advance ends in HOLD; actuation must be disabled')
             result[tool_id] = item
             continue
         if type(item.get('desired_docked')) is not bool:
