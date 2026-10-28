@@ -84,6 +84,7 @@ class JointAngleRunner(Node):
         self.create_subscription(JointState, '/joint_states', self.on_state, 10)
         self.collision = self.create_client(GetStateValidity, '/check_state_validity')
         self.mode = self.create_client(Trigger, '/arm/set_mode/tool_auto')
+        self.cancel = self.create_client(Trigger, '/arm/cancel')
         self.command = self.create_publisher(String, '/arm/input/tool_auto', 1)
 
     def on_status(self, message):
@@ -125,7 +126,14 @@ class JointAngleRunner(Node):
         if (s.get('mode') != 'hold' or s.get('requested', 'hold') != 'hold'
                 or s.get('transitioning') or s.get('focus') != 'arm' or not s.get('ready')
                 or not s.get('startup_complete') or not s.get('entry_alignment_complete', True)):
-            raise RuntimeError('stopped ready HOLD with arm focus is required: '+str(s.get('blocker', '')))
+            raise RuntimeError(
+                'stopped ready HOLD with arm focus is required: '
+                f"mode={s.get('mode')} requested={s.get('requested')} "
+                f"focus={s.get('focus')} ready={s.get('ready')} "
+                f"startup={s.get('startup_complete')} "
+                f"alignment={s.get('entry_alignment_complete')} "
+                f"transitioning={s.get('transitioning')} "
+                f"reason={s.get('blocker') or s.get('reason', '')}")
         if max(abs(velocity[name]) for name in JOINTS) > .02:
             raise RuntimeError('arm feedback must be stopped before validation')
         return s, dict(self.state[0])
@@ -139,6 +147,31 @@ class JointAngleRunner(Node):
         if result is None:
             raise RuntimeError(unavailable)
         return result
+
+    def prepare_hold(self, deadline):
+        """Stop another healthy arm mode before validating the requested move."""
+        now = time.monotonic()
+        if self.status is None or self.state is None or now-self.status_time >= .3 or now-self.state_time >= .3:
+            raise RuntimeError('fresh control status and joint feedback are required')
+        s = self.status
+        if s.get('focus') != 'arm':
+            raise RuntimeError('arm focus is required; press Options to select arm')
+        if s.get('mode') == 'fault':
+            raise RuntimeError('manager fault: '+str(s.get('reason', 'inspect control_status')))
+        if not s.get('ready') or not s.get('startup_complete'):
+            raise RuntimeError('controller readiness and startup recovery must complete before motion')
+        if not s.get('entry_alignment_complete', True):
+            raise RuntimeError('entry alignment must complete before motion')
+        if s.get('mode') == 'hold' and s.get('requested', 'hold') == 'hold' and not s.get('transitioning'):
+            return
+        response = self.call(self.cancel, Trigger.Request(), deadline, '/arm/cancel unavailable')
+        if not response.success:
+            raise RuntimeError('HOLD request rejected: '+response.message)
+        self.spin_until(
+            lambda: self.status is not None and self.status.get('mode') == 'hold'
+            and self.status.get('requested', 'hold') == 'hold'
+            and not self.status.get('transitioning'),
+            deadline, 'timed out waiting for HOLD')
 
     def collision_check(self, start, target, step, deadline):
         if not math.isfinite(step) or step <= 0:
@@ -174,6 +207,7 @@ class JointAngleRunner(Node):
         deadline = time.monotonic()+timeout
         self.spin_until(lambda: self.status is not None and self.state is not None, deadline,
                         'initial feedback timed out')
+        self.prepare_hold(deadline)
         status, snapshot = self.fresh_hold()
         epoch = status['epoch']
         samples = self.collision_check(snapshot, target, collision_step, deadline)
