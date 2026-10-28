@@ -30,15 +30,15 @@ def test_checked_in_tool0_respects_real_joint_margins():
     q = np.array([p['positions_rad'] for p in data['points']])
     t = np.array([p['time_from_start_sec'] for p in data['points']])
     assert all(model.within_limits(p, .02) for p in q)
-    np.testing.assert_allclose(np.diff(t), .5)
-    assert np.all(np.diff(q[t <= 132.5, 0]) >= -1e-12)
-    assert q[0, 0] == 0.
-    np.testing.assert_array_equal(q[t <= 132.5, 4:], 0.)
-    assert np.all(np.abs(np.diff(q, axis=0)/.5) <= np.array([.08,.04,.06,.06,.08,.08])+1e-9)
+    assert data['timing_mode'] == 'joint_limits'
+    assert len(q) == 17
+    np.testing.assert_allclose(np.diff(t), 1.)
+    np.testing.assert_allclose(q[0],
+        [-.026077673394262924, 1.1910126442766753, 1.1822859980167035,
+         -1.4964452633756828, .046019423636362244, -.10891263593967437])
     np.testing.assert_allclose(q[-1],
-        [3.0710295373468464, .5921902205279982, 1.517, -1.0670942940166888,
-         -.0843689433339172, .06902913545505918],
-        rtol=0., atol=1e-12)
+        [3.040349921589134, .06963863732102132, 1.1587240797463911,
+         -1.1440632447874504, .0322135965453918, -.016873788666535106])
 
 
 def write_path(tmp_path, enabled=True, times=(0., 1., 3.)):
@@ -111,26 +111,23 @@ def test_close_and_return_action_is_loaded_and_validated(tmp_path):
         load_path(path, model)
 
 
-def test_tool2_approach_runs_from_ready_to_pickup_within_joint_margin():
+def test_tool2_filtered_capture_runs_within_joint_margin():
     from tool_trajectory_joy import ArmKinematics
     path = SCRIPTS.parent/'config/tool2_trajectory.yaml'
     data = yaml.safe_load(path.read_text())
     model = ArmKinematics(
         SCRIPTS.parent.parent/'tool_manipulator_description/urdf/tool_manipulator.urdf.xacro',
         SCRIPTS.parent/'config/hardware.yaml')
-    assert len(data['points']) == 8
+    assert len(data['points']) == 4
     assert data['execution_enabled'] is True
     assert data['timing_mode'] == 'joint_limits'
     assert 'after_path' not in data
     points = np.asarray([point['positions_rad'] for point in data['points']])
-    # Original point 8 is TCP_ready; approach follows original points 8..1.
+    # Only user-provided original points 4..7 remain after margin filtering.
     np.testing.assert_array_equal(points[:, 0], [
-        -2.1475731030401044, -2.1399031991006763, -2.0079808513425115,
-        -1.6382914814620722, -0.9863496466106745, -0.3942330624868169,
-        -0.012271846303292033, -0.004601942363863909][::-1])
+        -1.0676506283686131, -0.5752427954573225,
+        -0.14112623248568612, -0.13805827090991496])
     assert all(model.within_limits(q, .02) for q in points)
-    assert points[7, 2] == 1.522
-    np.testing.assert_array_equal(points[[7, 5, 1], 3], [-1.572]*3)
     loaded = load_path(path, model)
     np.testing.assert_array_equal([loaded['start'], *loaded['waypoints']], points)
     speeds = np.abs(np.diff(points, axis=0))/np.asarray(loaded['durations'])[:, None]
@@ -164,7 +161,7 @@ def test_tool2_slow_timing_avoids_feedback_guard_in_tracking_simulation(retimed)
     c.ready, c.focus = True, 'arm'
     c.feedback(measured, [0.]*6, 0.)
     c.mode = c.requested = 'tool_auto'
-    durations = loaded['durations'] if retimed else [.02]*7
+    durations = loaded['durations'] if retimed else [.02]*len(loaded['waypoints'])
     assert c.path(c.epoch, 'tool2-test', loaded['waypoints'], 0., durations)
     # A simple 80-ms tracking lag exercises measured-velocity guards, not just
     # YAML validity. This is not a model of hardware stiction or box loading.
