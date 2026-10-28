@@ -8,6 +8,7 @@ import sys
 import time
 
 import numpy as np
+import yaml
 import rclpy
 from builtin_interfaces.msg import Duration
 from controller_manager_msgs.srv import ListControllers, SwitchController
@@ -66,6 +67,10 @@ class Manual(ManualController):
         self.stop_target = None
         self.stop_pose_active = False
         self.previous_stop_pose = False
+        self.path_combos = [False, False, False]
+        self.path_points = None
+        self.path_index = 0
+        self.path_l2_held = False
         self.hardware_fault = False
         self.neutral_required = True
         self.controller_stamp = -math.inf
@@ -192,9 +197,30 @@ class Manual(ManualController):
                 len(message.buttons) <= max(self.params[n] for n in buttons) or
                 not all(math.isfinite(v) for v in message.axes)):
             self.joy, self.joy_time = None, None
+            self.path_points = None
+            self.path_l2_held = False
+            self.path_combos = [False, False, False]
             self.neutral_required = True
             return
         super().on_joy(message)
+        l2 = len(message.axes) > 2 and message.axes[2] < -.5
+        # Same Linux PlayStation mapping as ik_manual: triangle=tool0,
+        # square=tool1, X=tool2. Tool2 remains deliberately disabled.
+        combos = [l2 and bool(message.buttons[i]) for i in (2, 3, 0)]
+        edges = [i for i, held in enumerate(combos) if held and not self.path_combos[i]]
+        self.path_combos = combos
+        self.path_l2_held = l2
+        if self.path_points is not None and not l2:
+            self.path_points = None
+            self.neutral_required = True
+        if len(edges) == 1 and self.path_points is None and not self.stop_pose_active:
+            if edges[0] in (0, 1):
+                self.start_tool_path(edges[0])
+            # elif edges[0] == 2:
+            #     self.start_tool_path(2)  # Tool2: enable only after validation.
+        if l2:
+            self.previous_stop_pose = bool(message.buttons[3])
+            return
         pressed = self.button('stop_pose_button')
         if (pressed and not self.previous_stop_pose and self.controller_ready and
                 self.focus == 'arm' and not self.neutral_required and
@@ -207,6 +233,49 @@ class Manual(ManualController):
             else:
                 self.stop_pose_active = True
         self.previous_stop_pose = pressed
+
+    def start_tool_path(self, path_id):
+        if (not self.controller_ready or self.focus != 'arm' or self.neutral_required or
+                self.hardware_fault or self.fault or self.startup_recovering or
+                not self.entry_alignment_complete or not self.valid_measured(self.now_seconds())):
+            return
+        path_file = Path(__file__).resolve().parents[1]/'config'/f'tool{path_id}_trajectory.yaml'
+        try:
+            data = yaml.safe_load(path_file.read_text())
+            if data.get('execution_enabled') is not True or data.get('joint_names') != list(JOINTS):
+                raise ValueError('path disabled or joint order mismatch')
+            raw = data['points']
+            if not 2 <= len(raw) <= 1000:
+                raise ValueError('invalid point count')
+            points = [np.asarray(p['positions_rad'], dtype=float) for p in raw]
+            margin = self.params['limit_margin_rad']
+            if any(q.shape != (6,) or not np.all(np.isfinite(q)) or
+                   np.any(q < self.lower+margin) or np.any(q > self.upper-margin) for q in points):
+                raise ValueError('path violates joint limits')
+            if np.max(np.abs(self.measured()-points[0])) > .10:
+                raise ValueError('start differs from measured position by more than 0.10 rad')
+        except (OSError, KeyError, TypeError, ValueError) as exc:
+            self.get_logger().error(f'Tool{path_id} path rejected: {exc}')
+            return
+        self.path_points = points
+        self.path_index = 0
+        self.stop_target = None
+        self.get_logger().warning(f'Tool{path_id} path started; keep L2 held')
+
+    def run_tool_path(self, dt):
+        goal = self.path_points[self.path_index]
+        candidate = self.target + np.clip(goal-self.target, -self.speeds*dt, self.speeds*dt)
+        allowed = np.abs(candidate-self.measured()) <= self.params['max_target_lead_rad']
+        candidate = np.where(allowed, candidate, self.target)
+        self.status = f'tool path point {self.path_index+1}/{len(self.path_points)}'
+        self.apply_motion(candidate, 0., 'tool_path', dt, goal=goal)
+        if (np.allclose(self.target, goal, atol=1e-9, rtol=0.) and
+                np.max(np.abs(self.measured()-goal)) <= .005):
+            self.path_index += 1
+            if self.path_index == len(self.path_points):
+                self.path_points = None
+                self.neutral_required = True
+                self.status = 'tool path reached'
 
     def run_stop_pose(self, dt):
         """Ramp to the exact pose with existing speed and feedback lead limits."""
@@ -513,6 +582,7 @@ class Manual(ManualController):
 
     def stop(self, reason, dt):
         self.stop_pose_active = False
+        self.path_points = None
         self.publish_ee_velocity(0.)
         self.neutral_required = True
         if self.status != reason:
@@ -600,7 +670,12 @@ class Manual(ManualController):
             self.get_logger().error('Following error; hold capture. Inspect arm and cycle focus.')
             self.stop('following error', dt)
         elif not fresh_joy or self.focus != 'arm' or self.chain is None:
+            self.path_points = None
             self.stop('input timeout' if not fresh_joy else 'input disabled', dt)
+        elif self.path_points is not None and self.path_l2_held:
+            self.run_tool_path(dt)
+        elif self.path_l2_held:
+            self.stop('L2 path selection', dt)
         elif self.neutral_required:
             self.stop('neutral controls required', dt)
             if self.neutral() and (self.stop_target is None or np.allclose(self.target, self.stop_target, atol=1e-9)):

@@ -1,29 +1,51 @@
-# Tool 2: corrected points 1 -> 2 -> 3 -> 4 -> 5, independent DXL ID 4 close,
-# then 4 -> 3 -> 2 -> 1. TCP XYZ is preserved; orientation changes are accepted.
-# FK/IK uses base_actuator -> tcp_link, with a 0.02-rad joint-limit margin.
-# Original poses, FK targets and residuals: tool2_ik_reference.yaml.
-# Times are nominal metadata; manager joint speed/acceleration limits set timing.
-# Runtime collision checks still gate approach, EE close and reverse path.
+# Tool 2 phase-1 test: original point 8 (TCP_ready) -> 7 -> ... -> 1, then HOLD.
+# Only the four out-of-margin joint values at points 1/3/7 are set to
+# the existing 0.02-rad margin boundaries; all other captured values remain.
+# Capture timestamps are discarded; 0..7 below are nominal ordering metadata.
+# The manager derives execution timing from joint speed/acceleration limits.
+# Runtime collision checks and manager limits gate execution.
+# tool2_ik_reference.yaml describes the superseded five-point path only.
 execution_enabled: true
 timing_mode: joint_limits
 joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
-after_path:
-  # Separate ee_joint / Dynamixel ID 4; excluded from six-axis arm IK.
-  ee_close_rad: 1.251728
-  return_to_start: true
+# PHASE 2 DISABLED: uncomment this block after approach validation.
+# Existing close-and-return sequencing holds the arm at original point 1,
+# drives independent Dynamixel ID 4 (ee_joint), waits for close completion,
+# then reverses this approach: original points 2 -> ... -> 8 (TCP_ready).
+# The previous close target must be confirmed with the actual supply box.
+# after_path:
+#   ee_close_rad: 1.251728
+#   return_to_start: true
 points:
+  # Original point 8 (TCP_ready).
   - time_from_start_sec: 0.0
-    positions_rad: [-0.004601942363863909, 1.2746139314261702, 1.330464414226767, -1.2765338042560084,
-      -2.0694557179012918e-13, -0.001533980787678857]
-  - time_from_start_sec: 20.0
-    positions_rad: [-2.089836437018305, 1.497999999, 1.33561023020994, -1.571999999,
-      0.14606424890739408, 0.6565536763825899]
-  - time_from_start_sec: 40.0
-    positions_rad: [-0.13965889947659457, 1.497999999, 1.132847045400794, -1.571999999,
-      -0.19557675212537212, -0.24122555075570395]
-  - time_from_start_sec: 60.0
-    positions_rad: [-1.192820779353109, 1.497999999, 1.1222543787465549, -1.5446470434011872,
-      -0.44172304248534167, -0.46998936426551424]
-  - time_from_start_sec: 80.0
-    positions_rad: [-0.07677446388839546, 0.9796193979506459, 1.521999999, -1.0278231083621654,
-      -0.6230134794511799, -1.0155354921216062]
+    positions_rad: [-0.004601942363863909, 1.301666588095304, 1.3535027550267698, -1.271821340707113,
+      -2.0694557179012918e-13, -0.004601942363450462]
+  # Original point 7.
+  - time_from_start_sec: 1.0
+    positions_rad: [-0.012271846303292033, 1.3348277373567528, 1.1217230516672116, -1.572,
+      -0.03374757733369105, -0.01994175024230671]
+  # Original point 6.
+  - time_from_start_sec: 2.0
+    positions_rad: [-0.3942330624868169, 0.9430013735472476, 1.1276572403661806, -1.3358750254554264,
+      -0.13959225169780032, -0.06596117387887723]
+  # Original point 5.
+  - time_from_start_sec: 3.0
+    positions_rad: [-0.9863496466106745, 0.9843656581773855, 1.270425178505639, -1.3035863277670876,
+      -0.14112623248568568, -0.06596117387887723]
+  # Original point 4.
+  - time_from_start_sec: 4.0
+    positions_rad: [-1.6382914814620722, 0.9855873833274593, 1.1756537947960248, -1.3297662665470027,
+      -0.13959225169780032, -0.33440781175886336]
+  # Original point 3.
+  - time_from_start_sec: 5.0
+    positions_rad: [-2.0079808513425115, 0.9094910838668895, 0.9698794600069267, -1.572,
+      -0.12578642460682943, -0.06596117387887723]
+  # Original point 2.
+  - time_from_start_sec: 6.0
+    positions_rad: [-2.1399031991006763, 0.8899433483076534, 1.3538518954456793, -1.4152874265263358,
+      -0.6120583343665777, -0.15800002115201472]
+  # Original point 1.
+  - time_from_start_sec: 7.0
+    positions_rad: [-2.1475731030401044, 0.8241444275179839, 1.522, -1.572,
+      -0.622796199881777, -0.4126408319410313]

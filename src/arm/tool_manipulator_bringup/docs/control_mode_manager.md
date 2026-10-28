@@ -124,27 +124,24 @@ or X (`buttons[0]`) selects tool path 0, 1, or 2 respectively. L2+L1 does not
 select a tool path. While L2 is held, the TCP producer suppresses L1 and square HOME
 handling so one combination cannot start both a path and TCP/HOME motion.
 Paths must contain reviewed captured points and have `execution_enabled: true`.
-Path 2 is enabled with five FK/IK-corrected points and `timing_mode: joint_limits`.
-Each original point's TCP XYZ in `base_actuator` is preserved within 1 micrometre;
-the six arm joints satisfy the existing limits with a 0.02-rad margin. Orientation
-is relaxed with user acceptance: changes at points 1..5 are approximately
-0 / 113.70 / 27.46 / 14.38 / 81.33 degrees. These are numerical candidates selected
-to favor the original orientation/joint posture and continuity, not a proof of
-globally minimal change. Original joint values, full FK transforms and residuals
-are retained in `config/tool2_ik_reference.yaml`. The runtime trajectory's
-`after_path` action closes `ee_joint` to the existing measured 1.251728 rad target,
-waits for stopped feedback at point 5, then commands points 4/3/2/1 and enters HOLD.
-`ee_joint` is the independent Dynamixel ID 4 and is excluded from the six-axis IK.
-Each phase is collision checked, including the gripper sweep and the reverse
-arm path with the closed gripper. The manager owns EE velocity (at most 0.12 rad/s)
-and aborts on stale feedback, arm drift, a 3-second EE stall or 60-second timeout.
-A failed close never starts the return. The reverse path always reaches original
-point 1, including when UI entry selected a nearer approach point. This sequence
-does not send Arduino docking pulses; a release request is unsupported.
-The original shoulder points 2..5, elbow points 3/4 and wrist-roll point 5
-violated the limits or margin; they remain reference data, not executable points.
-Only offline kinematics and sequencing are verified here; live collision validation
-is still required by the existing execution pipeline.
+Path 2 is enabled for an approach-only phase-1 test: original taught point 8
+(TCP_ready) -> 7 -> ... -> 1, then HOLD. Original point numbers refer to the
+user's capture order, not YAML list indices. Capture timestamps are discarded;
+nominal 0..7 metadata and `timing_mode: joint_limits` derive motion timing from
+joint limits. The `after_path` block is commented out, so ID 4 does not close
+and the arm does not return in this test. The commented block connects the
+existing sequence: stop at original point 1, close independent Dynamixel ID 4
+(`ee_joint`) to 1.251728 rad, confirm completion, then reverse the approach
+through original points 2..8 to TCP_ready and HOLD. Confirm the close target
+with the actual box before enabling that phase. Close failure prevents return.
+The four captured values outside the 0.02-rad joint margin are set to its
+boundaries: point 1 elbow to 1.522 rad and wrist pitch at points 1/3/7 to
+-1.572 rad. All other captured joint values remain exact. The path is enabled
+for `tool_trajectory_joy`, which checks collision and manager limits before
+execution. The manual L2+X dispatch remains disabled because it does not run
+that collision check. The old five-point FK/IK evidence in
+`config/tool2_ik_reference.yaml` is historical and does not describe this path.
+Live collision validation is required by the existing execution pipeline.
 Path 0 is enabled. Path 1 is enabled for approach-only testing and retains
 original points 1/2/5/7. Its `timing_mode: joint_limits` keeps capture timestamps
 as metadata and lets the manager derive segment timing from joint travel and
@@ -172,7 +169,7 @@ remain mandatory. Both launch switches `enable_tool_docking` and
 enables the full tool-1 sequence on L2 + square; launch itself submits no tool
 request. Set `enable_tool_docking:=false` for path-only playback or
 `enable_docking_motion:=false` for alignment preview after the approach.
-Path 2 uses its own close-and-return sequence, without tag alignment.
+Path 2 has its close-and-return settings commented out for approach-only testing; no tag alignment.
 Tool 1 uses `require_l2_hold: false`: one L2 + tool-1 selection starts the path
 and automatically continues into tag alignment and the checked 75 mm advance.
 Releasing L2 or losing subsequent Joy messages does not cancel that sequence.

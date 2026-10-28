@@ -86,52 +86,68 @@ def test_close_and_return_action_is_loaded_and_validated(tmp_path):
         load_path(path, model)
 
 
-def test_tool2_corrected_points_preserve_original_fk_xyz_with_joint_margin():
+def test_tool2_approach_runs_from_ready_to_pickup_within_joint_margin():
     from tool_trajectory_joy import ArmKinematics
     path = SCRIPTS.parent/'config/tool2_trajectory.yaml'
     data = yaml.safe_load(path.read_text())
-    reference = yaml.safe_load((SCRIPTS.parent/'config/tool2_ik_reference.yaml').read_text())
     model = ArmKinematics(
         SCRIPTS.parent.parent/'tool_manipulator_description/urdf/tool_manipulator.urdf.xacro',
         SCRIPTS.parent/'config/hardware.yaml')
-    assert len(data['points']) == 5
+    assert len(data['points']) == 8
     assert data['execution_enabled'] is True
     assert data['timing_mode'] == 'joint_limits'
-    assert reference['frame_id'] == 'base_actuator' and reference['tip_link'] == 'tcp_link'
-    invalid_originals = []
-    for i, (point, evidence) in enumerate(zip(data['points'], reference['points']), start=1):
-        original = np.asarray(evidence['original_positions_rad'])
-        corrected = np.asarray(point['positions_rad'])
-        assert evidence['point'] == i
-        assert len(corrected) == 6
-        np.testing.assert_array_equal(corrected, evidence['corrected_positions_rad'])
-        if not model.within_limits(original, .02):
-            invalid_originals.append(i)
-        assert model.within_limits(corrected, .02)
-        target = model.fk(original)
-        np.testing.assert_allclose(target, evidence['original_tcp_transform'], atol=1e-12)
-        error = model.pose_error(corrected, target)
-        assert np.linalg.norm(error[:3]) < 1e-6
-        assert np.linalg.norm(error[:3]) == pytest.approx(evidence['tcp_position_error_m'], abs=1e-12)
-        assert np.linalg.norm(error[3:]) == pytest.approx(evidence['tcp_orientation_change_rad'])
-    assert invalid_originals == [2, 3, 4, 5]
+    assert 'after_path' not in data
+    points = np.asarray([point['positions_rad'] for point in data['points']])
+    # Original point 8 is TCP_ready; approach follows original points 8..1.
+    np.testing.assert_array_equal(points[:, 0], [
+        -2.1475731030401044, -2.1399031991006763, -2.0079808513425115,
+        -1.6382914814620722, -0.9863496466106745, -0.3942330624868169,
+        -0.012271846303292033, -0.004601942363863909][::-1])
+    assert all(model.within_limits(q, .02) for q in points)
+    assert points[7, 2] == 1.522
+    np.testing.assert_array_equal(points[[7, 5, 1], 3], [-1.572]*3)
     loaded = load_path(path, model)
-    assert len(loaded['waypoints']) == 4
+    np.testing.assert_array_equal([loaded['start'], *loaded['waypoints']], points)
+    assert loaded['durations'] == [.02]*7
+    assert loaded['after_path'] is None
+
+    # Phase 1 completes at pickup without dispatching EE or return motion.
+    node = SimpleNamespace(paths={2: loaded}, path_id=2,
+                           requested_docked_state=None, report=Mock(),
+                           reset=Mock(), begin=Mock())
+    ToolTrajectoryJoy.path_completed(node)
+    node.begin.assert_not_called()
+    node.reset.assert_called_once()
+
+
+def test_tool2_commented_close_and_return_connects_to_ready(tmp_path):
+    path = SCRIPTS.parent/'config/tool2_trajectory.yaml'
+    # Exercise the exact disabled configuration without enabling the live file.
+    text = path.read_text()
+    for line in ('after_path:', '  ee_close_rad: 1.251728', '  return_to_start: true'):
+        assert '# '+line in text
+        text = text.replace('# '+line, line)
+    candidate = tmp_path/'tool2_full_sequence.yaml'
+    candidate.write_text(text)
+    model = Mock()
+    model.within_limits.return_value = True
+    loaded = load_path(candidate, model)
     assert loaded['after_path'] == dict(ee_close_rad=1.251728, return_to_start=True)
-    returning = reverse_path(loaded)
-    np.testing.assert_array_equal(returning['start'], data['points'][4]['positions_rad'])
+    from tool_trajectory_joy import ARM_JOINTS
+    node = SimpleNamespace(paths={2: loaded}, path_id=2, sequence_phase='approach',
+                           full_state=dict(zip(ARM_JOINTS, loaded['waypoints'][-1])),
+                           start_tolerance=.03, max_start_delta=.1, approach_speed=.05,
+                           report=Mock(), begin=Mock(), reset=Mock())
+    ToolTrajectoryJoy.path_completed(node)
+    assert node.sequence_phase == 'closing'
+    assert node.begin.call_args.args[1]['ee_target_rad'] == 1.251728
+    ToolTrajectoryJoy.path_completed(node)
+    assert node.sequence_phase == 'returning'
+    returning = node.begin.call_args.args[1]
     np.testing.assert_array_equal(returning['waypoints'],
-                                  [p['positions_rad'] for p in data['points'][3::-1]])
-    assert returning['durations'] == [.02]*4
-
-
-def test_tool2_ee_close_is_independent_dynamixel_id4():
-    data = yaml.safe_load((SCRIPTS.parent/'config/tool2_trajectory.yaml').read_text())
-    hardware = yaml.safe_load((SCRIPTS.parent/'config/hardware.yaml').read_text())
-    assert 'ee_joint' not in data['joint_names']
-    assert hardware['joints']['ee_joint']['vendor'] == 'dynamixel'
-    assert hardware['joints']['ee_joint']['id'] == 4
-    assert data['after_path']['ee_close_rad'] == 1.251728
+                                  [*loaded['waypoints'][-2::-1], loaded['start']])
+    ToolTrajectoryJoy.path_completed(node)
+    node.reset.assert_called_once()
 
 
 def test_reverse_path_retraces_all_points_with_reversed_segment_times():
