@@ -192,14 +192,23 @@ original points 1/2/5/7. Its `timing_mode: joint_limits` keeps capture timestamp
 as metadata and lets the manager derive segment timing from joint travel and
 existing speed limits, with acceleration, jerk and feedback pacing still applied.
 The recorded 102-second gap between points 5 and 7 no longer slows that segment.
-Measured docking geometry (2026-10-28): the docking origin is 58.4 mm below
-the AprilTag center. In the operator's camera convention (+X left, +Y up,
-+Z forward), the tag-to-docking offset is [0, -0.0584, 0] m. In a standard
-camera optical frame (+X right, +Y down, +Z forward), it is [0, +0.0584, 0] m.
-This is a lateral target offset, not the tag-normal advance distance. The current
-fixed-normal advance does not yet apply this calibration or seek that origin.
-Conversion to the robot base must use the actual camera TF and the tag pose
-from the same observation; do not substitute 58.4 mm for the advance distance.
+Updated docking geometry (2026-10-28, supersedes the earlier 58.4 mm offset):
+the operator defines a tag-fixed frame with +X toward the top of the tag,
++Y toward its left, and +Z outward from its visible face toward the camera.
+The requested arm `tool_tcp` docking point in this frame is
+[-0.0458, 0, +0.107] m (Y assumed zero because no lateral offset was supplied).
+This specifies a target position, not a relative advance distance or orientation.
+The operator frame must be related to the detector's decoded tag axes before
+using its PnP rotation; it is not the camera optical frame.
+The current fixed-normal advance does not apply this target offset.
+The URDF common docking reference is named `tcp_link`; there is no literal
+`tool_tcp` link. Confirm that the requested physical point is this common
+reference, rather than a tool working tip, before commanding this target.
+Compute the base-frame target using camera TF and the tag pose at the same
+image timestamp, with the operator-to-detector frame transform included.
+
+For the camera-only AprilTag detector, the defaults already select a 2.0 cm
+tag and `/arm/apriltag/centers`; run `ros2 run vision apriltag` without overrides.
 Paths without this setting retain recorded timing. MoveIt entry and docking
 correction/advance durations keep their own timing.
 Intermediate points 3/4/6/8 were removed at the user's request because they
