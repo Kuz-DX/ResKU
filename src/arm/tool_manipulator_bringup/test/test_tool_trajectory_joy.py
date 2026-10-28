@@ -18,6 +18,16 @@ from tool_trajectory_joy import (collision_check_budget, execution_plan, load_pa
 from tool_trajectory_joy import reverse_path
 
 
+def test_checked_in_tool0_respects_real_joint_margins():
+    from tool_trajectory_joy import ArmKinematics
+    arm = SCRIPTS.parents[1]
+    model = ArmKinematics(arm/'tool_manipulator_description/urdf/tool_manipulator.urdf.xacro',
+                          SCRIPTS.parent/'config/hardware.yaml')
+    path = load_path(SCRIPTS.parent/'config/tool0_trajectory.yaml', model)
+    assert path is not None
+    assert path['waypoints'][-1][2] == pytest.approx(1.2847368730456703)
+
+
 def write_path(tmp_path, enabled=True, times=(0., 1., 3.)):
     path = tmp_path/'path.yaml'
     path.write_text(yaml.safe_dump(dict(

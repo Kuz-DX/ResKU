@@ -20,4 +20,11 @@ TEST(MotionWatchdog, DirectionMismatchRequiresMotionAboveBothDeadbands) {
   EXPECT_FALSE(directionMismatch(0.002, -0.0005, 0.001, 0.001));
 }
 
+TEST(MotionWatchdog, TargetApproachDoesNotCountAsReverseMotion) {
+  EXPECT_FALSE(movesAwayFromTarget(-0.03, -0.02, -0.00244345));
+  EXPECT_TRUE(movesAwayFromTarget(0.03, 0.04, -0.00244345));
+  EXPECT_TRUE(movesAwayFromTarget(-0.03, -0.04, 0.00244345));
+  EXPECT_FALSE(movesAwayFromTarget(-0.001, 0.001, -0.002));
+}
+
 }  // namespace rmd_hardware_interface::test

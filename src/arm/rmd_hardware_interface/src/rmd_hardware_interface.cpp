@@ -1012,8 +1012,14 @@ namespace rmd_hardware_interface {
             now-direction_window_start_)};
           double const command_delta {safe_position_command_-direction_window_command_};
           double const feedback_delta {corrected_position_rad-direction_window_position_};
+          // A moving setpoint can reverse while the motor still approaches it.
+          // Only count opposite motion when feedback also moves away from the
+          // target on both ends of the observation window.
+          double const initial_error {direction_window_command_-direction_window_position_};
+          double const final_error {safe_position_command_-corrected_position_rad};
           if (directionMismatch(command_delta, feedback_delta,
-              direction_command_deadband_, direction_feedback_deadband_)) {
+              direction_command_deadband_, direction_feedback_deadband_) &&
+              movesAwayFromTarget(initial_error, final_error, feedback_delta)) {
             direction_mismatch_accumulated_ += elapsed;
           } else {
             direction_mismatch_accumulated_ = std::chrono::milliseconds(0);
@@ -1025,16 +1031,21 @@ namespace rmd_hardware_interface {
             std::ostringstream reason;
             reason << "RMD command/feedback direction mismatch: command_delta="
                    << command_delta << " rad, feedback_delta=" << feedback_delta
+                   << " rad, target_error=" << final_error
                    << " rad, duration_ms=" << direction_mismatch_accumulated_.count();
             latchHardwareSafetyFault(reason.str());
           }
         }
       }
+      // A safety latch freezes published position, not CAN reception. Keep
+      // successful feedback timestamps alive to avoid a spurious CAN watchdog.
+      if (std::isfinite(corrected_position_rad)) {
+        last_valid_feedback_ns_.store(std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::steady_clock::now().time_since_epoch()).count());
+      }
       if (std::isfinite(corrected_position_rad) && !hardware_safety_fault_.load()) {
         async_position_state_.store(corrected_position_rad);
         position_state_valid_.store(true);
-        last_valid_feedback_ns_.store(std::chrono::duration_cast<std::chrono::nanoseconds>(
-          std::chrono::steady_clock::now().time_since_epoch()).count());
         auto const diagnostic_time {std::chrono::steady_clock::now()};
         if (diagnostic_time >= next_position_diagnostic_time_) {
           RCLCPP_DEBUG(getLogger(),

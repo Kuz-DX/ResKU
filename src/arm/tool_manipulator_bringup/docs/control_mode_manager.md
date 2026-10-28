@@ -16,6 +16,8 @@ EE feedback and calibrated gripper travel bounds gate rotation. The selected
 speed is published as `ee_speed_rad_s` on `/arm/tcp_joy/status`.
 
 R2 (`axes[5]`, pressed below -0.5) requests the nearest TCP-entry candidate.
+Its target uses a 0.121-rad joint margin, leaving 0.02 rad beyond the
+0.101-rad entry check for settling. Rejections are logged immediately.
 Square (`buttons[3]`) in arm focus while FAULT requests `/arm/reset_fault` once
 per press (L2 path selection still takes priority). The manager's hardware,
 controller and stopped-feedback checks remain authoritative. Success returns
@@ -30,6 +32,13 @@ selection and while any hardware fault is latched.
 
 ## RMD feedback-fault recovery
 
+An RMD CAN/watchdog fault intentionally stops retries and freezes the last safe
+command. Direction mismatch additionally requires measured motion away from
+the position target at both ends of the observation window; a lagging motor
+approaching its target is not a direction fault merely because the setpoint
+reversed. Valid CAN reception continues refreshing its timestamp after a safety
+latch, avoiding a secondary false communication timeout. These driver changes
+require a rebuilt installation; editing source does not update a running driver.
 An RMD CAN/watchdog fault intentionally stops retries and freezes the last safe
 command. Repeated logs now include the preserved first cause instead of only
 `Feedback fault is latched`. A fresh lifecycle activation publishes

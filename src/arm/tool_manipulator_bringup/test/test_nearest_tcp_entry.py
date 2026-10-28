@@ -41,6 +41,7 @@ def test_nearest_pose_projects_limit_margin_and_has_valid_condition(model):
     measured[3] = model.limits['wrist_pitch_joint'][0]+.01
     result = nearest_tcp_entry(model, measured, ready)
     assert model.within_limits(result, .101)
+    assert model.within_limits(result, .121)
     assert condition(model, result) <= 20.
     assert np.linalg.norm(result-measured) <= np.linalg.norm(ready-measured)+1e-12
 

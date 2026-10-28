@@ -93,6 +93,13 @@ namespace rmd_hardware_interface {
       command_delta * feedback_delta < 0.0;
   }
 
+  inline bool movesAwayFromTarget(double initial_error, double final_error,
+      double feedback_delta) noexcept {
+    return std::isfinite(initial_error) && std::isfinite(final_error) &&
+      std::isfinite(feedback_delta) && initial_error * feedback_delta < 0.0 &&
+      final_error * feedback_delta < 0.0;
+  }
+
 }  // namespace rmd_hardware_interface
 
 #endif  // RMD_HARDWARE_INTERFACE__CONVERSIONS

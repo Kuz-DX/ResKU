@@ -28,12 +28,14 @@ class EeDpad:
         self.direction = 0 if vertical else int(axes[6] > .5)-int(axes[6] < -.5)
 
 
-def nearest_tcp_entry(model, measured, reference, margin=.101,
+def nearest_tcp_entry(model, measured, reference, margin=.121,
                       condition_limit=20., samples=100):
     """Nearest point on the limit-projection -> reviewed-ready corridor.
 
     Collision checking remains the managed workflow's responsibility. This
     function only establishes joint margin and numerical IK conditioning.
+    The default leaves 0.02 rad of settling room beyond the 0.101-rad
+    admission check, so a boundary target does not immediately fail re-entry.
     """
     measured = np.asarray(measured, dtype=float)
     reference = np.asarray(reference, dtype=float)

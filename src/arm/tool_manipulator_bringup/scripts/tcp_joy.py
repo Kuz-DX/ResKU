@@ -333,6 +333,7 @@ class TcpJoy(TcpMotionWorkflow, Node):
                 self.reason = reason
             except ValueError as exc:
                 self.reason = 'R2 nearest TCP entry blocked: '+str(exc)
+                self.get_logger().warning(self.reason)
         self.previous_nearest = nearest
         self.deadman, self.twist = joy_twist(msg.axes, msg.buttons)
         wrist_mode = valid and bool(msg.buttons[5])
