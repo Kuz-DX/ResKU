@@ -119,6 +119,24 @@ def joy_twist(axes, buttons, deadzone=.12):
     return True, result
 
 
+def rotate_translation_with_base_yaw(twist, base_yaw):
+    """Map joystick XY from arm-facing axes into the fixed base frame.
+
+    Z translation and target-TCP-local angular components are unchanged.
+    This keeps forward/left stick semantics continuous when base_joint moves
+    beyond +/-90 degrees.
+    """
+    result = np.asarray(twist, dtype=float).copy()
+    if (result.shape != (6,) or not np.all(np.isfinite(result))
+            or not math.isfinite(base_yaw)):
+        raise ValueError('invalid base-yaw joystick transform')
+    cosine, sine = math.cos(base_yaw), math.sin(base_yaw)
+    x, y = result[:2]
+    result[0] = cosine*x-sine*y
+    result[1] = sine*x+cosine*y
+    return result
+
+
 class TcpStepper:
     def __init__(self, model, speeds, linear=.02, angular=.15, margin=.02,
                  lead=.08, iterations=30, budget=.030):

@@ -225,7 +225,7 @@ Start the managed stack with its TCP producer and MoveIt planning-scene service:
 
 ```bash
 ros2 launch ~/ResKU/src/arm/tool_manipulator_bringup/launch/ik_manual.launch.py
-# Press Options: align DXL, then hold L1 for the checked TCP-ready approach.
+# Press Options: align DXL and validate the current pose; L1 is TCP deadman only.
 ros2 topic echo /arm/control_status --once --full-length
 ros2 topic echo /arm/tcp_joy/status
 ```
@@ -243,10 +243,10 @@ With `launch_tcp_joy:=true`, an Options drive-to-arm edge first aligns the DXL
 axes in HOLD. Alignment waits for position convergence and 0.20 seconds of
 stopped feedback. `tcp_joy` alone requests TCP_IK after a fresh entry assessment;
 the manager does not race it with a separate focus-triggered request.
-If the recovery pose lacks TCP
-entry margin, `tcp_joy` collision-checks the configured `tcp_ready` joint line,
-requests TOOL_AUTO ownership, executes it once, verifies the stopped endpoint and
-then requests TCP_IK. Options back to drive requests HOLD. Collision/check/service/
+If the current pose lacks TCP entry margin or numerical conditioning, it remains
+in HOLD and reports the reason. L1 never starts posture motion. R2 explicitly
+requests the nearest checked entry candidate; `/arm/go_tcp_ready` explicitly
+requests the configured fixed pose. Options back to drive requests HOLD. Collision/check/service/
 execution failure, cancel, command timeout, and fault do not automatically retry
 while focus stays on arm; inspect first, then toggle drive and back to arm.
 
@@ -488,9 +488,9 @@ python3 -m pytest -q ~/ResKU/src/arm/tool_manipulator_bringup/test/test_arm_mode
 TCP_IK now requires a fresh collision-checked, stationary current pose with at
 least 0.10 rad joint margin and scaled condition <=20. Requests without a valid
 assessment remain HOLD and report a reason; this also applies to Options focus
-activation. An explicit drive-to-arm focus edge may arm one collision-checked
-tcp_ready move if the current pose fails the entry margin or condition check;
-execution waits for L1. Candidate comparisons, limitations
+activation. A drive-to-arm focus edge assesses the current pose without moving
+it. If the pose fails the entry margin or condition check, R2 may request the
+nearest collision-checked entry candidate. Candidate comparisons, limitations
 and the assessment protocol are documented in [tcp_ready.md](tcp_ready.md).
 Transient entry rejections (snapshot drift, moving feedback or the 0.20-second
 stability wait) are rechecked within a single 3-second window starting with the

@@ -64,7 +64,10 @@ def bringup(context):
     if LaunchConfiguration('launch_tcp_joy').perform(context) == 'true':
         tcp = Node(executable=sys.executable, arguments=[str(scripts/'tcp_joy.py')],
                    parameters=[base.description, {'hardware_config': base.hardware_file,
-                                                  'tcp_ready_yaml': str(ready_config)}], output='screen')
+                                                  'tcp_ready_yaml': str(ready_config),
+                                                  'translation_frame': LaunchConfiguration(
+                                                      'tcp_translation_frame').perform(context)}],
+                   output='screen')
         docking = LaunchConfiguration('enable_tool_docking').perform(context) == 'true'
         pick_place = LaunchConfiguration('enable_tool2_pick_place').perform(context) == 'true'
         if pick_place and not docking:
@@ -127,6 +130,10 @@ def generate_launch_description():
         DeclareLaunchArgument('tool_id', default_value='99', choices=['0', '1', '2', '99'],
                               description='Task/tool ID: 0=gripper, 1=drill, 2=supply_box, 99=empty wrist'),
         DeclareLaunchArgument('launch_tcp_joy', default_value='true', choices=['true', 'false']),
+        DeclareLaunchArgument(
+            'tcp_translation_frame', default_value='base_yaw', choices=['base_yaw', 'base'],
+            description=('base_yaw keeps joystick forward/left aligned with the arm across '
+                         'the full base rotation; base retains the legacy fixed-frame mapping')),
         # One L2 + circle request owns the taught approach and its docking tail.
         # Enabling the producer does not submit a path at launch time.
         DeclareLaunchArgument('enable_tool_docking', default_value='true', choices=['true', 'false']),

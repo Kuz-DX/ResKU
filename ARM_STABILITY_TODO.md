@@ -28,6 +28,74 @@
   execution ID를 통해 최초 원인을 확인한다.
 - 물리적 도킹과 파지는 software/Arduino 완료 메시지만으로 성공 처리하지 않는다.
 
+## 2026-10-31 채팅 작업 요약
+
+현재 통합 기준은 `main`의 `c8bf074`다. 아래에서 **통합됨**은 이 커밋까지
+저장된 변경이고, **작업 트리**는 아직 커밋되지 않은 변경이다.
+
+### 통합됨 (`1a138ab..c8bf074`)
+
+- [x] task ID를 `0=gripper`, `1=drill`, `2=supply_box`, `99=no tool`로 정리하고
+  supply-box 작업에는 gripper 형상을 선택한다.
+- [x] MoveIt/RSP에 `tool_id`와 `use_mesh`를 동일하게 전달한다. `99`에서 gripper
+  finger, rack, spur gear가 생성되지 않는 정적 검사를 추가했다.
+- [x] `use_mesh=false`에서도 collision geometry를 유지하고, RViz에는 collision
+  STL을 일반 visual로 표시해 빨간 collision 렌더링과 실제 충돌 판정을 구분한다.
+- [x] mock 초기 관절값을 HOME으로 바꾸고, 의도된
+  `wrist_link_yaw <-> tool_spurgear` 맞물림만 SRDF `ToolMating`으로 제외했다.
+- [x] HOME/BACK/TCP_READY named pose만 유지했다. BACK은 supply-box 반대쪽으로
+  회전하도록 base 목표를 `-pi`로 정의했다.
+- [x] tool ID 1 drill을 `ee_output_link`에 고정해 `ee_joint` 출력과 1:1로
+  회전시키고, drill TCP/관성 중심을 로컬 Z축 기준으로 정리했다.
+- [x] FK와 Jacobian을 한 체인 순회로 계산하고 TCP stepper의 SVD 중복 계산을
+  제거했다. 관련 IK/TCP 회귀 테스트를 유지한다.
+- [x] `plan_pose_goal.py`의 `Node.executor` 속성 충돌을 제거하고 MoveIt 오류 이름,
+  목표 XYZ, planning time을 상태 메시지에 포함한다.
+- [x] pose-goal 접근축을 TCP 로컬 `+Z`로 명시했다. 표면이 world XY에서 35도면
+  접근축은 아래 방향 55도라는 정의를 문서와 설정에 반영했다.
+- [x] rack 장착 접근과 rack 해체 후 최종 진입을 별도 planning-scene 상태로
+  다뤄야 한다는 fail-closed 절차를 단계 7에 추가했다.
+
+### 작업 트리 — 커밋 전
+
+- [x] TCP 조이스틱 XY 평행이동을 `base_joint` yaw로 회전해 base가 +/-90도를
+  넘어도 팔 기준 전방/좌우 의미가 유지되게 했다. `tcp_translation_frame:=base`
+  로 기존 고정 프레임 동작을 비교할 수 있다.
+- [x] L1을 deadman/현재 자세 재검증 전용으로 바꿨다. L1은 고정 TCP_READY
+  자세 이동을 시작하지 않는다.
+- [x] 현재 자세가 진입 조건을 만족하면 이동 없이 TCP_IK로 들어간다. 실패하면
+  HOLD하고 이유를 보고하며, R2만 가장 가까운 검증된 진입 자세를 요청한다.
+- [x] TCP entry/deadman/joystick 회귀 테스트 155개 통과, `git diff --check` 통과.
+  ROS 패키지 빌드는 실행하지 않았다.
+
+### 시뮬레이션/실측으로 확인된 제약
+
+- [x] HOME 상태는 `/check_state_validity`: `valid=true`, `contacts=[]`로 확인했다.
+- [x] tool0 중심 좌표 `[-0.394506, 0, 0.212964]`는 rack 장착 상태에서
+  `rack_right <-> circuit_box`와 충돌한다. rack 제거 뒤에도 올바른 TCP +Z 아래
+  55도 조건에서는 전 방위각에 bounded IK 해가 없으므로 실행 목표가 아니다.
+- [x] tool1 중심 좌표 `[-0.317806, 0.090, 0.163912]`는 도달 가능한 45도 후보와
+  +/-18.4 mm 면 오프셋을 검사해도 wrist/camera/EE와 circuit box가 충돌한다.
+  중심점은 실행 목표가 아니며 `cartesian_targets.yaml`에서 비활성화했다.
+- [x] 실기 캡처에서 shoulder/elbow가 runtime soft limit를 넘는 값이 반복됐다.
+  도킹 좌표를 확정하기 전에 joint zero/sign/감속기 기준과 실제 soft limit를
+  대조해야 하며, 단순 limit 확장은 금지한다.
+
+### 다음 우선순위
+
+- [ ] 실기에서 관절별 zero/sign과 soft limit를 저속으로 재검증하고, 허용 범위
+  밖 캡처가 영점 불일치인지 실제 작업공간 요구인지 구분한다.
+- [ ] 실제 도킹 자세에서 `base_actuator -> tcp_link`와 tool-specific TCP TF를
+  동시에 기록하고, 물체 중심이 아닌 실제 접촉 TCP pose를 확정한다.
+- [ ] 확정된 dock pose에서 30--50 mm 떨어진 pre-dock과 저속 직선 최종 진입을
+  분리해 MoveIt/IK/collision 검사를 수행한다.
+- [ ] rack 해체 완료 신호와 planning-scene 형상 전이를 구현한다. 해체 전 계획은
+  폐기하고 현재 feedback에서 최종 경로를 다시 계획한다.
+- [ ] drill 회전 중심/방향과 `ee_gear` 1:1 맞물림을 RViz 및 실물 기준으로 다시
+  확인한다. 현재 STL 원점의 X 편심 약 1.47 mm도 구분해 기록한다.
+- [ ] 최신 작업 트리 변경을 커밋하기 전 mock에서 base 0, +/-90, +/-180도 부근의
+  조이스틱 방향과 L1 무이동 진입/R2 명시 이동을 확인한다.
+
 ## 단계 0 — 기준선 고정과 재현 자료
 
 - [x] 현재 `main`을 보존하고 `aa6614` 기준 재작업 브랜치를 생성한다.

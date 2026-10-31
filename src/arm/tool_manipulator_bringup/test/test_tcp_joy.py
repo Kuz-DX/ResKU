@@ -8,7 +8,8 @@ import pytest
 ARM = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ARM/'tool_change_min'))
 sys.path.insert(0, str(ARM/'tool_manipulator_bringup/scripts'))
-from tcp_joy_core import TcpStepper, joy_twist, LimitBlocked, TcpMetrics
+from tcp_joy_core import (TcpStepper, joy_twist, LimitBlocked, TcpMetrics,
+                          rotate_translation_with_base_yaw)
 from tcp_joy import TcpJoy
 from tool_change_min.kinematics import ArmKinematics
 from manual_control_common import ArmChain
@@ -34,6 +35,26 @@ def test_deadman_modifier_and_vector_speed_bound():
     np.testing.assert_array_equal(twist[:3], 0.)
     assert np.linalg.norm(twist[3:]) == pytest.approx(1.)
     assert not joy_twist([float('nan')]*8, buttons)[0]
+
+
+@pytest.mark.parametrize(
+    ('yaw', 'expected'),
+    [(0., [1., 0., .25, 0., 0., .5]),
+     (np.pi/2, [0., 1., .25, 0., 0., .5]),
+     (-np.pi/2, [0., -1., .25, 0., 0., .5]),
+     (np.pi, [-1., 0., .25, 0., 0., .5])],
+)
+def test_translation_mapping_follows_base_yaw_across_full_rotation(yaw, expected):
+    result = rotate_translation_with_base_yaw(
+        np.array([1., 0., .25, 0., 0., .5]), yaw)
+    np.testing.assert_allclose(result, expected, atol=1e-12)
+
+
+def test_base_yaw_mapping_preserves_translation_norm_and_angular_axes():
+    twist = np.array([.3, -.7, .2, -.4, .5, -.6])
+    result = rotate_translation_with_base_yaw(twist, 2.4)
+    assert np.linalg.norm(result[:2]) == pytest.approx(np.linalg.norm(twist[:2]))
+    np.testing.assert_array_equal(result[2:], twist[2:])
 
 
 def test_actual_urdf_fk_matches_manual_chain(model):

@@ -26,7 +26,8 @@ try:
 except ImportError:
     from arm_shared_kinematics import ArmKinematics, ARM_JOINTS
 from tcp_joy_core import (TcpStepper, joy_twist, LimitBlocked, SafetyError,
-                          TcpMetrics, EeDpad, nearest_tcp_entry)
+                          TcpMetrics, EeDpad, nearest_tcp_entry,
+                          rotate_translation_with_base_yaw)
 from arm_mode_core import TCP_ENTRY_TOLERANCE, non_arm_feedback_changed
 from tcp_motion_workflow import TcpMotionWorkflow
 
@@ -50,6 +51,9 @@ class TcpJoy(TcpMotionWorkflow, Node):
             linear=float(param('linear_speed_mps', .02)), angular=float(param('angular_speed_rad_s', .15)),
             margin=float(param('limit_margin_rad', .02)), lead=float(param('max_lead_rad', .08)),
             iterations=int(param('ik_iterations', 30)), budget=float(param('ik_budget_sec', .030)))
+        self.translation_frame = str(param('translation_frame', 'base_yaw'))
+        if self.translation_frame not in ('base_yaw', 'base'):
+            raise ValueError("translation_frame must be 'base_yaw' or 'base'")
         self.pub = self.create_publisher(String, '/arm/input/tcp_ik', 1)
         self.tool_pub = self.create_publisher(String, '/arm/input/tool_auto', 1)
         self.diag = self.create_publisher(String, '/arm/tcp_joy/status', 1)
@@ -309,6 +313,10 @@ class TcpJoy(TcpMotionWorkflow, Node):
                 self.reason = 'R2 nearest TCP entry blocked: '+str(exc)
         self.previous_nearest = nearest
         self.deadman, self.twist = joy_twist(msg.axes, msg.buttons)
+        if (self.deadman and vars(self).get('translation_frame', 'base') == 'base_yaw'
+                and self.measured is not None):
+            self.twist = rotate_translation_with_base_yaw(
+                self.twist, float(self.measured[0]))
         wrist_mode = valid and bool(msg.buttons[5])
         if wrist_mode != vars(self).get('wrist_mode', False):
             self.discard()
