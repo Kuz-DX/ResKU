@@ -55,10 +55,9 @@
   </material>
   <material name="petg_grey"><color rgba="0.40 0.40 0.42 1.0"/></material>
   <material name="motor_dark"><color rgba="0.12 0.12 0.14 1.0"/></material>
-  <material name="tcp_red"><color rgba="0.90 0.05 0.05 1.0"/></material>
+  <material name="tool_case_marker_blue"><color rgba="0.05 0.35 1.0 1.0"/></material>
   <material name="chassis_blue"><color rgba="0.12 0.22 0.34 0.55"/></material>
   <material name="circuit_box_orange"><color rgba="0.85 0.35 0.05 0.80"/></material>
-  <material name="tool_case_blue"><color rgba="0.10 0.45 0.85 0.70"/></material>
 
   <!-- MOTOR -->
   <material name="motor_grey">
@@ -166,30 +165,30 @@
     <origin xyz="$(arg arm_world_x) $(arg arm_world_y) $(arg arm_world_z)" rpy="0 0 0"/>
   </joint>
 
-  <!-- Case 2/3 outer: 36.8(X) x 46.8(Y) x 50(Z) mm.
-       EE entry is local +X; cavity is 16(X depth) x 16(Y) x 50(Z) mm. -->
-  <xacro:macro name="tool_case_walls">
-    <!-- back wall and two Y rails: open local +X face toward the EE -->
-    <visual><origin xyz="-0.008 0 0"/><geometry><box size="0.0208 0.0468 0.050"/></geometry><material name="tool_case_blue"/></visual>
-    <collision><origin xyz="-0.008 0 0"/><geometry><box size="0.0208 0.0468 0.050"/></geometry></collision>
-    <visual><origin xyz="0.0104 -0.0157 0"/><geometry><box size="0.016 0.0154 0.050"/></geometry><material name="tool_case_blue"/></visual>
-    <collision><origin xyz="0.0104 -0.0157 0"/><geometry><box size="0.016 0.0154 0.050"/></geometry></collision>
-    <visual><origin xyz="0.0104 0.0157 0"/><geometry><box size="0.016 0.0154 0.050"/></geometry><material name="tool_case_blue"/></visual>
-    <collision><origin xyz="0.0104 0.0157 0"/><geometry><box size="0.016 0.0154 0.050"/></geometry></collision>
+  <!-- Visible centre marker only; it does not affect collision checking. -->
+  <xacro:macro name="tool_case_center_marker" params="case_link marker_link">
+    <link name="${marker_link}">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry><sphere radius="0.012"/></geometry>
+        <material name="tool_case_marker_blue"/>
+      </visual>
+    </link>
+    <joint name="${case_link}_to_center_marker" type="fixed">
+      <parent link="${case_link}"/><child link="${marker_link}"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </joint>
   </xacro:macro>
 
-  <!-- Case 2 (+Y) centre is an arm_world offset. With the 55-degree tilt,
-       the lowest corner of its collision geometry meets the circuit-box top
-       at world Z=369.5 mm for the default mounting dimensions. -->
-  <link name="tool_case_y_plus"><xacro:tool_case_walls/></link>
+  <!-- Former case 2 frame: +76.7 mm X and +90 mm Y from case 1 in arm_world. -->
+  <link name="tool_case_y_plus"/>
   <joint name="arm_world_to_tool_case_y_plus" type="fixed">
     <parent link="arm_world"/><child link="tool_case_y_plus"/>
-    <!-- arm_world has world orientation, so pitch +55 deg is world-Y tilt. -->
-    <origin xyz="-0.268 0.10245 0.163911809" rpy="0 0.959931088597 0"/>
+    <!-- Retain the former case-2 orientation for its dock reference frames. -->
+    <origin xyz="-0.317806 0.090 0.163911809" rpy="0 -0.785398163397 0"/>
   </joint>
-  <!-- Each dock face is the case local YZ plane at outer X = +/-18.4 mm.
-       Its +Z axis is the outward face normal, so an EE TCP XY plane can be
-       made coplanar by aligning TCP +Z with the chosen face normal. -->
+  <xacro:tool_case_center_marker case_link="tool_case_y_plus" marker_link="tool_case_y_plus_center"/>
+  <!-- Former dock reference planes remain at local X = +/-18.4 mm. -->
   <link name="tool_case_y_plus_x_positive_face"/>
   <joint name="tool_case_y_plus_to_x_positive_face" type="fixed">
     <parent link="tool_case_y_plus"/><child link="tool_case_y_plus_x_positive_face"/>
@@ -209,32 +208,17 @@
     <origin xyz="-0.268 -0.10245 0.153595589" rpy="0 0 0"/>
   </joint>
 
-  <!-- Tool case 1: outer 36.8(X) x 100(Y) x 80(Z) mm.
-       Entry faces the EE at local +X. Cavity is 16(X depth) x 16(Y) x 50(Z) mm. -->
-  <xacro:macro name="tool_case_1_shell">
-    <!-- back wall: cavity ends 16 mm inboard from local +X entry -->
-    <visual><origin xyz="-0.008 0 0"/><geometry><box size="0.0208 0.100 0.080"/></geometry><material name="tool_case_blue"/></visual>
-    <collision><origin xyz="-0.008 0 0"/><geometry><box size="0.0208 0.100 0.080"/></geometry></collision>
-    <!-- two Y rails around the 16 mm opening -->
-    <visual><origin xyz="0.0104 -0.029 0"/><geometry><box size="0.016 0.042 0.080"/></geometry><material name="tool_case_blue"/></visual>
-    <collision><origin xyz="0.0104 -0.029 0"/><geometry><box size="0.016 0.042 0.080"/></geometry></collision>
-    <visual><origin xyz="0.0104 0.029 0"/><geometry><box size="0.016 0.042 0.080"/></geometry><material name="tool_case_blue"/></visual>
-    <collision><origin xyz="0.0104 0.029 0"/><geometry><box size="0.016 0.042 0.080"/></geometry></collision>
-    <!-- top/bottom rails leave a 50 mm opening along local Z -->
-    <visual><origin xyz="0.0104 0 -0.0325"/><geometry><box size="0.016 0.016 0.015"/></geometry><material name="tool_case_blue"/></visual>
-    <collision><origin xyz="0.0104 0 -0.0325"/><geometry><box size="0.016 0.016 0.015"/></geometry></collision>
-    <visual><origin xyz="0.0104 0 0.0325"/><geometry><box size="0.016 0.016 0.015"/></geometry><material name="tool_case_blue"/></visual>
-    <collision><origin xyz="0.0104 0 0.0325"/><geometry><box size="0.016 0.016 0.015"/></geometry></collision>
-  </xacro:macro>
-  <link name="tool_case_1"><xacro:tool_case_1_shell/></link>
+  <!-- Former case 1 frame retained for its centre marker and dock references. -->
+  <link name="tool_case_1"/>
   <joint name="arm_world_to_tool_case_1" type="fixed">
     <parent link="arm_world"/><child link="tool_case_1"/>
     <!-- Gripper-case centre measured from the base axis: X=-394.506, Z=212.964 mm.
          base_actuator and arm_world share the same origin and orientation. -->
-    <!-- arm_world has world orientation, so pitch +55 deg is world-Y tilt. -->
-    <origin xyz="-0.394506 0 0.212964" rpy="0 0.959931088597 0"/>
+    <!-- Retain the former case-1 orientation for its dock reference frames. -->
+    <origin xyz="-0.394506 0 0.212964" rpy="0 -0.959931088597 0"/>
   </joint>
-  <!-- Case-1 local YZ outer faces, at X = +/-18.4 mm. The positive face is the EE entry. -->
+  <xacro:tool_case_center_marker case_link="tool_case_1" marker_link="tool_case_1_center"/>
+  <!-- Former case-1 dock reference planes remain at X = +/-18.4 mm. -->
   <link name="tool_case_1_x_positive_face"/>
   <joint name="tool_case_1_to_x_positive_face" type="fixed">
     <parent link="tool_case_1"/><child link="tool_case_1_x_positive_face"/>
@@ -360,7 +344,7 @@
         xyz="0 -0.037700 0.103900"
         rpy="${pi/2} 0 0"/>
 
-    <axis xyz="0 0 -1"/>
+    <axis xyz="0 0 1"/>
 
     <limit
         lower="-1.592"
@@ -426,7 +410,7 @@
         xyz="0 0.180000 -0.052578"
         rpy="${pi} 0 0"/>
 
-    <axis xyz="0 0 -1"/>
+    <axis xyz="0 0 1"/>
 
     <limit
         lower="-1.497"
@@ -491,7 +475,7 @@
         xyz="0 -0.200000 -0.048397"
         rpy="${pi} 0 0"/>
 
-    <axis xyz="0 0 -1"/>
+    <axis xyz="0 0 1"/>
 
     <limit
         lower="-1.592"
