@@ -27,6 +27,14 @@ HOME = {
     "wrist_roll_joint": 0.0,
     "wrist_yaw_joint": 0.0,
 }
+TCP_READY = {
+    "base_joint": 0.0,
+    "shoulder_joint": 1.3056807708063805,
+    "elbow_joint": 1.3669418648356366,
+    "wrist_pitch_joint": -1.2812461346468489,
+    "wrist_roll_joint": 0.0,
+    "wrist_yaw_joint": 0.0,
+}
 
 
 def _arm_poses():
@@ -40,15 +48,16 @@ def _arm_poses():
     }
 
 
-def test_only_home_and_back_named_arm_poses_exist():
+def test_only_requested_named_arm_poses_exist():
     poses = _arm_poses()
-    assert set(poses) == {"home", "back"}
+    assert set(poses) == {"home", "back", "tcp_ready"}
     assert set(poses["home"]) == JOINTS
     assert poses["home"] == HOME
     assert set(poses["back"]) == JOINTS
     for name in JOINTS - {"base_joint"}:
         assert poses["back"][name] == HOME[name]
     assert poses["back"]["base_joint"] == pytest.approx(math.pi, abs=1e-12)
+    assert poses["tcp_ready"] == TCP_READY
 
 
 def test_rmd_urdf_axes_use_the_named_pose_sign_convention():

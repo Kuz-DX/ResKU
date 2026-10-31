@@ -32,6 +32,15 @@
         <joint name="wrist_roll_joint" value="0.000000000000"/>
         <joint name="wrist_yaw_joint" value="0.000000000000"/>
     </group_state>
+    <!-- L1 TCP entry target from config/tcp_ready.yaml. -->
+    <group_state name="tcp_ready" group="arm">
+        <joint name="base_joint" value="0.000000000000"/>
+        <joint name="elbow_joint" value="1.3669418648356366"/>
+        <joint name="shoulder_joint" value="1.3056807708063805"/>
+        <joint name="wrist_pitch_joint" value="-1.2812461346468489"/>
+        <joint name="wrist_roll_joint" value="0.000000000000"/>
+        <joint name="wrist_yaw_joint" value="0.000000000000"/>
+    </group_state>
     <!-- Intentional contact between each actuator housing and its adjacent
          mounting/output links.  Keep all non-adjacent self-collision checks. -->
     <disable_collisions link1="base_actuator" link2="base_link" reason="Adjacent"/>
