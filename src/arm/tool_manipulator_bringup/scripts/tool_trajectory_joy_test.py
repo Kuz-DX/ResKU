@@ -31,15 +31,7 @@ from arm_mode_core import TCP_ENTRY_TOLERANCE
 
 def load_path(path, model, margin=.02):
     """Load captured points with recorded or manager-limited execution timing."""
-    path = Path(path)
-    if path.name == 'tool0_trajectory.yaml':
-        # Resolve beside the supplied config, for both source and installed launches.
-        config_dir = path.parent.parent if path.parent.name == 'resampled' else path.parent
-        path = config_dir/'test/tool0_trajectory.yaml'
-        from resample_tool_paths import resample
-        data = resample(yaml.safe_load(path.read_text()))
-    else:
-        data = yaml.safe_load(path.read_text())
+    data = yaml.safe_load(Path(path).read_text())
     if not isinstance(data, dict):
         raise ValueError(f'{path}: YAML root must be a mapping')
     # Test-only tool1 edits; shared source and resampled YAML remain intact.
