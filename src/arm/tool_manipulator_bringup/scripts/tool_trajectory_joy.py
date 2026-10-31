@@ -485,7 +485,7 @@ class ToolTrajectoryJoy(Node):
                 return
         if request not in self.paths:
             self.path_id = request
-            self.report('blocked', f'tool path {request} is not execution-enabled')
+            self.report('blocked', f'{tool_label(request)} path is not execution-enabled')
             self.path_id = None
             return
         now = time.monotonic()
@@ -507,7 +507,7 @@ class ToolTrajectoryJoy(Node):
             self.path_id = request
             self.future = self.cancel.call_async(Trigger.Request())
             self.stage, self.started = 'request_hold', now
-            self.report('stopping', f'requesting HOLD before tool path {request}')
+            self.report('stopping', f'requesting HOLD before {tool_label(request)} path')
         else:
             self.path_id = request
             self.report('blocked', 'arm cancel/HOLD service unavailable')
@@ -592,7 +592,7 @@ class ToolTrajectoryJoy(Node):
             approach = ('; approaching taught start from %.4f rad' % path['start_error']
                         if path['start_error'] > self.start_tolerance else '')
             self.report('checking',
-                        f'checking tool path {path_id} ({len(self.requests)} samples, '
+                        f'checking {tool_label(path_id)} path ({len(self.requests)} samples, '
                         f'{budget:.1f}s budget){approach}')
         except (ValueError, RuntimeError, KeyError) as exc:
             self.path_id = path_id
@@ -668,7 +668,7 @@ class ToolTrajectoryJoy(Node):
         self.future = self.planner.call_async(GetMotionPlan.Request(motion_plan_request=request))
         self.stage, self.started = 'planning_entry', time.monotonic()
         self.report('planning',
-                    f'planning collision-free entry to tool path {path_id} from {error:.4f} rad')
+                    f'planning collision-free entry to {tool_label(path_id)} from {error:.4f} rad')
 
     def begin_failed(self, reason):
         self.report('blocked', reason)
@@ -694,7 +694,7 @@ class ToolTrajectoryJoy(Node):
                 self.report('returning', 'ee close confirmed; checking reverse path')
                 self.begin(self.path_id, path)
             else:
-                self.report('completed', f'tool path {self.path_id} closed ee and returned; HOLD')
+                self.report('completed', f'{tool_label(self.path_id)} closed ee and returned; HOLD')
                 self.reset()
             return
         if self.requested_docked_state is not None:
@@ -936,7 +936,7 @@ class ToolTrajectoryJoy(Node):
                 self.publisher.publish(String(data=json.dumps(command)))
                 self.stage = 'executing'
                 self.started = now
-                self.report('executing', f'executing tool path {self.path_id}')
+                self.report('executing', f'executing {tool_label(self.path_id)} path')
                 return
             if self.stage == 'executing':
                 s = self.status

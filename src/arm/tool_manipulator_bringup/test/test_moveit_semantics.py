@@ -99,7 +99,7 @@ def test_tool_case_centres_match_measured_arm_world_coordinates():
     ("tool_id", "expected"),
     [("0", {"tool_1_link"}),
      ("1", {"tool_2_link"}),
-     ("2", {"tool_3_link"}),
+     ("2", {"tool_1_link"}),
      ("99", set())],
 )
 def test_tool_id_expands_only_the_selected_tool(tool_id, expected):
@@ -114,3 +114,23 @@ def test_tool_id_expands_only_the_selected_tool(tool_id, expected):
         if link.attrib["name"] in {"tool_1_link", "tool_2_link", "tool_3_link"}
     }
     assert links == expected
+
+
+def test_drill_geometry_and_tcp_are_aligned_to_ee_output_z_axis():
+    result = subprocess.run(
+        ["xacro", str(XACRO), "tool_id:=1",
+         "use_mock_hardware:=true", "use_mesh:=false"],
+        check=True, capture_output=True, text=True,
+    )
+    root = ET.fromstring(result.stdout)
+    joints = {joint.attrib["name"]: joint for joint in root.findall("joint")}
+    mount = joints["tool_2_mount_joint"]
+    assert mount.find("parent").attrib["link"] == "ee_output_link"
+    assert mount.find("origin").attrib["rpy"] == "0 0 0"
+    assert joints["tool_2_tcp_joint"].find("origin").attrib["xyz"] == "0 0 0.060"
+
+    link = root.find("link[@name='tool_2_link']")
+    # The STL bounding box is longest on Z, so no mesh rotation is allowed.
+    assert link.find("visual/origin") is None
+    assert link.find("collision/origin") is None
+    assert link.find("inertial/origin").attrib["xyz"] == "0 0 0.030"

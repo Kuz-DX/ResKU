@@ -67,7 +67,8 @@
 
 
   <!-- ========================================================= -->
-  <!-- VISUAL MACRO -->
+  <!-- VISUAL/COLLISION MACRO. use_mesh controls display only; collision
+       geometry is always present so planning cannot silently become unsafe. -->
   <!-- STL 자체 좌표계를 그대로 사용 -->
   <!-- STL 단위 mm -> URDF m -->
   <!-- ========================================================= -->
@@ -98,13 +99,25 @@
       <material name="${material}"/>
 
     </visual>
-      <collision>
+    </xacro:if>
+    <xacro:unless value="$(arg use_mesh)">
+      <!-- Keep RobotModel visible without the detailed visual STL. The
+           collision mesh is reused only for display here; the separate
+           collision element below remains authoritative for planning. -->
+      <visual>
         <origin xyz="0 0 0" rpy="${mesh_rpy}"/>
         <geometry>
           <mesh filename="${collision_mesh_path}/${mesh}.stl" scale="0.001 0.001 0.001"/>
         </geometry>
-      </collision>
-    </xacro:if>
+        <material name="${material}"/>
+      </visual>
+    </xacro:unless>
+    <collision>
+      <origin xyz="0 0 0" rpy="${mesh_rpy}"/>
+      <geometry>
+        <mesh filename="${collision_mesh_path}/${mesh}.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </collision>
 
   </xacro:macro>
 
@@ -730,14 +743,12 @@
   </joint>
 
   <!-- The common arm ends at tcp_link; the selected tool is downstream. -->
-  <xacro:if value="${selected_tool_id == 0}">
+  <!-- Supply-box handling (task/tool ID 2) uses the same physical gripper. -->
+  <xacro:if value="${selected_tool_id == 0 or selected_tool_id == 2}">
     <xacro:tool_1_gripper prefix="" parent="tcp_link" drive_parent="ee_output_link" use_mesh="$(arg use_mesh)"/>
   </xacro:if>
   <xacro:if value="${selected_tool_id == 1}">
     <xacro:tool_2 prefix="" parent="ee_output_link" use_mesh="$(arg use_mesh)"/>
-  </xacro:if>
-  <xacro:if value="${selected_tool_id == 2}">
-    <xacro:tool_3 prefix="" parent="ee_output_link" use_mesh="$(arg use_mesh)"/>
   </xacro:if>
 
 </robot>

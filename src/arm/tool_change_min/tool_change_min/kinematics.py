@@ -219,32 +219,42 @@ class ArmKinematics:
                 index += 1
         return transform
 
-    def pose_error(self, q: np.ndarray, target: np.ndarray) -> np.ndarray:
-        current = self.fk(q)
-        return np.concatenate((target[:3, 3] - current[:3, 3],
-                               _rotvec(target[:3, :3] @ current[:3, :3].T)))
-
-    def jacobian(self, q: np.ndarray, epsilon: float = 1.0e-5) -> np.ndarray:
-        # Geometric Jacobian in the root frame. Include every fixed URDF
-        # transform; each revolute axis is expressed before its own rotation.
-        # epsilon remains accepted for compatibility with existing callers.
+    def pose_and_jacobian(self, q: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Compute FK and the spatial Jacobian in one chain traversal."""
         q = np.asarray(q, dtype=float)
         if q.shape != (len(self.joint_names),):
             raise ValueError(f"expected {len(self.joint_names)} joint positions")
         transform = np.eye(4)
         origins, axes = [], []
+        index = 0
         for joint in self.chain:
             transform = transform @ joint.origin
             if joint.joint_type in ("revolute", "continuous"):
                 origins.append(transform[:3, 3].copy())
                 axes.append(transform[:3, :3] @ joint.axis)
                 rotate = np.eye(4)
-                rotate[:3, :3] = _rotation(joint.axis, q[len(axes)-1])
+                rotate[:3, :3] = _rotation(joint.axis, q[index])
                 transform = transform @ rotate
+                index += 1
         tip = transform[:3, 3]
-        return np.column_stack([
+        jacobian = np.column_stack([
             np.concatenate((np.cross(axis, tip-origin), axis))
             for origin, axis in zip(origins, axes)])
+        return transform, jacobian
+
+    @staticmethod
+    def _pose_error_from_pose(current: np.ndarray, target: np.ndarray) -> np.ndarray:
+        return np.concatenate((target[:3, 3] - current[:3, 3],
+                               _rotvec(target[:3, :3] @ current[:3, :3].T)))
+
+    def pose_error(self, q: np.ndarray, target: np.ndarray) -> np.ndarray:
+        return self._pose_error_from_pose(self.fk(q), target)
+
+    def jacobian(self, q: np.ndarray, epsilon: float = 1.0e-5) -> np.ndarray:
+        # Geometric Jacobian in the root frame. Include every fixed URDF
+        # transform; each revolute axis is expressed before its own rotation.
+        # epsilon remains accepted for compatibility with existing callers.
+        return self.pose_and_jacobian(q)[1]
 
     def within_limits(self, q: np.ndarray, margin_rad: float = 0.0) -> bool:
         return (np.asarray(q).shape == (len(self.joint_names),) and np.all(np.isfinite(q)) and
@@ -264,12 +274,12 @@ class ArmKinematics:
         for _ in range(max_iterations):
             if time.monotonic() >= deadline:
                 raise ValueError('IK time budget exceeded')
-            error = self.pose_error(q, target)
+            current, jacobian = self.pose_and_jacobian(q)
+            error = self._pose_error_from_pose(current, target)
             if np.linalg.norm(error[:3]) < 1.0e-5 and np.linalg.norm(error[3:]) < 1.0e-4:
                 if time.monotonic() >= deadline:
                     raise ValueError('IK time budget exceeded')
                 return q
-            jacobian = self.jacobian(q)
             delta = jacobian.T @ np.linalg.solve(
                 jacobian @ jacobian.T + (damping * damping) * np.eye(6), error)
             norm = np.linalg.norm(delta)
@@ -318,14 +328,13 @@ class ArmKinematics:
         for _ in range(max_iterations):
             if time.monotonic() >= deadline:
                 raise ValueError('axis IK time budget exceeded')
-            pose = self.fk(q)
+            pose, jacobian = self.pose_and_jacobian(q)
             axis = pose[:3, :3] @ local_axis
             error = np.r_[position-pose[:3, 3], direction-axis]
             if np.linalg.norm(error[:3]) < 1e-5 and np.linalg.norm(error[3:]) < 1e-4:
                 if time.monotonic() >= deadline:
                     raise ValueError('axis IK time budget exceeded')
                 return q
-            jacobian = self.jacobian(q)
             jacobian[3:] = np.cross(jacobian[3:].T, axis).T
             delta = _bounded_damped_step(jacobian, error, lower-q, upper-q, .003)
             for backtrack in range(12):

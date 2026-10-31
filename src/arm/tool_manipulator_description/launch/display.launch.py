@@ -32,11 +32,13 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             "use_mesh", default_value="true",
-            description="true: CAD STL visual meshes; false: kinematic frames only.",
+            description=("true: CAD STL visual meshes; false: collision/kinematic model only. "
+                         "Enable Collision Enabled in RViz RobotModel when false."),
         ),
         DeclareLaunchArgument(
             "tool_id", default_value="0",
-            description="Task/tool ID: 0=gripper, 1=drill, 2=supply_box, 99=no mounted tool.",
+            description=("Task/tool ID: 0=gripper, 1=drill, "
+                         "2=supply_box handled by gripper, 99=no mounted tool."),
         ),
         DeclareLaunchArgument(
             "publish_joint_states", default_value="true",

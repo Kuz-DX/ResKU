@@ -94,6 +94,8 @@
 
 ## 단계 5 — MoveIt planning scene
 
+- [x] Python task ID를 `0=gripper, 1=drill, 2=supply_box`로 통일하고 supply-box
+  작업에는 실제 장착되는 gripper collision 형상을 사용한다.
 - [ ] chassis, circuit box, camera/bracket, rack, tool 형상을 scene에 포함한다.
 - [ ] SRDF allowed-collision matrix를 최소 권한으로 검토한다.
 - [ ] HOME은 고정 joint 직선이 아니라 현재 실측 자세에서 계획한다.
@@ -120,6 +122,15 @@
 
 - [ ] taught path 완료, tag 관측, 보정 이동, Arduino 구동, 물리 확인을 별도
   stage로 만든다.
+- [ ] rack gear가 장착된 접근 단계와 해체된 최종 도킹 단계를 서로 다른
+  planning-scene 상태로 모델링한다. 해체 확인 전에는 rack collision을 유지한다.
+- [ ] rack 해체 완료 신호는 sequence ID와 timestamp를 포함하고, 누락되거나 오래된
+  신호이면 다음 계획을 금지한다.
+- [ ] 해체 확인 뒤 현재 joint feedback에서 planning scene을 갱신하고 경로를 새로
+  계획한다. 해체 전 생성한 최종 도킹 trajectory는 재사용하지 않는다.
+- [ ] `rack_right`와 `circuit_box`의 allowed-collision을 전역 허용하지 않는다.
+  mock에서는 `attached -> detach confirmed -> removed/world object` 전이와 각 단계의
+  collision 결과를 각각 기록한다.
 - [ ] L2 deadman과 UI 요청의 정책을 분리한다.
 - [ ] Joy heartbeat stale과 실제 L2 release를 다른 오류로 보고한다.
 - [ ] Arduino 명령 전 subscriber와 정지 HOLD를 확인한다.

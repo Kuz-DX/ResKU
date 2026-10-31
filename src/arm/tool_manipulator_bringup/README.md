@@ -291,7 +291,7 @@ ros2 launch tool_manipulator_bringup manual.launch.py \
 ### mock + RViz
 
 ```bash
-# tool_id: 0=gripper, 1=drill, 2=Phillips bit, 99=no tool
+# task/tool ID: 0=gripper, 1=drill, 2=supply_box handled by gripper, 99=no mounted tool
 ros2 launch tool_manipulator_bringup mock.launch.py tool_id:=0 use_mesh:=true
 ```
 

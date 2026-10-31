@@ -21,6 +21,7 @@ from tool_trajectory_joy import ToolTrajectoryJoy, ARM_JOINTS
 from tool_docking_core import (load_settings, transform, pose_errors, bounded_target,
                                tag_pose, tag_normal_from_camera_side,
                                direction_angle, interpolate_direction)
+from tool_ids import tool_label
 
 
 class ToolDockingCoordinator(ToolTrajectoryJoy):
@@ -192,7 +193,7 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                             if self.cfg.get('alignment_mode') == 'camera_normal_advance'
                             else 'tag alignment')
             self.report('docking_armed',
-                        f'tool path {path_id} includes {continuation} after approach completion; '
+                        f'{tool_label(path_id)} path includes {continuation} after approach completion; '
                         f'motion_enabled={self.motion_enabled}')
             if (self.cfg['actuation_enabled']
                     and (self.docking_command.get_subscription_count() == 0

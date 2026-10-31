@@ -68,7 +68,7 @@ def bringup(context):
         docking = LaunchConfiguration('enable_tool_docking').perform(context) == 'true'
         pick_place = LaunchConfiguration('enable_tool2_pick_place').perform(context) == 'true'
         if pick_place and not docking:
-            raise ValueError('tool2 pick/place requires the managed docking coordinator')
+            raise ValueError('tool2 (supply_box) pick/place requires the managed docking coordinator')
         docking_parameters = ({
             'docking_config': LaunchConfiguration('docking_config').perform(context),
             'docking_camera_frame': LaunchConfiguration('docking_camera_frame').perform(context),

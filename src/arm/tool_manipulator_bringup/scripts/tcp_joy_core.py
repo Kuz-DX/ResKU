@@ -191,7 +191,9 @@ class TcpStepper:
         # Characteristic length 0.2 m balances translational/rotational units.
         jac = jac.copy()
         jac[:3] /= .2
-        singular = np.linalg.svd(jac, compute_uv=False)
+        # Reuse one decomposition for both conditioning and joint-demand
+        # prediction instead of factoring the same 6x6 Jacobian twice.
+        u, singular, vh = np.linalg.svd(jac, full_matrices=False)
         self.condition = (math.inf if singular[-1] < 1e-8 else float(singular[0]/singular[-1]))
         self.scale = float(np.clip((100.-self.condition)/80., 0., 1.))
         if self.scale <= 0:
@@ -205,7 +207,7 @@ class TcpStepper:
         # angular increment using the accepted target orientation, which also
         # defines the rotation below, even when measured feedback lags.
         scaled_increment[3:] = self.pose[:3, :3] @ increment[3:]
-        predicted = np.linalg.solve(jac, scaled_increment)
+        predicted = vh.T @ ((u.T @ scaled_increment) / singular)
         ratio = float(np.max(np.abs(predicted)/(self.speeds*dt)))
         self.velocity_scale = min(1., .9/max(ratio, 1e-12))
         attempts = min(4, self.iterations)

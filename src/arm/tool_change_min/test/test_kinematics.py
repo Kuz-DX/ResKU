@@ -29,11 +29,19 @@ class KinematicsTest(unittest.TestCase):
     def test_ik_limit_error_names_candidate_and_allowed_range(self):
         q = np.array([(lo+hi)/2 for lo, hi in self.model.limits.values()])
         q[0] = self.model.limits['base_joint'][1] - .02
-        with patch.object(self.model, 'pose_error', return_value=np.array([1., 0, 0, 0, 0, 0])), \
-                patch.object(self.model, 'jacobian', return_value=np.eye(6)):
+        with patch.object(self.model, 'pose_and_jacobian',
+                          return_value=(np.eye(4), np.eye(6))), \
+                patch.object(self.model, '_pose_error_from_pose',
+                             return_value=np.array([1., 0, 0, 0, 0, 0])):
             with self.assertRaisesRegex(ValueError,
                                         r'base_joint candidate=.*allowed=\[.*\] rad'):
                 self.model.solve(np.eye(4), q, margin_rad=.01)
+
+    def test_combined_pose_and_jacobian_matches_public_results(self):
+        q = np.array([0.21, -0.31, 0.37, -0.28, 0.11, 0.43])
+        pose, jacobian = self.model.pose_and_jacobian(q)
+        np.testing.assert_allclose(pose, self.model.fk(q), atol=1.0e-12)
+        np.testing.assert_allclose(jacobian, self.model.jacobian(q), atol=1.0e-12)
 
     def test_pose_path_waypoints_follow_cartesian_line(self):
         start = np.array([0.20, -0.30, 0.40, -0.25, 0.10, 0.20])

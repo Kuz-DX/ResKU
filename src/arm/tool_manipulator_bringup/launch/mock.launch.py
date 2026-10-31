@@ -22,7 +22,10 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             "tool_id", default_value="0",
-            description="Task/tool ID: 0=gripper, 1=drill, 2=supply_box, 99=no mounted tool."),
-        DeclareLaunchArgument("use_mesh", default_value="false"),
+            description=("Task/tool ID: 0=gripper, 1=drill, "
+                         "2=supply_box handled by gripper, 99=no mounted tool.")),
+        DeclareLaunchArgument(
+            "use_mesh", default_value="false",
+            description="Show visual meshes; collision meshes remain enabled."),
         *generate_demo_launch(config).entities,
     ])
