@@ -48,3 +48,50 @@ TCP approaches from or the yaw/roll about the surface normal. A final MoveIt
 pose requires that approach-normal direction to be selected before an
 orientation quaternion and approved IK goal can be stored.
 
+## Plan-only tool 0 topic check
+
+For the first check, define the wrist direction as the `tcp_link` local `+X`
+axis.  A directed world-Y pitch of `125 deg = 180 deg - 55 deg` makes the
+undirected angle between that axis and the parallel `world`/`arm_world` XY
+planes exactly `55 deg`.  With roll and yaw zero, its quaternion is
+`[0, 0.8870108331782217, 0, 0.46174861323503386]` in XYZW order.
+
+Run only one mock bringup; do not run `ik_manual.launch.py` or another
+controller stack at the same time:
+
+```bash
+source /opt/ros/humble/setup.bash
+source ~/ResKU/install/setup.bash
+ros2 launch ~/ResKU/src/arm/tool_manipulator_bringup/launch/mock.launch.py \
+  tool_id:=0 use_mesh:=false
+```
+
+In a second terminal, run the source script directly.  This requires no package
+build and never sends a trajectory to a controller:
+
+```bash
+source /opt/ros/humble/setup.bash
+source ~/ResKU/install/setup.bash
+python3 ~/ResKU/src/arm/tool_manipulator_bringup/scripts/plan_pose_goal.py
+```
+
+Publish the measured `arm_world` target (the MoveIt root `base_actuator` is
+coincident with `arm_world`):
+
+```bash
+ros2 topic pub --once /arm/plan_pose_goal geometry_msgs/msg/PoseStamped \
+"{header: {frame_id: base_actuator}, pose: {position: {x: -0.394506, y: 0.0, z: 0.212964}, orientation: {x: 0.0, y: 0.8870108331782217, z: 0.0, w: 0.46174861323503386}}}"
+```
+
+RViz receives a successful plan on `/display_planned_path`.  Inspect the exact
+result without the repeated `ros2 topic echo` lost-message warning using:
+
+```bash
+ros2 topic echo /arm/pose_plan_status std_msgs/msg/String --once \
+  --qos-reliability reliable --qos-durability transient_local
+```
+
+Success means only that MoveIt found a collision-checked trajectory from the
+current mock state to this fully specified pose.  It does not yet approve the
+approach-normal side, clearances, or hardware execution.
+

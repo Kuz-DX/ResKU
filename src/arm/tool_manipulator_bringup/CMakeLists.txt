@@ -23,6 +23,7 @@ install(PROGRAMS scripts/managed_manual.py scripts/arm_control_mode_manager.py D
 install(FILES scripts/arm_mode_core.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/tcp_joy.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/tool_trajectory_joy.py DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS scripts/plan_pose_goal.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/tool_docking_coordinator.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/tool2_pick_place_coordinator.py DESTINATION lib/${PROJECT_NAME})
 install(FILES scripts/tool2_sequence.py scripts/person_place_geometry.py DESTINATION lib/${PROJECT_NAME})

@@ -24,6 +24,8 @@
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>std_srvs</exec_depend>
   <exec_depend>moveit_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>shape_msgs</exec_depend>
   <exec_depend>moveit_ros_move_group</exec_depend>
   <exec_depend>xacro</exec_depend>
   <exec_depend>rcl_interfaces</exec_depend>
