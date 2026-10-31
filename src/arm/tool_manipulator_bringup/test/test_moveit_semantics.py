@@ -21,9 +21,9 @@ JOINTS = {
 }
 HOME = {
     "base_joint": 0.0,
-    "shoulder_joint": -1.4830934149601134,
-    "elbow_joint": -1.507093414960,
-    "wrist_pitch_joint": 1.553343034275,
+    "shoulder_joint": 1.4830934149601134,
+    "elbow_joint": 1.507093414960,
+    "wrist_pitch_joint": -1.553343034275,
     "wrist_roll_joint": 0.0,
     "wrist_yaw_joint": 0.0,
 }
@@ -49,6 +49,18 @@ def test_only_home_and_back_named_arm_poses_exist():
     for name in JOINTS - {"base_joint"}:
         assert poses["back"][name] == HOME[name]
     assert poses["back"]["base_joint"] == pytest.approx(math.pi, abs=1e-12)
+
+
+def test_rmd_urdf_axes_use_the_named_pose_sign_convention():
+    result = subprocess.run(
+        ["xacro", str(XACRO), "tool_id:=99",
+         "use_mock_hardware:=true", "use_mesh:=false"],
+        check=True, capture_output=True, text=True,
+    )
+    root = ET.fromstring(result.stdout)
+    joints = {joint.attrib["name"]: joint for joint in root.findall("joint")}
+    for name in ("shoulder_joint", "elbow_joint", "wrist_pitch_joint"):
+        assert joints[name].find("axis").attrib["xyz"] == "0 0 1"
 
 
 @pytest.mark.parametrize(
