@@ -23,9 +23,10 @@
         <joint name="wrist_roll_joint" value="0.000000000000"/>
         <joint name="wrist_yaw_joint" value="0.000000000000"/>
     </group_state>
-    <!-- Same arm shape as home, rotated +180 degrees about base_joint. -->
+    <!-- Same arm shape as home, rotated clockwise by 180 degrees about
+         base_joint to keep the sweep away from the supply box. -->
     <group_state name="back" group="arm">
-        <joint name="base_joint" value="3.141592653590"/>
+        <joint name="base_joint" value="-3.141592653590"/>
         <joint name="elbow_joint" value="1.507093414960"/>
         <joint name="shoulder_joint" value="1.4830934149601134"/>
         <joint name="wrist_pitch_joint" value="-1.553343034275"/>

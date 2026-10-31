@@ -9,6 +9,10 @@ The measured circular-top centres supplied on 2026-10-31 are:
 | 0 | `[-394.506, 0.000, 212.964]` | `55 deg` |
 | 1 | `[-317.806, 90.000, 163.912]` | `45 deg` |
 
+The measured supply-box centre is `[-236.197, -120.000, 182.000] mm` in the
+same frame. It is an object reference, not a TCP goal: a grasp offset and
+approach orientation must be added before execution.
+
 `arm_world` and the MoveIt planning root `base_actuator` have the same origin
 and orientation. Therefore the planning targets are the measured values above.
 For visualization in `world`, add the fixed `world -> arm_world` translation
@@ -98,6 +102,20 @@ coincident with `arm_world`):
 ros2 topic pub --once /arm/plan_pose_goal geometry_msgs/msg/PoseStamped \
 "{header: {frame_id: base_actuator}, pose: {position: {x: -0.394506, y: 0.0, z: 0.212964}, orientation: {x: 0.0, y: 0.46174861323503386, z: 0.0, w: 0.8870108331782217}}}"
 ```
+
+The following Tool 1 command is retained as a diagnostic reproduction only.
+The measured point is the case centre, not an approved TCP docking pose; all
+reachable 45-degree candidates currently collide with `circuit_box`:
+
+```bash
+ros2 topic pub --once /arm/plan_pose_goal geometry_msgs/msg/PoseStamped \
+"{header: {frame_id: base_actuator}, pose: {position: {x: -0.317806, y: 0.090, z: 0.163912}, orientation: {x: 0.0, y: 0.3826834323650898, z: 0.0, w: 0.9238795325112867}}}"
+```
+
+Do not publish the supply-box centre to the planner as a TCP goal. It is kept
+in `config/cartesian_targets.yaml` and the URDF reference frame
+`supplybox_pickup_area` only for visualization until the grasp definition is
+available.
 
 RViz receives a successful plan on `/display_planned_path`.  Inspect the exact
 result without the repeated `ros2 topic echo` lost-message warning using:

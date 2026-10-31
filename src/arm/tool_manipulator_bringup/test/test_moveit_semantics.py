@@ -57,7 +57,7 @@ def test_only_requested_named_arm_poses_exist():
     assert set(poses["back"]) == JOINTS
     for name in JOINTS - {"base_joint"}:
         assert poses["back"][name] == HOME[name]
-    assert poses["back"]["base_joint"] == pytest.approx(math.pi, abs=1e-12)
+    assert poses["back"]["base_joint"] == pytest.approx(-math.pi, abs=1e-12)
     assert poses["tcp_ready"] == TCP_READY
 
 
@@ -93,6 +93,9 @@ def test_tool_case_centres_match_measured_arm_world_coordinates():
     np.testing.assert_allclose(
         xyz("arm_world_to_tool_case_y_plus"),
         [-0.317806, 0.090, 0.163912], atol=1e-12)
+    np.testing.assert_allclose(
+        xyz("arm_world_to_supplybox_pickup_area"),
+        [-0.236197, -0.120, 0.182], atol=1e-12)
 
 
 @pytest.mark.parametrize(

@@ -1,0 +1,24 @@
+# Measured Cartesian references in the coincident arm_world/base_actuator frame.
+# tool0/tool1 are plan-only tcp_link pose targets. The supply-box entry is the
+# object centre and must not be executed until a grasp offset/orientation exists.
+targets:
+  tool0:
+    frame_id: base_actuator
+    target_link: tcp_link
+    position_m: [-0.394506, 0.0, 0.212964]
+    surface_tilt_deg: 55.0
+    orientation_xyzw: [0.0, 0.46174861323503386, 0.0, 0.8870108331782217]
+    executable: plan_only
+  tool1:
+    frame_id: base_actuator
+    target_link: tcp_link
+    position_m: [-0.317806, 0.090, 0.163912]
+    surface_tilt_deg: 45.0
+    orientation_xyzw: [0.0, 0.3826834323650898, 0.0, 0.9238795325112867]
+    executable: false
+    reason: measured case centre only; all reachable 45-degree candidates collide with circuit_box
+  supply_box_center:
+    frame_id: base_actuator
+    position_m: [-0.236197, -0.120, 0.182]
+    executable: false
+    reason: object centre only; TCP grasp offset and approach orientation are not defined

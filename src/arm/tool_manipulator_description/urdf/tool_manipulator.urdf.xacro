@@ -231,12 +231,12 @@
     <origin xyz="-0.0184 0 0" rpy="0 -1.570796326795 0"/>
   </joint>
 
-  <!-- Former case 3 location: supply-box pickup area, not a measured grasp pose.
-       No permanent collision; reference axes are parallel to world. -->
+  <!-- Measured supply-box centre in arm_world/base_actuator. This is an object
+       reference point, not an executable TCP grasp pose. -->
   <link name="supplybox_pickup_area"/>
   <joint name="arm_world_to_supplybox_pickup_area" type="fixed">
     <parent link="arm_world"/><child link="supplybox_pickup_area"/>
-    <origin xyz="-0.268 -0.10245 0.153595589" rpy="0 0 0"/>
+    <origin xyz="-0.236197 -0.120 0.182" rpy="0 0 0"/>
   </joint>
 
   <!-- Former case 1 frame retained for its centre marker and dock references. -->

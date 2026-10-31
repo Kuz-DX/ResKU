@@ -17,6 +17,7 @@ from moveit_msgs.msg import (Constraints, DisplayTrajectory, JointConstraint, Mo
                              PositionConstraint)
 from moveit_msgs.srv import GetMotionPlan
 from rclpy.action import ActionClient
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import JointState
@@ -57,6 +58,25 @@ def rotated_local_x(quaternion):
         2.0 * (x * y + w * z),
         2.0 * (x * z - w * y),
     ])
+
+
+def moveit_error_name(code):
+    return {
+        MoveItErrorCodes.SUCCESS: "SUCCESS",
+        MoveItErrorCodes.PLANNING_FAILED: "PLANNING_FAILED",
+        MoveItErrorCodes.INVALID_MOTION_PLAN: "INVALID_MOTION_PLAN",
+        MoveItErrorCodes.MOTION_PLAN_INVALIDATED_BY_ENVIRONMENT_CHANGE:
+            "MOTION_PLAN_INVALIDATED_BY_ENVIRONMENT_CHANGE",
+        MoveItErrorCodes.CONTROL_FAILED: "CONTROL_FAILED",
+        MoveItErrorCodes.TIMED_OUT: "TIMED_OUT",
+        MoveItErrorCodes.START_STATE_IN_COLLISION: "START_STATE_IN_COLLISION",
+        MoveItErrorCodes.START_STATE_VIOLATES_PATH_CONSTRAINTS:
+            "START_STATE_VIOLATES_PATH_CONSTRAINTS",
+        MoveItErrorCodes.GOAL_IN_COLLISION: "GOAL_IN_COLLISION",
+        MoveItErrorCodes.GOAL_VIOLATES_PATH_CONSTRAINTS:
+            "GOAL_VIOLATES_PATH_CONSTRAINTS",
+        MoveItErrorCodes.NO_IK_SOLUTION: "NO_IK_SOLUTION",
+    }.get(code, "UNKNOWN")
 
 
 class PoseGoalPlanner(Node):
@@ -103,7 +123,11 @@ class PoseGoalPlanner(Node):
         self.joint_state = None
         self.busy = False
         self.planner = self.create_client(GetMotionPlan, "/plan_kinematic_path")
-        self.executor = ActionClient(self, ExecuteTrajectory, "/execute_trajectory")
+        # Node.executor is an rclpy-managed property. Do not shadow it with an
+        # action client or Node.__init__ will try to treat the client as an
+        # executor and call add_node() on it.
+        self.trajectory_executor = ActionClient(
+            self, ExecuteTrajectory, "/execute_trajectory")
         self.display = self.create_publisher(
             DisplayTrajectory, "/display_planned_path", 1)
         status_qos = QoSProfile(
@@ -150,7 +174,8 @@ class PoseGoalPlanner(Node):
                 raise RuntimeError("no valid /joint_states sample received")
             if not self.planner.service_is_ready():
                 raise RuntimeError("/plan_kinematic_path is unavailable")
-            if self.execute_plan and not self.executor.server_is_ready():
+            if (self.execute_plan
+                    and not self.trajectory_executor.server_is_ready()):
                 raise RuntimeError("/execute_trajectory is unavailable")
             axis_solution = None
             if self.axis_goal:
@@ -189,7 +214,11 @@ class PoseGoalPlanner(Node):
                     axis_goal_positions_rad=(None if axis_solution is None else
                                              axis_solution.tolist()))
         future = self.planner.call_async(request)
-        future.add_done_callback(lambda result: self.on_plan(result, tilt))
+        context = dict(
+            frame=message.header.frame_id,
+            xyz_m=[position.x, position.y, position.z],
+            requested_wrist_to_world_xy_deg=tilt)
+        future.add_done_callback(lambda result: self.on_plan(result, context))
 
     def make_request(self, target, quaternion, axis_solution=None):
         request = MotionPlanRequest()
@@ -240,15 +269,21 @@ class PoseGoalPlanner(Node):
         request.goal_constraints = [constraint]
         return GetMotionPlan.Request(motion_plan_request=request)
 
-    def on_plan(self, future, requested_tilt):
+    def on_plan(self, future, context):
         try:
             result = future.result()
             if result is None:
                 raise RuntimeError("MoveIt returned no response")
             response = result.motion_plan_response
-            if response.error_code.val != MoveItErrorCodes.SUCCESS:
-                raise RuntimeError(
-                    f"MoveIt planning failed with code {response.error_code.val}")
+            code = response.error_code.val
+            if code != MoveItErrorCodes.SUCCESS:
+                self.busy = False
+                name = moveit_error_name(code)
+                self.report(
+                    "failed", f"MoveIt planning failed: {name} ({code})",
+                    moveit_error_code=code, moveit_error_name=name,
+                    planning_time_sec=response.planning_time, **context)
+                return
             trajectory = response.trajectory.joint_trajectory
             if not trajectory.points:
                 raise RuntimeError("MoveIt returned an empty trajectory")
@@ -260,12 +295,12 @@ class PoseGoalPlanner(Node):
             if self.execute_plan:
                 self.report(
                     "executing", "collision-checked plan accepted for execution",
-                    requested_wrist_to_world_xy_deg=requested_tilt,
+                    **context,
                     final_joint_names=list(trajectory.joint_names),
                     final_positions_rad=list(final.positions))
                 goal = ExecuteTrajectory.Goal()
                 goal.trajectory = response.trajectory
-                sent = self.executor.send_goal_async(goal)
+                sent = self.trajectory_executor.send_goal_async(goal)
                 sent.add_done_callback(self.on_execute_goal)
                 return
             self.busy = False
@@ -275,12 +310,12 @@ class PoseGoalPlanner(Node):
                                  "position_and_orientation"
                                  if self.use_orientation else "position_only"),
                 planning_time_sec=response.planning_time,
-                requested_wrist_to_world_xy_deg=requested_tilt,
+                **context,
                 final_joint_names=list(trajectory.joint_names),
                 final_positions_rad=list(final.positions))
         except Exception as exc:  # rclpy futures may surface service exceptions here.
             self.busy = False
-            self.report("failed", str(exc))
+            self.report("failed", str(exc), **context)
 
     def on_execute_goal(self, future):
         try:
@@ -312,7 +347,7 @@ def main(args=None):
     node = PoseGoalPlanner()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         node.destroy_node()
