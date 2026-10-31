@@ -660,7 +660,7 @@
     <child link="ee_actuator"/>
 
     <origin
-        xyz="0 -0.034000 0.078360"
+        xyz="0 0.034000 0.078360"
         rpy="0 0 0"/>
 
   </joint>
