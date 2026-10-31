@@ -45,4 +45,11 @@ install(DIRECTORY config/ DESTINATION share/${PROJECT_NAME}/config
 install(FILES scripts/manual_control_common.py DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY docs/ DESTINATION share/${PROJECT_NAME}/docs)
 install(FILES README.md DESTINATION share/${PROJECT_NAME})
+# Separate experimental entry points; production scripts remain unchanged.
+install(PROGRAMS
+  scripts/tool_trajectory_joy_test.py
+  scripts/tool_docking_coordinator_test.py
+  scripts/tool2_pick_place_coordinator_test.py
+  scripts/tcp_joy_test.py
+  DESTINATION lib/${PROJECT_NAME})
 ament_package()
