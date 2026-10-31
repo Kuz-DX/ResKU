@@ -4,6 +4,19 @@
 기준 커밋: `aa6614cdee3c31d326314a5d2f6d1a3123be1f51`  
 비교 대상 보존 브랜치: `main` (`bd87acb`)
 
+## 현재 검증 범위
+
+- 실제 하드웨어를 사용할 수 없으므로 이 브랜치에서는 실기 동작을 시도하지 않는다.
+- 검증 근거는 다음 두 종류로 제한한다.
+  1. mock/offline/MoveIt 시뮬레이션에서 새로 재현한 결과
+  2. 저장소, Git 이력 또는 사용자가 제공한 기존 실기 오류 로그
+- 기존 로그가 없는 물리 현상은 synthetic fault fixture로 가설만 검증하고
+  `실기 미검증`으로 남긴다.
+- 시뮬레이션 통과는 상태 전이, 오류 분류, 경로/충돌 검사의 통과를 뜻할 뿐
+  모터 추종성, 전류 제한, 물리 충돌, 도킹 및 파지 성공을 뜻하지 않는다.
+- 기존 로그에서 timestamp, command, feedback 또는 current가 빠진 경우 원인을
+  확정하지 않고 `추정`으로 기록한다.
+
 ## 원칙
 
 - ROS 패키지는 빌드하지 않는다.
@@ -19,13 +32,17 @@
 
 - [x] 현재 `main`을 보존하고 `aa6614` 기준 재작업 브랜치를 생성한다.
 - [x] `aa6614`의 `test_arm_mode_core.py`: 43 passed (2026-10-31, 빌드 없음).
-- [ ] 반복 오류별 실제 로그를 수집한다: DXL 정렬, RMD direction mismatch,
-  following error, waypoint stall/timeout, HOME 충돌, docking deadman/ACK.
+- [ ] 저장소와 Git 이력에서 반복 오류의 기존 근거를 수집한다: DXL 정렬,
+  RMD direction mismatch, following error, waypoint stall/timeout, HOME 충돌,
+  docking deadman/ACK.
+- [ ] 원본 로그가 없는 오류는 관련 커밋 diff·문서·테스트를 `간접 근거`로
+  분류하고 synthetic fault fixture로 재현한다.
 - [ ] 각 로그에 최초 오류와 후속 오류를 구분한다.
 - [ ] 공통 재현 레코드 형식을 정의한다: timestamp, stage, epoch, execution ID,
   command/position/velocity/current, controller/hardware status, Joy, MoveIt 결과.
 
-합격 조건: 각 반복 오류에 최소 한 개의 재현 로그 또는 재현 fixture가 있다.
+합격 조건: 각 반복 오류에 `기존 원본 로그`, `간접 근거+fixture`, `근거 없음` 중
+하나가 표시되고, 근거가 있는 오류에는 최소 한 개의 재현 fixture가 있다.
 
 ## 단계 1 — 상태 머신만 안정화
 
@@ -112,7 +129,11 @@
 
 합격 조건: software path 완료, Arduino 완료, 물리 도킹 확인이 혼동되지 않는다.
 
-## 단계 8 — 실기 단계 검증
+## 단계 8 — 실기 가능 시 수행할 보류 항목
+
+현재 작업 범위에서는 아래 항목을 실행하거나 완료 처리하지 않는다. 시뮬레이션 결과와
+기존 로그로 값을 확정할 수 없는 이유를 남긴 뒤, 하드웨어 사용 가능 시 별도 승인과
+현장 안전 절차에 따라 수행한다.
 
 - [ ] 관절별 부호, 영점, soft limit, safe endpoint를 저속으로 확인한다.
 - [ ] 한 관절씩 ramp 응답과 command-feedback-current를 기록한다.
@@ -123,8 +144,39 @@
 - [ ] collision object와 실제 여유 거리 차이를 기록한다.
 - [ ] 실측 자료로만 following-error, stall, timeout, speed/acceleration 값을 확정한다.
 
-합격 조건: 각 단계의 로그와 현장 확인 결과가 있고, 이전 단계 실패 시 다음 단계로
-진행하지 않는다.
+보류 해제 조건: 실제 하드웨어 사용 가능, 현장 안전 절차 확인, 관절별 저속 시험 승인.
+
+## 현재 확인된 증거 위치
+
+- `src/arm/tool_manipulator_bringup/docs/dxl_trajectory_diagnostics.md`:
+  DXL stall 관련 기존 관측과 미확정 가설
+- `src/arm/tool_manipulator_bringup/docs/tcp_ik_stage4_benchmark.json`:
+  feedback 0.3 응답을 사용한 offline IK benchmark; 실제 collision timing 아님
+- `src/arm/tool_manipulator_bringup/docs/tcp_ready_evaluation.json`:
+  자세/진입 평가 결과; `collision_free: null` 항목은 미검증
+- `src/arm/tool_change_min/docs/changer_ros_mock_results.json`:
+  tool changer ROS mock 결과
+- `src/arm/tool_manipulator_bringup/test/`:
+  timeout, stale feedback, collision rejection, deadman 등을 재현하는 기존 fixture
+- `main`의 `hold_recovery_runbook.md` 및 `control_mode_manager.md`:
+  후속 실기 오류 문구와 대응 기록. 원본 runtime log가 아니므로 간접 근거로만 사용
+
+현재 저장소 검색에서는 arm runtime의 원본 `.log` 또는 rosbag을 찾지 못했다. 따라서
+원본 실기 로그가 별도로 제공되지 않는 한 커밋 diff와 문서에 적힌 수치만으로 물리적
+원인을 확정하지 않는다.
+
+### 초기 증거 매트릭스
+
+| 오류군 | 현재 근거 | 분류 | 이 브랜치에서 할 일 |
+| --- | --- | --- | --- |
+| DXL 정렬 잔차/timeout | 후속 커밋의 허용 오차·진단 문자열 변경, 단위 테스트 | 간접 근거 | quantization·정지 잔차 fixture |
+| RMD direction mismatch | `78e4a25` diff와 watchdog 테스트 | 간접 근거 | setpoint 반전+feedback 지연 fixture |
+| following error | manager 코드·테스트와 후속 runbook | 간접 근거 | 정상 지연과 실제 stall을 분리하는 mock plant |
+| waypoint stall/timeout | trajectory 진단 문서·테스트 | 간접 근거 | 진행량·lead·dropout fault injection |
+| HOME circuit-box 충돌 | `13b26bc` diff와 후속 문서 | 간접 근거 | 동일 URDF/SRDF의 MoveIt planning fixture |
+| docking L2 release/stale | deadman 코드·테스트와 후속 runbook | 간접 근거 | raw Joy sequence와 heartbeat fixture |
+| Arduino ACK/timeout | bridge/coordinator 코드와 changer mock 결과 | mock 근거 | 오래된 ACK, ERROR, no-response sequence fixture |
+| 실제 체결·접촉·전류 | 원본 로그 및 센서 자료 없음 | 근거 없음 | 시뮬레이션 합격 대상에서 제외, 실기 미검증 표시 |
 
 ## 이후 커밋 참고 지도
 
