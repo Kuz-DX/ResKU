@@ -73,7 +73,7 @@ def test_rmd_urdf_axes_use_the_named_pose_sign_convention():
         assert joints[name].find("axis").attrib["xyz"] == "0 0 1"
 
 
-def test_tool_case_centres_match_measured_world_coordinates():
+def test_tool_case_centres_match_measured_arm_world_coordinates():
     result = subprocess.run(
         ["xacro", str(XACRO), "tool_id:=99",
          "use_mock_hardware:=true", "use_mesh:=false"],
@@ -87,12 +87,11 @@ def test_tool_case_centres_match_measured_world_coordinates():
             float(value) for value in joints[name].find("origin").attrib["xyz"].split()
         ])
 
-    world_to_arm = xyz("world_to_arm_world")
     np.testing.assert_allclose(
-        world_to_arm + xyz("arm_world_to_tool_case_1"),
+        xyz("arm_world_to_tool_case_1"),
         [-0.394506, 0.0, 0.212964], atol=1e-12)
     np.testing.assert_allclose(
-        world_to_arm + xyz("arm_world_to_tool_case_y_plus"),
+        xyz("arm_world_to_tool_case_y_plus"),
         [-0.317806, 0.090, 0.163912], atol=1e-12)
 
 

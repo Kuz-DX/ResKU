@@ -1,28 +1,31 @@
 # Tool 0/1 docking target comparison
 
-All positions below use the URDF `world` frame and metres unless marked as mm.
+All measured positions below use the URDF `arm_world` frame and metres unless
+marked as mm.
 The measured circular-top centres supplied on 2026-10-31 are:
 
-| Tool | Target `tcp_link` world XYZ (mm) | Surface tilt from world XY |
+| Tool | Target `tcp_link` arm_world XYZ (mm) | Surface tilt from world XY |
 | --- | --- | --- |
 | 0 | `[-394.506, 0.000, 212.964]` | `55 deg` |
 | 1 | `[-317.806, 90.000, 163.912]` | `45 deg` |
 
-`world -> arm_world/base_actuator` is `[+192.1, 0, +235]` mm with no rotation.
-The same targets in the MoveIt planning root `base_actuator` are therefore:
+`arm_world` and the MoveIt planning root `base_actuator` have the same origin
+and orientation. Therefore the planning targets are the measured values above.
+For visualization in `world`, add the fixed `world -> arm_world` translation
+`[+192.1, 0, +235]` mm:
 
-| Tool | Target `tcp_link` base XYZ (mm) |
+| Tool | Target `tcp_link` world XYZ (mm) |
 | --- | --- |
-| 0 | `[-586.606, 0.000, -22.036]` |
-| 1 | `[-509.906, 90.000, -71.088]` |
+| 0 | `[-202.406, 0.000, 447.964]` |
+| 1 | `[-125.706, 90.000, 398.912]` |
 
 The old final joint samples currently stored in `tool0_trajectory.yaml` and
 `tool1_trajectory.yaml` produce:
 
 | Tool | Existing final `tcp_link` world XYZ (mm) | target - FK (mm) | Distance (mm) |
 | --- | --- | --- | --- |
-| 0 | `[538.484, -40.154, 467.662]` | `[-932.990, +40.154, -254.698]` | `967.964` |
-| 1 | `[-25.933, 39.270, 453.553]` | `[-291.873, +50.730, -289.641]` | `414.313` |
+| 0 | `[538.484, -40.154, 467.662]` | `[-740.890, +40.154, -19.698]` | `742.239` |
+| 1 | `[-25.933, 39.270, 453.553]` | `[-99.773, +50.730, -54.641]` | `124.554` |
 
 The old final samples are therefore not the new docking targets and must not be
 used as the final goals of the new MoveIt route.
