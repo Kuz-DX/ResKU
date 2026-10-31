@@ -180,12 +180,14 @@
     </joint>
   </xacro:macro>
 
-  <!-- Former case 2 frame: +76.7 mm X and +90 mm Y from case 1 in arm_world. -->
+  <!-- Tool 1 centre measured in world: (-317.806, +90, +163.912) mm.
+       This joint is expressed in arm_world, whose world offset is
+       (+192.1, 0, +235) mm, hence the converted local origin below. -->
   <link name="tool_case_y_plus"/>
   <joint name="arm_world_to_tool_case_y_plus" type="fixed">
     <parent link="arm_world"/><child link="tool_case_y_plus"/>
     <!-- Retain the former case-2 orientation for its dock reference frames. -->
-    <origin xyz="-0.317806 0.090 0.163911809" rpy="0 -0.785398163397 0"/>
+    <origin xyz="-0.509906 0.090 -0.071088" rpy="0 -0.785398163397 0"/>
   </joint>
   <xacro:tool_case_center_marker case_link="tool_case_y_plus" marker_link="tool_case_y_plus_center"/>
   <!-- Former dock reference planes remain at local X = +/-18.4 mm. -->
@@ -212,10 +214,11 @@
   <link name="tool_case_1"/>
   <joint name="arm_world_to_tool_case_1" type="fixed">
     <parent link="arm_world"/><child link="tool_case_1"/>
-    <!-- Gripper-case centre measured from the base axis: X=-394.506, Z=212.964 mm.
-         base_actuator and arm_world share the same origin and orientation. -->
+    <!-- Tool 0 centre measured in world: (-394.506, 0, +212.964) mm.
+         Convert to arm_world coordinates by subtracting its
+         (+192.1, 0, +235) mm world offset. -->
     <!-- Retain the former case-1 orientation for its dock reference frames. -->
-    <origin xyz="-0.394506 0 0.212964" rpy="0 -0.959931088597 0"/>
+    <origin xyz="-0.586606 0 -0.022036" rpy="0 -0.959931088597 0"/>
   </joint>
   <xacro:tool_case_center_marker case_link="tool_case_1" marker_link="tool_case_1_center"/>
   <!-- Former case-1 dock reference planes remain at X = +/-18.4 mm. -->
