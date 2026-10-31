@@ -170,7 +170,8 @@ def reverse_path(path):
 def requested_path(axes, buttons, previous, l2_axis=2, threshold=-.5,
                    first_button=2, third_button=0, second_button=1):
     """Return a new 0..2 path request, plus current combo edge state."""
-    # Linux PlayStation mapping: triangle=2, circle=1, X=0; square=3 is HOME.
+    # Linux PlayStation mapping: triangle=2, circle=1, X=0. Square is handled
+    # separately as BACK while L2 is held (square alone remains HOME elsewhere).
     path_buttons = (first_button, second_button, third_button)
     valid = (len(axes) > l2_axis and len(buttons) > max(path_buttons)
              and all(math.isfinite(v) for v in axes)
@@ -180,6 +181,16 @@ def requested_path(axes, buttons, previous, l2_axis=2, threshold=-.5,
         current = [bool(buttons[index]) for index in path_buttons]
     edges = [i for i, held in enumerate(current) if held and not previous[i]]
     return (edges[0] if len(edges) == 1 else None), current
+
+
+def requested_back(axes, buttons, previous, l2_axis=2, threshold=-.5,
+                   back_button=3):
+    """Return one rising edge for L2+square, reserved for BACK staging."""
+    valid = (len(axes) > l2_axis and len(buttons) > back_button
+             and all(math.isfinite(v) for v in axes)
+             and all(v in (0, 1) for v in buttons))
+    current = bool(valid and axes[l2_axis] < threshold and buttons[back_button])
+    return current and not previous, current
 
 
 def execution_plan(path, measured, tolerance=.03, max_delta=.10, approach_speed=.05):
@@ -361,6 +372,8 @@ class ToolTrajectoryJoy(Node):
         self.first_button = int(param('first_path_button', 2))
         self.second_button = int(param('second_path_button', 1))
         self.third_button = int(param('third_path_button', 0))
+        self.back_button = int(param('back_button', 3))
+        self.back_tolerance = float(param('back_ready_tolerance_rad', .03))
         if (not 0 < self.margin <= .1 or not 0 < self.start_tolerance <= self.max_start_delta <= .25
                 or not 0 < self.approach_speed <= .12
                 or not 0 < self.collision_step <= .01
@@ -374,7 +387,9 @@ class ToolTrajectoryJoy(Node):
                 or self.l2_axis < 0 or self.first_button < 0
                 or self.third_button < 0 or self.second_button < 0
                 or len({self.first_button, self.second_button, self.third_button}) != 3
-                or 3 in (self.first_button, self.second_button, self.third_button)):
+                or self.back_button < 0 or self.back_button in (
+                    self.first_button, self.second_button, self.third_button)
+                or not 0 < self.back_tolerance <= .1):
             raise ValueError('invalid tool trajectory joystick parameters')
         self.paths = {}
         for path_id in TOOL_IDS:
@@ -418,6 +433,9 @@ class ToolTrajectoryJoy(Node):
         self.status, self.status_time = {}, -math.inf
         self.full_state, self.state_time = None, -math.inf
         self.combos = [False]*3
+        self.back_combo = False
+        self.back_ready = False
+        self.back_ready_epoch = None
         self.reset()
         enabled = ','.join(map(str, self.paths)) or 'none'
         self.get_logger().info(f'L2 tool trajectories enabled: {enabled}')
@@ -431,6 +449,8 @@ class ToolTrajectoryJoy(Node):
         self.execution_id = None
         self.entry_path = None
         self.route_goals = self.route_waypoints = self.route_durations = None
+        self.route_labels = None
+        self.route_kind = None
         self.route_index = 0
         self.requested_docked_state = None
         self.use_nearest_entry = False
@@ -452,6 +472,9 @@ class ToolTrajectoryJoy(Node):
             self.get_logger().info(reason)
 
     def fail(self, reason):
+        if self.route_kind in ('back', 'back_pending') or self.execution_id is not None:
+            self.back_ready = False
+            self.back_ready_epoch = None
         if self.execution_id is not None and self.status.get('epoch') is not None:
             self.publisher.publish(String(data=json.dumps(dict(
                 epoch=self.status['epoch'], execution_id=self.execution_id, cancel=True))))
@@ -482,9 +505,54 @@ class ToolTrajectoryJoy(Node):
         request, self.combos = requested_path(
             msg.axes, msg.buttons, self.combos, self.l2_axis,
             self.l2_threshold, self.first_button, self.third_button, self.second_button)
-        if request is None:
+        back_request, self.back_combo = requested_back(
+            msg.axes, msg.buttons, self.back_combo, self.l2_axis,
+            self.l2_threshold, self.back_button)
+        if back_request and request is None:
+            self.request_back()
+        elif request is not None and not self.back_combo:
+            self.request_path(request)
+
+    def request_back(self):
+        if self.stage != 'idle':
+            self.report('ignored', 'BACK request ignored while another path is active')
             return
-        self.request_path(request)
+        now = time.monotonic()
+        try:
+            self.back_ready = False
+            self.back_ready_epoch = None
+            if self.status.get('mode') == 'hold':
+                self.healthy_hold(now)
+                self.begin_back()
+            elif (now-self.status_time < .3 and now-self.state_time < .3
+                  and self.full_state is not None and self.status.get('ready')
+                  and self.status.get('startup_complete')
+                  and self.status.get('focus') == 'arm'
+                  and not self.status.get('transitioning')
+                  and self.cancel.service_is_ready()):
+                self.route_kind = 'back_pending'
+                self.future = self.cancel.call_async(Trigger.Request())
+                self.stage, self.started = 'request_hold', now
+                self.report('stopping', 'requesting HOLD before BACK staging')
+            else:
+                raise RuntimeError('fresh ready arm focus and cancel/HOLD service are required')
+        except (ValueError, RuntimeError) as exc:
+            self.report('blocked', str(exc))
+
+    def back_is_ready(self, now):
+        try:
+            status = self.healthy_hold(now)
+        except RuntimeError as exc:
+            return False, str(exc)
+        if not self.back_ready or status.get('epoch') != self.back_ready_epoch:
+            return False, 'press L2+square and complete HOME -> BACK first'
+        measured = np.asarray([self.full_state[j] for j in ARM_JOINTS], dtype=float)
+        error = float(np.max(np.abs(measured-self.route_poses['back'])))
+        if error > self.back_tolerance:
+            self.back_ready = False
+            self.back_ready_epoch = None
+            return False, f'robot departed BACK pose ({error:.4f} rad)'
+        return True, ''
 
     def on_ui_request(self, msg, path_id, desired_docked):
         key = (path_id, desired_docked)
@@ -524,6 +592,12 @@ class ToolTrajectoryJoy(Node):
             self.path_id = None
             return
         now = time.monotonic()
+        ready, reason = self.back_is_ready(now)
+        if not ready:
+            self.path_id = request
+            self.report('blocked', reason)
+            self.path_id = None
+            return
         s = self.status
         available = (now-self.status_time < .3 and now-self.state_time < .3
                      and self.full_state is not None and s.get('ready')
@@ -536,17 +610,7 @@ class ToolTrajectoryJoy(Node):
             self.report('blocked', 'fresh ready arm focus is required')
             self.path_id = None
             return
-        if s.get('mode') == 'hold':
-            self.begin(request)
-        elif self.cancel.service_is_ready():
-            self.path_id = request
-            self.future = self.cancel.call_async(Trigger.Request())
-            self.stage, self.started = 'request_hold', now
-            self.report('stopping', f'requesting HOLD before {tool_label(request)} path')
-        else:
-            self.path_id = request
-            self.report('blocked', 'arm cancel/HOLD service unavailable')
-            self.reset()
+        self.begin(request)
 
     def healthy_hold(self, now):
         s = self.status
@@ -627,14 +691,38 @@ class ToolTrajectoryJoy(Node):
             approach = ('; approaching taught start from %.4f rad' % path['start_error']
                         if path['start_error'] > self.start_tolerance else '')
             self.report('checking',
-                        f'checking {tool_label(path_id)} path ({len(self.requests)} samples, '
+                        f'checking {self.operation_label()} path ({len(self.requests)} samples, '
                         f'{budget:.1f}s budget){approach}')
         except (ValueError, RuntimeError, KeyError) as exc:
             self.path_id = path_id
             self.begin_failed(str(exc))
 
+    def operation_label(self):
+        return 'BACK staging' if self.route_kind == 'back' else tool_label(self.path_id)
+
+    def begin_back(self):
+        now = time.monotonic()
+        status = self.healthy_hold(now)
+        if not self.planner.service_is_ready():
+            raise RuntimeError('MoveIt route planner unavailable')
+        goals = [self.route_poses['home'].copy(), self.route_poses['back'].copy()]
+        for label, goal in zip(('home', 'back'), goals):
+            if not self.model.within_limits(goal):
+                raise ValueError(f'MoveIt route {label} violates joint limits')
+        self.path_id = None
+        self.route_kind = 'back'
+        self.route_labels = ['home', 'back']
+        self.snapshot = dict(self.full_state)
+        self.original_epoch = status['epoch']
+        self.route_goals = goals
+        self.route_waypoints, self.route_durations = [], []
+        self.route_index = 0
+        self.route_start = np.asarray(
+            [self.full_state[j] for j in ARM_JOINTS], dtype=float)
+        self._request_route_leg()
+
     def request_route_plan(self, path_id, measured, status):
-        """Plan current -> home -> back -> reviewed Cartesian pre-dock."""
+        """Plan verified BACK -> reviewed Cartesian pre-dock."""
         if not self.planner.service_is_ready():
             raise RuntimeError('MoveIt route planner unavailable')
         if path_id not in self.pre_dock_targets:
@@ -661,11 +749,13 @@ class ToolTrajectoryJoy(Node):
             raise ValueError(f'{tool_label(path_id)} pre-dock axis IK failed: '
                              + ' | '.join(errors))
         pre_dock = np.asarray(pre_dock, dtype=float)
-        goals = [self.route_poses['home'].copy(), self.route_poses['back'].copy(), pre_dock]
-        for label, goal in zip(('home', 'back', f'{tool_label(path_id)} pre-dock'), goals):
+        goals = [pre_dock]
+        for label, goal in zip((f'{tool_label(path_id)} pre-dock',), goals):
             if not self.model.within_limits(goal):
                 raise ValueError(f'MoveIt route {label} violates joint limits')
         self.path_id = path_id
+        self.route_kind = 'tool'
+        self.route_labels = [f'{tool_label(path_id)} pre-dock']
         self.snapshot = dict(self.full_state)
         self.original_epoch = status['epoch']
         self.route_goals = goals
@@ -697,9 +787,10 @@ class ToolTrajectoryJoy(Node):
         self.future = self.planner.call_async(
             GetMotionPlan.Request(motion_plan_request=request))
         self.stage, self.started = 'planning_route', time.monotonic()
-        labels = ('home', 'back', f'{tool_label(self.path_id)} pre-dock')
+        count = len(self.route_goals)
         self.report('planning',
-                    f'planning MoveIt route leg {self.route_index+1}/3 to {labels[self.route_index]}')
+                    f'planning MoveIt route leg {self.route_index+1}/{count} '
+                    f'to {self.route_labels[self.route_index]}')
 
     def request_entry_plan(self, path_id, path, measured, error, status):
         if not self.planner.service_is_ready():
@@ -732,6 +823,16 @@ class ToolTrajectoryJoy(Node):
         self.reset()
 
     def path_completed(self):
+        if self.route_kind == 'back':
+            measured = np.asarray([self.full_state[j] for j in ARM_JOINTS], dtype=float)
+            error = float(np.max(np.abs(measured-self.route_poses['back'])))
+            if error > self.back_tolerance:
+                raise RuntimeError(f'BACK completion feedback mismatch ({error:.4f} rad)')
+            self.back_ready = True
+            self.back_ready_epoch = self.status.get('epoch')
+            self.report('completed', 'BACK reached and feedback verified; select tool0/1/2')
+            self.reset()
+            return
         after = self.paths[self.path_id].get('after_path')
         if after is not None:
             if self.sequence_phase == 'approach':
@@ -859,8 +960,10 @@ class ToolTrajectoryJoy(Node):
                 return
             if self.stage == 'wait_hold':
                 if (self.status.get('mode') == 'hold' and not self.status.get('transitioning')):
-                    path_id = self.path_id
-                    self.begin(path_id)
+                    if self.route_kind == 'back_pending':
+                        self.begin_back()
+                    else:
+                        self.begin(self.path_id)
                     return
                 if now-self.started > 3.:
                     raise TimeoutError('arm did not reach HOLD')
@@ -874,7 +977,8 @@ class ToolTrajectoryJoy(Node):
                                        + self.snapshot_change_reason(validation=True))
                 if now-self.started > self.planning_timeout+1.:
                     raise TimeoutError(
-                        f'MoveIt route leg {self.route_index+1}/3 planning timed out')
+                        f'MoveIt route leg {self.route_index+1}/'
+                        f'{len(self.route_goals)} planning timed out')
                 if not self.future.done():
                     return
                 result = self.future.result()
@@ -883,7 +987,8 @@ class ToolTrajectoryJoy(Node):
                     code = ('none' if result is None else
                             result.motion_plan_response.error_code.val)
                     raise RuntimeError(
-                        f'MoveIt route leg {self.route_index+1}/3 planning failed ({code})')
+                        f'MoveIt route leg {self.route_index+1}/'
+                        f'{len(self.route_goals)} planning failed ({code})')
                 start = (self.route_start if self.route_index == 0 else
                          self.route_goals[self.route_index-1])
                 waypoints, durations = planned_leg(
@@ -975,6 +1080,9 @@ class ToolTrajectoryJoy(Node):
                 if not self.unchanged(validation=True):
                     raise RuntimeError('robot moved before path execution; '
                                        + self.snapshot_change_reason(validation=True))
+                if self.route_kind == 'tool':
+                    self.back_ready = False
+                    self.back_ready_epoch = None
                 self.execution_id = 'tool-path-'+uuid.uuid4().hex
                 command = dict(epoch=s['epoch'], execution_id=self.execution_id)
                 if 'ee_target_rad' in self.path:
@@ -993,7 +1101,7 @@ class ToolTrajectoryJoy(Node):
                 self.publisher.publish(String(data=json.dumps(command)))
                 self.stage = 'executing'
                 self.started = now
-                self.report('executing', f'executing {tool_label(self.path_id)} path')
+                self.report('executing', f'executing {self.operation_label()} path')
                 return
             if self.stage == 'executing':
                 s = self.status

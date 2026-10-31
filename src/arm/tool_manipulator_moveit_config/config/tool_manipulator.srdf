@@ -12,14 +12,13 @@
     <group name="arm">
         <chain base_link="base_actuator" tip_link="tcp_link"/>
     </group>
-    <!-- Options arm-focus alignment result observed in mock control_status.
-         DXL base/roll/yaw are aligned to zero; the recovered RMD joints stay
-         at their startup targets. -->
+    <!-- Hardware HOME measured after the 2026-10-31 soft-limit recalibration.
+         The three RMD joints retain at least 0.10 rad limit clearance. -->
     <group_state name="home" group="arm">
         <joint name="base_joint" value="0.000000000000"/>
-        <joint name="elbow_joint" value="1.507093414960"/>
-        <joint name="shoulder_joint" value="1.4830934149601134"/>
-        <joint name="wrist_pitch_joint" value="-1.553343034275"/>
+        <joint name="elbow_joint" value="1.473931"/>
+        <joint name="shoulder_joint" value="1.358215"/>
+        <joint name="wrist_pitch_joint" value="-1.493129"/>
         <joint name="wrist_roll_joint" value="0.000000000000"/>
         <joint name="wrist_yaw_joint" value="0.000000000000"/>
     </group_state>
@@ -27,9 +26,9 @@
          base_joint to keep the sweep away from the supply box. -->
     <group_state name="back" group="arm">
         <joint name="base_joint" value="-3.141592653590"/>
-        <joint name="elbow_joint" value="1.507093414960"/>
-        <joint name="shoulder_joint" value="1.4830934149601134"/>
-        <joint name="wrist_pitch_joint" value="-1.553343034275"/>
+        <joint name="elbow_joint" value="1.473931"/>
+        <joint name="shoulder_joint" value="1.358215"/>
+        <joint name="wrist_pitch_joint" value="-1.493129"/>
         <joint name="wrist_roll_joint" value="0.000000000000"/>
         <joint name="wrist_yaw_joint" value="0.000000000000"/>
     </group_state>
