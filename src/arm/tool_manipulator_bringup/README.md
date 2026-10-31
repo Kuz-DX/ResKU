@@ -44,8 +44,10 @@ MANUAL/TCP_IK/TOOL_AUTO를 중재하지만, 다른 launch와의 동시 실행은
 반드시 기존 팔 launch를 완전히 종료한 뒤 다른 모드를 실행한다.
 `ik_manual.launch.py`도 첫 Options arm 진입에서 RMD 시작 복구 완료 후 DXL
 base/roll/yaw를 0 rad로 정렬한다. 이후 현재 자세의 TCP 진입 조건을 검사한다.
-L1은 deadman 전용이며 자세 이동을 시작하지 않는다. 현재 자세가 부적합할 때만
-R2로 가장 가까운 검증된 진입 자세를 명시적으로 요청한다.
+`ik_manual.launch.py`와 `ik_manual_test.launch.py` 모두 HOLD에서 스틱을 중립으로 놓고
+L1을 새로 누르면, 경로 충돌 검사 후 고정 `tcp_ready` 자세로 이동한다.
+이동이 시작될 때까지 L1을 유지하고, TCP_IK 진입 후에는 L1을 놓았다가 다시 눌러 조작한다.
+R2는 가장 가까운 검증된 진입 자세를 요청한다.
 
 ```bash
 # 빌드 전에는 소스 launch를 직접 지정한다.

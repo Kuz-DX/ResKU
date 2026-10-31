@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts'))
 from arm_mode_core import ModeCore
 from arm_control_mode_manager import ControlModeManager
 from tcp_joy import TcpJoy
+from tcp_joy_test import TcpJoy as ExperimentalTcpJoy
 
 
 def test_options_tcp_ready_alignment_zeros_dxl_axes():
@@ -193,8 +194,15 @@ def test_candidate_a_passes_all_directions_without_claiming_collision_safety():
     arm = Path(__file__).resolve().parents[2]
     model = ArmKinematics(arm/'tool_manipulator_description/urdf/tool_manipulator.urdf.xacro',
                           arm/'tool_manipulator_bringup/config/hardware.yaml')
-    result = evaluate(model, CANDIDATES['candidate_a'], CANDIDATES['recovery_reference'])
-    assert min(result['limit_margins_rad']) > .3
+    # Evaluate the approach from the current two-degree startup inset. The old
+    # captured reference exceeds the recalibrated shoulder upper limit.
+    limits = model.limits
+    margin = np.deg2rad(2.)
+    recovery = [0., limits['shoulder_joint'][1]-margin,
+                limits['elbow_joint'][1]-margin,
+                limits['wrist_pitch_joint'][0]+margin, 0., 0.]
+    result = evaluate(model, CANDIDATES['candidate_a'], recovery)
+    assert min(result['limit_margins_rad']) > .101  # TCP entry margin under current limits
     assert result['condition'] < 20
     assert all(d['ik'] and d['max_condition'] < 20 for d in result['directions'].values())
     assert result['collision_free'] is None
@@ -271,22 +279,44 @@ def test_tcp_ready_path_is_checked_before_managed_execution():
     assert n.ready_state == 'executing'
 
 
-def test_l1_current_pose_retry_never_starts_fixed_ready_motion():
+@pytest.mark.parametrize('producer', [TcpJoy, ExperimentalTcpJoy])
+@pytest.mark.parametrize('collision_free', [True, False])
+def test_l1_requests_fixed_ready_motion_only_after_path_checks(producer, collision_free):
     n = ready_node()
     n.ready_state = 'failed'
     n.auto_entry_armed = False
-    n.explicit_ready = True
+    n.explicit_ready = False
     n.default_ready_goal = n.ready_goal.copy()
     n.twist = np.zeros(6)
-    TcpJoy.retry_ready(n, True, False, False, 1.)
+    producer.retry_ready(n, True, False, False, 1.)
     assert n.auto_entry_armed
-    assert not n.explicit_ready
-    TcpJoy.drive_ready(n, 1.)
-    assert n.ready_state == 'idle'
-    n.check.call_async.assert_not_called()
+    assert n.explicit_ready and not n.named_one_shot
+    producer.drive_ready(n, 1.)
+    assert n.ready_state == 'checking'
+    n.check.call_async.assert_called_once()
     n.tool_mode.call_async.assert_not_called()
     n.tool_pub.publish.assert_not_called()
-    assert 'current pose' in n.reason
+    n.check.call_async.return_value.done.return_value = True
+    n.check.call_async.return_value.result.return_value = SimpleNamespace(valid=collision_free, contacts=[])
+    for _ in range(len(n.ready_requests)+1):
+        producer.drive_ready(n, 1.1)
+        if n.ready_state != 'checking':
+            break
+    if not collision_free:
+        assert n.ready_state == 'failed'
+        n.tool_mode.call_async.assert_not_called()
+        n.tool_pub.publish.assert_not_called()
+        return
+    assert n.ready_state == 'request_tool'
+    n.tool_mode.call_async.return_value.done.return_value = True
+    n.tool_mode.call_async.return_value.result.return_value = SimpleNamespace(success=True)
+    producer.drive_ready(n, 1.2)
+    n.status.update(mode='tool_auto', epoch='tool-e')
+    n.status_time = n.state_time = 1.3
+    producer.drive_ready(n, 1.3)
+    payload = json.loads(n.tool_pub.publish.call_args.args[0].data)
+    assert payload['waypoints'] == [n.default_ready_goal.tolist()]
+    assert n.ready_state == 'executing'
 
 
 @pytest.mark.parametrize('joint,drift,accepted', [

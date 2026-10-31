@@ -225,7 +225,7 @@ Start the managed stack with its TCP producer and MoveIt planning-scene service:
 
 ```bash
 ros2 launch ~/ResKU/src/arm/tool_manipulator_bringup/launch/ik_manual.launch.py
-# Press Options: align DXL and validate the current pose; L1 is TCP deadman only.
+# Press Options to align DXL; from HOLD, press/hold neutral L1 for checked TCP-ready motion.
 ros2 topic echo /arm/control_status --once --full-length
 ros2 topic echo /arm/tcp_joy/status
 ```
@@ -244,8 +244,10 @@ axes in HOLD. Alignment waits for position convergence and 0.20 seconds of
 stopped feedback. `tcp_joy` alone requests TCP_IK after a fresh entry assessment;
 the manager does not race it with a separate focus-triggered request.
 If the current pose lacks TCP entry margin or numerical conditioning, it remains
-in HOLD and reports the reason. L1 never starts posture motion. R2 explicitly
-requests the nearest checked entry candidate; `/arm/go_tcp_ready` explicitly
+in HOLD and reports the reason. In both ik_manual and ik_manual_test, a fresh
+neutral L1 press requests the fixed TCP-ready pose with full path collision
+checking. Hold L1 until motion starts, then release/re-press after TCP_IK entry
+to enable jogging. R2 explicitly requests the nearest checked entry candidate; `/arm/go_tcp_ready` explicitly
 requests the configured fixed pose. Options back to drive requests HOLD. Collision/check/service/
 execution failure, cancel, command timeout, and fault do not automatically retry
 while focus stays on arm; inspect first, then toggle drive and back to arm.
@@ -489,7 +491,8 @@ TCP_IK now requires a fresh collision-checked, stationary current pose with at
 least 0.10 rad joint margin and scaled condition <=20. Requests without a valid
 assessment remain HOLD and report a reason; this also applies to Options focus
 activation. A drive-to-arm focus edge assesses the current pose without moving
-it. If the pose fails the entry margin or condition check, R2 may request the
+it. If the pose fails the entry margin or condition check, a fresh neutral L1
+press requests the collision-checked fixed TCP-ready pose; R2 may request the
 nearest collision-checked entry candidate. Candidate comparisons, limitations
 and the assessment protocol are documented in [tcp_ready.md](tcp_ready.md).
 Transient entry rejections (snapshot drift, moving feedback or the 0.20-second
@@ -497,7 +500,7 @@ stability wait) are rechecked within a single 3-second window starting with the
 first TCP mode request, with at least 0.25 seconds between rejection and retry.
 Each retry requires a new collision assessment; retries never extend the window
 or relax the manager's stopped-feedback and position tolerances. Expiry leaves
-HOLD; a fresh neutral L1 press starts a new assessment. Other rejections fail
+HOLD; a fresh neutral L1 press requests a newly checked TCP-ready approach. Other rejections fail
 immediately.
 
 ## Timed tool paths
