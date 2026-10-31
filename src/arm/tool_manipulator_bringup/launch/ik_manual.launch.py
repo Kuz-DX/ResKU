@@ -1,5 +1,6 @@
 """Mode-managed IK/manual arm stack. Defaults to real hardware and external Joy."""
 import importlib.util
+import runpy
 from pathlib import Path
 import sys
 
@@ -119,9 +120,8 @@ def bringup(context):
 
 
 def generate_launch_description():
-    source_config = Path(__file__).resolve().parents[1]/'config/hardware.yaml'
-    hardware_default = (source_config if source_config.is_file() else
-                        Path(get_package_share_directory('tool_manipulator_bringup'))/'config/hardware.yaml')
+    hardware_default = runpy.run_path(str(Path(__file__).with_name(
+        'hardware_config.py')))['default_hardware_config']()
     return LaunchDescription([
         DeclareLaunchArgument('real_hardware', default_value='true', choices=['true', 'false']),
         DeclareLaunchArgument('hardware_config', default_value=str(hardware_default)),

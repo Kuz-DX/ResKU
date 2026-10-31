@@ -24,10 +24,10 @@ joints:
     id: 1
     operating_mode: 4
     raw_increases_ccw: true
-    zero_raw: 20
+    zero_raw: 1561
     soft_limit_raw:
-    - -2264
-    - 2376
+    - -723
+    - 3917
     soft_limit_rad:
     - -3.503
     - 3.614

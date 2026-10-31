@@ -392,6 +392,17 @@ python3 ~/ResKU/src/arm/tool_manipulator_bringup/scripts/joint_world_coordinates
 ### 현재 위치를 영점으로 저장
 
 이 명령만 `--apply`를 붙이면 `hardware.yaml`을 수정한다. 먼저 미리보기를 확인한다.
+실기 제어 launch인 `manual`, `real_control`, `ik_manual`, `ik_manual_test`는
+선택된 ROS 패키지가 속한 작업공간의 `src/arm/tool_manipulator_bringup/config/hardware.yaml`을
+우선 사용한다. 소스가 없는 배포에서는 설치된 설정을 사용한다.
+`hardware_config:=/절대/경로/hardware.yaml`으로 명시한 경로가 우선한다.
+
+저장 후 실행 중인 실기 제어 노드를 종료하고 다시 시작해야 반영된다.
+시작 로그의 `Arm hardware config: ...; base_joint zero_raw=...`를 확인한다.
+2026-10-31 베이스 측정값은 `zero_raw=1561`이며, 하드웨어의
+`position calibration: zero_offset=-0.747048643700 rad`와 대응한다.
+Options 첫 진입은 DXL을 관절각 0으로 이동시키므로 기계적 영점에서 시작할 때
+실제 제어기의 `/joint_states` 베이스 값이 0 근처인지 먼저 확인한다.
 
 ```bash
 ros2 run tool_manipulator_bringup set_current_zero.py \

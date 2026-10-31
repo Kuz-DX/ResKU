@@ -14,6 +14,9 @@ from ament_index_python.packages import get_package_prefix, get_package_share_di
 from launch_ros.actions import Node
 from moveit_configs_utils import MoveItConfigsBuilder
 
+default_hardware_config = runpy.run_path(
+    str(Path(__file__).with_name('hardware_config.py')))['default_hardware_config']
+
 
 def resolve_existing_path(value: str) -> str:
     """Resolve a caller-provided path before xacro changes path context."""
@@ -55,6 +58,9 @@ def build_arm_base(
 ):
     """Build common description and process actions for one selected mode."""
     hardware_file = resolve_existing_path(hardware_file)
+    calibration = yaml.safe_load(Path(hardware_file).read_text(encoding='utf-8'))
+    base_zero = calibration['joints']['base_joint']['zero_raw']
+    print(f'Arm hardware config: {hardware_file}; base_joint zero_raw={base_zero}', flush=True)
 
     if real_hardware:
         if mock_initial_positions_file:

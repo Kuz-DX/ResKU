@@ -119,7 +119,7 @@ def generate_launch_description():
     share = Path(get_package_share_directory('tool_manipulator_bringup'))
     return LaunchDescription([
         DeclareLaunchArgument('real_hardware', default_value='true', choices=['true', 'false']),
-        DeclareLaunchArgument('hardware_config', default_value=str(share/'config/hardware.yaml')),
+        DeclareLaunchArgument('hardware_config', default_value=str(common.default_hardware_config())),
         DeclareLaunchArgument('launch_rviz', default_value='false', choices=['true', 'false']),
         DeclareLaunchArgument('launch_joy', default_value='true', choices=['true', 'false']),
         DeclareLaunchArgument('mock_initial_positions_file', default_value=''),

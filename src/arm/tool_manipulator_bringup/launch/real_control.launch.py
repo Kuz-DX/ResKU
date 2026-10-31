@@ -72,7 +72,7 @@ def _start_real(context):
 
 def generate_launch_description():
     share = Path(get_package_share_directory('tool_manipulator_bringup'))
-    default_config = str(share / 'config' / 'hardware.yaml')
+    default_config = str(common.default_hardware_config())
     return LaunchDescription([
         DeclareLaunchArgument('hardware_config', default_value=default_config),
         DeclareLaunchArgument(
