@@ -248,6 +248,15 @@ def test_malformed_joy_feedback_and_hardware_fault_cannot_be_cleared_by_focus():
     assert node.fault and node.hardware_fault
 
 
+def test_rmd_activation_ok_does_not_latch_hardware_fault():
+    node = harness()
+    node.on_hardware_fault(String(data='wrist_pitch_joint: ok'))
+    assert not node.hardware_fault
+    assert not node.fault
+    node.on_hardware_fault(String(data='wrist_pitch_joint: CAN timeout'))
+    assert node.hardware_fault and node.fault
+
+
 def finished(value):
     future = Future()
     future.set_result(value)

@@ -171,10 +171,12 @@ class Manual(ManualController):
         super().on_state(message)
 
     def on_hardware_fault(self, message):
-        if message.data.strip():
+        status = message.data.strip()
+        # RMD publishes "<joint>: ok" on activation on this same topic.
+        if status and not status.lower().endswith(': ok'):
             self.hardware_fault = True
             self.fault = True
-            self.status = 'hardware fault: ' + message.data
+            self.status = 'hardware fault: ' + status
             self.neutral_required = True
             self.publish_ee_velocity(0.)
             self.hold()
