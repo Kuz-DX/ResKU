@@ -278,7 +278,7 @@ def test_tcp_ready_path_is_checked_before_managed_execution():
     assert n.ready_state == 'executing'
 
 
-def test_l1_current_pose_retry_never_starts_fixed_ready_motion():
+def test_l1_requests_fixed_ready_motion_only_after_collision_validation():
     n = ready_node()
     n.ready_state = 'failed'
     n.auto_entry_armed = False
@@ -287,13 +287,13 @@ def test_l1_current_pose_retry_never_starts_fixed_ready_motion():
     n.twist = np.zeros(6)
     TcpJoy.retry_ready(n, True, False, False, 1.)
     assert n.auto_entry_armed
-    assert not n.explicit_ready
+    assert n.explicit_ready
+    assert not n.named_one_shot
     TcpJoy.drive_ready(n, 1.)
-    assert n.ready_state == 'idle'
-    n.check.call_async.assert_not_called()
+    assert n.ready_state == 'checking'
+    n.check.call_async.assert_called()
     n.tool_mode.call_async.assert_not_called()
     n.tool_pub.publish.assert_not_called()
-    assert 'current pose' in n.reason
 
 
 @pytest.mark.parametrize('joint,drift,accepted', [
