@@ -28,6 +28,7 @@ try:
 except ImportError:
     from arm_shared_kinematics import ArmKinematics, ARM_JOINTS
 from arm_mode_core import TCP_ENTRY_TOLERANCE
+from tool_ids import TOOL_IDS, tool_label, tool_name
 
 
 def load_route_poses(robot_description_semantic):
@@ -341,7 +342,7 @@ class ToolTrajectoryJoy(Node):
                 or 3 in (self.first_button, self.second_button, self.third_button)):
             raise ValueError('invalid tool trajectory joystick parameters')
         self.paths = {}
-        for path_id in range(3):
+        for path_id in TOOL_IDS:
             path = directory/f'tool{path_id}_trajectory.yaml'
             loaded = load_path(path, self.model, self.margin)
             if loaded is not None:
@@ -363,9 +364,9 @@ class ToolTrajectoryJoy(Node):
         self.create_subscription(Bool, '/arm/docked', self.on_docked, docking_qos)
         self.create_subscription(String, '/arm/docking_status', self.on_docking_status,
                                  docking_qos)
-        self.ui_held = {(path_id, desired): False for path_id in range(3)
+        self.ui_held = {(path_id, desired): False for path_id in TOOL_IDS
                         for desired in (False, True)}
-        for path_id in range(3):
+        for path_id in TOOL_IDS:
             self.create_subscription(
                 Bool, f'/arm/tool{path_id}_docking',
                 lambda msg, p=path_id: self.on_ui_request(msg, p, True), 10)
@@ -405,7 +406,8 @@ class ToolTrajectoryJoy(Node):
 
     def report(self, state, reason):
         self.diagnostics.publish(String(data=json.dumps(dict(
-            state=state, reason=reason, path_id=self.path_id))))
+            state=state, reason=reason, path_id=self.path_id,
+            tool_name=(None if self.path_id is None else tool_name(self.path_id))))))
         # rclpy associates severity with the Python call site.  Calling a
         # dynamically selected logger method from one site raises when a later
         # message changes severity, so keep the sites distinct.
@@ -603,7 +605,7 @@ class ToolTrajectoryJoy(Node):
         source = self.paths[path_id]
         final = np.asarray(source['waypoints'][-1], dtype=float)
         goals = [self.route_poses['home'].copy(), self.route_poses['back'].copy(), final]
-        for label, goal in zip(('home', 'back', f'tool{path_id} final'), goals):
+        for label, goal in zip(('home', 'back', f'{tool_label(path_id)} final'), goals):
             if not self.model.within_limits(goal):
                 raise ValueError(f'MoveIt route {label} violates joint limits')
         self.path_id = path_id
@@ -638,7 +640,7 @@ class ToolTrajectoryJoy(Node):
         self.future = self.planner.call_async(
             GetMotionPlan.Request(motion_plan_request=request))
         self.stage, self.started = 'planning_route', time.monotonic()
-        labels = ('home', 'back', f'tool{self.path_id} final')
+        labels = ('home', 'back', f'{tool_label(self.path_id)} final')
         self.report('planning',
                     f'planning MoveIt route leg {self.route_index+1}/3 to {labels[self.route_index]}')
 
@@ -707,7 +709,7 @@ class ToolTrajectoryJoy(Node):
             action = 'dock' if self.requested_docked_state else 'release'
             self.report('actuating', f'Arduino {action} pulse sent; waiting for /arm/docked')
             return
-        self.report('completed', f'tool path {self.path_id} completed; HOLD')
+        self.report('completed', f'{tool_label(self.path_id)} path completed; HOLD')
         self.reset()
 
     def on_docked(self, msg):

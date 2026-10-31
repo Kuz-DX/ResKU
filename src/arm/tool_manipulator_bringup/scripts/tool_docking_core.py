@@ -5,6 +5,8 @@ import cv2
 import numpy as np
 import yaml
 
+from tool_ids import TOOL_IDS, tool_label
+
 
 def transform(xyz, xyzw):
     xyz, q = np.asarray(xyz, dtype=float), np.asarray(xyzw, dtype=float)
@@ -151,7 +153,7 @@ def load_settings(filename):
         raise ValueError('docking config must contain tools mapping')
     result = {}
     for tool_id, raw in data['tools'].items():
-        if type(tool_id) is not int or tool_id not in (0, 1, 2) or not isinstance(raw, dict):
+        if type(tool_id) is not int or tool_id not in TOOL_IDS or not isinstance(raw, dict):
             raise ValueError('invalid docking tool entry')
         if raw.get('enabled') is not True:
             continue
@@ -187,7 +189,7 @@ def load_settings(filename):
             value = item.get(name)
             if (type(value) not in (int, float) or not math.isfinite(value)
                     or not low < value <= high):
-                raise ValueError(f'tool {tool_id}: {name} must be in ({low}, {high}]')
+                raise ValueError(f'{tool_label(tool_id)}: {name} must be in ({low}, {high}]')
         if type(item.get('stable_samples')) is not int or not 3 <= item['stable_samples'] <= 100:
             raise ValueError('stable_samples must be 3..100 distinct observations')
         if type(item.get('actuation_enabled')) is not bool:

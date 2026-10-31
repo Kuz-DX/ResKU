@@ -125,7 +125,7 @@ def generate_launch_description():
         DeclareLaunchArgument('launch_joy', default_value='false', choices=['true', 'false']),
         DeclareLaunchArgument('mock_initial_positions_file', default_value=''),
         DeclareLaunchArgument('tool_id', default_value='99', choices=['0', '1', '2', '99'],
-                              description='Mounted tool: 0=gripper, 1/2=other tools, 99=empty wrist'),
+                              description='Task/tool ID: 0=gripper, 1=drill, 2=supply_box, 99=empty wrist'),
         DeclareLaunchArgument('launch_tcp_joy', default_value='true', choices=['true', 'false']),
         # One L2 + circle request owns the taught approach and its docking tail.
         # Enabling the producer does not submit a path at launch time.

@@ -18,6 +18,7 @@ from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import Float64MultiArray, String
 
 from manual_control_common import JOINTS, ManualController, bounded_step, vertical_pitch_velocity
+from tool_ids import tool_label
 
 
 # Joint-space radians: DXL base/roll/yaw = 0; RMD shoulder/elbow/pitch = +85/+87/-89 deg.
@@ -206,8 +207,8 @@ class Manual(ManualController):
             return
         super().on_joy(message)
         l2 = len(message.axes) > 2 and message.axes[2] < -.5
-        # Same Linux PlayStation mapping as ik_manual: triangle=tool0,
-        # circle=tool1, X=tool2. Managed mode delegates all three to its producer.
+        # Linux PlayStation: triangle=tool0/gripper, circle=tool1/drill,
+        # X=tool2/supply_box. Managed mode delegates them to its producer.
         from tool_trajectory_joy import requested_path
         request, combos = requested_path(message.axes, message.buttons, self.path_combos)
         self.path_combos = combos
@@ -268,7 +269,7 @@ class Manual(ManualController):
         if (not self.controller_ready or self.focus != 'arm' or self.neutral_required or
                 self.hardware_fault or self.fault or self.startup_recovering or
                 not self.entry_alignment_complete or not self.valid_measured(self.now_seconds())):
-            self.get_logger().warning(f'Tool{path_id} path blocked: ready arm focus, neutral controls and fresh feedback required')
+            self.get_logger().warning(f'{tool_label(path_id)} path blocked: ready arm focus, neutral controls and fresh feedback required')
             return
         path_file = Path(__file__).resolve().parents[1]/'config'/f'tool{path_id}_trajectory.yaml'
         try:
@@ -285,14 +286,14 @@ class Manual(ManualController):
             if np.max(np.abs(self.measured()-points[0])) > .10:
                 raise ValueError('start differs from measured position by more than 0.10 rad')
         except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as exc:
-            self.get_logger().error(f'Tool{path_id} path rejected: {exc}')
+            self.get_logger().error(f'{tool_label(path_id)} path rejected: {exc}')
             return
         self.path_points = points
         self.path_index = 0
         self.path_durations = [.02, *path['durations']]
         self.path_segment_index = None
         self.stop_target = None
-        self.get_logger().warning(f'Tool{path_id} path started; keep L2 held')
+        self.get_logger().warning(f'{tool_label(path_id)} path started; keep L2 held')
 
     def run_tool_path(self, dt):
         goal = self.path_points[self.path_index]

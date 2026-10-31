@@ -77,7 +77,7 @@ def generate_launch_description():
         DeclareLaunchArgument('hardware_config', default_value=default_config),
         DeclareLaunchArgument(
             'tool_id', default_value='0',
-            description='Static tool model: 0=gripper, 1=drill, 2=Phillips bit, 99=no tool.'),
+            description='Task/tool ID: 0=gripper, 1=drill, 2=supply_box, 99=no mounted tool.'),
         DeclareLaunchArgument('use_mesh', default_value='true'),
         DeclareLaunchArgument('move_home_on_start', default_value='true',
                               description='Move arm to SRDF home once after controller activation.'),

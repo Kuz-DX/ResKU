@@ -1,5 +1,6 @@
 """Pure tool-2 sequencing and calibration checks, independent of ROS."""
 import math
+from tool_ids import SUPPLY_BOX, tool_label
 
 STAGES = ('approach', 'grasp', 'return_path', 'ready', 'person',
           'align', 'preplace', 'descend', 'release', 'complete')
@@ -22,7 +23,7 @@ class PickPlaceSequence:
 def checked_config(data):
     """Do not invent gripper calibration, floor frame or placement geometry."""
     if data.get('enabled') is not True:
-        raise ValueError('tool2 pick/place disabled; measure and enable its configuration first')
+        raise ValueError(f'{tool_label(SUPPLY_BOX)} pick/place disabled; measure and enable its configuration first')
     for key in ('floor_frame', 'person_ground_frame', 'person_topic', 'person_camera_info_topic'):
         if not isinstance(data.get(key), str) or not data[key].strip():
             raise ValueError(f'missing {key}')

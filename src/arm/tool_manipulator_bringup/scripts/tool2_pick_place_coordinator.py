@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Opt-in tool2 pick/place; the mode manager remains the sole motor gateway."""
+"""Opt-in supply-box pick/place; the mode manager remains the sole motor gateway."""
 import json
 import math
 from pathlib import Path
@@ -22,6 +22,7 @@ from tool_docking_coordinator import ToolDockingCoordinator
 from tool_docking_core import transform
 from tool_trajectory_joy import ARM_JOINTS, reverse_path, execution_plan
 from tool2_sequence import PickPlaceSequence, checked_config
+from tool_ids import SUPPLY_BOX, tool_label
 from person_place_geometry import person_on_floor, placement_targets, aligned_base
 
 
@@ -50,7 +51,7 @@ class Tool2PickPlaceCoordinator(ToolDockingCoordinator):
         if not self.model.within_limits(self.pick_ready, self.margin):
             raise ValueError('invalid pick/place TCP ready target')
         if self.paths[2].get('after_path') is not None:
-            raise ValueError('tool2 after_path conflicts with pick/place coordinator')
+            raise ValueError(f'{tool_label(SUPPLY_BOX)} after_path conflicts with pick/place coordinator')
         self.person_camera = None
         self.create_subscription(CameraInfo, self.pick_config['person_camera_info_topic'],
                                  self.on_person_camera, qos_profile_sensor_data)
@@ -66,7 +67,7 @@ class Tool2PickPlaceCoordinator(ToolDockingCoordinator):
         self.person_sample = None
 
     def begin(self, path_id, planned_path=None):
-        if path_id == 2 and self.pick_sequence is None:
+        if path_id == SUPPLY_BOX and self.pick_sequence is None:
             self.pick_sequence = PickPlaceSequence()
             self.pick_started = time.monotonic()
             # Returning along the taught route requires the complete approach.
@@ -203,7 +204,7 @@ class Tool2PickPlaceCoordinator(ToolDockingCoordinator):
             self.pick_steps = max(1, math.ceil(self.pick_config['preplace_height_m']/.002))
             self.stage = 'pick_descent_plan'
         elif stage == 'complete':
-            self.report('completed', 'tool2 release target reached; remain HOLD')
+            self.report('completed', f'{tool_label(SUPPLY_BOX)} release target reached; remain HOLD')
             self.reset()
 
     def tick(self):
@@ -213,7 +214,7 @@ class Tool2PickPlaceCoordinator(ToolDockingCoordinator):
         try:
             now = time.monotonic()
             if now-self.pick_started > self.pick_config['sequence_timeout_s']:
-                raise RuntimeError('tool2 sequence timed out')
+                raise RuntimeError(f'{tool_label(SUPPLY_BOX)} sequence timed out')
             if self.pick_sequence.stage in ('align', 'preplace', 'descend', 'release'):
                 if (self.person_sample is None
                         or now-self.person_last_received > self.pick_config['max_detection_age_s']):
