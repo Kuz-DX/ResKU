@@ -51,8 +51,8 @@ joints:
     q_offset_rad: 0.0
     # Raw endpoints: bent 91.25 deg, extended -86.979 deg; sign=-1.
     soft_limit_rad:
-    - -1.592
-    - 1.518
+    - -1.6139059
+    - 1.4622368
     velocity_limit_rad_s: 0.35
     current_limit_a: 4.0
     current_release_threshold_a: 3.0
@@ -68,8 +68,8 @@ joints:
     q_offset_rad: 0.0
     # Raw endpoints: bent -88.389 deg, extended 85.819 deg; sign=-1.
     soft_limit_rad:
-    - -1.497
-    - 1.542
+    - -1.4960962
+    - 1.5779521
     velocity_limit_rad_s: 0.3
     current_limit_a: 3.0
     current_release_threshold_a: 2.2
@@ -85,8 +85,8 @@ joints:
     q_offset_rad: 0.0
     # Raw endpoints: bent 84.259 deg, extended -91.239 deg; sign=+1.
     soft_limit_rad:
-    - -1.592
-    - 1.470
+    - -1.5964526
+    - 1.5168655
     velocity_limit_rad_s: 0.3
     # Tool-2 no-load approach measurement 2026-10-28: collision-checked motion
     # at 0.006 rad/s repeatedly needed 2.02..2.33 A.  The former 2.0 A limit
