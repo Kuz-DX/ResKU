@@ -19,6 +19,7 @@ def bringup(context):
     spec.loader.exec_module(common)
     source_config = Path(__file__).resolve().parents[1]/'config/manual_controllers.yaml'
     ready_config = source_config.parent/'tcp_ready.yaml'
+    cartesian_targets = source_config.parent/'cartesian_targets.yaml'
     trajectory_dir = source_config.parent/'resampled'
     if not trajectory_dir.is_dir():
         trajectory_dir = Path(get_package_share_directory('tool_manipulator_bringup'))/'config/resampled'
@@ -91,6 +92,7 @@ def bringup(context):
                                       base.moveit_config.robot_description_semantic,
                                       {'hardware_config': base.hardware_file,
                                                         'trajectory_dir': str(trajectory_dir),
+                                                        'cartesian_targets_file': str(cartesian_targets),
                                                         'shoulder_isolation_enabled': True,
                                                         'shoulder_isolation_half_width_rad': 0.08,
                                                         'shoulder_isolation_speed_rad_s': 0.015,

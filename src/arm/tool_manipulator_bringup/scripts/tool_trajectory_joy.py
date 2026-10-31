@@ -56,6 +56,38 @@ def load_route_poses(robot_description_semantic):
     return poses
 
 
+def load_pre_dock_targets(path):
+    """Load reviewed arm_world TCP pre-dock poses for MoveIt route entry."""
+    data = yaml.safe_load(Path(path).read_text())
+    if not isinstance(data, dict) or not isinstance(data.get('targets'), dict):
+        raise ValueError(f'{path}: targets must be a mapping')
+    targets = {}
+    for key, value in data['targets'].items():
+        if not key.startswith('tool') or not key[4:].isdigit():
+            continue
+        path_id = int(key[4:])
+        if path_id not in TOOL_IDS or not isinstance(value, dict):
+            continue
+        if value.get('executable') is not True:
+            continue
+        position = np.asarray(value.get('position_m'), dtype=float)
+        quaternion = np.asarray(value.get('orientation_xyzw'), dtype=float)
+        if (value.get('frame_id') != 'arm_world' or value.get('target_link') != 'tcp_link'
+                or position.shape != (3,) or quaternion.shape != (4,)
+                or not np.all(np.isfinite(position)) or not np.all(np.isfinite(quaternion))):
+            raise ValueError(f'{path}: {key} has an invalid arm_world TCP pose')
+        norm = float(np.linalg.norm(quaternion))
+        if norm < 1e-9:
+            raise ValueError(f'{path}: {key} has a zero quaternion')
+        quaternion /= norm
+        x, y, z, w = quaternion
+        approach_axis = np.asarray([
+            2.*(x*z+w*y), 2.*(y*z-w*x), 1.-2.*(x*x+y*y)], dtype=float)
+        targets[path_id] = dict(position=position, quaternion=quaternion,
+                                approach_axis=approach_axis)
+    return targets
+
+
 def load_path(path, model, margin=.02):
     """Load captured points with recorded or manager-limited execution timing."""
     data = yaml.safe_load(Path(path).read_text())
@@ -302,6 +334,9 @@ class ToolTrajectoryJoy(Node):
         self.model = ArmKinematics('', hardware, description=description)
         self.route_poses = load_route_poses(semantic)
         directory = Path(str(param('trajectory_dir', '')))
+        target_file = Path(str(param('cartesian_targets_file', '')))
+        self.pre_dock_targets = (load_pre_dock_targets(target_file)
+                                 if target_file.is_file() else {})
         self.margin = float(param('limit_margin_rad', .02))
         self.start_tolerance = float(param('start_tolerance_rad', .03))
         self.max_start_delta = float(param('max_start_delta_rad', .10))
@@ -599,13 +634,35 @@ class ToolTrajectoryJoy(Node):
             self.begin_failed(str(exc))
 
     def request_route_plan(self, path_id, measured, status):
-        """Plan current -> home -> back -> selected tool final target."""
+        """Plan current -> home -> back -> reviewed Cartesian pre-dock."""
         if not self.planner.service_is_ready():
             raise RuntimeError('MoveIt route planner unavailable')
-        source = self.paths[path_id]
-        final = np.asarray(source['waypoints'][-1], dtype=float)
-        goals = [self.route_poses['home'].copy(), self.route_poses['back'].copy(), final]
-        for label, goal in zip(('home', 'back', f'{tool_label(path_id)} final'), goals):
+        if path_id not in self.pre_dock_targets:
+            raise ValueError(f'{tool_label(path_id)} has no execution-enabled pre-dock pose')
+        target = self.pre_dock_targets[path_id]
+        nominal_final = np.asarray(self.paths[path_id]['waypoints'][-1], dtype=float)
+        seeds = [('current feedback', np.asarray(measured, dtype=float)),
+                 ('nominal YAML final', nominal_final),
+                 ('SRDF back', self.route_poses['back'].copy())]
+        pre_dock, errors = None, []
+        for seed_name, seed in seeds:
+            if not self.model.within_limits(seed, self.margin):
+                errors.append(f'{seed_name}: seed violates soft limits')
+                continue
+            try:
+                pre_dock = self.model.solve_axis(
+                    target['position'], target['approach_axis'], np.asarray([0., 0., 1.]),
+                    seed, margin_rad=self.margin, max_iterations=500,
+                    max_time_s=.5, joint_step_rad=6.)
+                break
+            except ValueError as exc:
+                errors.append(f'{seed_name}: {exc}')
+        if pre_dock is None:
+            raise ValueError(f'{tool_label(path_id)} pre-dock axis IK failed: '
+                             + ' | '.join(errors))
+        pre_dock = np.asarray(pre_dock, dtype=float)
+        goals = [self.route_poses['home'].copy(), self.route_poses['back'].copy(), pre_dock]
+        for label, goal in zip(('home', 'back', f'{tool_label(path_id)} pre-dock'), goals):
             if not self.model.within_limits(goal):
                 raise ValueError(f'MoveIt route {label} violates joint limits')
         self.path_id = path_id
@@ -640,7 +697,7 @@ class ToolTrajectoryJoy(Node):
         self.future = self.planner.call_async(
             GetMotionPlan.Request(motion_plan_request=request))
         self.stage, self.started = 'planning_route', time.monotonic()
-        labels = ('home', 'back', f'{tool_label(self.path_id)} final')
+        labels = ('home', 'back', f'{tool_label(self.path_id)} pre-dock')
         self.report('planning',
                     f'planning MoveIt route leg {self.route_index+1}/3 to {labels[self.route_index]}')
 

@@ -14,7 +14,8 @@ SCRIPTS = Path(__file__).resolve().parents[1]/'scripts'
 sys.path.insert(0, str(SCRIPTS))
 from tool_trajectory_joy import (collision_check_budget, execution_plan, load_path,
                                  isolate_shoulder_zero_crossings, nearest_path_suffix,
-                                 load_route_poses, planned_entry, planned_leg,
+                                 load_pre_dock_targets, load_route_poses,
+                                 planned_entry, planned_leg,
                                  requested_path, ARM_JOINTS, ToolTrajectoryJoy)
 from tool_trajectory_joy import reverse_path
 
@@ -525,11 +526,28 @@ def test_planned_leg_uses_only_moveit_points_and_reaches_requested_goal():
     assert durations == [1., 1.]
 
 
-def test_tool_request_starts_three_leg_moveit_route_to_final_point():
-    home, back, final = np.ones(6)*.1, np.ones(6)*.2, np.ones(6)*.3
+def test_pre_dock_targets_load_reviewed_arm_world_tcp_poses(tmp_path):
+    target_file = tmp_path/'targets.yaml'
+    target_file.write_text(yaml.safe_dump({'targets': {
+        'tool0': dict(frame_id='arm_world', target_link='tcp_link',
+                      position_m=[-.4, 0., .2], orientation_xyzw=[0., 1., 0., 0.],
+                      executable=True),
+        'tool1': dict(frame_id='arm_world', target_link='tcp_link',
+                      position_m=[-.3, .09, .16], orientation_xyzw=[0., 0., 0., 1.],
+                      executable=False)}}))
+    targets = load_pre_dock_targets(target_file)
+    assert set(targets) == {0}
+    np.testing.assert_allclose(targets[0]['position'], [-.4, 0., .2])
+    np.testing.assert_allclose(targets[0]['approach_axis'], [0., 0., -1.])
+
+
+def test_tool_request_starts_three_leg_moveit_route_to_pre_dock():
+    home, back, pre_dock = np.ones(6)*.1, np.ones(6)*.2, np.ones(6)*.3
     node = SimpleNamespace(
-        planner=Mock(), model=Mock(), paths={1: dict(
-            start=np.zeros(6), waypoints=[np.ones(6)*.25, final], durations=[1., 1.])},
+        planner=Mock(), model=Mock(), margin=.02,
+        paths={1: dict(waypoints=[np.ones(6)*.25])},
+        pre_dock_targets={1: dict(position=np.array([-.3, .09, .16]),
+                                  approach_axis=np.array([1., 0., 0.]))},
         route_poses={'home': home, 'back': back},
         full_state=dict(zip(ARM_JOINTS, np.zeros(6))),
         planning_attempts=3, planning_timeout=8., planning_velocity_scale=.08,
@@ -537,11 +555,13 @@ def test_tool_request_starts_three_leg_moveit_route_to_final_point():
     node._request_route_leg = lambda: ToolTrajectoryJoy._request_route_leg(node)
     node.planner.service_is_ready.return_value = True
     node.model.within_limits.return_value = True
+    node.model.solve_axis.return_value = pre_dock
     ToolTrajectoryJoy.request_route_plan(
         node, 1, np.zeros(6), {'epoch': 'hold'})
     assert node.stage == 'planning_route'
     assert node.route_index == 0
-    np.testing.assert_array_equal(node.route_goals, [home, back, final])
+    np.testing.assert_array_equal(node.route_goals, [home, back, pre_dock])
+    node.model.solve_axis.assert_called_once()
     request = node.planner.call_async.call_args.args[0].motion_plan_request
     assert [constraint.position for constraint in
             request.goal_constraints[0].joint_constraints] == pytest.approx(home)

@@ -71,12 +71,13 @@
 ### 시뮬레이션/실측으로 확인된 제약
 
 - [x] HOME 상태는 `/check_state_validity`: `valid=true`, `contacts=[]`로 확인했다.
-- [x] tool0 중심 좌표 `[-0.394506, 0, 0.212964]`는 rack 장착 상태에서
-  `rack_right <-> circuit_box`와 충돌한다. rack 제거 뒤에도 올바른 TCP +Z 아래
-  55도 조건에서는 전 방위각에 bounded IK 해가 없으므로 실행 목표가 아니다.
-- [x] tool1 중심 좌표 `[-0.317806, 0.090, 0.163912]`는 도달 가능한 45도 후보와
-  +/-18.4 mm 면 오프셋을 검사해도 wrist/camera/EE와 circuit box가 충돌한다.
-  중심점은 실행 목표가 아니며 `cartesian_targets.yaml`에서 비활성화했다.
+- [x] 사용자가 tool0 `[-0.394506, 0, 0.212964]`, 표면 35도와 tool1
+  `[-0.317806, 0.090, 0.163912]`, 표면 55도를 `arm_world` 실제 pre-dock으로
+  확정했다. L2 경로는 YAML 마지막 관절점 대신 이 pose의 bounded axis IK를 거쳐
+  MoveIt `현재 -> home -> back -> pre-dock` 세 leg를 계획하도록 변경했다.
+- [ ] 현재 모델의 오프라인 axis IK는 tool0/tool1 모두 유효 seed 80개에서 해를 찾지
+  못했다. 또한 SRDF BACK shoulder 값은 hardware soft limit을 넘는다. 좌표계/TCP와
+  joint zero/limit을 실기에서 대조하기 전에는 fail-closed 상태를 유지한다.
 - [x] 실기 캡처에서 shoulder/elbow가 runtime soft limit를 넘는 값이 반복됐다.
   도킹 좌표를 확정하기 전에 joint zero/sign/감속기 기준과 실제 soft limit를
   대조해야 하며, 단순 limit 확장은 금지한다.

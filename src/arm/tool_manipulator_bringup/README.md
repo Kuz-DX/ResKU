@@ -67,9 +67,10 @@ L2+동그라미를 한 번 누르면 툴 1 접근 경로 → 정지 상태의 �
 UI는 `std_msgs/msg/Bool`의 `/arm/tool0_docking` 또는 `/arm/tool0_release`를
 `true`로 올려 경로 0 작업을 한 번 요청한다. 다시 요청하려면 먼저 해당 토픽을
 `false`로 내려 상승 에지를 재무장해야 한다. UI와 L2 요청은 MoveIt으로 현재 정지
-자세 → SRDF `home` → SRDF `back` → 선택한 tool YAML의 마지막 관절 목표를 차례로
-계획한다. 기록된 중간 waypoint는 실행하지 않으며 최종 목표를 고르는 용도로만
-사용한다. 세 leg가 모두 계획되고 전체 샘플의 충돌 검사가 끝난 뒤 하나의 manager
+자세 → SRDF `home` → SRDF `back` → `cartesian_targets.yaml`의 tool별 `arm_world`
+pre-dock pose를 차례로 계획한다. pre-dock pose는 BACK을 seed로 bounded axis IK를
+통과해야 하며, 기존 tool YAML의 마지막 관절점은 실행 목표로 사용하지 않는다.
+세 leg가 모두 계획되고 전체 샘플의 충돌 검사가 끝난 뒤 하나의 manager
 경로로 실행한다. 마지막 도킹 준비 자세에서 docking은 `/arm/docking`에 `true -> false`,
 release는 `false -> true`를 즉시 발행하고, 이후 새 `/arm/docked` 피드백이 각각
 `true` 또는 `false`가 될 때까지 HOLD를 유지한다. 같은 계약을 tool1/tool2에도
