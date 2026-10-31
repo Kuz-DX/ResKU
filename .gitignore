@@ -15,6 +15,7 @@ symlink_install_manifest.txt
 # Local robot-arm diagnosis: reports, scripts, and captured runtime evidence.
 debug_report/
 /ARM_MODE_TRANSITION_REVIEW_20261026.md
+REPORT.md
 
 # 루트에 보관한 이전 ROS2 / colcon 산출물
 /build.stale-*/

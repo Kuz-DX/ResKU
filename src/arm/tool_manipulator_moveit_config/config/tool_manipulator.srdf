@@ -71,6 +71,8 @@
     <disable_collisions link1="cam_link" link2="wrist_link_roll" reason="Adjacent"/>
     <!-- The fixed +Y tool case rests on the circuit-box top face. -->
     <disable_collisions link1="circuit_box" link2="tool_case_y_plus" reason="FixtureContact"/>
+    <!-- The supply box rests on the circuit box; collisions with the arm remain enabled. -->
+    <disable_collisions link1="circuit_box" link2="supply_box" reason="FixtureContact"/>
     <disable_collisions link1="ee_actuator" link2="wrist_actuator_yaw" reason="Adjacent"/>
     <disable_collisions link1="ee_actuator" link2="wrist_link_roll" reason="Adjacent"/>
     <disable_collisions link1="elbow_actuator" link2="shoulder_actuator" reason="Adjacent"/>
