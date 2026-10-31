@@ -6,15 +6,17 @@ targets:
     frame_id: base_actuator
     target_link: tcp_link
     position_m: [-0.394506, 0.0, 0.212964]
-    surface_tilt_deg: 55.0
-    orientation_xyzw: [0.0, 0.46174861323503386, 0.0, 0.8870108331782217]
-    executable: plan_only
+    surface_plane_tilt_from_world_xy_deg: 35.0
+    approach_z_tilt_from_world_xy_deg: -55.0
+    orientation_xyzw: [0.0, 0.9537169507482269, 0.0, 0.30070579950427306]
+    executable: false
+    reason: measured centre; no bounded IK solution with TCP +Z tilted 55 degrees downward
   tool1:
     frame_id: base_actuator
     target_link: tcp_link
     position_m: [-0.317806, 0.090, 0.163912]
-    surface_tilt_deg: 45.0
-    orientation_xyzw: [0.0, 0.3826834323650898, 0.0, 0.9238795325112867]
+    approach_z_tilt_from_world_xy_deg: -45.0
+    orientation_xyzw: [0.0, 0.9238795325112867, 0.0, 0.38268343236508984]
     executable: false
     reason: measured case centre only; all reachable 45-degree candidates collide with circuit_box
   supply_box_center:

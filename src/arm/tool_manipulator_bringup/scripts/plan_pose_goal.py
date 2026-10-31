@@ -44,19 +44,19 @@ def normalized_quaternion(pose):
     return [value / norm for value in values]
 
 
-def local_x_plane_tilt_deg(quaternion):
-    """Undirected angle between the rotated local +X axis and world XY."""
+def local_z_plane_tilt_deg(quaternion):
+    """Signed angle of the rotated TCP +Z approach axis from world XY."""
     x, y, z, w = quaternion
-    local_x_world_z = 2.0 * (x * z - w * y)
-    return math.degrees(math.asin(min(1.0, abs(local_x_world_z))))
+    local_z_world_z = 1.0 - 2.0 * (x * x + y * y)
+    return math.degrees(math.asin(float(np.clip(local_z_world_z, -1.0, 1.0))))
 
 
-def rotated_local_x(quaternion):
+def rotated_local_z(quaternion):
     x, y, z, w = quaternion
     return np.asarray([
-        1.0 - 2.0 * (y * y + z * z),
-        2.0 * (x * y + w * z),
-        2.0 * (x * z - w * y),
+        2.0 * (x * z + w * y),
+        2.0 * (y * z - w * x),
+        1.0 - 2.0 * (x * x + y * y),
     ])
 
 
@@ -188,7 +188,7 @@ class PoseGoalPlanner(Node):
                     try:
                         axis_solution = self.model.solve_axis(
                             np.asarray([position.x, position.y, position.z]),
-                            rotated_local_x(quaternion), np.asarray([1.0, 0.0, 0.0]),
+                            rotated_local_z(quaternion), np.asarray([0.0, 0.0, 1.0]),
                             candidate, margin_rad=0.02, max_iterations=500,
                             max_time_s=0.5, joint_step_rad=6.0)
                         break
@@ -203,21 +203,21 @@ class PoseGoalPlanner(Node):
             return
 
         self.busy = True
-        tilt = local_x_plane_tilt_deg(quaternion)
+        tilt = local_z_plane_tilt_deg(quaternion)
         self.report("planning", "MoveIt pose planning requested",
                     constraint_mode=("axis_ik_joint_goal" if self.axis_goal else
                                      "position_and_orientation"
                                      if self.use_orientation else "position_only"),
                     frame=message.header.frame_id,
                     xyz_m=[position.x, position.y, position.z],
-                    wrist_to_world_xy_deg=tilt,
+                    approach_z_to_world_xy_deg=tilt,
                     axis_goal_positions_rad=(None if axis_solution is None else
                                              axis_solution.tolist()))
         future = self.planner.call_async(request)
         context = dict(
             frame=message.header.frame_id,
             xyz_m=[position.x, position.y, position.z],
-            requested_wrist_to_world_xy_deg=tilt)
+            requested_approach_z_to_world_xy_deg=tilt)
         future.add_done_callback(lambda result: self.on_plan(result, context))
 
     def make_request(self, target, quaternion, axis_solution=None):

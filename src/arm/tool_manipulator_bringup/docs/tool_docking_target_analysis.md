@@ -44,7 +44,7 @@ product of their normals.
 
 | Tool | Target surface tilt | Existing final TCP-plane tilt | Error |
 | --- | --- | --- | --- |
-| 0 | `55.000 deg` | `52.073 deg` | `-2.927 deg` |
+| 0 | `35.000 deg` | `52.073 deg` | `+17.073 deg` |
 | 1 | `45.000 deg` | `46.798 deg` | `+1.798 deg` |
 
 This comparison constrains only plane tilt, not which side of the surface the
@@ -54,13 +54,16 @@ orientation quaternion and approved IK goal can be stored.
 
 ## Plan-only tool 0 topic check
 
-For the first check, define the wrist direction as the `tcp_link` local `+X`
-axis.  The user-supplied `55 deg` is the undirected minimum angle between this
-line and the parallel `world`/`arm_world` XY planes; it is not a joint encoder
-angle.  The reachable side is represented by world-Y pitch `+55 deg`, whose
-quaternion is `[0, 0.46174861323503386, 0, 0.8870108331782217]` in XYZW order.
-The opposite directed representative (`125 deg`) has the same line-plane angle
-but no bounded IK solution for this arm.
+This command is a diagnostic reproduction, not an executable target. With the
+correct TCP +Z approach-axis definition, the measured case-centre point has no
+bounded IK solution for any tested XY bearing. A surface TCP point or pre-dock
+offset is required.
+
+The approach direction is the `tcp_link` local `+Z` axis. The docking surface
+is tilted 35 degrees from world XY, therefore the approach +Z axis is tilted
+55 degrees below world XY. With its horizontal bearing along world +X, this is
+world-Y rotation `+145 deg`, represented by quaternion
+`[0, 0.9537169507482269, 0, 0.30070579950427306]` in XYZW order.
 
 Run only one mock bringup; do not run `ik_manual.launch.py` or another
 controller stack at the same time:
@@ -100,7 +103,7 @@ coincident with `arm_world`):
 
 ```bash
 ros2 topic pub --once /arm/plan_pose_goal geometry_msgs/msg/PoseStamped \
-"{header: {frame_id: base_actuator}, pose: {position: {x: -0.394506, y: 0.0, z: 0.212964}, orientation: {x: 0.0, y: 0.46174861323503386, z: 0.0, w: 0.8870108331782217}}}"
+"{header: {frame_id: base_actuator}, pose: {position: {x: -0.394506, y: 0.0, z: 0.212964}, orientation: {x: 0.0, y: 0.9537169507482269, z: 0.0, w: 0.30070579950427306}}}"
 ```
 
 The following Tool 1 command is retained as a diagnostic reproduction only.
@@ -109,7 +112,7 @@ reachable 45-degree candidates currently collide with `circuit_box`:
 
 ```bash
 ros2 topic pub --once /arm/plan_pose_goal geometry_msgs/msg/PoseStamped \
-"{header: {frame_id: base_actuator}, pose: {position: {x: -0.317806, y: 0.090, z: 0.163912}, orientation: {x: 0.0, y: 0.3826834323650898, z: 0.0, w: 0.9238795325112867}}}"
+"{header: {frame_id: base_actuator}, pose: {position: {x: -0.317806, y: 0.090, z: 0.163912}, orientation: {x: 0.0, y: 0.9238795325112867, z: 0.0, w: 0.38268343236508984}}}"
 ```
 
 Do not publish the supply-box centre to the planner as a TCP goal. It is kept
