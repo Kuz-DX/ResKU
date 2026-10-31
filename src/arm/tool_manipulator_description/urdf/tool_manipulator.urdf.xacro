@@ -58,6 +58,7 @@
   <material name="tool_case_marker_blue"><color rgba="0.05 0.35 1.0 1.0"/></material>
   <material name="chassis_blue"><color rgba="0.12 0.22 0.34 0.55"/></material>
   <material name="circuit_box_orange"><color rgba="0.85 0.35 0.05 0.80"/></material>
+  <material name="supply_box_green"><color rgba="0.20 0.70 0.30 0.85"/></material>
 
   <!-- MOTOR -->
   <material name="motor_grey">
@@ -156,6 +157,23 @@
     <!-- X/Y use the chassis centre. Z uses the wheel axle: box centre is
          axle height + (372 - 102/2) mm, then converted to chassis Z. -->
     <origin xyz="-0.134097 0 ${float(wheel_axle_z) + 0.321 - float(imu_z) - float(chassis_mount_z_m)}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- 95 mm supply box on the -Y arm of the U-shaped circuit box, opposite
+       tool case 2. Its bottom rests on the top; its +X face is inset
+       2.5 mm from the protrusion's +X end at local X=0.140 m. -->
+  <link name="supply_box">
+    <visual>
+      <geometry><box size="0.095 0.095 0.095"/></geometry>
+      <material name="supply_box_green"/>
+    </visual>
+    <collision>
+      <geometry><box size="0.095 0.095 0.095"/></geometry>
+    </collision>
+  </link>
+  <joint name="circuit_box_to_supply_box" type="fixed">
+    <parent link="circuit_box"/><child link="supply_box"/>
+    <origin xyz="0.090 -0.120 0.0985" rpy="0 0 0"/>
   </joint>
 
   <!-- Robot-arm reference: base height is 350 mm above ground, therefore 235 mm above the IMU/world at ground z=115 mm. -->
@@ -617,14 +635,8 @@
 
   <!-- ========================================================= -->
   <!-- EE ACTUATOR DRIVE GEAR -->
-  <!-- wrist yaw -> EE drive gear centre:
-       wrist-yaw local (0, -34, +78.36) mm
-       measured world (-34, 0, +78.36) mm -->
-  <!-- wrist_yaw frame -->
-  <!-- Xe = +Yworld -->
-  <!-- Ye = -Xworld -->
-  <!-- Ze = +Zworld -->
-  <!-- 따라서 local displacement = (0,0,+62 mm) -->
+  <!-- Drive gear sits on the upper side of the gripper housing:
+       wrist-yaw local (0, +34, +78.36) mm. -->
   <!-- ========================================================= -->
 
   <link name="ee_actuator">

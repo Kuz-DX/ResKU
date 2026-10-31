@@ -31,6 +31,8 @@ def bringup(context):
     base = common.build_arm_base(
         real_hardware=real,
         hardware_file=LaunchConfiguration('hardware_config').perform(context), mock_ee_velocity=True,
+        # Use the same mounted-tool geometry for display and collision checks.
+        tool_id=LaunchConfiguration('tool_id').perform(context),
         mock_initial_positions_file=initial,
         manual_controller_file=str(source_config) if source_config.is_file() else '')
     scripts = Path(__file__).resolve().parents[1]/'scripts'
@@ -122,6 +124,8 @@ def generate_launch_description():
         DeclareLaunchArgument('hardware_config', default_value=str(hardware_default)),
         DeclareLaunchArgument('launch_joy', default_value='false', choices=['true', 'false']),
         DeclareLaunchArgument('mock_initial_positions_file', default_value=''),
+        DeclareLaunchArgument('tool_id', default_value='99', choices=['0', '1', '2', '99'],
+                              description='Mounted tool: 0=gripper, 1/2=other tools, 99=empty wrist'),
         DeclareLaunchArgument('launch_tcp_joy', default_value='true', choices=['true', 'false']),
         # One L2 + circle request owns the taught approach and its docking tail.
         # Enabling the producer does not submit a path at launch time.
