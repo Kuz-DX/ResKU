@@ -1,7 +1,17 @@
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
 from moveit_configs_utils import MoveItConfigsBuilder
 from moveit_configs_utils.launches import generate_rsp_launch
 
 
 def generate_launch_description():
-    moveit_config = MoveItConfigsBuilder("tool_manipulator", package_name="tool_manipulator_moveit_config").to_moveit_configs()
-    return generate_rsp_launch(moveit_config)
+    config = (MoveItConfigsBuilder("tool_manipulator", package_name="tool_manipulator_moveit_config")
+              .robot_description(mappings={"tool_id": LaunchConfiguration("tool_id"),
+                                           "use_mesh": LaunchConfiguration("use_mesh")})
+              .to_moveit_configs())
+    return LaunchDescription([
+        DeclareLaunchArgument("tool_id", default_value="0"),
+        DeclareLaunchArgument("use_mesh", default_value="true"),
+        *generate_rsp_launch(config).entities,
+    ])
