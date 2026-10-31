@@ -21,9 +21,9 @@ JOINTS = {
 }
 HOME = {
     "base_joint": 0.0,
-    "shoulder_joint": 1.4830934149601134,
-    "elbow_joint": 1.507093414960,
-    "wrist_pitch_joint": -1.553343034275,
+    "shoulder_joint": -1.4830934149601134,
+    "elbow_joint": -1.507093414960,
+    "wrist_pitch_joint": 1.553343034275,
     "wrist_roll_joint": 0.0,
     "wrist_yaw_joint": 0.0,
 }
