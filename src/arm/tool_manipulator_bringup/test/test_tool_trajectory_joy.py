@@ -16,7 +16,8 @@ from tool_trajectory_joy import (collision_check_budget, execution_plan, load_pa
                                  isolate_shoulder_zero_crossings, nearest_path_suffix,
                                  load_pre_dock_targets, load_route_poses,
                                  planned_entry, planned_leg,
-                                 requested_path, ARM_JOINTS, ToolTrajectoryJoy)
+                                 requested_back, requested_path, ARM_JOINTS,
+                                 ToolTrajectoryJoy)
 from tool_trajectory_joy import reverse_path
 
 
@@ -381,12 +382,21 @@ def test_l2_plus_l1_does_not_select_tool2():
     assert request is None and held == [False]*3
 
 
-def test_triangle_circle_x_select_paths_and_square_is_reserved_for_home():
+def test_triangle_circle_x_select_paths_and_square_is_reserved_for_back():
     buttons = [0]*13
     for index, expected in ((2, 0), (1, 1), (0, 2), (3, None)):
         buttons[index] = 1
         assert requested_path([0., 0., -1.], buttons, [False]*3)[0] == expected
         buttons[index] = 0
+
+
+def test_l2_plus_square_requests_back_once():
+    buttons = [0]*13
+    buttons[3] = 1
+    request, held = requested_back([0., 0., -1.], buttons, False)
+    assert request is True and held is True
+    assert requested_back([0., 0., -1.], buttons, held)[0] is False
+    assert requested_back([0., 0., 1.], buttons, held) == (False, False)
 
 
 def test_ui_request_uses_one_rising_edge_and_nearest_entry():
@@ -541,7 +551,7 @@ def test_pre_dock_targets_load_reviewed_arm_world_tcp_poses(tmp_path):
     np.testing.assert_allclose(targets[0]['approach_axis'], [0., 0., -1.])
 
 
-def test_tool_request_starts_three_leg_moveit_route_to_pre_dock():
+def test_verified_back_tool_request_plans_only_pre_dock_leg():
     home, back, pre_dock = np.ones(6)*.1, np.ones(6)*.2, np.ones(6)*.3
     node = SimpleNamespace(
         planner=Mock(), model=Mock(), margin=.02,
@@ -560,11 +570,11 @@ def test_tool_request_starts_three_leg_moveit_route_to_pre_dock():
         node, 1, np.zeros(6), {'epoch': 'hold'})
     assert node.stage == 'planning_route'
     assert node.route_index == 0
-    np.testing.assert_array_equal(node.route_goals, [home, back, pre_dock])
+    np.testing.assert_array_equal(node.route_goals, [pre_dock])
     node.model.solve_axis.assert_called_once()
     request = node.planner.call_async.call_args.args[0].motion_plan_request
     assert [constraint.position for constraint in
-            request.goal_constraints[0].joint_constraints] == pytest.approx(home)
+            request.goal_constraints[0].joint_constraints] == pytest.approx(pre_dock)
     node.report.assert_called_once()
 
 
