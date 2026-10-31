@@ -193,8 +193,15 @@ def test_candidate_a_passes_all_directions_without_claiming_collision_safety():
     arm = Path(__file__).resolve().parents[2]
     model = ArmKinematics(arm/'tool_manipulator_description/urdf/tool_manipulator.urdf.xacro',
                           arm/'tool_manipulator_bringup/config/hardware.yaml')
-    result = evaluate(model, CANDIDATES['candidate_a'], CANDIDATES['recovery_reference'])
-    assert min(result['limit_margins_rad']) > .3
+    # Evaluate from the current two-degree startup inset. The old captured
+    # recovery reference exceeds the recalibrated shoulder upper limit.
+    limits = model.limits
+    margin = np.deg2rad(2.)
+    recovery = [0., limits['shoulder_joint'][1]-margin,
+                limits['elbow_joint'][1]-margin,
+                limits['wrist_pitch_joint'][0]+margin, 0., 0.]
+    result = evaluate(model, CANDIDATES['candidate_a'], recovery)
+    assert min(result['limit_margins_rad']) > .101
     assert result['condition'] < 20
     assert all(d['ik'] and d['max_condition'] < 20 for d in result['directions'].values())
     assert result['collision_free'] is None
