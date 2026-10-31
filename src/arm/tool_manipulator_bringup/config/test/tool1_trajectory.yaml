@@ -1,0 +1,42 @@
+# User-recorded path 1: approach-only test, stopping BEFORE the final descent.
+# Original intermediate points 3, 4, 6, 8 removed at user request because
+# they violate the current joint margin/limits. Capture timestamps are metadata:
+# measurement pauses are not playback durations. The manager derives timing
+# from joint travel and its existing speed/acceleration/jerk limits.
+# User reports collision simulation of the intermediate path is complete.
+# Execute original points 1/2/5/7, then HOLD. Original point 9 is reference only.
+# With enable_tool_docking + enable_docking_motion, the coordinator confirms
+# tag 1 at the stopped endpoint, then advances 30 mm along its normal to HOLD.
+execution_enabled: true
+timing_mode: joint_limits
+joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
+points:
+  - time_from_start_sec: 0.0
+    positions_rad: [-0.0030679615759785506, 1.0325367828166843, 1.3191198806152473,
+      -1.4666001491455465, 0.015339807878649747, 0.03067961575792033]
+  - time_from_start_sec: 6.571365
+    positions_rad: [0.615126295941935, 1.0105455969573005, 1.4615386783357962,
+      -1.4357077468167363, 0.1810097329702991, 0.1181165206674013]
+  - time_from_start_sec: 27.046781
+    positions_rad: [2.0831459099484935, 0.8494517149877071, 1.4805628364247228,
+      -1.5528194568046436, 0.5721748338811374, -1.0277671278831733]
+  - time_from_start_sec: 129.10062
+    positions_rad: [3.2888548092266077, 0.4934045542387666, 1.4027210346066878,
+      -1.5432200926554531, -0.4801359866084125, -1.9527575429782145]
+
+# REFERENCE ONLY -- excluded from points and never executed by this path.
+# FK calculated 2026-10-28 with tool_change_min.kinematics.ArmKinematics and
+# tool_manipulator_description/urdf/tool_manipulator.urdf.xacro (tool_id=0).
+# This is T_base_actuator_tcp_link, NOT a pose in the physical tag frame.
+# Future tag guidance needs T_tag_tcp = inverse(T_base_actuator_tag) * T_base_actuator_tcp.
+# The original joint pose still fails the 0.02-rad elbow margin (1.532574 > 1.522).
+# Saving its Cartesian pose does not validate an IK solution or the descent.
+# final_descent_reference:
+#   frame_id: base_actuator
+#   tip_link: tcp_link
+#   xyz_m: [0.248223461306, 0.088276606345, 0.205563764973]
+#   xyzw: [-0.870229240368, -0.236042261387, -0.389490641298, 0.187835460947]
+#   original_point:
+#     time_from_start_sec: 203.315841
+#     positions_rad: [3.2044858658928974, 0.4361577760786413, 1.5325735735656434,
+#       -1.2644909898066699, -0.4924078329114976, -1.8315730607352494]

@@ -1,0 +1,56 @@
+# Tool 2 phase-1 test: original point 8 (TCP_ready) -> 7 -> ... -> 1, then HOLD.
+# Only the four out-of-margin joint values at points 1/3/7 are set to
+# the existing 0.02-rad margin boundaries; all other captured values remain.
+# Capture timestamps are discarded; 0..7 below are nominal ordering metadata.
+# The manager derives execution timing from joint speed/acceleration limits.
+# Runtime collision checks and manager limits gate execution.
+# tool2_ik_reference.yaml describes the superseded five-point path only.
+execution_enabled: true
+timing_mode: joint_limits
+# Tool 1 approaches the wrist-pitch lower guard at about 0.0064 rad/s.
+# Retiming tool 2 to 0.006 rad/s on elbow/pitch avoids a fast commanded
+# approach into the 0.05-rad guard band (outward feedback trip: 0.02 rad/s).
+# These caps set segment durations; the manager still owns all motion guards.
+joint_speed_limits_rad_s: [0.08, 0.04, 0.006, 0.006, 0.08, 0.08]
+joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
+# PHASE 2 DISABLED: uncomment this block after approach validation.
+# Existing close-and-return sequencing holds the arm at original point 1,
+# drives independent Dynamixel ID 4 (ee_joint), waits for close completion,
+# then reverses this approach: original points 2 -> ... -> 8 (TCP_ready).
+# The previous close target must be confirmed with the actual supply box.
+# after_path:
+#   ee_close_rad: 1.251728
+#   return_to_start: true
+points:
+  # Original point 8 (TCP_ready).
+  - time_from_start_sec: 0.0
+    positions_rad: [-0.004601942363863909, 1.301666588095304, 1.3535027550267698, -1.271821340707113,
+      -2.0694557179012918e-13, -0.004601942363450462]
+  # Original point 7.
+  - time_from_start_sec: 1.0
+    positions_rad: [-0.012271846303292033, 1.3348277373567528, 1.1217230516672116, -1.572,
+      -0.03374757733369105, -0.01994175024230671]
+  # Original point 6.
+  - time_from_start_sec: 2.0
+    positions_rad: [-0.3942330624868169, 0.9430013735472476, 1.1276572403661806, -1.3358750254554264,
+      -0.13959225169780032, -0.06596117387887723]
+  # Original point 5.
+  - time_from_start_sec: 3.0
+    positions_rad: [-0.9863496466106745, 0.9843656581773855, 1.270425178505639, -1.3035863277670876,
+      -0.14112623248568568, -0.06596117387887723]
+  # Original point 4.
+  - time_from_start_sec: 4.0
+    positions_rad: [-1.6382914814620722, 0.9855873833274593, 1.1756537947960248, -1.3297662665470027,
+      -0.13959225169780032, -0.33440781175886336]
+  # Original point 3.
+  - time_from_start_sec: 5.0
+    positions_rad: [-2.0079808513425115, 0.9094910838668895, 0.9698794600069267, -1.572,
+      -0.12578642460682943, -0.06596117387887723]
+  # Original point 2.
+  - time_from_start_sec: 6.0
+    positions_rad: [-2.1399031991006763, 0.8899433483076534, 1.3538518954456793, -1.4152874265263358,
+      -0.6120583343665777, -0.15800002115201472]
+  # Original point 1.
+  - time_from_start_sec: 7.0
+    positions_rad: [-2.1475731030401044, 0.8241444275179839, 1.522, -1.572,
+      -0.622796199881777, -0.4126408319410313]

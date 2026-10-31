@@ -13,15 +13,28 @@ from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory, get_package_prefix
 
 
+def test_trajectory_directory(source_config_dir, installed_config_dir):
+    """Use only the independent test copy, never shared production paths."""
+    source = Path(source_config_dir)/'test/resampled'
+    installed = Path(installed_config_dir)/'test/resampled'
+    directory = source if source.is_dir() else installed
+    missing = [directory/f'tool{i}_trajectory.yaml' for i in range(3)
+               if not (directory/f'tool{i}_trajectory.yaml').is_file()]
+    if missing:
+        raise FileNotFoundError('Test trajectory files missing; rebuild/install test config: '
+                                + ', '.join(map(str, missing)))
+    return directory
+
+
 def bringup(context):
     spec = importlib.util.spec_from_file_location('managed_common', Path(__file__).with_name('arm_bringup_common.py'))
     common = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(common)
     source_config = Path(__file__).resolve().parents[1]/'config/manual_controllers.yaml'
     ready_config = source_config.parent/'tcp_ready.yaml'
-    trajectory_dir = source_config.parent/'resampled'
-    if not trajectory_dir.is_dir():
-        trajectory_dir = Path(get_package_share_directory('tool_manipulator_bringup'))/'config/resampled'
+    trajectory_dir = test_trajectory_directory(
+        source_config.parent,
+        Path(get_package_share_directory('tool_manipulator_bringup'))/'config')
     real = LaunchConfiguration('real_hardware').perform(context) == 'true'
     tcp_enabled = LaunchConfiguration('launch_tcp_joy').perform(context) == 'true'
     initial = LaunchConfiguration('mock_initial_positions_file').perform(context)

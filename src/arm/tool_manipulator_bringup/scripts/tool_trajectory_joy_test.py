@@ -34,31 +34,6 @@ def load_path(path, model, margin=.02):
     data = yaml.safe_load(Path(path).read_text())
     if not isinstance(data, dict):
         raise ValueError(f'{path}: YAML root must be a mapping')
-    # Test-only tool1 edits; shared source and resampled YAML remain intact.
-    if Path(path).name == 'tool1_trajectory.yaml':
-        from resample_tool_paths import resample
-        anchors = data.get('source_point_indices', list(range(len(data.get('points', [])))))
-        if len(anchors) != 4 or anchors[0] != 0 or anchors[-1] != len(data['points'])-1:
-            raise ValueError('test tool1 override requires four source points')
-        shoulder = data['joint_names'].index('shoulder_joint')
-        source = [list(data['points'][index]['positions_rad']) for index in anchors]
-        for point in source[:2]:
-            point[shoulder] = math.radians(41.81)
-        source[2][data['joint_names'].index('wrist_yaw_joint')] = 0.577
-        # Points 4 and 5 are user-selected RViz joint values in radians.
-        fourth_pose = dict(base_joint=2.498, shoulder_joint=0.846,
-                          elbow_joint=1.476, wrist_pitch_joint=-1.559,
-                          wrist_roll_joint=0.369, wrist_yaw_joint=1.265)
-        source.insert(3, [fourth_pose[name] for name in data['joint_names']])
-        fifth_pose = dict(base_joint=2.729, shoulder_joint=0.812,
-                          elbow_joint=1.460, wrist_pitch_joint=-1.542,
-                          wrist_roll_joint=0.145, wrist_yaw_joint=1.464)
-        source[4] = [fifth_pose[name] for name in data['joint_names']]
-        data['points'] = [dict(time_from_start_sec=float(index), positions_rad=q)
-                          for index, q in enumerate(source)]
-        if 'nominal_joint_speed_limits_rad_s' in data:
-            data['joint_speed_limits_rad_s'] = data['nominal_joint_speed_limits_rad_s']
-        data = resample(data, period=data.get('sample_period_sec', .5))
     if data.get('execution_enabled') is not True:
         return None
     if data.get('joint_names') != list(ARM_JOINTS):
@@ -330,6 +305,7 @@ class ToolTrajectoryJoy(Node):
                 or len({self.first_button, self.second_button, self.third_button}) != 3
                 or 3 in (self.first_button, self.second_button, self.third_button)):
             raise ValueError('invalid tool trajectory joystick parameters')
+        self.get_logger().info(f'TEST trajectory directory: {directory.resolve()}')
         self.paths = {}
         for path_id in range(3):
             path = directory/f'tool{path_id}_trajectory.yaml'
