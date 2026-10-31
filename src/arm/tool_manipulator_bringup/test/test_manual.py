@@ -568,8 +568,9 @@ def test_measured_stop_pose_camera_world_transform_regression():
     path = Path(__file__).resolve().parents[2] / 'tool_manipulator_description/urdf/tool_manipulator.urdf.xacro'
     chain = ArmChain(
         xacro.process_file(str(path)).toxml(), root='world', tip='cam_link')
+    # The corrected URDF axes use the joint-state sign convention directly.
     measured = dict(zip(
-        JOINTS, np.deg2rad([0., 85.140, 86.340, -89.200, -5.098, -3.604])))
+        JOINTS, np.deg2rad([0., -85.140, -86.340, 89.200, -5.098, -3.604])))
     camera, _ = chain.pose_and_jacobian(measured)
     np.testing.assert_allclose(
         camera[:3, 3], [0.15347243, -0.00601448, 0.45803051], atol=1e-7)

@@ -461,11 +461,12 @@ def test_home_completion_stays_hold_and_restores_tcp_ready_target():
     n.default_ready_goal = n.ready_goal.copy()
     n.ready_goal = np.radians([0., 85., 87., -89., 0., 0.])
     n.returning_home = True
+    n.home_leg = 'home'
     n.ready_state = 'executing'
     n.ready_execution_id = 'home'
     n.status.update(last_execution_id='home', last_execution_result='succeeded')
     TcpJoy.drive_ready(n, 1.)
-    assert not n.returning_home and n.auto_entry_armed
+    assert not n.returning_home and not n.auto_entry_armed
     assert n.ready_state == 'idle'
     np.testing.assert_array_equal(n.ready_goal, n.default_ready_goal)
     n.tcp_mode.call_async.assert_not_called()

@@ -373,7 +373,13 @@ Releasing L2 or losing subsequent Joy messages does not cancel that sequence.
 Explicit cancel, feedback, ownership and collision checks remain active. Other
 docking configurations default to continuous L2 hold unless explicitly disabled.
 At one sample per 20 ms timer tick, 861 samples take at least about 17 seconds
-to validate. A new path request while checking is ignored.
+to validate. A new path request while planning or checking is ignored. Tool
+0/1/2 requests plan three sequential OMPL legs before motion: stopped current
+pose to SRDF `home`, `home` to SRDF `back`, and `back` to the selected tool
+YAML's final joint target. Captured intermediate waypoints are not executed.
+All three plans must succeed, are concatenated, sampled again through
+`/check_state_validity`, and are then executed by the mode manager; MoveIt
+trajectory execution remains disabled.
 
 TCP-ready and entry checks allow the same bounded 0.02-rad DXL/EE encoder
 variation used by tool-path validation; RMD entry tolerance stays at 0.001 rad.

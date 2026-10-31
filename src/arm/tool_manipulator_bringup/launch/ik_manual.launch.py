@@ -81,7 +81,9 @@ def bringup(context):
                        'tool_docking_coordinator.py' if docking else 'tool_trajectory_joy.py')
         tool_paths = Node(executable=sys.executable,
                           arguments=[str(scripts/tool_script)],
-                          parameters=[base.description, {'hardware_config': base.hardware_file,
+                          parameters=[base.description,
+                                      base.moveit_config.robot_description_semantic,
+                                      {'hardware_config': base.hardware_file,
                                                         'trajectory_dir': str(trajectory_dir),
                                                         'shoulder_isolation_enabled': True,
                                                         'shoulder_isolation_half_width_rad': 0.08,

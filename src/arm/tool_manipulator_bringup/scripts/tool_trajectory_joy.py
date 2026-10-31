@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 import time
 import uuid
+import xml.etree.ElementTree as ET
 
 source = Path(__file__).resolve().parents[2]/'tool_change_min'
 if (source/'tool_change_min/kinematics.py').is_file():
@@ -27,6 +28,31 @@ try:
 except ImportError:
     from arm_shared_kinematics import ArmKinematics, ARM_JOINTS
 from arm_mode_core import TCP_ENTRY_TOLERANCE
+
+
+def load_route_poses(robot_description_semantic):
+    """Load the two mandatory MoveIt route gates from SRDF text."""
+    try:
+        root = ET.fromstring(robot_description_semantic)
+    except (ET.ParseError, TypeError) as exc:
+        raise ValueError('robot_description_semantic is invalid') from exc
+    poses = {}
+    for state in root.findall("group_state[@group='arm']"):
+        values = {joint.get('name'): joint.get('value') for joint in state.findall('joint')}
+        if state.get('name') not in ('home', 'back'):
+            continue
+        if set(values) != set(ARM_JOINTS):
+            raise ValueError(f"SRDF {state.get('name')} pose has invalid joints")
+        try:
+            pose = np.asarray([float(values[name]) for name in ARM_JOINTS], dtype=float)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"SRDF {state.get('name')} pose has invalid values") from exc
+        if not np.all(np.isfinite(pose)):
+            raise ValueError(f"SRDF {state.get('name')} pose has nonfinite values")
+        poses[state.get('name')] = pose
+    if set(poses) != {'home', 'back'}:
+        raise ValueError('SRDF arm route requires exactly home and back poses')
+    return poses
 
 
 def load_path(path, model, margin=.02):
@@ -176,14 +202,14 @@ def execution_timeout(path, measured, speed_limits):
     return duration+5.*len(path['waypoints'])+30.
 
 
-def planned_entry(path, trajectory, measured, minimum_duration=.02):
-    """Convert a MoveIt joint trajectory into a managed path prefix."""
+def planned_leg(trajectory, start, goal, minimum_duration=.02):
+    """Convert one MoveIt leg into manager waypoints and validate its endpoint."""
     names = list(trajectory.joint_names)
     if len(names) != len(set(names)) or any(name not in names for name in ARM_JOINTS):
         raise ValueError('MoveIt entry plan has invalid joint names')
     indices = [names.index(name) for name in ARM_JOINTS]
     waypoints, durations = [], []
-    previous = np.asarray(measured, dtype=float)
+    previous = np.asarray(start, dtype=float)
     previous_time = 0.
     for point in trajectory.points:
         if len(point.positions) != len(names):
@@ -199,9 +225,16 @@ def planned_entry(path, trajectory, measured, minimum_duration=.02):
         previous_time = stamp
     if not waypoints:
         raise ValueError('MoveIt entry plan is empty')
-    if float(np.max(np.abs(waypoints[-1]-path['start']))) > .01:
-        raise ValueError('MoveIt entry plan did not reach the taught start')
-    waypoints[-1] = np.asarray(path['start'], dtype=float)
+    if float(np.max(np.abs(waypoints[-1]-np.asarray(goal, dtype=float)))) > .01:
+        raise ValueError('MoveIt plan did not reach the requested route goal')
+    waypoints[-1] = np.asarray(goal, dtype=float)
+    return waypoints, durations
+
+
+def planned_entry(path, trajectory, measured, minimum_duration=.02):
+    """Convert a MoveIt joint trajectory into a managed path prefix."""
+    waypoints, durations = planned_leg(
+        trajectory, measured, path['start'], minimum_duration)
     waypoints.extend(path['waypoints'])
     durations.extend(path['durations'])
     return dict(start=np.asarray(measured, dtype=float).copy(),
@@ -264,7 +297,9 @@ class ToolTrajectoryJoy(Node):
             return self.declare_parameter(name, default).value
         hardware = str(param('hardware_config', ''))
         description = str(param('robot_description', ''))
+        semantic = str(param('robot_description_semantic', ''))
         self.model = ArmKinematics('', hardware, description=description)
+        self.route_poses = load_route_poses(semantic)
         directory = Path(str(param('trajectory_dir', '')))
         self.margin = float(param('limit_margin_rad', .02))
         self.start_tolerance = float(param('start_tolerance_rad', .03))
@@ -359,6 +394,8 @@ class ToolTrajectoryJoy(Node):
         self.started = None
         self.execution_id = None
         self.entry_path = None
+        self.route_goals = self.route_waypoints = self.route_durations = None
+        self.route_index = 0
         self.requested_docked_state = None
         self.use_nearest_entry = False
         self.command_feedback_sequence = None
@@ -490,6 +527,9 @@ class ToolTrajectoryJoy(Node):
             s = self.healthy_hold(now)
             measured = np.asarray([self.full_state[j] for j in ARM_JOINTS])
             if planned_path is None:
+                if getattr(self, 'route_poses', None):
+                    self.request_route_plan(path_id, measured, s)
+                    return
                 source_path = (nearest_path_suffix(self.paths[path_id], measured)
                                if self.use_nearest_entry else self.paths[path_id])
                 self.entry_path = source_path
@@ -501,7 +541,8 @@ class ToolTrajectoryJoy(Node):
                                       self.max_start_delta, self.approach_speed)
             else:
                 path = planned_path
-            if self.shoulder_isolation_enabled and not path.get('cartesian_line', False):
+            if (self.shoulder_isolation_enabled and not path.get('cartesian_line', False)
+                    and not path.get('moveit_planned', False)):
                 path = isolate_shoulder_zero_crossings(
                     path, self.shoulder_isolation_half_width,
                     self.shoulder_isolation_speed)
@@ -554,6 +595,52 @@ class ToolTrajectoryJoy(Node):
         except (ValueError, RuntimeError, KeyError) as exc:
             self.path_id = path_id
             self.begin_failed(str(exc))
+
+    def request_route_plan(self, path_id, measured, status):
+        """Plan current -> home -> back -> selected tool final target."""
+        if not self.planner.service_is_ready():
+            raise RuntimeError('MoveIt route planner unavailable')
+        source = self.paths[path_id]
+        final = np.asarray(source['waypoints'][-1], dtype=float)
+        goals = [self.route_poses['home'].copy(), self.route_poses['back'].copy(), final]
+        for label, goal in zip(('home', 'back', f'tool{path_id} final'), goals):
+            if not self.model.within_limits(goal):
+                raise ValueError(f'MoveIt route {label} violates joint limits')
+        self.path_id = path_id
+        self.snapshot = dict(self.full_state)
+        self.original_epoch = status['epoch']
+        self.route_goals = goals
+        self.route_waypoints, self.route_durations = [], []
+        self.route_index = 0
+        self.route_start = np.asarray(measured, dtype=float).copy()
+        self._request_route_leg()
+
+    def _request_route_leg(self):
+        start = self.route_start if self.route_index == 0 else self.route_goals[self.route_index-1]
+        goal_values = self.route_goals[self.route_index]
+        request = MotionPlanRequest()
+        request.group_name = 'arm'
+        request.num_planning_attempts = self.planning_attempts
+        request.allowed_planning_time = self.planning_timeout
+        request.max_velocity_scaling_factor = self.planning_velocity_scale
+        request.max_acceleration_scaling_factor = self.planning_acceleration_scale
+        values = dict(self.snapshot)
+        values.update(zip(ARM_JOINTS, map(float, start)))
+        request.start_state.joint_state.name = list(values)
+        request.start_state.joint_state.position = list(values.values())
+        request.start_state.is_diff = True
+        goal = Constraints()
+        for name, position in zip(ARM_JOINTS, goal_values):
+            goal.joint_constraints.append(JointConstraint(
+                joint_name=name, position=float(position),
+                tolerance_above=.005, tolerance_below=.005, weight=1.))
+        request.goal_constraints = [goal]
+        self.future = self.planner.call_async(
+            GetMotionPlan.Request(motion_plan_request=request))
+        self.stage, self.started = 'planning_route', time.monotonic()
+        labels = ('home', 'back', f'tool{self.path_id} final')
+        self.report('planning',
+                    f'planning MoveIt route leg {self.route_index+1}/3 to {labels[self.route_index]}')
 
     def request_entry_plan(self, path_id, path, measured, error, status):
         if not self.planner.service_is_ready():
@@ -718,6 +805,47 @@ class ToolTrajectoryJoy(Node):
                     return
                 if now-self.started > 3.:
                     raise TimeoutError('arm did not reach HOLD')
+                return
+            if self.stage == 'planning_route':
+                s = self.healthy_hold(now)
+                if s.get('epoch') != self.original_epoch:
+                    raise RuntimeError('arm ownership changed during route planning')
+                if not self.unchanged(validation=True):
+                    raise RuntimeError('robot moved during route planning; '
+                                       + self.snapshot_change_reason(validation=True))
+                if now-self.started > self.planning_timeout+1.:
+                    raise TimeoutError(
+                        f'MoveIt route leg {self.route_index+1}/3 planning timed out')
+                if not self.future.done():
+                    return
+                result = self.future.result()
+                if (result is None or
+                        result.motion_plan_response.error_code.val != MoveItErrorCodes.SUCCESS):
+                    code = ('none' if result is None else
+                            result.motion_plan_response.error_code.val)
+                    raise RuntimeError(
+                        f'MoveIt route leg {self.route_index+1}/3 planning failed ({code})')
+                start = (self.route_start if self.route_index == 0 else
+                         self.route_goals[self.route_index-1])
+                waypoints, durations = planned_leg(
+                    result.motion_plan_response.trajectory.joint_trajectory,
+                    start, self.route_goals[self.route_index])
+                self.route_waypoints.extend(waypoints)
+                self.route_durations.extend(durations)
+                if len(self.route_waypoints) > 1000:
+                    raise ValueError('combined MoveIt route exceeds 1000 waypoints')
+                self.route_index += 1
+                if self.route_index < len(self.route_goals):
+                    self._request_route_leg()
+                    return
+                path_id = self.path_id
+                plan = dict(
+                    start=self.route_start.copy(),
+                    waypoints=list(self.route_waypoints),
+                    durations=list(self.route_durations),
+                    total=sum(self.route_durations),
+                    start_error=0., moveit_planned=True)
+                self.begin(path_id, plan)
                 return
             if self.stage == 'planning_entry':
                 s = self.healthy_hold(now)

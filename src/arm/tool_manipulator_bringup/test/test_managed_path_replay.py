@@ -13,7 +13,7 @@ from tool_trajectory_joy import (load_path, execution_plan,
                                  isolate_shoulder_zero_crossings, execution_timeout)
 
 
-def test_tcp_ready_then_recorded_path_zero_completes():
+def test_tcp_ready_manager_motion_completes():
     config = Path(__file__).resolve().parents[1]/'config'
     hardware = yaml.safe_load((config/'hardware.yaml').read_text())['joints']
     ready = yaml.safe_load((config/'tcp_ready.yaml').read_text())['tcp_ready']
@@ -46,16 +46,7 @@ def test_tcp_ready_then_recorded_path_zero_completes():
         return now-start
 
     replay('ready', [ready['positions_rad']], [ready['duration_sec']])
-    def within_limits(q, margin):
-        return all(lo+margin <= v <= hi-margin for v, (lo, hi) in zip(q, limits))
-    taught = load_path(config/'tool0_trajectory.yaml',
-                       SimpleNamespace(within_limits=within_limits))
-    plan = execution_plan(taught, c.position, .02, .35, .03)
-    plan = isolate_shoulder_zero_crossings(plan, .08, .015)
-    budget = execution_timeout(plan, c.position, c.path_speed_limits)
-    elapsed = replay('path0', [p.tolist() for p in plan['waypoints']],
-                     plan['durations'], plan['stop_at_waypoints'])
-    assert elapsed < budget, (elapsed, budget)
+    np.testing.assert_allclose(c.position, ready['positions_rad'], atol=.01)
 
 
 def test_tool1_recorded_pause_does_not_slow_execution_or_exceed_joint_speed_limits():

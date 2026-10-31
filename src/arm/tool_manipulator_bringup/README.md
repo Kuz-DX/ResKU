@@ -65,9 +65,11 @@ L2+동그라미를 한 번 누르면 툴 1 접근 경로 → 정지 상태의 �
 
 UI는 `std_msgs/msg/Bool`의 `/arm/tool0_docking` 또는 `/arm/tool0_release`를
 `true`로 올려 경로 0 작업을 한 번 요청한다. 다시 요청하려면 먼저 해당 토픽을
-`false`로 내려 상승 에지를 재무장해야 한다. UI 요청은 현재 관절값과 가장 가까운
-기록 지점을 골라 그 지점까지 MoveIt으로 진입한 뒤, 기록된 순방향 경로만 이어서
-실행한다. 마지막 도킹 준비 자세에서 docking은 `/arm/docking`에 `true -> false`,
+`false`로 내려 상승 에지를 재무장해야 한다. UI와 L2 요청은 MoveIt으로 현재 정지
+자세 → SRDF `home` → SRDF `back` → 선택한 tool YAML의 마지막 관절 목표를 차례로
+계획한다. 기록된 중간 waypoint는 실행하지 않으며 최종 목표를 고르는 용도로만
+사용한다. 세 leg가 모두 계획되고 전체 샘플의 충돌 검사가 끝난 뒤 하나의 manager
+경로로 실행한다. 마지막 도킹 준비 자세에서 docking은 `/arm/docking`에 `true -> false`,
 release는 `false -> true`를 즉시 발행하고, 이후 새 `/arm/docked` 피드백이 각각
 `true` 또는 `false`가 될 때까지 HOLD를 유지한다. 같은 계약을 tool1/tool2에도
 적용한다.
@@ -78,7 +80,7 @@ release는 `false -> true`를 즉시 발행하고, 이후 새 `/arm/docked` 피�
 도킹을 활성화한 경로의 순서는 다음과 같다.
 
 ```text
-L2 + 경로 선택 → 기존 관절 경로 검증/재생 → 실제 완료 및 HOLD
+L2 + 경로 선택 → MoveIt 현재→home→back→tool 최종점 계획/검증/실행 → 실제 완료 및 HOLD
   → 태그 획득 → coarse 목표 → fine 목표 → dock 목표
   → 서로 다른 영상/관절 피드백에서 정렬·정지 연속 확인
   → `/arm/docking` Bool 펄스 → 새 `/arm/docked` 완료 상태 확인 → HOLD 유지

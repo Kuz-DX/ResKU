@@ -14,7 +14,8 @@ SCRIPTS = Path(__file__).resolve().parents[1]/'scripts'
 sys.path.insert(0, str(SCRIPTS))
 from tool_trajectory_joy import (collision_check_budget, execution_plan, load_path,
                                  isolate_shoulder_zero_crossings, nearest_path_suffix,
-                                 planned_entry, requested_path, ToolTrajectoryJoy)
+                                 load_route_poses, planned_entry, planned_leg,
+                                 requested_path, ARM_JOINTS, ToolTrajectoryJoy)
 from tool_trajectory_joy import reverse_path
 
 
@@ -495,6 +496,56 @@ def test_moveit_entry_must_reach_taught_start():
                 durations=[3.], total=3.)
     with pytest.raises(ValueError, match='did not reach'):
         planned_entry(path, trajectory, np.ones(6)*.2)
+
+
+def test_route_poses_load_home_and_back_while_ignoring_tcp_ready():
+    semantic = '''<robot name="arm">
+      <group_state name="home" group="arm">%s</group_state>
+      <group_state name="back" group="arm">%s</group_state>
+      <group_state name="tcp_ready" group="arm">%s</group_state>
+    </robot>''' % tuple(
+        ''.join(f'<joint name="{name}" value="{value}"/>'
+                for name, value in zip(ARM_JOINTS, values))
+        for values in ([0.]*6, [1.]*6, [.5]*6))
+    poses = load_route_poses(semantic)
+    assert set(poses) == {'home', 'back'}
+    np.testing.assert_array_equal(poses['home'], np.zeros(6))
+    np.testing.assert_array_equal(poses['back'], np.ones(6))
+
+
+def test_planned_leg_uses_only_moveit_points_and_reaches_requested_goal():
+    trajectory = SimpleNamespace(joint_names=list(ARM_JOINTS), points=[
+        SimpleNamespace(positions=[.2]*6,
+                        time_from_start=SimpleNamespace(sec=1, nanosec=0)),
+        SimpleNamespace(positions=[.4]*6,
+                        time_from_start=SimpleNamespace(sec=2, nanosec=0)),
+    ])
+    waypoints, durations = planned_leg(trajectory, np.zeros(6), np.ones(6)*.4)
+    np.testing.assert_array_equal(waypoints, [[.2]*6, [.4]*6])
+    assert durations == [1., 1.]
+
+
+def test_tool_request_starts_three_leg_moveit_route_to_final_point():
+    home, back, final = np.ones(6)*.1, np.ones(6)*.2, np.ones(6)*.3
+    node = SimpleNamespace(
+        planner=Mock(), model=Mock(), paths={1: dict(
+            start=np.zeros(6), waypoints=[np.ones(6)*.25, final], durations=[1., 1.])},
+        route_poses={'home': home, 'back': back},
+        full_state=dict(zip(ARM_JOINTS, np.zeros(6))),
+        planning_attempts=3, planning_timeout=8., planning_velocity_scale=.08,
+        planning_acceleration_scale=.4, report=Mock())
+    node._request_route_leg = lambda: ToolTrajectoryJoy._request_route_leg(node)
+    node.planner.service_is_ready.return_value = True
+    node.model.within_limits.return_value = True
+    ToolTrajectoryJoy.request_route_plan(
+        node, 1, np.zeros(6), {'epoch': 'hold'})
+    assert node.stage == 'planning_route'
+    assert node.route_index == 0
+    np.testing.assert_array_equal(node.route_goals, [home, back, final])
+    request = node.planner.call_async.call_args.args[0].motion_plan_request
+    assert [constraint.position for constraint in
+            request.goal_constraints[0].joint_constraints] == pytest.approx(home)
+    node.report.assert_called_once()
 
 
 def test_shoulder_zero_crossing_is_staged_and_other_joints_hold():
