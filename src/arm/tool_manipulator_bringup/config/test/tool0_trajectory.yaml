@@ -1,0 +1,66 @@
+# User-provided tool0 capture, reversed: original point 17 -> point 1.
+# Capture timestamps are metadata; playback timing is derived from the manager's
+# joint speed, acceleration, jerk and feedback limits. Runtime collision checks
+# remain mandatory. All source points satisfy the configured 0.02-rad margin.
+# Shoulder/elbow/wrist pitch signs reversed again at user request.
+# First wrist pitch retains the adjusted magnitude: -1.45 rad.
+# Points 3 through 15 hold the point-5 posture; only base rotates.
+# Points 16 through 18 move only RMD joints; base/roll/yaw remain fixed.
+execution_enabled: true
+timing_mode: joint_limits
+joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
+points:
+  # Original point 17, captured at 327.820082 s.
+  - time_from_start_sec: 0.0
+    positions_rad: [-0.026077673394262924, 1.1910126442766753, 1.1822859980167035, -1.45, 0.0, 0.0]
+  # Original point 16, captured at 324.384293 s.
+  - time_from_start_sec: 1.0
+    positions_rad: [-0.026077673394262924, 0.7539822501773558, 1.1611675300465387, -1.3580406483662104, 0.0, 0.0]
+  # Original point 15, captured at 323.148151 s.
+  - time_from_start_sec: 2.0
+    positions_rad: [0.0628932123031043, 0.7325146417882816, 1.3103932343552758, -1.2552407660763887, 0.0, 0.0]
+  # Original point 14, captured at 322.083861 s.
+  - time_from_start_sec: 3.0
+    positions_rad: [0.16873788666721357, 0.7325146417882816, 1.3103932343552758, -1.2552407660763887, 0.0, 0.0]
+  # Original point 13, captured at 320.780464 s.
+  - time_from_start_sec: 4.0
+    positions_rad: [0.368155389092347, 0.7325146417882816, 1.3103932343552758, -1.2552407660763887, 0.0, 0.0]
+  # Original point 12, captured at 319.608181 s.
+  - time_from_start_sec: 5.0
+    positions_rad: [0.6780195082452463, 0.7325146417882816, 1.3103932343552758, -1.2552407660763887, 0.0, 0.0]
+  # Original point 11, captured at 318.072151 s.
+  - time_from_start_sec: 6.0
+    positions_rad: [0.7930680673366695, 0.7325146417882816, 1.3103932343552758, -1.2552407660763887, 0.0, 0.0]
+  # Original point 10, captured at 316.300368 s.
+  - time_from_start_sec: 7.0
+    positions_rad: [1.0246991663074012, 0.7325146417882816, 1.3103932343552758, -1.2552407660763887, 0.0, 0.0]
+  # Original point 9, captured at 313.892620 s.
+  - time_from_start_sec: 8.0
+    positions_rad: [1.6659031356435992, 0.7325146417882816, 1.3103932343552758, -1.2552407660763887, 0.0, 0.0]
+  # Original point 8, captured at 310.732544 s.
+  - time_from_start_sec: 9.0
+    positions_rad: [1.825437137583706, 0.7325146417882816, 1.3103932343552758, -1.2552407660763887, 0.0, 0.0]
+  # Original point 7, captured at 308.408548 s.
+  - time_from_start_sec: 10.0
+    positions_rad: [2.1306993143729485, 0.7325146417882816, 1.3103932343552758, -1.2552407660763887, 0.0, 0.0]
+  # Original point 6, captured at 303.992524 s.
+  - time_from_start_sec: 11.0
+    positions_rad: [2.5878255891628696, 0.7325146417882816, 1.3103932343552758, -1.2552407660763887, 0.0, 0.0]
+  # Original point 5, captured at 301.984841 s.
+  - time_from_start_sec: 12.0
+    positions_rad: [2.825592611285144, 0.7325146417882816, 1.3103932343552758, -1.2552407660763887, 0.0, 0.0]
+  # Original point 4, captured at 290.572983 s.
+  - time_from_start_sec: 13.0
+    positions_rad: [3.040349921589134, 0.7325146417882816, 1.3103932343552758, -1.2552407660763887, 0.0, 0.0]
+  # Added base-only completion before RMD-only descent.
+  - time_from_start_sec: 14.0
+    positions_rad: [3.141592653589793, 0.7325146417882816, 1.3103932343552758, -1.2552407660763887, 0.0, 0.0]
+  # Original point 3, captured at 288.505001 s.
+  - time_from_start_sec: 15.0
+    positions_rad: [3.141592653589793, 0.326, 1.19642312234728, -1.250004725057184, 0.0, 0.0]
+  # Original point 2, captured at 286.413181 s.
+  - time_from_start_sec: 16.0
+    positions_rad: [3.141592653589793, 0.12042771172970601, 1.13376586611655, -1.2023573110462493, 0.0, 0.0]
+  # Original point 1, captured at 269.625310 s.
+  - time_from_start_sec: 17.0
+    positions_rad: [3.141592653589793, 0.06963863732102132, 1.1587240797463911, -1.1440632447874504, 0.0, 0.0]
