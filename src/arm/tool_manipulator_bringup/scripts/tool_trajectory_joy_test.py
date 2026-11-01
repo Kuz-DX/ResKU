@@ -96,9 +96,16 @@ def load_path(path, model, margin=.02):
                 not math.isfinite(after['ee_close_rad']) or
                 not -2.351592547829 <= after['ee_close_rad'] <= 2.839398438376):
             raise ValueError(f'{path}: invalid close-and-return action')
-    return dict(start=points[0], waypoints=points[1:],
+    result = dict(start=points[0], waypoints=points[1:],
                 durations=durations, total=sum(durations),
                 after_path=after)
+    if data.get('mid_path_ee_open'):
+        action = data['mid_path_ee_open']
+        if action != dict(after_point=14, velocity_rad_s=-.48, duration_sec=2.):
+            raise ValueError('invalid test mid-path EE opening')
+        index = data.get('source_point_indices', list(range(len(points))))[13]
+        result['ee_split_index'] = index
+    return result
 
 
 def reverse_path(path):
@@ -366,6 +373,8 @@ class ToolTrajectoryJoy(Node):
         self.actuation_deadline = None
         self.collision_deadline = None
         self.sequence_phase = 'approach'
+        self.ee_tail = None
+        self.ee_mid_phase = None
 
     def report(self, state, reason):
         self.diagnostics.publish(String(data=json.dumps(dict(
@@ -490,9 +499,22 @@ class ToolTrajectoryJoy(Node):
         try:
             s = self.healthy_hold(now)
             measured = np.asarray([self.full_state[j] for j in ARM_JOINTS])
+            if planned_path is None and path_id == 0 and self.ee_mid_phase is None:
+                full = self.paths[path_id]
+                split = full.get('ee_split_index')
+                if split is not None:
+                    self.ee_tail = dict(start=full['waypoints'][split-1],
+                        waypoints=full['waypoints'][split:], durations=full['durations'][split:],
+                        total=sum(full['durations'][split:]))
+                    self.ee_mid_phase = 'approach'
             if planned_path is None:
-                source_path = (nearest_path_suffix(self.paths[path_id], measured)
-                               if self.use_nearest_entry else self.paths[path_id])
+                selected = self.paths[path_id]
+                if self.ee_mid_phase == 'approach':
+                    split = selected['ee_split_index']
+                    selected = dict(start=selected['start'], waypoints=selected['waypoints'][:split],
+                        durations=selected['durations'][:split], total=sum(selected['durations'][:split]))
+                source_path = (nearest_path_suffix(selected, measured)
+                               if self.use_nearest_entry else selected)
                 self.entry_path = source_path
                 error = float(np.max(np.abs(measured-source_path['start'])))
                 if error > self.max_start_delta:
@@ -586,7 +608,27 @@ class ToolTrajectoryJoy(Node):
         self.report('blocked', reason)
         self.reset()
 
+    def handle_mid_path_ee(self):
+        if self.ee_mid_phase == 'approach':
+            self.ee_mid_phase = 'opening'
+            q = np.asarray([self.full_state[j] for j in ARM_JOINTS])
+            self.report('opening', 'point 14 reached; checking EE opening at -0.48 rad/s for 2s')
+            self.begin(self.path_id, dict(start=q, waypoints=[q], durations=[2.], total=2.,
+                start_error=0., ee_target_rad=self.full_state['ee_joint']-.96,
+                ee_duration_sec=2., ee_velocity_rad_s=-.48))
+            return True
+        if self.ee_mid_phase == 'opening':
+            self.ee_mid_phase = 'tail'
+            self.report('resuming', 'EE stopped; checking continuation to point 15')
+            path = execution_plan(self.ee_tail, [self.full_state[j] for j in ARM_JOINTS],
+                self.start_tolerance, self.max_start_delta, self.approach_speed)
+            self.begin(self.path_id, path)
+            return True
+        return False
+
     def path_completed(self):
+        if self.handle_mid_path_ee():
+            return
         after = self.paths[self.path_id].get('after_path')
         if after is not None:
             if self.sequence_phase == 'approach':
@@ -794,6 +836,9 @@ class ToolTrajectoryJoy(Node):
                 if 'ee_target_rad' in self.path:
                     self.execution_timeout = 65.
                     command['ee_target_rad'] = self.path['ee_target_rad']
+                    if 'ee_duration_sec' in self.path:
+                        command.update(ee_duration_sec=self.path['ee_duration_sec'],
+                                       ee_velocity_rad_s=self.path['ee_velocity_rad_s'])
                     if 'ee_speed_rad_s' in self.path:
                         command['ee_speed_rad_s'] = self.path['ee_speed_rad_s']
                 else:
