@@ -1,4 +1,5 @@
 """Ownership, cancellation and watchdog tests without ROS or hardware."""
+import math
 import sys
 from pathlib import Path
 import pytest
@@ -425,6 +426,35 @@ def test_reported_hardware_pose_recovers_inward_without_joystick():
     # Startup allowance must not apply again during normal operation.
     c.feedback(initial, [0.]*6, now+.02)
     assert c.mode == 'fault'
+
+
+def test_recoverable_startup_outward_velocity_does_not_preempt_inward_recovery():
+    limits = [(-3.503, 3.614), (-1.6139059, 1.4622368),
+              (-1.4960962, 1.5779521), (-1.5964526, 1.5168655),
+              (-.75, .63), (-5.76, 6.5)]
+    c = ModeCore(limits, [.12]*6, startup_recovery_enabled=True)
+    measured = [-.001534, 1.4629349737, 1.6020377364,
+                -1.5613715329, .0536893, -.0644272]
+    # Initial estimates point outward at shoulder/elbow but remain inside the
+    # explicit five-degree RMD recovery envelope.
+    c.feedback(measured, [0., .03, .03, 0., 0., 0.], 0.)
+    assert c.mode == 'hold'
+    c.begin_startup(0.)
+    assert c.startup_recovering
+    assert c.startup_goal[1:4] == pytest.approx([
+        limits[1][1]-math.radians(2),
+        limits[2][1]-math.radians(2),
+        measured[3]])
+
+
+def test_outward_velocity_guard_returns_after_startup_completion():
+    c = ModeCore([(-2., 2.)]*6, [.12]*6, startup_recovery_enabled=True)
+    c.feedback([0.]*6, [0.]*6, 0.)
+    c.begin_startup(0.)
+    assert c.startup_complete
+    c.feedback([0., 1.96, 0., 0., 0., 0.], [0., .03, 0., 0., 0., 0.], .01)
+    assert c.mode == 'fault'
+    assert 'moving outward near soft limit' in c.reason
 
 
 @pytest.mark.parametrize('index,value', [(0, 3.7), (4, .7), (5, 6.6),

@@ -84,6 +84,10 @@
 
 ### 다음 우선순위
 
+- [x] soft limit 밖이지만 5도 recovery envelope 안인 RMD가 부팅 직후 바깥 방향
+  속도로 추정돼 일반 limit guard가 복구 전에 fault를 latch하던 순서를 수정했다.
+  startup 중에는 envelope/following-error/stall 감시가 담당하고, 완료 후 일반
+  outward guard가 즉시 다시 활성화된다.
 - [x] 실측 tool0/tool2 끝점을 MoveIt joint goal로 사용하고, BACK 기준 가장 가까운
   base `2π` 동치각을 선택하도록 했다. 저장 경로 직접 재생은 production에 합치지 않았다.
 - [ ] tool1 끝점의 elbow `1.581792 rad`를 planning 상한 `1.557952 rad` 이하로

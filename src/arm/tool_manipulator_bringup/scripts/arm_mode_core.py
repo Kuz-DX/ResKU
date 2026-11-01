@@ -289,8 +289,18 @@ class ModeCore:
             return
         for index, (value, speed, (lower, upper)) in enumerate(
                 zip(position, velocity, self.limits)):
-            if ((value > upper-.05 and speed > .02)
-                    or (value < lower+.05 and speed < -.02)):
+            # During the one-shot startup recovery, RMD feedback may begin a
+            # few hundredths of a radian outside the recalibrated endpoint and
+            # its first velocity estimate can still point outward.  The
+            # recovery envelope, feedback lead, following-error and stall
+            # guards own this bounded case.  Applying the normal-operation
+            # outward guard here would latch fault before begin_startup() can
+            # command the reviewed inward recovery target.
+            startup_rmd = (self.startup_enabled and not self.startup_complete
+                           and 1 <= index <= 3)
+            if (not startup_rmd and
+                    ((value > upper-.05 and speed > .02)
+                     or (value < lower+.05 and speed < -.02))):
                 self.fault(
                     'joint moving outward near soft limit: %s position=%.6f '
                     'velocity=%.6f allowed=[%.6f, %.6f]' %
