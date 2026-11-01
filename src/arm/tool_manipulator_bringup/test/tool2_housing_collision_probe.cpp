@@ -49,7 +49,12 @@ int main(int argc, char** argv)
     scene.checkCollision(request, result, state);
     std::cout << (!result.collision && state.satisfiesBounds()) << " ";
     for (const auto& contact : result.contacts)
-      std::cout << contact.first.first << ":" << contact.first.second << ",";
+    {
+      const auto& detail = contact.second.front();
+      std::cout << contact.first.first << ":" << contact.first.second << ":"
+                << detail.pos.x() << ":" << detail.pos.y() << ":" << detail.pos.z()
+                << ":" << detail.depth << ",";
+    }
     std::cout << std::endl;
   }
 }

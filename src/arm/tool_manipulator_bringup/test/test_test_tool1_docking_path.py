@@ -110,8 +110,8 @@ def test_test_tool1_fixed_vertices_margins_and_resampling():
         [.0628932123031043, .7325146417882816, 1.3103932343552758, -1.2552407660763887, 0., 0.],
         [.0628932123031043, .7325146417882816, 1.3103932343552758, -1.2552407660763887, .015339807878649747, .03067961575792033]])
     np.testing.assert_array_equal(points[-1], [3.011907106470, .628082201261,
-        1.555196620372, -1.429415788244, -.206484847228, 1.548450778811])
-    assert np.all(np.diff(points[3:, 5]) > 0.)
+        1.555196620372, -1.429415788244, -.206484847228, -1.593141874779])
+    assert np.all(np.diff(points[3:, 5]) < 0.)
     model = ArmKinematics(ROOT.parent/'tool_manipulator_description/urdf/tool_manipulator.urdf.xacro',
                           ROOT/'config/hardware.yaml')
     assert all(model.within_limits(q, .02) for q in points)
@@ -134,12 +134,18 @@ def test_terminal_tcp_matches_docking_center_with_reversed_camera_orientation():
     source = yaml.safe_load((ROOT/'config/test/tool1_trajectory.yaml').read_text())
     actual = model.fk(np.array(source['points'][-1]['positions_rad']))
     previous = model.fk(np.array([3.011907106470, .628082201261, 1.555196620372,
-                                 -1.429415788244, -.206484847228, -1.548450778811]))
+                                 -1.429415788244, -.206484847228, 1.548450778811]))
     np.testing.assert_allclose(actual[:3, 3], target[:3, 3], atol=1e-9, rtol=0.)
-    # The physical ID 3 axis is local -Z; changing calibrated q from -a to
-    # +a rotates the camera by -2a without changing the TCP position.
-    angle = -2.*1.548450778811
-    rotation = np.array([[np.cos(angle), -np.sin(angle), 0.],
-                         [np.sin(angle), np.cos(angle), 0.], [0., 0., 1.]])
+    # A half-turn, rather than merely negating the angle, places the camera
+    # exactly across the wrist-yaw axis while retaining its axial offset.
+    rotation = np.diag([-1., -1., 1.])
     np.testing.assert_allclose(actual[:3, :3], previous[:3, :3]@rotation,
                                atol=1e-9, rtol=0.)
+    mount = next(j for j in ET.fromstring(description).findall('joint')
+                 if j.get('name') == 'cam_link_mount')
+    offset = _origin(mount.find('origin'))[:3, 3]
+    axis_center = previous[:3, 3]+previous[:3, 2]*offset[2]
+    before_camera = previous[:3, 3]+previous[:3, :3]@offset
+    after_camera = actual[:3, 3]+actual[:3, :3]@offset
+    np.testing.assert_allclose(after_camera-axis_center,
+                               -(before_camera-axis_center), atol=1e-9, rtol=0.)

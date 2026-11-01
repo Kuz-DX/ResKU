@@ -48,8 +48,10 @@ ament_target_dependencies(probe moveit_core urdf srdfdom)
     urdf.write_text(ET.tostring(robot, encoding='unicode'))
     srdf = ROOT.parent/'tool_manipulator_moveit_config/config/tool_manipulator.srdf'
 
-    def check(points):
-        inputs = ''.join(' '.join(map(str, [*q, 0.]))+'\n' for q in points)
+    def check(points, ee=0.):
+        angles = np.broadcast_to(np.asarray(ee), (len(points),))
+        inputs = ''.join(' '.join(map(str, [*q, angle]))+'\n'
+                         for q, angle in zip(points, angles))
         result = subprocess.run([str(work/'build/probe'), str(urdf), str(srdf)],
                                 input=inputs, capture_output=True, text=True, timeout=90)
         assert result.returncode == 0, result.stderr
@@ -57,9 +59,15 @@ ament_target_dependencies(probe moveit_core urdf srdfdom)
         for line in result.stdout.splitlines():
             valid, _, pairs = line.partition(' ')
             assert valid in ('0', '1'), result.stdout
-            responses.append(SimpleNamespace(valid=valid == '1', contacts=[SimpleNamespace(
-                contact_body_1=pair.split(':')[0], contact_body_2=pair.split(':')[1])
-                for pair in pairs.strip(',').split(',') if pair]))
+            contacts = []
+            for pair in pairs.strip(',').split(','):
+                if not pair:
+                    continue
+                fields = pair.split(':')
+                contacts.append(SimpleNamespace(contact_body_1=fields[0],
+                    contact_body_2=fields[1], position=np.array(fields[2:5], dtype=float),
+                    depth=float(fields[5])))
+            responses.append(SimpleNamespace(valid=valid == '1', contacts=contacts))
         assert len(responses) == len(points)
         return responses
 
@@ -86,3 +94,34 @@ def test_entire_stored_tool2_path_passes_with_housing_collision_checks(collision
     for i, result in enumerate(collision_probe(points)):
         assert collision_result_accepted(result, ignored_links=TEST_TOOL2_GRIPPER_LINKS), (
             i, [(c.contact_body_1, c.contact_body_2) for c in result.contacts])
+
+
+def test_terminal_fingers_clear_when_open_and_pinch_opposite_box_faces_when_closed(collision_probe):
+    source = yaml.safe_load((ROOT/'config/test/tool2_trajectory.yaml').read_text())
+    goal = source['points'][-1]['positions_rad']
+    reference = source['grasp_reference']
+    opened, = collision_probe([goal], reference['ee_open_rad'])
+    assert opened.valid
+    assert not opened.contacts
+    closed, = collision_probe([goal], reference['validation_close_ee_rad'])
+    pairs = {frozenset((c.contact_body_1, c.contact_body_2)) for c in closed.contacts}
+    assert pairs == {frozenset(('rack_left', 'supply_box')),
+                     frozenset(('rack_right', 'supply_box'))}
+    # Opposite world-Y box faces; Y is unchanged by the ground/arm-world origins.
+    face_y = sorted(c.position[1] for c in closed.contacts)
+    np.testing.assert_allclose(face_y, [-.1675, -.0725], atol=.0005, rtol=0.)
+    assert all(c.depth < .0002 for c in closed.contacts)
+    assert abs(np.diff(reference['predicted_contact_ee_rad'])[0]) < .005
+    assert 'after_path' not in source
+    angles = np.linspace(reference['ee_open_rad'], reference['validation_close_ee_rad'], 65)
+    first_contact = {}
+    for angle, result in zip(angles, collision_probe([goal]*len(angles), angles)):
+        assert collision_result_accepted(result,
+            allowed_pairs=frozenset((('rack_left', 'supply_box'),
+                                     ('rack_right', 'supply_box'))))
+        for contact in result.contacts:
+            finger = next(link for link in (contact.contact_body_1, contact.contact_body_2)
+                          if link in ('rack_left', 'rack_right'))
+            first_contact.setdefault(finger, angle)
+    assert set(first_contact) == {'rack_left', 'rack_right'}
+    assert abs(first_contact['rack_left']-first_contact['rack_right']) < .005

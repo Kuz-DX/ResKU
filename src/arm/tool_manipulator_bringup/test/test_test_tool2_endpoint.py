@@ -40,11 +40,13 @@ def endpoint():
     return model, source, model.fk(q), box[:3, 3], top_normal
 
 
-def test_tool2_endpoint_is_at_the_approved_overhead_position(endpoint):
-    _, _, pose, center, normal = endpoint
-    offset = pose[:3, 3] - center
-    np.testing.assert_allclose(offset, .095*normal, atol=1e-8, rtol=0.)
-    np.testing.assert_allclose(pose[:3, 3], [-.236197, -.120, .277], atol=1e-8, rtol=0.)
+def test_tool2_endpoint_centers_the_box_inside_the_opposing_fingers(endpoint):
+    _, source, pose, center, _ = endpoint
+    local_center = pose[:3, :3].T @ (center-pose[:3, 3])
+    assert local_center[2] == pytest.approx(.110, abs=1e-8)
+    np.testing.assert_allclose(local_center,
+        source['grasp_reference']['object_center_in_tcp_m'], atol=1e-8, rtol=0.)
+    assert abs(local_center[0]) < .005 and abs(local_center[1]) < .005
 
 
 def test_tool2_first_three_points_are_preserved_with_matching_bases(endpoint):
@@ -63,7 +65,7 @@ def test_tool2_replanned_tail_has_no_joint_reversals_or_upward_tcp_motion(endpoi
     points = np.array([p['positions_rad'] for p in source['points'][2:]])
     delta = np.diff(points, axis=0)
     assert np.all(delta*(points[-1]-points[0]) >= -1e-12)
-    assert all(model.within_limits(q, .05) for q in points)
+    assert all(model.within_limits(q, .02) for q in points)
     heights = np.array([model.fk(q)[:3, 3] @ normal for q in points])
     assert np.all(np.diff(heights) < 0.)
 

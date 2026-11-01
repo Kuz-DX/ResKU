@@ -212,6 +212,11 @@
     </joint>
   </xacro:macro>
 
+  <!-- Raise case 1 and its child markers/dock frames by 5.231546 mm.
+       This sets the Drawing1.stl underside gap above the circuit box to
+       10.4 mm (previously 5.168454 mm). -->
+  <xacro:property name="tool_case_1_z_lift" value="0.005231545585"/>
+
   <!-- Toolbox 2: the highlighted collar midpoint in STL coordinates is
        (25, 21.939120, 68.385120) mm. Its arm_world X/Y is offset from
        the toolbox 1 centre by (+139, +80.6) mm.
@@ -303,9 +308,10 @@
   </link>
   <joint name="arm_world_to_tool_case_1" type="fixed">
     <parent link="arm_world"/><child link="tool_case_1"/>
-    <!-- Tool 0 centre measured in arm_world: (-394.506, 0, +212.964) mm. -->
+    <!-- Measured centre in arm_world: (-394.506, 0, +212.964) mm,
+         plus the case-1 lift to give a 10.4 mm underside gap. -->
     <!-- Rotate the visible gear/front face from CAD -Y toward arm_world +X. -->
-    <origin xyz="-0.394506 0 0.212964" rpy="0 -0.959931088597 ${pi/2}"/>
+    <origin xyz="-0.394506 0 ${0.212964 + tool_case_1_z_lift}" rpy="0 -0.959931088597 ${pi/2}"/>
   </joint>
   <xacro:tool_case_center_marker case_link="tool_case_1" marker_link="tool_case_1_center"/>
   <!-- Former case-1 dock reference planes remain at X = +/-18.4 mm. -->

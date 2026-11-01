@@ -1,19 +1,24 @@
 # Tool2 test: 17 joint waypoints. Points 1-3 are preserved, with base 3 = base 2.
-# Points 4-17 follow one joint-space line from point 3; no joint reversals.
-# Approved terminal tcp_link: supply-box centre + [0, 0, 0.095] m in arm_world.
-# TCP XYZ [m]: [-0.236197, -0.120000, 0.277000]. This replaces the previous
-# 67.175 mm / 45-degree offset because the wrist_link_yaw housing collided.
-# TCP orientation is relaxed to obtain a bounded, housing-checked posture.
-# TCP height decreases monotonically; XY is not a Cartesian straight line.
-# Times are ordering metadata; existing joint-speed caps set nominal timing.
-# TEMPORARY tool2-only collision exclusions cover the fingers/gears below.
-# The wrist_link_yaw housing, camera and other arm links remain checked.
-# No close-and-return action is enabled.
+# Point 17 is a geometric pinch pose: supply-box centre in tcp_link is
+# [-0.915, +3.796, +110.000] mm, inside the opposing finger span.
+# Terminal tcp_link XYZ in arm_world [m]: [-0.1488640172, -0.0871407845, 0.2403821212].
+# Replaces the earlier centre +95 mm standby pose, whose jaw alignment missed
+# the box. Points 4-16 now interpolate to this pinch pose without joint
+# reversals or rising TCP height. XY is not a Cartesian straight line.
+# Housing/camera/arm collisions remain checked; fingers/gears have only the
+# previously authorized temporary test tool2 exclusion.
+# grasp_reference is offline URDF contact evidence, not a motor command.
+# Automatic EE close/return remains disabled: no after_path is configured.
 execution_enabled: true
 temporary_ignored_collision_links: [ee_actuator, tool_spurgear, rack_left, rack_right]
 timing_mode: joint_limits
 joint_speed_limits_rad_s: [0.08, 0.04, 0.006, 0.006, 0.08, 0.08]
 joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
+grasp_reference:
+  object_center_in_tcp_m: [-0.0009154046524920102, 0.0037963185221115067, 0.10999999999981971]
+  ee_open_rad: -0.076699
+  predicted_contact_ee_rad: [-0.016222895957946782, -0.01958774706268311]
+  validation_close_ee_rad: -0.014222895957946782
 points:
   # Preserved point 1.
   - time_from_start_sec: 0.0
@@ -24,45 +29,45 @@ points:
   # Preserved point 3.
   - time_from_start_sec: 2.0
     positions_rad: [-0.026077673394262924, 0.7325146417882816, 1.3103932343552758, -1.2552407660763887, 0.0, 0.0]
-  # Replanned point 4.
+  # Replanned grasp approach point 4.
   - time_from_start_sec: 3.0
-    positions_rad: [-0.1877533949997048, 0.7195809371620342, 1.3259219044536137, -1.2427786578946414, -0.04997585791474281, 0.021651072597208085]
-  # Replanned point 5.
+    positions_rad: [-0.181596313031317, 0.7419443716315387, 1.3271221566880627, -1.2774701827852182, -0.03309728035136742, -0.02283733192075797]
+  # Replanned grasp approach point 5.
   - time_from_start_sec: 4.0
-    positions_rad: [-0.3494291166051467, 0.7066472325357868, 1.3414505745519516, -1.2303165497128943, -0.09995171582948562, 0.04330214519441617]
-  # Replanned point 6.
+    positions_rad: [-0.3371149526683711, 0.7513741014747958, 1.3438510790208498, -1.2996995994940475, -0.06619456070273484, -0.04567466384151594]
+  # Replanned grasp approach point 6.
   - time_from_start_sec: 5.0
-    positions_rad: [-0.5111048382105886, 0.6937135279095393, 1.3569792446502895, -1.2178544415311472, -0.14992757374422844, 0.06495321779162426]
-  # Replanned point 7.
+    positions_rad: [-0.4926335923054252, 0.7608038313180527, 1.3605800013536367, -1.3219290162028767, -0.09929184105410227, -0.0685119957622739]
+  # Replanned grasp approach point 7.
   - time_from_start_sec: 6.0
-    positions_rad: [-0.6727805598160305, 0.6807798232832919, 1.3725079147486277, -1.2053923333493999, -0.19990343165897123, 0.08660429038883234]
-  # Replanned point 8.
+    positions_rad: [-0.6481522319424793, 0.7702335611613098, 1.3773089236864235, -1.3441584329117062, -0.13238912140546968, -0.09134932768303188]
+  # Replanned grasp approach point 8.
   - time_from_start_sec: 7.0
-    positions_rad: [-0.8344562814214723, 0.6678461186570445, 1.3880365848469656, -1.1929302251676526, -0.24987928957371403, 0.10825536298604042]
-  # Replanned point 9.
+    positions_rad: [-0.8036708715795333, 0.7796632910045669, 1.3940378460192107, -1.3663878496205357, -0.1654864017568371, -0.11418665960378985]
+  # Replanned grasp approach point 9.
   - time_from_start_sec: 8.0
-    positions_rad: [-0.9961320030269143, 0.6549124140307971, 1.4035652549453035, -1.1804681169859055, -0.2998551474884569, 0.12990643558324852]
-  # Replanned point 10.
+    positions_rad: [-0.9591895112165875, 0.789093020847824, 1.4107667683519975, -1.388617266329365, -0.19858368210820454, -0.1370239915245478]
+  # Replanned grasp approach point 10.
   - time_from_start_sec: 9.0
-    positions_rad: [-1.1578077246323561, 0.6419787094045497, 1.4190939250436414, -1.1680060088041584, -0.34983100540319967, 0.1515575081804566]
-  # Replanned point 11.
+    positions_rad: [-1.1147081508536416, 0.798522750691081, 1.4274956906847844, -1.4108466830381943, -0.23168096245957195, -0.1598613234453058]
+  # Replanned grasp approach point 11.
   - time_from_start_sec: 10.0
-    positions_rad: [-1.319483446237798, 0.6290450047783023, 1.4346225951419793, -1.155543900622411, -0.39980686331794246, 0.17320858077766468]
-  # Replanned point 12.
+    positions_rad: [-1.2702267904906956, 0.807952480534338, 1.4442246130175715, -1.4330760997470238, -0.26477824281093937, -0.18269865536606375]
+  # Replanned grasp approach point 12.
   - time_from_start_sec: 11.0
-    positions_rad: [-1.4811591678432399, 0.6161113001520548, 1.4501512652403172, -1.1430817924406638, -0.44978272123268526, 0.19485965337487277]
-  # Replanned point 13.
+    positions_rad: [-1.4257454301277497, 0.8173822103775951, 1.4609535353503584, -1.4553055164558533, -0.2978755231623068, -0.2055359872868217]
+  # Replanned grasp approach point 13.
   - time_from_start_sec: 12.0
-    positions_rad: [-1.6428348894486817, 0.6031775955258074, 1.4656799353386551, -1.1306196842589167, -0.49975857914742805, 0.21651072597208085]
-  # Replanned point 14.
+    positions_rad: [-1.5812640697648037, 0.8268119402208521, 1.4776824576831455, -1.4775349331646825, -0.3309728035136742, -0.2283733192075797]
+  # Replanned grasp approach point 14.
   - time_from_start_sec: 13.0
-    positions_rad: [-1.8045106110541236, 0.59024389089956, 1.481208605436993, -1.1181575760771696, -0.5497344370621708, 0.23816179856928893]
-  # Replanned point 15.
+    positions_rad: [-1.736782709401858, 0.8362416700641092, 1.4944113800159324, -1.4997643498735118, -0.36407008386504164, -0.2512106511283377]
+  # Replanned grasp approach point 15.
   - time_from_start_sec: 14.0
-    positions_rad: [-1.9661863326595657, 0.5773101862733125, 1.4967372755353312, -1.1056954678954223, -0.5997102949769137, 0.25981287116649704]
-  # Replanned point 16.
+    positions_rad: [-1.892301349038912, 0.8456713999073662, 1.5111403023487193, -1.5219937665823413, -0.3971673642164091, -0.2740479830490956]
+  # Replanned grasp approach point 16.
   - time_from_start_sec: 15.0
-    positions_rad: [-2.1278620542650075, 0.5643764816470651, 1.5122659456336691, -1.093233359713675, -0.6496861528916565, 0.2814639437637051]
-  # Replanned point 17.
+    positions_rad: [-2.047819988675966, 0.8551011297506232, 1.5278692246815064, -1.5442231832911708, -0.43026464456777647, -0.2968853149698536]
+  # Replanned grasp approach point 17.
   - time_from_start_sec: 16.0
-    positions_rad: [-2.2895377758704494, 0.5514427770208177, 1.527794615732007, -1.0807712515319279, -0.6996620108063993, 0.3031150163609132]
+    positions_rad: [-2.2033386283130203, 0.8645308595938803, 1.5445981470142933, -1.5664526, -0.46336192491914385, -0.3197226468906116]
