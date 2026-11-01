@@ -270,6 +270,20 @@ class TcpJoy(TcpMotionWorkflow, Node):
         # No heartbeat after stopping. The manager also has independent
         # feedback/controller watchdogs if a request cannot be delivered.
 
+    def retry_ready(self, valid, was_pressed, home, now):
+        """Test-only neutral L1 edge explicitly requests checked TCP-ready motion."""
+        s = self.status
+        if (valid and self.deadman and not was_pressed and not home
+                and vars(self).get('ready_enabled', False)
+                and self.ready_state in ('failed', 'idle', 'await_entry')
+                and not vars(self).get('returning_home', False)
+                and s.get('mode') == 'hold' and not s.get('transitioning')
+                and s.get('focus') == 'arm' and s.get('ready')
+                and s.get('startup_complete') and now-self.status_time < .3
+                and s.get('entry_alignment_complete', True)
+                and now-self.state_time < .3 and not np.any(self.twist)):
+            _, self.reason = self.request_named_pose(False, now)
+
     def on_joy(self, msg):
         was_pressed = self.deadman
         was_enabled = self.deadman_engaged or (self.deadman and self.rearmed)
@@ -347,7 +361,7 @@ class TcpJoy(TcpMotionWorkflow, Node):
                 and self.status.get('mode') != 'fault'):
             _, self.reason = self.request_named_pose(True, self.joy_time)
         self.previous_home = home
-        TcpMotionWorkflow.retry_ready(self, valid, was_pressed, home, self.joy_time)
+        self.retry_ready(valid, was_pressed, home, self.joy_time)
         if valid and self.deadman and not was_pressed and self.rearmed and not self.blocked:
             self.discard()
             self.stepper.q = self.stepper.pose = None

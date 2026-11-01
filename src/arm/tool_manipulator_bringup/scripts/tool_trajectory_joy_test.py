@@ -29,6 +29,12 @@ except ImportError:
 from arm_mode_core import TCP_ENTRY_TOLERANCE
 
 
+# Test tool2 only: the housing is the wrist_link_yaw mesh; ee_actuator is
+# its drive gear. Keep wrist_actuator_yaw, the camera and all other arm links.
+TEST_TOOL2_GRIPPER_LINKS = frozenset((
+    'wrist_link_yaw', 'ee_actuator', 'tool_spurgear', 'rack_left', 'rack_right'))
+
+
 def load_path(path, model, margin=.02):
     """Load captured points with recorded or manager-limited execution timing."""
     data = yaml.safe_load(Path(path).read_text())
@@ -99,19 +105,76 @@ def load_path(path, model, margin=.02):
     result = dict(start=points[0], waypoints=points[1:],
                 durations=durations, total=sum(durations),
                 after_path=after)
+    excluded = data.get('temporary_ignored_collision_links')
+    if excluded is not None:
+        if (Path(path).name != 'tool2_trajectory.yaml' or
+                not isinstance(excluded, list) or
+                not all(isinstance(link, str) for link in excluded) or
+                len(excluded) != len(TEST_TOOL2_GRIPPER_LINKS) or
+                frozenset(excluded) != TEST_TOOL2_GRIPPER_LINKS):
+            raise ValueError('invalid test tool2 temporary gripper collision exclusions')
+        result['temporary_ignored_collision_links'] = TEST_TOOL2_GRIPPER_LINKS
     if data.get('mid_path_ee_open'):
         action = data['mid_path_ee_open']
         if action != dict(after_point=15, velocity_rad_s=-1., duration_sec=3.2):
             raise ValueError('invalid test mid-path EE opening')
         index = data.get('source_point_indices', list(range(len(points))))[14]
         result['ee_split_index'] = index
+    docking = data.get('terminal_docking_contact')
+    if docking is not None:
+        # This test-only policy describes the two hand-confirmed mating
+        # contacts on taught tool1 points 16/17. Never alter the scene ACM.
+        expected_pairs = [['ee_actuator', 'tool_case_y_plus'],
+                          ['wrist_link_yaw', 'tool_case_y_plus']]
+        if (Path(path).name != 'tool1_trajectory.yaml' or
+                docking != dict(start_point=15, allowed_pairs=expected_pairs,
+                                endpoint_hold=True)):
+            raise ValueError('invalid test tool1 terminal docking contact policy')
+        indices = data.get('source_point_indices', list(range(len(points))))
+        if (len(indices) != 17 or any(type(i) is not int for i in indices) or
+                indices[0] != 0 or indices[-1] != len(points)-1 or
+                any(a >= b for a, b in zip(indices, indices[1:]))):
+            raise ValueError('terminal docking requires exactly 17 ordered source points')
+        result['terminal_docking_contact'] = dict(
+            points=[points[i] for i in indices[14:]],
+            pairs=frozenset(tuple(sorted(pair)) for pair in expected_pairs),
+            endpoint_hold=True)
     return result
+
+
+def docking_contact_pairs(path, q):
+    """Allow mating pairs only on the exact taught 15->16->17 joint lines."""
+    policy = path.get('terminal_docking_contact')
+    if policy is None:
+        return frozenset()
+    q = np.asarray(q, dtype=float)
+    for a, b in zip(policy['points'], policy['points'][1:]):
+        delta = b-a
+        length = float(delta@delta)
+        fraction = 0. if length < 1e-20 else float((q-a)@delta/length)
+        if (-1e-10 <= fraction <= 1.+1e-10 and
+                np.max(np.abs(q-(a+np.clip(fraction, 0., 1.)*delta))) < 1e-9):
+            return policy['pairs']
+    return frozenset()
+
+
+def collision_result_accepted(result, allowed_pairs=frozenset(),
+                              ignored_links=frozenset()):
+    if result is None:
+        return False
+    if result.valid:
+        return True
+    contacts = {tuple(sorted((c.contact_body_1, c.contact_body_2)))
+                for c in result.contacts}
+    return bool(contacts) and all(
+        pair in allowed_pairs or any(link in ignored_links for link in pair)
+        for pair in contacts)
 
 
 def reverse_path(path):
     """Retrace all taught points, excluding any automatically planned entry."""
     points = [path['start'], *path['waypoints']]
-    return dict(start=points[-1], waypoints=list(reversed(points[:-1])),
+    return dict(path, start=points[-1], waypoints=list(reversed(points[:-1])),
                 durations=list(reversed(path['durations'])), total=path['total'])
 
 
@@ -144,7 +207,7 @@ def execution_plan(path, measured, tolerance=.03, max_delta=.10, approach_speed=
         approach_duration = max(.5, error/approach_speed)
         waypoints.insert(0, path['start'])
         durations.insert(0, approach_duration)
-    return dict(start=np.asarray(measured, dtype=float).copy(),
+    return dict(path, start=np.asarray(measured, dtype=float).copy(),
                 waypoints=waypoints, durations=durations,
                 total=path['total']+approach_duration, start_error=error)
 
@@ -156,7 +219,7 @@ def nearest_path_suffix(path, measured):
     index = min(range(len(points)),
                 key=lambda i: float(np.max(np.abs(points[i]-measured))))
     durations = list(path['durations'][index:])
-    return dict(start=points[index], waypoints=points[index+1:], durations=durations,
+    return dict(path, start=points[index], waypoints=points[index+1:], durations=durations,
                 total=sum(durations), entry_index=index)
 
 
@@ -211,7 +274,7 @@ def planned_entry(path, trajectory, measured, minimum_duration=.02):
     waypoints[-1] = np.asarray(path['start'], dtype=float)
     waypoints.extend(path['waypoints'])
     durations.extend(path['durations'])
-    return dict(start=np.asarray(measured, dtype=float).copy(),
+    return dict(path, start=np.asarray(measured, dtype=float).copy(),
                 waypoints=waypoints, durations=durations,
                 total=sum(durations), start_error=float(np.max(
                     np.abs(np.asarray(measured)-path['start']))))
@@ -319,6 +382,10 @@ class ToolTrajectoryJoy(Node):
             loaded = load_path(path, self.model, self.margin)
             if loaded is not None:
                 self.paths[path_id] = loaded
+                if path_id == 2 and loaded.get('temporary_ignored_collision_links'):
+                    self.get_logger().warning(
+                        'TEST tool2 temporary gripper collision exclusions: '+
+                        ', '.join(sorted(loaded['temporary_ignored_collision_links'])))
         self.publisher = self.create_publisher(String, '/arm/input/tool_auto', 1)
         self.diagnostics = self.create_publisher(String, '/arm/tool_trajectory/status', 1)
         self.mode = self.create_client(Trigger, '/arm/set_mode/tool_auto')
@@ -363,6 +430,7 @@ class ToolTrajectoryJoy(Node):
         self.stage = 'idle'
         self.path_id = self.path = self.snapshot = self.original_epoch = None
         self.requests, self.future = [], None
+        self.request_contact_pairs = []
         self.request_index = 0
         self.started = None
         self.execution_id = None
@@ -535,6 +603,7 @@ class ToolTrajectoryJoy(Node):
             self.original_epoch = s['epoch']
             starts = [measured, *path['waypoints'][:-1]]
             self.requests = []
+            self.request_contact_pairs = []
             samples = 0
             if 'ee_target_rad' in path:
                 ee_start = self.snapshot['ee_joint']
@@ -565,6 +634,9 @@ class ToolTrajectoryJoy(Node):
                 req.robot_state.joint_state.position = list(values.values())
                 req.robot_state.is_diff = True
                 self.requests.append(req)
+                self.request_contact_pairs.append(
+                    docking_contact_pairs(path, [values[j] for j in ARM_JOINTS])
+                    if 'ee_target_rad' not in path else frozenset())
             self.stage, self.started, self.request_index = 'checking', now, 0
             budget = collision_check_budget(len(self.requests), self.collision_timeout)
             self.collision_deadline = now+budget
@@ -800,7 +872,10 @@ class ToolTrajectoryJoy(Node):
                 if not self.future.done():
                     return
                 result = self.future.result()
-                if result is None or not result.valid:
+                ignored_links = (self.paths[2].get('temporary_ignored_collision_links', frozenset())
+                                 if self.path_id == 2 else frozenset())
+                if not collision_result_accepted(
+                        result, self.request_contact_pairs[self.request_index], ignored_links):
                     pairs = sorted({' <-> '.join(sorted((c.contact_body_1, c.contact_body_2)))
                                     for c in getattr(result, 'contacts', [])})
                     detail = ', '.join(pairs[:6]) or 'no contacts; check joint bounds/scene'

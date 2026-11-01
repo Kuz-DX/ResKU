@@ -1,11 +1,23 @@
-# Tool 2 phase-1 test: original point 8 (TCP_ready) -> 7 -> ... -> 1, then HOLD.
-# Only the four out-of-margin joint values at points 1/3/7 are set to
-# the existing 0.02-rad margin boundaries; all other captured values remain.
-# Capture timestamps are discarded; 0..7 below are nominal ordering metadata.
-# The manager derives execution timing from joint speed/acceleration limits.
-# Runtime collision checks and manager limits gate execution.
-# tool2_ik_reference.yaml describes the superseded five-point path only.
+# Tool2: 17 waypoints; shared tool0/tool1 points 1-2.
+# Point 3 keeps its taught arm posture, with base matched to point 2.
+# Previous points 4-10 retained; final point uses the supply-box approach below.
+# Six linear intermediate points added after previous point 4.
+# Point 17: supply-box centre + 47.5 mm horizontally and +47.5 mm vertically
+# in arm_world; distance = 95*sqrt(2)/2 mm, elevation = 45 deg above the
+# horizontal circuit-box top. Keep the previous centre-to-TCP XY bearing.
+# TCP +Z points toward the box centre (45 deg downward). A vertical-down
+# axis-IK search found no solution within the existing 0.02-rad margins.
+# Target tcp_link XYZ [m]: [-0.196497885754747, -0.09391877441257105, 0.2295].
+# Selected over centre + [0, 0, 95*sqrt(2)/2] mm: TCP travel from point 16
+# is 72.225 mm versus 95.035 mm. Keep point 16 wrist yaw to avoid an
+# unnecessary 2.153-degree axial turn without changing TCP position/+Z.
+# Only the endpoint pose is constrained; joint interpolation is not a TCP line.
+# Times are ordering metadata; joint speed caps set execution timing.
 execution_enabled: true
+# TEMPORARY, tool2 test replay only, explicitly requested by the operator.
+# wrist_link_yaw is the gripper housing; ee_actuator is its drive gear.
+# Removing this field restores collision checking for the entire gripper.
+temporary_ignored_collision_links: [wrist_link_yaw, ee_actuator, tool_spurgear, rack_left, rack_right]
 timing_mode: joint_limits
 # Tool 1 approaches the wrist-pitch lower guard at about 0.0064 rad/s.
 # Retiming tool 2 to 0.006 rad/s on elbow/pitch avoids a fast commanded
@@ -14,43 +26,62 @@ timing_mode: joint_limits
 joint_speed_limits_rad_s: [0.08, 0.04, 0.006, 0.006, 0.08, 0.08]
 joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
 # PHASE 2 DISABLED: uncomment this block after approach validation.
-# Existing close-and-return sequencing holds the arm at original point 1,
+# Existing close-and-return sequencing holds the arm at the final waypoint,
 # drives independent Dynamixel ID 4 (ee_joint), waits for close completion,
-# then reverses this approach: original points 2 -> ... -> 8 (TCP_ready).
+# then reverses this approach back to its starting waypoint.
 # The previous close target must be confirmed with the actual supply box.
 # after_path:
 #   ee_close_rad: 1.251728
 #   return_to_start: true
 points:
-  # Original point 8 (TCP_ready).
+  # Preserved previous waypoint 1.
   - time_from_start_sec: 0.0
-    positions_rad: [-0.004601942363863909, 1.301666588095304, 1.3535027550267698, -1.271821340707113,
-      -2.0694557179012918e-13, -0.004601942363450462]
-  # Original point 7.
+    positions_rad: [-0.026077673394262924, 1.1910126442766753, 1.1822859980167035, -1.45, 0.0, 0.0]
+  # Preserved previous waypoint 2.
   - time_from_start_sec: 1.0
-    positions_rad: [-0.012271846303292033, 1.3348277373567528, 1.1217230516672116, -1.572,
-      -0.03374757733369105, -0.01994175024230671]
-  # Original point 6.
+    positions_rad: [-0.026077673394262924, 0.7539822501773558, 1.1611675300465387, -1.3580406483662104, 0.0, 0.0]
+  # Previous waypoint 3, with base matched to waypoint 2.
   - time_from_start_sec: 2.0
-    positions_rad: [-0.3942330624868169, 0.9430013735472476, 1.1276572403661806, -1.3358750254554264,
-      -0.13959225169780032, -0.06596117387887723]
-  # Original point 5.
+    positions_rad: [-0.026077673394262924, 0.7325146417882816, 1.3103932343552758, -1.2552407660763887, 0.0, 0.0]
+  # Preserved previous waypoint 4.
   - time_from_start_sec: 3.0
-    positions_rad: [-0.9863496466106745, 0.9843656581773855, 1.270425178505639, -1.3035863277670876,
-      -0.14112623248568568, -0.06596117387887723]
-  # Original point 4.
+    positions_rad: [-0.004601942363863909, 1.301666588095304, 1.3535027550267698, -1.271821340707113, -2.0694557179012918e-13, -0.004601942363450462]
+  # Preserved previous waypoint 5.
   - time_from_start_sec: 4.0
-    positions_rad: [-1.6382914814620722, 0.9855873833274593, 1.1756537947960248, -1.3297662665470027,
-      -0.13959225169780032, -0.33440781175886336]
-  # Original point 3.
+    positions_rad: [-0.012271846303292033, 1.3348277373567528, 1.1217230516672116, -1.572, -0.03374757733369105, -0.01994175024230671]
+  # Linear intermediate waypoint.
   - time_from_start_sec: 5.0
-    positions_rad: [-2.0079808513425115, 0.9094910838668895, 0.9698794600069267, -1.572,
-      -0.12578642460682943, -0.06596117387887723]
-  # Original point 2.
+    positions_rad: [-0.20325245439505446, 1.1389145554520002, 1.1246901460166963, -1.4539375127277132, -0.08666991451574568, -0.04295146206059197]
+  # Preserved previous waypoint 6.
   - time_from_start_sec: 6.0
-    positions_rad: [-2.1399031991006763, 0.8899433483076534, 1.3538518954456793, -1.4152874265263358,
-      -0.6120583343665777, -0.15800002115201472]
-  # Original point 1.
+    positions_rad: [-0.3942330624868169, 0.9430013735472476, 1.1276572403661806, -1.3358750254554264, -0.13959225169780032, -0.06596117387887723]
+  # Linear intermediate waypoint.
   - time_from_start_sec: 7.0
-    positions_rad: [-2.1475731030401044, 0.8241444275179839, 1.522, -1.572,
-      -0.622796199881777, -0.4126408319410313]
+    positions_rad: [-0.6902913545487457, 0.9636835158623165, 1.1990412094359097, -1.319730676611257, -0.140359242091743, -0.06596117387887723]
+  # Preserved previous waypoint 7.
+  - time_from_start_sec: 8.0
+    positions_rad: [-0.9863496466106745, 0.9843656581773855, 1.270425178505639, -1.3035863277670876, -0.14112623248568568, -0.06596117387887723]
+  # Linear intermediate waypoint.
+  - time_from_start_sec: 9.0
+    positions_rad: [-1.3123205640363733, 0.9849765207524224, 1.223039486650832, -1.3166762971570452, -0.140359242091743, -0.2001844928188703]
+  # Preserved previous waypoint 8.
+  - time_from_start_sec: 10.0
+    positions_rad: [-1.6382914814620722, 0.9855873833274593, 1.1756537947960248, -1.3297662665470027, -0.13959225169780032, -0.33440781175886336]
+  # Linear intermediate waypoint.
+  - time_from_start_sec: 11.0
+    positions_rad: [-1.8231361664022918, 0.9475392335971744, 1.0727666274014758, -1.4508831332735013, -0.13268933815231487, -0.2001844928188703]
+  # Preserved previous waypoint 9.
+  - time_from_start_sec: 12.0
+    positions_rad: [-2.0079808513425115, 0.9094910838668895, 0.9698794600069267, -1.572, -0.12578642460682943, -0.06596117387887723]
+  # Linear intermediate waypoint.
+  - time_from_start_sec: 13.0
+    positions_rad: [-2.073942025221594, 0.8997172160872715, 1.161865677726303, -1.493643713263168, -0.3689223794867036, -0.11198059751544598]
+  # Preserved previous waypoint 10.
+  - time_from_start_sec: 14.0
+    positions_rad: [-2.1399031991006763, 0.8899433483076534, 1.3538518954456793, -1.4152874265263358, -0.6120583343665777, -0.15800002115201472]
+  # Linear intermediate waypoint.
+  - time_from_start_sec: 15.0
+    positions_rad: [-2.33395176876821, 0.8626289694823919, 1.4347478769808446, -1.4622368260155607, -0.4218447166687582, -0.12041749184881656]
+  # Supply-box 45-degree approach endpoint; independent EE remains unchanged.
+  - time_from_start_sec: 16.0
+    positions_rad: [-2.827621855553809, 0.528253512452711, 1.3501982949941216, -1.5523236274122452, 0.18786343035738898, -0.12041749184881656]

@@ -586,3 +586,23 @@ def test_failed_ready_retries_only_on_fresh_neutral_l1_in_hold(mode, pressed, tw
     TcpJoy.retry_ready(n, True, pressed, False, 1.1)
     assert n.auto_entry_armed is retry
     assert n.ready_state == ('idle' if retry else 'failed')
+
+
+def test_test_l1_requests_explicit_ready_motion_once():
+    from tcp_joy_test import TcpJoy as TestTcpJoy
+    n = ready_node()
+    n.twist = np.zeros(6)
+    n.request_named_pose = Mock(return_value=(True, 'stopping before TCP ready'))
+    TestTcpJoy.retry_ready(n, True, False, False, 1.)
+    n.request_named_pose.assert_called_once_with(False, 1.)
+    TestTcpJoy.retry_ready(n, True, True, False, 1.)
+    assert n.request_named_pose.call_count == 1
+
+
+def test_test_l1_with_stick_input_does_not_request_ready_motion():
+    from tcp_joy_test import TcpJoy as TestTcpJoy
+    n = ready_node()
+    n.twist = np.ones(6)
+    n.request_named_pose = Mock()
+    TestTcpJoy.retry_ready(n, True, False, False, 1.)
+    n.request_named_pose.assert_not_called()

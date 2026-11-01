@@ -182,8 +182,9 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             self.tag_reason = str(exc)
 
     def begin(self, path_id, planned_path=None):
+        taught_dock = self.paths.get(path_id, {}).get('terminal_docking_contact')
         if (planned_path is None and self.requested_docked_state is None
-                and path_id in self.settings):
+                and path_id in self.settings and not taught_dock):
             self.active = True
             self.cfg = self.settings[path_id]
             self.docking_started = None

@@ -56,6 +56,7 @@
   <material name="petg_grey"><color rgba="0.40 0.40 0.42 1.0"/></material>
   <material name="motor_dark"><color rgba="0.12 0.12 0.14 1.0"/></material>
   <material name="tool_case_marker_blue"><color rgba="0.05 0.35 1.0 1.0"/></material>
+  <material name="tool_case_marker_green"><color rgba="0.05 1.0 0.15 1.0"/></material>
   <material name="chassis_blue"><color rgba="0.12 0.22 0.34 0.55"/></material>
   <material name="circuit_box_orange"><color rgba="0.85 0.35 0.05 0.80"/></material>
   <material name="supply_box_green"><color rgba="0.20 0.70 0.30 0.85"/></material>
@@ -217,7 +218,7 @@
        Rotating the STL +55 degrees about world X makes the broad underside
        horizontal. Its collar centre is 37.728826 mm above that contact plane.
        Set Z from the circuit-box top (372 mm above the wheel axle).
-       This is only a mesh-placement reference, not a task-space target.
+       The case marker and dock references follow the corrected collar centre;
        the case yaw matches the long base boundary horizontal:vertical ratio
        33.7:70.2 in plan view (64.356341 degrees from +X). -->
   <xacro:property name="toolbox2_yaw" value="${atan2(70.2, 33.7)}"/>
@@ -244,18 +245,21 @@
          Rotate about the collar centre; keep the underside on the box top. -->
     <origin xyz="-0.255506 0.0806 ${float(wheel_axle_z) + 0.372 - float(imu_z) - float(toolbox2_arm_world_z) + toolbox2_collar_height}" rpy="0 ${-pi/4} ${toolbox2_yaw}"/>
   </joint>
-  <!-- Measured tool-1 docking-circle centre in arm_world.  This point and the
-       final tcp_link target are the same physical point.  Keep it independent
-       of the STL export origin and mesh-placement calculations above. -->
-  <link name="tool_case_y_plus_dock_point">
-    <visual>
+  <xacro:tool_case_center_marker case_link="tool_case_y_plus" marker_link="tool_case_y_plus_center"/>
+  <!-- 툴박스2 도킹: centre of the topmost circular face (radius 8.5 mm)
+       in toolbox1.stl, at CAD (25.000007, 21.939130, 128.685120) mm.
+       Transform that point with the visual mesh origin above: it is 60.3 mm
+       from the blue collar marker along the tilted mesh +Z axis.
+       The docking frame inherits the case orientation. -->
+  <link name="tool_case_y_plus_docking">
+    <visual name="툴박스2 도킹">
       <geometry><sphere radius="0.012"/></geometry>
-      <material name="tool_case_marker_blue"/>
+      <material name="tool_case_marker_green"/>
     </visual>
   </link>
-  <joint name="arm_world_to_tool_case_y_plus_dock_point" type="fixed">
-    <parent link="arm_world"/><child link="tool_case_y_plus_dock_point"/>
-    <origin xyz="-0.317806 0.090 0.163912" rpy="0 0 0"/>
+  <joint name="tool_case_y_plus_center_to_docking" type="fixed">
+    <parent link="tool_case_y_plus_center"/><child link="tool_case_y_plus_docking"/>
+    <origin xyz="0.024456472101 -0.049394862146 0.024456462661" rpy="0 0 0"/>
   </joint>
   <!-- Former dock reference planes remain at local X = +/-18.4 mm. -->
   <link name="tool_case_y_plus_x_positive_face"/>
