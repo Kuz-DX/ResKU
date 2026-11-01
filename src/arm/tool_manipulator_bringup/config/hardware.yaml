@@ -1,7 +1,8 @@
 version: 1
 buses:
   dynamixel_u2d2:
-    device: /dev/ttyUSB0
+    #device: /dev/ttyUSB0
+    device: /dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FTAAML39-if00-port0   #11월 2일 변경, 아두이노 보드 바꾸니 포트 넘버 바뀌어서 universal로 바꿈
     baud_rate: 1000000
     protocol: 2.0
     adapter: U2D2
