@@ -18,9 +18,11 @@ OUTWARD_LIMIT_GUARD_DURATION_SEC = .1
 
 
 def non_arm_feedback_changed(current, snapshot, arm_joints):
-    """EE is also a DXL encoder; unknown joints retain the tight fallback."""
+    """Ignore the velocity-controlled EE axis when checking position stability."""
+    current = {j: v for j, v in current.items() if j != 'ee_joint'}
+    snapshot = {j: v for j, v in snapshot.items() if j != 'ee_joint'}
     return (current.keys() != snapshot.keys() or any(
-        abs(value-snapshot[joint]) > (.02 if joint == 'ee_joint' else .001)
+        abs(value-snapshot[joint]) > .001
         for joint, value in current.items() if joint not in arm_joints))
 
 
@@ -351,8 +353,7 @@ class ModeCore:
         if type(speed) not in (int, float) or not math.isfinite(speed) or not 0 < speed <= .12:
             raise ValueError('ee speed must be in (0, 0.12] rad/s')
         if (not isinstance(execution_id, str) or not execution_id or
-                type(target) not in (int, float) or not math.isfinite(target) or
-                not -2.351592547829 <= target <= 2.839398438376):
+                type(target) not in (int, float) or not math.isfinite(target)):
             raise ValueError('invalid ee goal')
         if not 0 <= now-self.ee_state_time < .3:
             raise ValueError('fresh ee feedback required')

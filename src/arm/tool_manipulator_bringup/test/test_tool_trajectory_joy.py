@@ -79,7 +79,10 @@ def test_disabled_path_is_not_loadable_for_execution(tmp_path):
     assert load_path(write_path(tmp_path, enabled=False), Mock()) is None
 
 
-def test_close_and_return_action_is_loaded_and_validated(tmp_path):
+@pytest.mark.parametrize('module', ['tool_trajectory_joy', 'tool_trajectory_joy_test'])
+def test_close_and_return_action_is_loaded_and_validated(tmp_path, module):
+    from importlib import import_module
+    load_path = import_module(module).load_path
     path = write_path(tmp_path)
     data = yaml.safe_load(path.read_text())
     data['after_path'] = dict(ee_close_rad=1.251728, return_to_start=True)
@@ -87,7 +90,11 @@ def test_close_and_return_action_is_loaded_and_validated(tmp_path):
     model = Mock()
     model.within_limits.return_value = True
     assert load_path(path, model)['after_path'] == data['after_path']
-    data['after_path']['ee_close_rad'] = 20.
+    for target in (-20., 20.):
+        data['after_path']['ee_close_rad'] = target
+        path.write_text(yaml.safe_dump(data))
+        assert load_path(path, model)['after_path'] == data['after_path']
+    data['after_path']['ee_close_rad'] = float('nan')
     path.write_text(yaml.safe_dump(data))
     with pytest.raises(ValueError, match='close-and-return'):
         load_path(path, model)
@@ -898,13 +905,18 @@ def test_path_validation_allows_only_one_collision_step_of_rmd_drift():
     assert not ToolTrajectoryJoy.unchanged(node, validation=True)
 
 
-def test_path_snapshot_accepts_uncommanded_ee_dxl_encoder_hunt():
+@pytest.mark.parametrize('module', ['tool_trajectory_joy', 'tool_trajectory_joy_test'])
+@pytest.mark.parametrize('validation', [False, True])
+def test_path_snapshot_ignores_ee_position_change(module, validation):
+    from importlib import import_module
+    ToolTrajectoryJoy = import_module(module).ToolTrajectoryJoy
     names = ['base_joint', 'shoulder_joint', 'elbow_joint',
              'wrist_pitch_joint', 'wrist_roll_joint', 'wrist_yaw_joint', 'ee_joint']
     node = SimpleNamespace(snapshot=dict.fromkeys(names, 0.),
                            full_state=dict.fromkeys(names, 0.),
                            validation_rmd_drift=.005)
-    node.full_state['ee_joint'] = .019
-    assert ToolTrajectoryJoy.unchanged(node, validation=True)
-    node.full_state['ee_joint'] = .021
-    assert not ToolTrajectoryJoy.unchanged(node, validation=True)
+    for position in (.019, .021476, -20., 20.):
+        node.full_state['ee_joint'] = position
+        assert ToolTrajectoryJoy.unchanged(node, validation=validation)
+    node.full_state['shoulder_joint'] = .006
+    assert not ToolTrajectoryJoy.unchanged(node, validation=validation)

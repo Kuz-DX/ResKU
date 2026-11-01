@@ -570,6 +570,25 @@ def test_failed_advance_ik_never_submits_partial_path(tmp_path):
     n.begin.assert_not_called()
 
 
+@pytest.mark.parametrize('module', ['tool_docking_coordinator', 'tool_docking_coordinator_test'])
+@pytest.mark.parametrize('joint,ignored', [('ee_joint', True), ('shoulder_joint', False)])
+def test_advance_planning_ignores_ee_position_only(tmp_path, module, joint, ignored):
+    from importlib import import_module
+    n = camera_node(tmp_path)
+    n.full_state['ee_joint'] = 0.
+    for _ in range(n.cfg['stable_samples']):
+        camera_sample(n)
+    n.full_state[joint] += 20.
+    # Stop at the first solve, after the snapshot gate, without submitting motion.
+    n.model.solve_axis.side_effect = ValueError('test solve reached')
+    error = ValueError if ignored else RuntimeError
+    message = 'test solve reached' if ignored else 'robot moved'
+    with pytest.raises(error, match=message):
+        import_module(module).ToolDockingCoordinator.plan_advance_step(n)
+    assert n.model.solve_axis.called is ignored
+    n.begin.assert_not_called()
+
+
 @pytest.mark.parametrize('locked', [False, True])
 def test_tag_loss_only_permitted_after_advance_direction_is_locked(tmp_path, locked):
     n = camera_node(tmp_path)

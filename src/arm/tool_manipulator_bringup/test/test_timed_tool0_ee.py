@@ -76,7 +76,7 @@ def test_middle_action_precedes_tail():
     assert not ToolTrajectoryJoy.handle_mid_path_ee(n)
 
 
-def test_coasting_and_position_drift_delay_completion():
+def test_velocity_delays_completion_but_ee_position_drift_does_not():
     c = core()
     c.ee_velocity = -.1
     for t in (3.2, 3.25):
@@ -90,8 +90,8 @@ def test_coasting_and_position_drift_delay_completion():
     c.ee_state_time = 3.5
     c.run_ee(3.5)
     assert c.execution_id == 'open'
-    c.ee_state_time = 3.81
-    c.run_ee(3.81)
+    c.ee_state_time = 3.61
+    c.run_ee(3.61)
     assert c.last_execution_result == 'succeeded'
 
 
@@ -120,10 +120,10 @@ def test_continuous_ee_timed_motion_has_no_position_bounds(start):
     assert c.ee == 0.
 
 
-def test_common_position_goal_still_bounded():
+@pytest.mark.parametrize('goal', [-20., -3., 3., 20.])
+def test_common_ee_goal_has_no_position_bounds(goal):
     c = TimedCore([(-4., 4.)]*6, [.12]*6)
     c.focus, c.ready, c.mode = 'arm', True, 'tool_auto'
     c.feedback([0.]*6, [0.]*6, 0.)
     c.ee_position, c.ee_velocity, c.ee_state_time = 0., 0., 0.
-    with pytest.raises(ValueError, match='invalid ee goal'):
-        c.close_ee(c.epoch, 'open', -3., 0.)
+    assert c.close_ee(c.epoch, 'open', goal, 0.)

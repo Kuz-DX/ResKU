@@ -58,14 +58,17 @@ def test_ee_dpad_speed_edges_require_reenable_after_modifier_release():
     (True, True, 1., 0., 1, 0.), (True, True, 0., None, 1, 0.),
     (True, True, 0., 3.183, 1, 5.), (True, True, 0., -3.183, -1, -5.),
 ])
-def test_publish_ee_only_when_authorized(deadman, rearmed, age, position, direction, expected):
+@pytest.mark.parametrize('module', ['tcp_joy', 'tcp_joy_test'])
+def test_publish_ee_only_when_authorized(deadman, rearmed, age, position, direction, expected, module):
+    from importlib import import_module
+    TcpJoy = import_module(module).TcpJoy
     dpad = EeDpad()
     dpad.direction = direction
     node = SimpleNamespace(blocked=False, epoch='test', deadman=deadman, rearmed=rearmed,
                            ee_dpad=dpad,
                            joy_time=10.-age, state_time=10., full_state={'ee_joint': position},
                            stepper=SimpleNamespace(q=np.zeros(6)), pub=Mock())
-    with patch('tcp_joy.time.monotonic', return_value=10.):
+    with patch(module+'.time.monotonic', return_value=10.):
         TcpJoy.publish(node)
     data = json.loads(node.pub.publish.call_args.args[0].data)
     if deadman:

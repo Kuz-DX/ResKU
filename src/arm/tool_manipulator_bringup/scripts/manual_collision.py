@@ -156,7 +156,7 @@ class CollisionWindow:
                 self.rejected += 1
                 return self.stop(measured, 'collision/state invalid; measured hold')
             if (p['context'] != context or not np.allclose(command, p['start'][:6], atol=1e-10, rtol=0.) or
-                    np.max(np.abs(measured-p['measured'])) > self.tolerance):
+                    np.max(np.abs(measured[:6]-p['measured'][:6])) > self.tolerance):
                 self.rejected += 1
                 return self.stop(measured, 'feedback changed during collision check; measured hold')
             self.contacts = []
@@ -176,23 +176,23 @@ class CollisionWindow:
         p = self.plan
         if now > p['expires']:
             return self.stop(measured, 'collision approval expired; measured hold')
-        # A position/velocity controller may track different joints at different
-        # rates. Reject feedback that leaves the sampled paths instead of using
-        # a collision result for an unrelated actual pose.
-        deviation = min(segment_error(measured, a, b) for a, b in (
+        # Check position tracking only for the six arm joints. The EE velocity
+        # axis is not constrained to the sampled encoder position.
+        deviation = min(segment_error(measured[:6], a[:6], b[:6]) for a, b in (
             (p['measured'], p['start']), (p['measured'], p['end']), (p['start'], p['end'])))
         if deviation > self.tolerance:
             return self.stop(measured, 'feedback left checked path; measured hold')
-        # Follow the approved joint line exactly. Scale it down if the current
-        # requested speeds decrease; changed directions require a new check.
+        # Follow the approved arm joint line. Scale down for reduced requested
+        # speeds, but never clip EE velocity using an encoder-position endpoint.
+        # Changed directions require a new check.
         active = np.abs(p['velocity']) > 1e-10
         if (np.any(velocity[active]*p['velocity'][active] <= 0.) or
                 np.any(np.abs(velocity[~active]) > 1e-5)):
             return self.stop(measured, 'motion direction changed; measured hold')
         scale = min(1., float(np.min(velocity[active]/p['velocity'][active])))
-        position = np.r_[command, measured[6]]
+        position = command
         delta = p['velocity']*dt*scale
-        for i in np.flatnonzero(np.abs(delta) > 1e-12):
+        for i in np.flatnonzero(np.abs(delta[:6]) > 1e-12):
             scale = min(scale, max(0., (p['end'][i]-position[i])/(p['velocity'][i]*dt)))
         delta = p['velocity']*dt*scale
         candidate = command+delta[:6]

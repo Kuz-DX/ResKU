@@ -16,7 +16,7 @@ MoveIt state-validity service. Stale EE feedback, an inactive EE controller,
 Dynamixel communication failure and L2 path selection still suppress it. RMD
 arm faults do not. Velocity-mode jog does not interpret the accumulated
 `ee_joint` position as a software travel limit. This applies to
-`ik_manual.launch.py`; standalone manual retains its existing tool layer. The
+`ik_manual.launch.py` and `ik_manual_test.launch.py`; standalone manual retains its existing tool layer. The
 selected speed is published as `ee_speed_rad_s` on `/arm/tcp_joy/status`.
 The Dynamixel ID-4 Velocity Limit was configured in Wizard to 16.8 rad/s
 (approximately raw 701). Launch does not write EEPROM limit registers. The
@@ -475,9 +475,16 @@ All three plans must succeed, are concatenated, sampled again through
 `/check_state_validity`, and are then executed by the mode manager; MoveIt
 trajectory execution remains disabled.
 
-TCP-ready and entry checks allow the same bounded 0.02-rad DXL/EE encoder
+TCP-ready and entry checks allow the same bounded 0.02-rad arm DXL encoder
 variation used by tool-path validation; RMD entry tolerance stays at 0.001 rad.
-Collision checks, fresh feedback and joint limits remain required.
+The velocity-controlled `ee_joint` is excluded from position-change checks in
+TCP entry, ready motion, path validation, fixed docking advance and manual
+collision-window tracking. Its position does not impose travel limits on jogs
+or configured open/close targets. Timed opening confirms stopping from fresh
+velocity feedback only, without an encoder-position stability threshold.
+Automatic angle-target opening/closing still uses position feedback to reach
+the requested goal and detect a stall. Finite/fresh feedback, collision checks,
+EE speed/current limits and the six arm joints' limits remain required.
 
 Path stall detection watches each joint after command lead has accumulated,
 instead of requiring a fixed 0.001-rad reduction of the largest goal error every

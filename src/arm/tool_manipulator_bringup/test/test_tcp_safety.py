@@ -78,6 +78,25 @@ def test_feedback_loss_stops_on_first_tick():
     assert messages(n)[0]['fault'] is True
 
 
+@pytest.mark.parametrize('module', ['tcp_joy', 'tcp_joy_test'])
+@pytest.mark.parametrize('joint,accepted', [('ee_joint', True), ('other_joint', False)])
+def test_pending_collision_ignores_only_ee_position(module, joint, accepted):
+    from importlib import import_module
+    cls = import_module(module).TcpJoy
+    n = node()
+    n.full_state[joint] = 0.
+    future = Mock()
+    future.done.return_value = True
+    future.result.return_value = SimpleNamespace(valid=True)
+    n.pending = dict(q=np.full(6, .001), pose=np.eye(4), measured=np.zeros(6),
+                     full_state=dict(n.full_state), started=10., epoch='e', futures=[future])
+    n.full_state[joint] = 20.
+    with patch('time.monotonic', return_value=10.02):
+        cls.tick(n)
+    assert (n.metrics.counts['accepted_commands'] == 1) is accepted
+    assert n.failures == (0 if accepted else 1)
+
+
 def test_lead_stop_requests_hold_once_without_old_target_publication():
     n = node()
     n.measured[:] = -.09

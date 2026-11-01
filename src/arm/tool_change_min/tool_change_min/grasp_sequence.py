@@ -47,6 +47,9 @@ def checked_joint_vector(names: Sequence[str], values: Iterable[float],
     if len(result) != len(names) or not all(math.isfinite(value) for value in result):
         raise ValueError(f"{label} must contain {len(names)} finite joint values")
     for name, value in zip(names, result):
+        # EE is a continuous velocity axis; finite angle goals remain supported.
+        if name == "ee_joint":
+            continue
         lower, upper = map(float, limits[name])
         if not lower <= value <= upper:
             raise ValueError(

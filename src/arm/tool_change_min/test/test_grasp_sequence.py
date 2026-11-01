@@ -29,6 +29,12 @@ class GraspSequenceTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "outside"):
             checked_joint_vector(("joint",), [1.1], {"joint": (-1.0, 1.0)}, "test")
 
+    def test_ee_goal_has_no_position_bounds(self):
+        for goal in (-20., 20.):
+            self.assertEqual(checked_joint_vector(("ee_joint",), [goal], {}, "test"), [goal])
+        with self.assertRaisesRegex(ValueError, "finite"):
+            checked_joint_vector(("ee_joint",), [float('nan')], {}, "test")
+
     def test_duration_honors_slowest_hardware_joint(self):
         duration = required_duration(
             ("fast", "slow"), (0.0, 0.0), (0.2, 0.4),

@@ -389,9 +389,11 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
     def plan_advance_step(self):
         # One bounded IK solve per timer tick keeps feedback/cancel callbacks live.
         tolerances = self.snapshot_tolerances(validation=True)
-        if (self.full_state.keys() != self.advance_snapshot.keys()
-                or any(abs(value-self.advance_snapshot[j]) > tolerances.get(j, .001)
-                       for j, value in self.full_state.items())):
+        current = {j: v for j, v in self.full_state.items() if j != 'ee_joint'}
+        snapshot = {j: v for j, v in self.advance_snapshot.items() if j != 'ee_joint'}
+        if (current.keys() != snapshot.keys()
+                or any(abs(value-snapshot[j]) > tolerances.get(j, .001)
+                       for j, value in current.items())):
             raise RuntimeError('robot moved during fixed advance planning')
         index = len(self.advance_plan['waypoints'])+1
         target = self.advance_origin.copy()

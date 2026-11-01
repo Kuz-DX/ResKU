@@ -42,6 +42,16 @@ def test_place_test_configuration_does_not_invent_gripper_calibration():
     assert result['close_rad'] is None and result['open_rad'] is None
 
 
+def test_ee_targets_have_no_position_bounds_but_require_finite_values():
+    data = config()
+    data.update(close_rad=20., open_rad=-20.)
+    assert checked_config(data)['close_rad'] == 20.
+    for value in (None, True, float('nan'), float('inf')):
+        data['close_rad'] = value
+        with pytest.raises(ValueError, match='close_rad'):
+            checked_config(data)
+
+
 def test_sequence_order_rejects_duplicate_and_failed_completions():
     sequence = PickPlaceSequence()
     for current, following in zip(STAGES, STAGES[1:]):

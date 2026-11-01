@@ -91,7 +91,7 @@ def test_managed_ee_requires_fresh_feedback_and_valid_goal():
     with pytest.raises(ValueError, match='fresh ee'):
         c.close_ee(c.epoch, 'close', .2, .1)
     c.ee_feedback(0., 0., .1)
-    for goal in (True, float('nan'), 3., -3.):
+    for goal in (True, float('nan'), float('inf')):
         with pytest.raises(ValueError, match='invalid ee goal'):
             c.close_ee(c.epoch, 'close', goal, .1)
     c.ee_feedback(float('nan'), 0., .1)

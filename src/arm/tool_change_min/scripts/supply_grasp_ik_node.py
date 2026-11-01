@@ -122,7 +122,7 @@ class SupplyGraspIkNode(Node):
         hardware = self._load_hardware(Path(str(self.get_parameter("hardware_yaml").value)))
         self.limits = {
             name: tuple(map(float, hardware["joints"][name]["soft_limit_rad"]))
-            for name in (*ARM_JOINTS, EE_JOINT)
+            for name in ARM_JOINTS
         }
         self.velocity_limits = {
             name: float(hardware["joints"][name]["velocity_limit_rad_s"])
@@ -244,7 +244,8 @@ class SupplyGraspIkNode(Node):
             spec = data["joints"].get(name, {})
             limit = spec.get("soft_limit_rad")
             velocity = spec.get("velocity_limit_rad_s")
-            if not isinstance(limit, list) or len(limit) != 2 or velocity is None:
+            if (velocity is None or (name != EE_JOINT and
+                    (not isinstance(limit, list) or len(limit) != 2))):
                 raise ValueError(f"hardware YAML missing limits/velocity for {name}")
         return data
 

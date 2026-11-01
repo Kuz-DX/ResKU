@@ -24,7 +24,7 @@ def test_gripper_contacts_are_ignored_only_with_the_explicit_exclusion(link):
     assert not collision_result_accepted(result)
     assert collision_result_accepted(result, ignored_links=TEST_TOOL2_GRIPPER_LINKS)
     for pair in [('cam_link', 'circuit_box'), ('wrist_actuator_yaw', 'supply_box'),
-                 ('elbow_link', 'chassis')]:
+                 ('wrist_link_yaw', 'supply_box'), ('elbow_link', 'chassis')]:
         assert not collision_result_accepted(
             response((link, 'supply_box'), pair), ignored_links=TEST_TOOL2_GRIPPER_LINKS)
 
@@ -58,7 +58,8 @@ def test_exclusion_cannot_be_extended_or_enabled_on_another_tool(tmp_path):
         with pytest.raises(ValueError, match='tool2 temporary gripper'):
             load_path(path, model)
     path = tmp_path/'tool2_trajectory.yaml'
-    for invalid in ['rack_right', ['rack_right'], [*TEST_TOOL2_GRIPPER_LINKS, 'cam_link']]:
+    for invalid in ['rack_right', ['rack_right'], [*TEST_TOOL2_GRIPPER_LINKS, 'cam_link'],
+                    [*TEST_TOOL2_GRIPPER_LINKS, 'wrist_link_yaw']]:
         source['temporary_ignored_collision_links'] = invalid
         path.write_text(yaml.safe_dump(source))
         with pytest.raises(ValueError, match='tool2 temporary gripper'):
@@ -71,6 +72,7 @@ def test_exclusion_cannot_be_extended_or_enabled_on_another_tool(tmp_path):
 @pytest.mark.parametrize('tool,enabled,extra,accepted', [
     (2, True, (), True), (0, True, (), False), (1, True, (), False),
     (2, False, (), False), (2, True, (('cam_link', 'circuit_box'),), False),
+    (2, True, (('wrist_link_yaw', 'supply_box'),), False),
 ])
 def test_runtime_validation_keeps_the_exclusion_scoped_to_tool2(tool, enabled, extra, accepted):
     policy = {'temporary_ignored_collision_links': TEST_TOOL2_GRIPPER_LINKS} if enabled else {}

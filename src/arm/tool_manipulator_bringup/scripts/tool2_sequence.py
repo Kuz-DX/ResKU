@@ -32,9 +32,11 @@ def checked_config(data, place_test=False):
                   stable_angle_rad=(0., .1), acquire_timeout_s=(0., 30.),
                   sequence_timeout_s=(0., 1800.), linear_speed_m_s=(0., .02))
     if not place_test:
-        ranges.update(close_rad=(-2.351592547829, 2.839398438376),
-                      open_rad=(-2.351592547829, 2.839398438376),
-                      ee_speed_rad_s=(0., .12))
+        for key in ('close_rad', 'open_rad'):
+            value = data.get(key)
+            if type(value) not in (float, int) or not math.isfinite(value):
+                raise ValueError(f'{key} must be a measured finite target')
+        ranges['ee_speed_rad_s'] = (0., .12)
     mode = data.get('placement_mode')
     if mode == 'radius':
         ranges['place_radius_m'] = (0., 1.)

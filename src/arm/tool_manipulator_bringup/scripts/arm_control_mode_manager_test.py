@@ -34,7 +34,6 @@ class TestModeCore(ModeCore):
         self.timed_ee_velocity = velocity
         self.timed_ee_end = now+duration
         self.timed_ee_stable_since = None
-        self.timed_ee_stable_position = None
         return True
 
     def run_ee(self, now):
@@ -47,20 +46,16 @@ class TestModeCore(ModeCore):
                 self.position, self.goal, (.02,.005,.005,.005,.02,.02))):
             self.abort_path_to_hold('arm moved during timed ee', now)
         elif now >= self.timed_ee_end:
-            # Zero command is not proof of mechanical standstill. Keep ownership
-            # until fresh position and velocity remain stable before tail validation.
+            # Confirm standstill from fresh velocity feedback; EE position is free.
             self.reason = 'timed ee opening stopped; waiting for stable feedback'
             if now-self.timed_ee_end > 3.:
                 self.abort_path_to_hold('timed ee failed to settle after stop', now)
                 return
-            if (not math.isfinite(self.ee_position) or not math.isfinite(self.ee_velocity)
-                    or abs(self.ee_velocity) > .02):
+            if not math.isfinite(self.ee_velocity) or abs(self.ee_velocity) > .02:
                 self.timed_ee_stable_since = None
                 return
-            if (self.timed_ee_stable_since is None
-                    or abs(self.ee_position-self.timed_ee_stable_position) > .002):
+            if self.timed_ee_stable_since is None:
                 self.timed_ee_stable_since = now
-                self.timed_ee_stable_position = self.ee_position
             elif now-self.timed_ee_stable_since >= .3:
                 completed = self.execution_id
                 self.request('hold', now)

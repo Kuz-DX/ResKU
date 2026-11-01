@@ -43,8 +43,6 @@ class TcpJoy(TcpMotionWorkflow, Node):
         self.model = ArmKinematics('', hardware, base, tip, description=description)
         config = yaml.safe_load(Path(hardware).read_text())
         self.ee_dpad = EeDpad()
-        # Same calibrated rack travel as ModeCore.close_ee and the gripper URDF.
-        self.ee_limits = (-2.351592547829, 2.839398438376)
         self.stepper = TcpStepper(self.model,
             [float(config['joints'][j]['velocity_limit_rad_s'])/2 for j in ARM_JOINTS],
             linear=float(param('linear_speed_mps', .02)), angular=float(param('angular_speed_rad_s', .15)),
@@ -429,10 +427,7 @@ class TcpJoy(TcpMotionWorkflow, Node):
                     and time.monotonic()-self.state_time < .3):
                 position = (self.full_state or {}).get('ee_joint')
                 if position is not None and math.isfinite(position):
-                    lo, hi = self.ee_limits
-                    if ((control.direction > 0 and lo <= position < hi-.01)
-                            or (control.direction < 0 and lo+.01 < position <= hi)):
-                        ee = control.direction*control.speed
+                    ee = control.direction*control.speed
             self.pub.publish(String(data=json.dumps(dict(epoch=self.epoch,
                 positions=self.stepper.q.tolist(), ee_velocity=ee))))
 
@@ -533,9 +528,8 @@ class TcpJoy(TcpMotionWorkflow, Node):
                                           (': '+detail if detail else ''))
                             elif np.max(np.abs(self.measured-p['measured'])) > .01:
                                 self.fail('feedback changed during collision check')
-                            elif (self.full_state.keys() != p['full_state'].keys() or
-                                  any(abs(v-p['full_state'][j]) > .001
-                                      for j, v in self.full_state.items() if j not in ARM_JOINTS)):
+                            elif non_arm_feedback_changed(
+                                    self.full_state, p['full_state'], ARM_JOINTS):
                                 self.fail('non-arm feedback changed during collision check')
                             elif np.max(np.abs(p['q']-self.measured)) > self.stepper.lead:
                                 self.safety_stop('feedback lead exceeded', fault=False)

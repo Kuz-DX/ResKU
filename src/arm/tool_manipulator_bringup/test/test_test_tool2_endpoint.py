@@ -40,40 +40,32 @@ def endpoint():
     return model, source, model.fk(q), box[:3, 3], top_normal
 
 
-def test_tool2_endpoint_has_requested_center_distance_and_elevation(endpoint):
-    model, _, pose, center, normal = endpoint
-    offset = pose[:3, 3] - center
-    height = offset @ normal
-    horizontal = offset - height*normal
-    assert np.linalg.norm(offset) == pytest.approx(.095*np.sqrt(2)/2, abs=1e-10)
-    assert height == pytest.approx(.0475, abs=1e-10)
-    assert np.linalg.norm(horizontal) == pytest.approx(.0475, abs=1e-10)
-    assert np.arctan2(height, np.linalg.norm(horizontal)) == pytest.approx(np.pi/4, abs=1e-9)
-    previous_q = np.array([-2.5280003384357435, .8353145906571304,
-                           1.5156438585160097, -1.5091862255047854,
-                           -.2316310989709387, -.0828349625456184])
-    previous_offset = model.fk(previous_q)[:3, 3] - center
-    previous_horizontal = previous_offset - (previous_offset @ normal)*normal
-    np.testing.assert_allclose(horizontal/np.linalg.norm(horizontal),
-                               previous_horizontal/np.linalg.norm(previous_horizontal),
-                               atol=1e-9, rtol=0.)
-
-
-def test_tool2_tcp_approach_axis_points_down_toward_box_center(endpoint):
+def test_tool2_endpoint_is_at_the_approved_overhead_position(endpoint):
     _, _, pose, center, normal = endpoint
-    direction = center - pose[:3, 3]
-    direction /= np.linalg.norm(direction)
-    np.testing.assert_allclose(pose[:3, 2], direction, atol=1e-9, rtol=0.)
-    assert pose[:3, 2] @ normal == pytest.approx(-np.sqrt(.5), abs=1e-9)
+    offset = pose[:3, 3] - center
+    np.testing.assert_allclose(offset, .095*normal, atol=1e-8, rtol=0.)
+    np.testing.assert_allclose(pose[:3, 3], [-.236197, -.120, .277], atol=1e-8, rtol=0.)
 
 
-def test_tool2_selected_target_reduces_travel_and_preserves_previous_wrist_yaw(endpoint):
-    model, source, pose, center, normal = endpoint
-    previous = np.array(source['points'][-2]['positions_rad'])
-    previous_position = model.fk(previous)[:3, 3]
-    overhead = center + (.095*np.sqrt(2)/2)*normal
-    assert np.linalg.norm(pose[:3, 3]-previous_position) < np.linalg.norm(overhead-previous_position)
-    assert source['points'][-1]['positions_rad'][-1] == previous[-1]
+def test_tool2_first_three_points_are_preserved_with_matching_bases(endpoint):
+    _, source, _, _, _ = endpoint
+    points = np.array([p['positions_rad'] for p in source['points'][:3]])
+    np.testing.assert_array_equal(points, [
+        [-.026077673394262924, 1.1910126442766753, 1.1822859980167035, -1.45, 0., 0.],
+        [-.026077673394262924, .7539822501773558, 1.1611675300465387,
+         -1.3580406483662104, 0., 0.],
+        [-.026077673394262924, .7325146417882816, 1.3103932343552758,
+         -1.2552407660763887, 0., 0.]])
+
+
+def test_tool2_replanned_tail_has_no_joint_reversals_or_upward_tcp_motion(endpoint):
+    model, source, _, _, normal = endpoint
+    points = np.array([p['positions_rad'] for p in source['points'][2:]])
+    delta = np.diff(points, axis=0)
+    assert np.all(delta*(points[-1]-points[0]) >= -1e-12)
+    assert all(model.within_limits(q, .05) for q in points)
+    heights = np.array([model.fk(q)[:3, 3] @ normal for q in points])
+    assert np.all(np.diff(heights) < 0.)
 
 
 def test_tool2_test_path_resampling_preserves_vertices_limits_and_speed_caps(endpoint):

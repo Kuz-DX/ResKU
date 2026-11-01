@@ -74,6 +74,21 @@ def test_pending_check_never_publishes_unchecked_movement_or_ee_velocity():
     assert q[0] > 0 and ee > 0
 
 
+def test_ee_position_does_not_reject_or_clip_velocity_command():
+    w = window()
+    velocity = [.12, 0., 0., 0., 0., 0., .36]
+    step(w, 0., velocity=velocity)
+    measured = np.zeros(7)
+    measured[6] = 20.
+    q, ee = step(w, .02, measured=measured, velocity=velocity)
+    assert w.accepted == 1 and w.rejected == 0
+    assert q[0] > 0. and ee == pytest.approx(.36)
+    measured[:6] = q
+    measured[6] = -20.
+    next_q, ee = step(w, .04, command=q, measured=measured, velocity=velocity)
+    assert next_q[0] > q[0] and ee == pytest.approx(.36)
+
+
 def test_collision_stops_at_measured_position_not_last_command():
     w = window(False)
     command = np.array([.04, 0, 0, 0, 0, 0])

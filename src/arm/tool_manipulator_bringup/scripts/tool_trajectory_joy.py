@@ -193,8 +193,7 @@ def load_path(path, model, margin=.02):
                 set(after) != {'ee_close_rad', 'return_to_start'} or
                 after['return_to_start'] is not True or
                 type(after['ee_close_rad']) not in (int, float) or
-                not math.isfinite(after['ee_close_rad']) or
-                not -2.351592547829 <= after['ee_close_rad'] <= 2.839398438376):
+                not math.isfinite(after['ee_close_rad'])):
             raise ValueError(f'{path}: invalid close-and-return action')
     return dict(start=points[0], waypoints=points[1:],
                 durations=durations, total=sum(durations),
@@ -1155,18 +1154,15 @@ class ToolTrajectoryJoy(Node):
     def snapshot_delta(self):
         if self.full_state is None or self.snapshot is None:
             return None
-        if self.full_state.keys() != self.snapshot.keys():
+        current = {j: v for j, v in self.full_state.items() if j != 'ee_joint'}
+        snapshot = {j: v for j, v in self.snapshot.items() if j != 'ee_joint'}
+        if current.keys() != snapshot.keys():
             return None
-        return {joint: abs(self.full_state[joint]-value)
-                for joint, value in self.snapshot.items()}
+        return {joint: abs(current[joint]-value)
+                for joint, value in snapshot.items()}
 
     def snapshot_tolerances(self, validation=False):
         tolerances = dict(zip(ARM_JOINTS, TCP_ENTRY_TOLERANCE))
-        # ee_joint is a separate DYNAMIXEL velocity axis and is not commanded
-        # by a six-joint arm path.  Its stopped feedback has the same encoder
-        # hunting seen on the arm DYNAMIXEL axes, so do not apply the 0.001-rad
-        # RMD fallback to it.
-        tolerances['ee_joint'] = .02
         if validation:
             for joint in ARM_JOINTS[1:4]:
                 tolerances[joint] = self.validation_rmd_drift

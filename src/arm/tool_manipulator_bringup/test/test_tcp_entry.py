@@ -299,7 +299,7 @@ def test_l1_rearms_current_pose_entry_without_requesting_ready_motion():
 
 
 @pytest.mark.parametrize('joint,drift,accepted', [
-    ('ee_joint', .003, True), ('ee_joint', .021, False),
+    ('ee_joint', .003, True), ('ee_joint', .021, True), ('ee_joint', 20., True),
     ('base_joint', .019, True), ('base_joint', .021, False),
     ('shoulder_joint', .004, True), ('shoulder_joint', .0051, False)])
 def test_ready_snapshot_distinguishes_dxl_hunt_from_motion(joint, drift, accepted):
@@ -316,8 +316,8 @@ def test_ready_snapshot_distinguishes_dxl_hunt_from_motion(joint, drift, accepte
     n.tool_mode.call_async.assert_not_called()
 
 
-@pytest.mark.parametrize('drift,accepted', [(.003, True), (.021, False)])
-def test_entry_assessment_allows_only_bounded_ee_encoder_hunt(drift, accepted):
+@pytest.mark.parametrize('drift,accepted', [(.003, True), (.021, True), (20., True)])
+def test_entry_assessment_ignores_ee_position_change(drift, accepted):
     n = assessment_node()
     n.full_state['ee_joint'] = 0.
     n.check.call_async.return_value.done.return_value = True
