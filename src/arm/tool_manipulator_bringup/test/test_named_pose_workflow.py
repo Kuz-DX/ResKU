@@ -18,6 +18,8 @@ def workflow():
     node.status_time = node.state_time = 10.
     node.ready_checks = []
     node.default_ready_goal = np.zeros(6)
+    node.model = Mock()
+    node.model.within_limits.return_value = True
     node.cancel = Mock()
     node.cancel.service_is_ready.return_value = True
     node.cancel.call_async.return_value.done.return_value = True
@@ -97,3 +99,14 @@ def test_explicit_ready_removes_distance_gate_but_not_collision_gate():
     assert node.ready_state == 'failed'
     assert 'collision/state invalid' in node.reason
     node.tool_pub.publish.assert_not_called()
+
+
+def test_r2_style_named_pose_is_the_explicit_motion_owner():
+    node = workflow()
+    goal = np.array([.2, .3, .4, -.5, .1, -.1])
+    accepted, reason = node.request_named_pose(
+        False, 10., goal=goal, label='nearest TCP entry pose')
+    assert accepted and 'nearest TCP entry pose' in reason
+    assert node.explicit_ready and node.named_one_shot
+    np.testing.assert_array_equal(node.ready_goal, goal)
+    node.cancel.call_async.assert_called_once()

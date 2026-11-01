@@ -28,3 +28,11 @@ def test_nonadjacent_and_fixture_checks_remain_enabled():
                  ("wrist_link_yaw", "tool_case_1"),
                  ("base_link", "chassis")):
         assert frozenset((a, b)) not in pairs()
+
+def test_task_contacts_are_not_global_srdf_exclusions():
+    for a, b in (("rack_left", "supply_box"),
+                 ("rack_right", "supply_box"),
+                 ("rack_left", "circuit_box"),
+                 ("rack_right", "circuit_box"),
+                 ("rack_right", "tool_case_1")):
+        assert frozenset((a, b)) not in pairs()

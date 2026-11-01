@@ -42,7 +42,12 @@ def test_deadman_modifier_and_vector_speed_bound():
     [(0., [1., 0., .25, 0., 0., .5]),
      (np.pi/2, [0., 1., .25, 0., 0., .5]),
      (-np.pi/2, [0., -1., .25, 0., 0., .5]),
-     (np.pi, [-1., 0., .25, 0., 0., .5])],
+     (np.pi, [-1., 0., .25, 0., 0., .5]),
+     (-np.pi, [-1., 0., .25, 0., 0., .5]),
+     (np.pi-np.deg2rad(1.), [-np.cos(np.deg2rad(1.)),
+                             np.sin(np.deg2rad(1.)), .25, 0., 0., .5]),
+     (-np.pi+np.deg2rad(1.), [-np.cos(np.deg2rad(1.)),
+                              -np.sin(np.deg2rad(1.)), .25, 0., 0., .5])],
 )
 def test_translation_mapping_follows_base_yaw_across_full_rotation(yaw, expected):
     result = rotate_translation_with_base_yaw(

@@ -74,8 +74,10 @@ The manager requires the matching epoch, proof age <0.5 s and arm feedback withi
 request, retains HOLD and reports why. The same checks run at transition completion.
 An explicitly accepted transition carries its proof to the new epoch; unrelated
 cancels and faults invalidate it. A margin/condition rejection after the explicit
-focus edge triggers at most one checked ready move. Collision, feedback, service or
-execution failure remains HOLD/FAULT and never retries automatically.
+focus edge remains in HOLD. R2 repeats the read-only current-pose assessment and
+never requests a ready move; use `/arm/go_tcp_ready` for that motion. Collision,
+feedback, service or execution failure remains HOLD/FAULT and never retries
+automatically.
 
 The private `/arm/tcp_joy/entry_status` JSON String contains `epoch`, `safe`,
 `reason`, `positions`. It is an internal trusted-producer protocol, not an access

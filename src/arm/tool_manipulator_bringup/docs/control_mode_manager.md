@@ -18,28 +18,29 @@ arm faults do not. Velocity-mode jog does not interpret the accumulated
 `ee_joint` position as a software travel limit. This applies to
 `ik_manual.launch.py`; standalone manual retains its existing tool layer. The
 selected speed is published as `ee_speed_rad_s` on `/arm/tcp_joy/status`.
-The configured Dynamixel ID-4 Velocity Limit remains raw 400, equivalent to
-9.58764908 rad/s. Values above that are accepted by the TCP manager but cannot
-produce 16.8 rad/s until the independent motor register is deliberately changed
-to about raw 701 and read back. Launch does not write EEPROM limit registers.
+The Dynamixel ID-4 Velocity Limit was configured in Wizard to 16.8 rad/s
+(approximately raw 701). Launch does not write EEPROM limit registers. The
+manual-mode 9.58764908 rad/s software ceiling remains deliberately independent
+of that hardware limit; TCP EE jog is bounded to 16.8 rad/s.
 
 The independently controlled EE jog is available in `manual`, `tcp_ik`,
 `tool_auto`, `hold` and `fault`. L1+R1+D-pad left/right goes through the same
 manager-owned output while arm focus, controllers and fresh EE feedback remain
-healthy. In HOLD, this explicit EE layer suppresses the L1 TCP-ready request.
+healthy. In HOLD, this explicit EE layer suppresses the L1 current-pose entry
+assessment.
 In fault it never clears the arm fault or sends new arm-joint targets. Releasing
 the buttons, stale Joy (250 ms), stale EE feedback (300 ms), or inactive controllers
 commands zero. A Dynamixel `COMM_ERROR` still blocks the
 command in the hardware interface because ID 4 shares that U2D2 bus; RMD-only
 CAN faults do not.
 
-R2 (`axes[5]`, pressed below -0.5) requests the nearest TCP-entry candidate.
-The current joints are first projected into the required 0.10-rad margin. If
-that pose has scaled Jacobian condition above 20, the search moves only as far
-as needed along the corridor toward the reviewed TCP-ready pose. The candidate
-then uses the same sampled MoveIt state/collision check and managed tool-auto
-execution as named returns. Failure remains HOLD. R2 is disabled during L2 path
-selection and while any hardware fault is latched.
+R2 (`axes[5]`, pressed below -0.5) performs a read-only TCP-entry assessment of
+the current stopped HOLD pose. It requires fresh manager/joint feedback, all arm
+velocities at or below 0.02 rad/s, 0.10-rad joint-limit margin, scaled Jacobian
+condition at or below 20, and a valid MoveIt state. It publishes the assessment
+but never requests a nearest candidate, named-pose motion, or mode transition.
+Use `/arm/go_tcp_ready` for an explicit posture move. R2 is suppressed during
+L2 path selection and while the arm is not in healthy stopped HOLD.
 
 ## RMD feedback-fault recovery
 
@@ -130,9 +131,13 @@ shoulder/elbow/wrist-pitch and zero for base/wrist-roll/wrist-yaw.
 The test uses only bbox horizontal centre `(x1+x2)/2`; clipped head or feet and
 person distance are irrelevant. The calibrated optical ray at camera principal
 Y is transformed to a horizontal world bearing. After five stable bearing
-observations, the test turns only `base_joint` toward the person and targets the
-chassis footprint boundary with zero added edge clearance. It does not claim or
-check human stand-off distance in this development mode.
+observations, it tests TCP lifts from 0.02 m through 0.14 m in 0.02 m steps plus
+the exact 0.15 m maximum. Each candidate preserves TCP orientation, solves IK,
+and validates the complete `HOME -> lift -> base-only alignment` path before
+motion. The first collision-free candidate executes; if none passes, the robot
+does not move and remains in HOLD. It then targets the chassis footprint
+boundary with zero added edge clearance. It does not claim or check human
+stand-off distance in this development mode.
 
 It then plans and executes the full-arm transit to floor preplace. If that IK
 has no solution, it preserves the post-alignment HOME TCP height and orientation
@@ -218,7 +223,9 @@ HOME (also square without L2) always visits TCP ready first, then checks and
 executes a second leg to startup home. Its shoulder/elbow/wrist-pitch values
 come from `startup_goal_rad`; base/wrist-roll/wrist-yaw are all zero.
 Successful HOME remains in HOLD. Pressing square again cancels HOME.
-Neutral L1 in HOLD can request TCP ready; keep L1 held until motion starts.
+Neutral L1 in HOLD rearms collision-checked entry from the current pose and
+never requests posture motion. R2 only inspects the current stopped pose; use
+`/arm/go_tcp_ready` for the configured fixed-pose move.
 Each leg currently checks a direct joint-space line. If that line collides,
 the request fails in HOLD; it does not claim reachability from every pose or
 bypass faults. Inspect `/arm/tcp_joy/status` and `/arm/control_status`.
@@ -329,8 +336,8 @@ stopped feedback. `tcp_joy` alone requests TCP_IK after a fresh entry assessment
 the manager does not race it with a separate focus-triggered request.
 If the current pose lacks TCP entry margin or numerical conditioning, it remains
 in HOLD and reports the reason. L1 never starts posture motion. R2 explicitly
-requests the nearest checked entry candidate; `/arm/go_tcp_ready` explicitly
-requests the configured fixed pose. Options back to drive requests HOLD. Collision/check/service/
+inspects the current stopped pose without movement; `/arm/go_tcp_ready`
+explicitly requests the configured fixed pose. Options back to drive requests HOLD. Collision/check/service/
 execution failure, cancel, command timeout, and fault do not automatically retry
 while focus stays on arm; inspect first, then toggle drive and back to arm.
 
@@ -573,9 +580,9 @@ TCP_IK now requires a fresh collision-checked, stationary current pose with at
 least 0.10 rad joint margin and scaled condition <=20. Requests without a valid
 assessment remain HOLD and report a reason; this also applies to Options focus
 activation. A drive-to-arm focus edge assesses the current pose without moving
-it. If the pose fails the entry margin or condition check, R2 may request the
-nearest collision-checked entry candidate. Candidate comparisons, limitations
-and the assessment protocol are documented in [tcp_ready.md](tcp_ready.md).
+it. R2 repeats this same current-pose assessment without moving; a rejected pose
+requires an explicit `/arm/go_tcp_ready` request or manual repositioning.
+The assessment protocol is documented in [tcp_ready.md](tcp_ready.md).
 Transient entry rejections (snapshot drift, moving feedback or the 0.20-second
 stability wait) are rechecked within a single 3-second window starting with the
 first TCP mode request, with at least 0.25 seconds between rejection and retry.

@@ -38,10 +38,18 @@ class Tool2PickPlaceCoordinator(ToolDockingCoordinator):
             self.pick_config.get('place_test_home_tolerance_rad', .10))
         self.place_test_fallback_extension = float(
             self.pick_config.get('place_test_fallback_extension_m', .20))
+        self.place_test_clearance_max = float(
+            self.pick_config.get('place_test_clearance_max_m', .15))
+        self.place_test_clearance_step = float(
+            self.pick_config.get('place_test_clearance_step_m', .02))
         if not 0. < self.place_test_home_tolerance <= .10:
             raise ValueError('place_test_home_tolerance_rad must be in (0, 0.10]')
         if not 0. < self.place_test_fallback_extension <= .50:
             raise ValueError('place_test_fallback_extension_m must be in (0, 0.50]')
+        if not 0. < self.place_test_clearance_max <= .30:
+            raise ValueError('place_test_clearance_max_m must be in (0, 0.30]')
+        if not 0. < self.place_test_clearance_step <= self.place_test_clearance_max:
+            raise ValueError('place_test_clearance_step_m must be in (0, clearance max]')
         if self.pick_config['placement_mode'] == 'chassis_edge':
             robot = ET.fromstring(self.get_parameter('robot_description').value)
             link = next((link for link in robot.findall('link')
@@ -79,6 +87,48 @@ class Tool2PickPlaceCoordinator(ToolDockingCoordinator):
         self.person_stamp = -1
         self.person_last_received = -math.inf
         self.person_sample = None
+        self.pick_clearance_search = False
+        self.pick_clearance_candidates = []
+        self.pick_clearance_index = 0
+
+    def prepare_clearance_alignment(self, person_base):
+        """Build low-to-high TCP-lift candidates followed by base-only alignment."""
+        current = self.current_q()
+        pose = self.model.fk(current)
+        heights = list(np.arange(self.place_test_clearance_step,
+                                 self.place_test_clearance_max+1e-12,
+                                 self.place_test_clearance_step))
+        if not heights or self.place_test_clearance_max-heights[-1] > 1e-9:
+            heights.append(self.place_test_clearance_max)
+        candidates = []
+        for height in heights:
+            target = pose.copy()
+            target[2, 3] += height
+            try:
+                lifted = self.model.solve(target, current, self.margin, max_time_s=.03)
+                aligned = aligned_base(self.model, lifted, person_base, self.margin)
+            except (ValueError, RuntimeError, np.linalg.LinAlgError):
+                continue
+            d1 = max(.5, float(np.max(np.abs(lifted-current)/.025)))
+            d2 = max(.5, float(np.max(np.abs(aligned-lifted)/.025)))
+            candidates.append((float(height), dict(
+                start=current, waypoints=[lifted, aligned], durations=[d1, d2],
+                total=d1+d2, start_error=0.)))
+        if not candidates:
+            raise RuntimeError('no IK solution for clearance-lift candidates')
+        self.pick_clearance_candidates = candidates
+        self.pick_clearance_index = 0
+        self.pick_clearance_search = True
+        self.start_next_clearance_candidate()
+
+    def start_next_clearance_candidate(self):
+        if self.pick_clearance_index >= len(self.pick_clearance_candidates):
+            raise RuntimeError('no collision-free clearance lift/base alignment path')
+        height, path = self.pick_clearance_candidates[self.pick_clearance_index]
+        self.pick_clearance_index += 1
+        self.report('clearance_search',
+                    f'checking {height:.3f} m TCP lift then base alignment')
+        self.begin(2, path)
 
     def start_place_test(self, _request, response):
         """Start person alignment from operator-confirmed dynamic HOME."""
@@ -330,7 +380,11 @@ class Tool2PickPlaceCoordinator(ToolDockingCoordinator):
                     direction_base[2] = 0.
                     self.pick_direction_base = direction_base/np.linalg.norm(direction_base)
                     self.pick_sequence.complete('person')
-                    self.joint_move(aligned_base(self.model, self.current_q(), person_base, self.margin))
+                    if self.place_test_enabled:
+                        self.prepare_clearance_alignment(person_base)
+                    else:
+                        self.joint_move(aligned_base(
+                            self.model, self.current_q(), person_base, self.margin))
                 else:
                     if np.max(np.abs(self.current_q()-self.pick_plan['start'])) > .005:
                         raise RuntimeError('arm moved during descent planning')
@@ -351,7 +405,18 @@ class Tool2PickPlaceCoordinator(ToolDockingCoordinator):
                         self.begin(2, self.pick_plan)
                 return
             super().tick()
+            if self.pick_clearance_search and self.stage != 'checking':
+                self.pick_clearance_search = False
         except (ValueError, RuntimeError, KeyError, TransformException, np.linalg.LinAlgError) as exc:
+            if (self.pick_clearance_search and self.stage == 'checking'
+                    and 'collision/state invalid' in str(exc)):
+                self.report('clearance_rejected', str(exc))
+                super().reset()
+                try:
+                    self.start_next_clearance_candidate()
+                except RuntimeError as final:
+                    self.fail(str(final))
+                return
             self.fail(str(exc))
 
 

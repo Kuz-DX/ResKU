@@ -57,6 +57,70 @@ def test_l2_path_buttons_never_request_home_or_tcp_ready(button):
     assert messages(n) == [dict(epoch='e', pause=True)]
 
 
+def test_l2_with_home_and_l1_cannot_start_tcp_or_home_workflow():
+    n = node()
+    n.ready_enabled = True
+    n.ready_state = 'idle'
+    n.ready_checks = []
+    n.default_ready_goal = np.zeros(6)
+    n.auto_entry_armed = True
+    n._reset_ready = lambda: TcpJoy._reset_ready(n)
+    n.request_named_pose = Mock()
+    msg = joy(True, 1.)
+    msg.axes[2] = -1.
+    msg.buttons[3] = 1
+    send(n, msg)
+    n.request_named_pose.assert_not_called()
+    n.model.solve.assert_not_called()
+    assert not n.deadman and not n.rearmed
+    assert messages(n) == [dict(epoch='e', pause=True)]
+
+
+def test_r2_only_assesses_current_stopped_pose_without_motion_request():
+    n = node()
+    n.status.update(mode='hold', startup_complete=True,
+                    velocities_rad_s=[0.]*6)
+    n.entry_pub = Mock()
+    n.auto_entry_armed = True
+    n.ready_state = 'idle'
+    n.ready_safe_at = None
+    n.r2_assessment_requested = False
+    n.previous_nearest = False
+    n.request_named_pose = Mock()
+    msg = joy(False)
+    msg.axes[5] = -1.
+    send(n, msg)
+    assert n.entry_pending is not None
+    assert not n.auto_entry_armed
+    n.request_named_pose.assert_not_called()
+    n.model.solve.assert_not_called()
+    n.entry_pending['future'].done.return_value = True
+    n.entry_pending['future'].result.return_value = SimpleNamespace(valid=True)
+    TcpJoy.assess_entry(n, 10.02)
+    result = json.loads(n.entry_pub.publish.call_args.args[0].data)
+    assert result['safe'] is True
+    assert 'no motion' in n.reason
+    assert n.ready_state == 'idle'
+
+
+def test_r2_rejects_moving_feedback_without_collision_or_motion_request():
+    n = node()
+    n.deadman = n.deadman_engaged = False
+    n.status.update(mode='hold', startup_complete=True,
+                    velocities_rad_s=[0., 0., .021, 0., 0., 0.])
+    n.entry_pub = Mock()
+    n.auto_entry_armed = True
+    n.r2_assessment_requested = False
+    n.previous_nearest = False
+    n.request_named_pose = Mock()
+    msg = joy(False)
+    msg.axes[5] = -1.
+    send(n, msg)
+    assert 'stopped HOLD' in n.reason
+    n.check.call_async.assert_not_called()
+    n.request_named_pose.assert_not_called()
+
+
 def test_wrist_modifier_moves_only_wrist_and_skips_ik():
     n = node()
     msg = joy(True)

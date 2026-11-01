@@ -68,7 +68,8 @@
 - [x] L1을 deadman/현재 자세 재검증 전용으로 바꿨다. L1은 고정 TCP_READY
   자세 이동을 시작하지 않는다.
 - [x] 현재 자세가 진입 조건을 만족하면 이동 없이 TCP_IK로 들어간다. 실패하면
-  HOLD하고 이유를 보고하며, R2만 가장 가까운 검증된 진입 자세를 요청한다.
+  HOLD하고 이유를 보고한다. R2는 현재 정지 자세를 다시 검사할 뿐 이동을 요청하지
+  않으며, 자세 이동은 명시적인 `/arm/go_tcp_ready`만 소유한다.
 - [x] TCP entry/deadman/joystick 회귀 테스트 155개 통과, `git diff --check` 통과.
   ROS 패키지 빌드는 실행하지 않았다.
 
@@ -86,6 +87,17 @@
   tool0은 `rack_right <-> tool_case_1`, tool2는 `rack_left <-> supply_box` 접촉이다.
   이를 전역 allowed-collision로 숨기지 않고, 각 목표가 접촉 전 pre-dock인지 실제
   mating/grasp 자세인지 정의한 뒤 planning-scene 단계 전이 또는 새 여유 자세로 해결한다.
+- [x] 실측 goal의 의미를 확정했다. tool0 goal은 기어가 맞물린 최종 자세이고,
+  제거 workflow는 `접촉 전 pre-dock -> EE 회전/rack 제거 -> 제거 상태 확인 -> 현재
+  feedback에서 직선 접근 재계획 -> 최종 기어 맞물림` 순서다. tool2 goal은 박스에
+  닿은 grasp 자세다. 둘 다 일반 collision-free pre-dock 목표가 아니므로 별도 진입
+  목표와 scene 전이가 구현될 때까지 `cartesian_targets.yaml executable: false`로
+  fail-closed 처리했다.
+- [x] tool0의 접촉 전 pre-dock을 최종점의 TCP local `-Z` 30 mm로 정의했다.
+  rack 제거 EE 명령은 아래 실측 명세를 기록했지만 전용 실행/feedback 판정이 아직
+  구현되지 않았으므로 실행하지 않는다. tool2 grasp 단계의
+  의도된 접촉은 `rack_left <-> supply_box`와 `rack_right <-> supply_box` 양쪽이다.
+  이 두 쌍은 grasp 단계에서만 제한적으로 허용하고 전역 SRDF에는 추가하지 않는다.
 - [x] 사용자가 tool0 `[-0.394506, 0, 0.212964]`, 표면 35도와 tool1
   `[-0.317806, 0.090, 0.163912]`, 표면 55도를 `arm_world` 실제 pre-dock으로
   확정했다. L2 경로는 YAML 마지막 관절점 대신 이 pose의 bounded axis IK를 거쳐
@@ -131,8 +143,12 @@
   폐기하고 현재 feedback에서 최종 경로를 다시 계획한다.
 - [ ] drill 회전 중심/방향과 `ee_gear` 1:1 맞물림을 RViz 및 실물 기준으로 다시
   확인한다. 현재 STL 원점의 X 편심 약 1.47 mm도 구분해 기록한다.
-- [ ] 최신 작업 트리 변경을 커밋하기 전 mock에서 base 0, +/-90, +/-180도 부근의
-  조이스틱 방향과 L1 무이동 진입/R2 명시 이동을 확인한다.
+- [x] 최신 작업 트리 변경을 커밋하기 전 mock에서 base 0, +/-90, +/-180도 부근의
+  조이스틱 방향과 L1 무이동 진입/R2 명시 이동을 확인했다. 방향 회귀는 0,
+  +/-90, +/-179, +/-180도를 포함한다. managed mock에서 L1 전후 관절값과
+  execution ID가 변하지 않았고, margin 밖 별도 seed에서 R2가 shoulder를
+  `1.400000 -> 1.3612368 rad`로 이동해 `last_execution_result=succeeded`를
+  확인했다.
 
 ## Tool별 완성 계획
 
@@ -142,10 +158,26 @@ software 상태나 Arduino Bool만으로 완료 처리하지 않는다.
 
 ### Tool0 — gripper 도킹
 
-현재 실측 pre-dock joint goal은 joint limit 안에 있고 MoveIt 실행 대상으로
-활성화돼 있다. tag 0 크기와 tag-to-TCP 오프셋, 체결 뒤 TCP `-Z` 30 mm 후퇴와
-BACK 복귀 흐름도 정의돼 있다. 다음 항목을 마쳐 첫 번째 완성 대상으로 삼는다.
+현재 실측 joint goal은 joint limit 안이지만 pre-dock이 아니라 기어가 맞물린 최종
+자세다. tag 0 크기와 tag-to-TCP 오프셋, 체결 뒤 TCP `-Z` 30 mm 후퇴와 BACK 복귀
+흐름은 정의돼 있다. 다음 항목을 마쳐 첫 번째 완성 대상으로 삼는다.
 
+- [ ] rack 접촉이 없는 별도 pre-dock 자세를 측정하거나 tag/TCP 관계로 계산하고
+  전체 MoveIt 경로 collision을 통과시킨다.
+- [ ] pre-dock 정지 뒤 EE를 회전해 rack을 제거하고, 목표 위치·전류 또는 별도 센서로
+  제거 완료를 확인한다. EE 명령 완료만으로 제거 성공 처리하지 않는다.
+- [x] rack 제거 EE 명령을 양의 `ee_joint`, gripper에서 모터를 바라본 기준 CCW,
+  `5 rad/s`로 최대 2초로 확정했다. 기대 변위는 10 rad이고 10% 완료 허용오차를
+  적용한 성공 조건은 시작점부터 양의 방향으로 unwrap해 누적한 `ee_joint` 변위
+  `>= 9.0 rad`이다. Dynamixel Wizard Velocity Limit는 `16.8 rad/s`로 설정했다.
+  2초 경과만으로는 성공 처리하지 않는다.
+- [ ] rack 제거 전용 manager-owned 속도 명령과 unwrap 누적 feedback 판정을 구현하고,
+  2초 안에 9.0 rad에 도달하지 못하거나 역방향/feedback 정지가 발생하면 정지·실패
+  처리한다. 일반 tool-auto 위치 명령의 `0.12 rad/s` 한계는 올리지 않는다.
+- [ ] rack 제거 확인 뒤 planning scene과 현재 joint/EE feedback을 갱신하고, 제거 전
+  생성한 trajectory를 폐기한다.
+- [ ] 갱신된 현재 상태에서 최종 기어 맞물림까지 직선 TCP 접근을 새로 IK/충돌
+  검사한다. 최종 맞물림 접촉만 해당 단계에서 제한적으로 모델링한다.
 - [ ] `tool_docking.yaml`의 tag-relative `coarse`, `fine`, `dock` TCP pose를 실제
   측정값으로 채운다. null pose나 카메라 중심을 목표로 대체하지 않는다.
 - [ ] 현재 camera-normal 30 mm 전진 대신 측정된 X/Z 오프셋
@@ -195,10 +227,15 @@ Tool1 완료 조건: limit 안의 재측정 자세와 전체 collision 경로, t
 
 ### Tool2 — supply-box pick/place
 
-tool2 작업은 별도 툴 형상이 아니라 tool0과 같은 물리 gripper를 사용한다. pre-dock
-joint goal과 pick/place 상태 머신은 있으나 설정은 `enabled: false`이고 gripper 보정과
-payload/사람 안전 조건이 비어 있으므로 개발 모드로 유지한다.
+tool2 작업은 별도 툴 형상이 아니라 tool0과 같은 물리 gripper를 사용한다. 저장 joint
+goal은 접촉 전 pre-grasp가 아니라 rack/finger가 박스에 닿은 grasp 자세다. pick/place
+상태 머신은 있으나 설정은 `enabled: false`이고 gripper 보정과 payload/사람 안전
+조건이 비어 있으므로 개발 모드로 유지한다.
 
+- [ ] supply box와 접촉하지 않는 별도 pre-grasp 자세를 정의하고 MoveIt 진입 목표로
+  사용한다.
+- [ ] pre-grasp에서 grasp까지의 저속 직선 접근과 finger/rack 접촉만 grasp 단계의
+  제한된 collision policy로 검증한다.
 - [ ] 실측 `open_rad`, `close_rad`, `ee_speed_rad_s`를 입력하고 무부하/접촉/파지
   전류를 분리해 측정한다.
 - [ ] supply box의 치수, 질량, 무게중심, 파지면과 마찰 조건을 기록하고 실제 grasp
@@ -268,15 +305,20 @@ Tool2 완료 조건: gripper와 payload 실측 보정, attached/world scene 전�
 
 ## 단계 2 — mock plant 추가
 
-- [ ] 명령을 즉시 feedback으로 복사하지 않는 관절 mock을 만든다.
-- [ ] 속도/가속도 제한, 1차 지연, encoder quantization, 정지 잔차를 지원한다.
-- [ ] 관절별 stall, feedback dropout, 지연, overshoot를 주입할 수 있게 한다.
-- [ ] following error, stall, timeout이 서로 구분되는지 확인한다.
-- [ ] 목표 반전 중 아직 이전 방향으로 움직이는 정상 지연을 direction fault로
-  오인하지 않는 테스트를 작성한다.
-- [ ] mock 결과로 임계값을 바꾸지 말고, 측정 가능한 의미와 단위를 먼저 고정한다.
+- [x] 명령을 즉시 feedback으로 복사하지 않는 순수 Python 관절 mock을 만들었다.
+- [x] 속도/가속도 제한, 1차 지연, encoder quantization, seed 기반 정지 잔차를
+  `rad`, `rad/s`, `rad/s^2`, `s` 단위로 지원한다.
+- [x] 관절별 stall, feedback dropout, command 지연, 일회성 overshoot를 주입할 수
+  있게 했다.
+- [x] manager 연동 fixture에서 following error, waypoint stall, waypoint timeout,
+  joint feedback timeout이 서로 다른 최초 실패 원인으로 나오는지 확인했다.
+- [x] 목표 반전 중 아직 이전 방향으로 움직이는 정상 지연을 direction fault로
+  오인하지 않는 테스트를 작성했다.
+- [x] mock 결과로 production 임계값을 바꾸지 않았다. 모델 입력과 fault fixture의
+  측정 가능한 의미·단위를 `joint_mock_plant.py`에 고정했다.
 
-합격 조건: 같은 seed와 fixture에서 동일한 최초 실패 원인이 나온다.
+합격 조건: 같은 seed와 fixture에서 동일한 최초 실패 원인이 나온다. 충족:
+`test_joint_mock_plant.py`가 각 fixture를 두 번 실행해 최초 reason 문자열까지 비교한다.
 
 ## 단계 3 — 시작 복구와 관절 한계
 
@@ -306,27 +348,44 @@ Tool2 완료 조건: gripper와 payload 실측 보정, attached/world scene 전�
 
 - [x] Python task ID를 `0=gripper, 1=drill, 2=supply_box`로 통일하고 supply-box
   작업에는 실제 장착되는 gripper collision 형상을 사용한다.
-- [ ] chassis, circuit box, camera/bracket, rack, tool 형상을 scene에 포함한다.
-- [ ] SRDF allowed-collision matrix를 최소 권한으로 검토한다.
-- [ ] HOME은 고정 joint 직선이 아니라 현재 실측 자세에서 계획한다.
-- [ ] 현재 자세→기록 경로 진입, 전체 기록 경로, 귀환 경로를 각각 검사한다.
-- [ ] 정상 시작뿐 아니라 경로 중단 자세와 limit 인접 자세에서도 계획한다.
-- [ ] sampled state validity 간격과 검증 예산을 정하고 작은 장애물/swept-volume
+- [x] chassis, circuit box, camera/bracket, rack, tool 형상을 robot-description
+  planning scene에 포함했고 tool 0/1/2별 collision geometry 존재를 정적 검증한다.
+- [x] SRDF allowed-collision matrix를 고정 조립면·직접 인접면·명시된 fixture resting
+  contact로 제한했다. rack/supply-box, rack/circuit-box 및 비인접 arm/fixture 접촉이
+  전역 허용되지 않는 회귀 테스트를 추가했다.
+- [x] HOME/BACK은 고정 joint 직선으로 실행하지 않고 현재 정지 실측 snapshot을
+  MoveIt start state로 사용해 각 named pose까지 계획한다.
+- [x] 현재 자세→기록 경로 진입, 전체 기록/계획 경로, EE motion과 retreat/귀환을
+  각각 sampled state-validity gate로 검사한다.
+- [ ] 정상 시작뿐 아니라 경로 중단 자세와 limit 인접 자세에서도 실제 MoveIt plan과
+  collision 결과를 수집한다. 로컬 단위 테스트에서는 중단 자세가 그대로 start state가
+  되고 limit 밖 목표가 planner 호출 전에 거부되는 것까지 고정했다.
+- [x] sampled state validity 간격과 검증 예산을 정하고 작은 장애물/swept-volume
   한계를 문서화한다.
-- [ ] 계획 중 feedback, epoch, ownership이 바뀌면 결과를 폐기한다.
+- [x] 계획/검증 중 feedback, epoch, ownership이 바뀌면 결과를 폐기하며, 완료된
+  stale future의 result도 소비하지 않는 테스트를 추가했다.
 
 합격 조건: 각 시작 자세와 경로에 plan 결과, collision 결과, 실패 지점이 남는다.
+정적 scene/정책과 stale-result 폐기는 완료했다. 실제 MoveIt graph에서 정상·중단·limit
+인접 seed별 결과를 저장하는 통합 검증은 남아 있다. 세부 기준은
+`docs/moveit_scene_validation.md`에 기록했다.
 
 ## 단계 6 — TCP joystick과 deadman
 
-- [ ] fresh Joy, release-to-rearm, L1 release, timeout을 독립 테스트한다.
-- [ ] collision service 대기 중 적분 catch-up이 발생하지 않게 한다.
-- [ ] collision 승인 전 후보 자세를 commit하지 않는다.
-- [ ] R2의 의미를 `현재 정지 자세 TCP 진입 검사` 또는 `TCP-ready 이동` 중 하나로
-  고정하고 UI/문서/테스트를 일치시킨다.
-- [ ] HOME, L1, L2 조합이 동시에 두 workflow를 시작하지 않는지 확인한다.
+- [x] fresh Joy, release-to-rearm, L1 release, 250 ms timeout을 독립 테스트했다.
+- [x] collision service 대기 중에는 새 IK를 적분하지 않고, 승인 뒤 다음 증분도
+  20 ms control quantum만 사용하는 catch-up 방지 테스트를 추가했다.
+- [x] collision 승인 전 후보 자세를 commit하지 않으며, release로 취소된 오래된
+  future가 나중에 성공해도 빠른 재입력의 새 transaction에 반영되지 않는다.
+- [x] R2를 `현재 정지 자세 TCP 진입 검사`로 고정했다. fresh stopped HOLD,
+  전 관절 `|velocity| <= 0.02 rad/s`, limit margin, Jacobian condition, 현재 full-state
+  collision만 검사하고 named pose·nearest pose·mode transition은 요청하지 않는다.
+- [x] HOME, L1, L2 조합이 동시에 두 workflow를 시작하지 않는지 확인했다. L2가
+  있으면 TCP 준비와 square HOME을 먼저 quiesce하고 tool selector만 소유한다.
 
 합격 조건: 오래된 service 응답이나 빠른 재입력으로 motion이 재시작되지 않는다.
+충족: 취소된 future의 지연 성공, collision 대기, release/repress 및 L2+HOME+L1
+fixture가 모두 새 motion/commit을 만들지 않는지 검증한다.
 
 ## 단계 7 — 도킹 workflow
 

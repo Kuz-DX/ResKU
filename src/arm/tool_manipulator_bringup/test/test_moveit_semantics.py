@@ -146,6 +146,31 @@ def test_tool_id_expands_only_the_selected_tool(tool_id, expected):
     assert links == expected
 
 
+@pytest.mark.parametrize("tool_id,tool_link", [("0", "tool_1_link"),
+                                                 ("1", "tool_2_link"),
+                                                 ("2", "tool_1_link")])
+def test_scene_inventory_has_collision_geometry_for_fixture_and_selected_tool(
+        tool_id, tool_link):
+    result = subprocess.run(
+        ["xacro", str(XACRO), f"tool_id:={tool_id}",
+         "use_mock_hardware:=true", "use_mesh:=false"],
+        check=True, capture_output=True, text=True,
+    )
+    root = ET.fromstring(result.stdout)
+    required = {"chassis", "circuit_box", "cam_link", "tool_case_y_plus",
+                "tool_case_1", "supply_box"}
+    if tool_id == "1":
+        required.add(tool_link)
+    else:
+        # tool_1_link is a massless mounting frame; the gripper's physical
+        # collision geometry belongs to its driven gear and two racks.
+        required.update({"tool_spurgear", "rack_left", "rack_right"})
+    for name in required:
+        link = root.find(f"link[@name='{name}']")
+        assert link is not None, name
+        assert link.find("collision") is not None, name
+
+
 def test_drill_geometry_and_tcp_are_aligned_to_ee_output_z_axis():
     result = subprocess.run(
         ["xacro", str(XACRO), "tool_id:=1",

@@ -588,11 +588,24 @@ def test_pre_dock_targets_prefer_reviewed_joint_goal(tmp_path):
     np.testing.assert_allclose(targets[0]['retreat_axis'], [0., 0., -1.])
 
 
-def test_source_targets_fail_closed_for_out_of_margin_tool1():
-    targets = load_pre_dock_targets(
-        Path(__file__).resolve().parents[1] / 'config/cartesian_targets.yaml')
-    assert set(targets) == {0, 2}
-    assert 'joint_goal' in targets[0] and 'joint_goal' in targets[2]
+def test_source_contact_and_out_of_margin_targets_all_fail_closed():
+    source = Path(__file__).resolve().parents[1] / 'config/cartesian_targets.yaml'
+    targets = load_pre_dock_targets(source)
+    # All three stored joint goals are final/contact or out-of-margin
+    # references, not collision-free pre-dock execution targets.
+    assert targets == {}
+    data = yaml.safe_load(source.read_text())['targets']
+    assert data['tool0']['pre_dock_offset_tcp_m'] == [0., 0., -.030]
+    assert data['tool0']['rack_removal_ee_command'] == {
+        'duration_s': 2., 'velocity_rad_s': 5.,
+        'joint_direction': 'positive', 'physical_direction': 'ccw',
+        'physical_viewpoint': 'gripper_toward_motor',
+        'completion_feedback':
+            'ee_joint_accumulated_positive_displacement',
+        'minimum_displacement_rad': 9.0,
+        'expected_displacement_rad': 10.}
+    assert data['tool2']['grasp_stage_allowed_contacts'] == [
+        ['rack_left', 'supply_box'], ['rack_right', 'supply_box']]
 
 
 def test_nearest_base_equivalent_avoids_full_turn_from_back():
@@ -629,6 +642,50 @@ def test_automatic_return_plans_directly_to_back_without_home():
     assert node.route_labels == ['back']
     np.testing.assert_allclose(node.route_goals, [np.ones(6)*.2])
     node._request_route_leg.assert_called_once()
+
+
+def test_home_back_route_starts_at_interrupted_measured_pose():
+    measured = np.array([.37, 1.31, 1.42, -1.37, .04, -.03])
+    home, back = np.ones(6)*.1, np.ones(6)*.2
+    node = SimpleNamespace(
+        healthy_hold=Mock(return_value={'epoch': 'hold-current'}),
+        planner=Mock(), model=Mock(), route_poses={'home': home, 'back': back},
+        back_tolerance=.03, full_state=dict(zip(ARM_JOINTS, measured)),
+        planning_attempts=3, planning_timeout=8., planning_velocity_scale=.08,
+        planning_acceleration_scale=.4, report=Mock())
+    node.planner.service_is_ready.return_value = True
+    node.model.within_limits.return_value = True
+    node._request_route_leg = lambda: ToolTrajectoryJoy._request_route_leg(node)
+    ToolTrajectoryJoy.begin_back(node)
+    np.testing.assert_allclose(node.route_start, measured)
+    request = node.planner.call_async.call_args.args[0].motion_plan_request
+    start = dict(zip(request.start_state.joint_state.name,
+                     request.start_state.joint_state.position))
+    np.testing.assert_allclose([start[name] for name in ARM_JOINTS], measured)
+    assert node.route_labels == ['home', 'back']
+
+
+@pytest.mark.parametrize('changed_epoch,moved,expected', [
+    (True, False, 'ownership changed during route planning'),
+    (False, True, 'robot moved during route planning'),
+])
+def test_stale_route_plan_is_discarded_before_future_is_consumed(
+        changed_epoch, moved, expected):
+    future = Mock()
+    future.done.return_value = True
+    node = SimpleNamespace(
+        stage='planning_route', original_epoch='original',
+        healthy_hold=Mock(return_value={
+            'epoch': 'changed' if changed_epoch else 'original'}),
+        unchanged=Mock(return_value=not moved), snapshot_change_reason=Mock(
+            return_value='shoulder_joint changed'),
+        started=0., planning_timeout=8., future=future, fail=Mock())
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr('tool_trajectory_joy.time.monotonic', lambda: 1.)
+        ToolTrajectoryJoy.tick(node)
+    node.fail.assert_called_once()
+    assert expected in node.fail.call_args.args[0]
+    future.result.assert_not_called()
 
 
 def test_fresh_hold_at_back_revalidates_without_historical_latch():

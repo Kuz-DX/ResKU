@@ -155,6 +155,11 @@ def coordinator():
     n.pick_ready = np.ones(6)*.01
     n.place_test_enabled = False
     n.place_test_fallback_extension = .20
+    n.place_test_clearance_max = .15
+    n.place_test_clearance_step = .02
+    n.pick_clearance_search = False
+    n.pick_clearance_candidates = []
+    n.pick_clearance_index = 0
     n.begin, n.report, n.reset = Mock(), Mock(), Mock()
     n.status = dict(epoch='stopped')
     return n
@@ -227,6 +232,25 @@ def test_place_test_floor_ik_failure_extends_at_home_height():
     np.testing.assert_allclose(fallback[:3, 3], [.3, .2, .4])
     assert n.pick_place_test_fallback
     n.request_entry_plan.assert_called_once()
+
+
+def test_clearance_candidates_search_low_to_high_and_include_exact_maximum():
+    n = coordinator()
+    n.place_test_enabled = True
+    n.model = Mock()
+    n.model.fk.return_value = np.eye(4)
+    n.model.solve.side_effect = [np.ones(6)*height for height in
+                                 (.02, .04, .06, .08, .10, .12, .14, .15)]
+    n.current_q = Mock(return_value=np.zeros(6))
+    n.start_next_clearance_candidate = Mock()
+    with patch('tool2_pick_place_coordinator.aligned_base',
+               side_effect=lambda model, q, person, margin: q.copy()):
+        n.prepare_clearance_alignment(np.array([1., 0., 0.]))
+    assert [height for height, _ in n.pick_clearance_candidates] == pytest.approx(
+        [.02, .04, .06, .08, .10, .12, .14, .15])
+    assert all(len(path['waypoints']) == 2 for _, path in n.pick_clearance_candidates)
+    assert n.pick_clearance_search
+    n.start_next_clearance_candidate.assert_called_once()
 
 
 def test_runtime_grasps_returns_full_route_then_exact_ready_before_person():

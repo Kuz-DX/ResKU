@@ -53,10 +53,10 @@ class TcpMotionWorkflow:
         return True, self.reason
 
     def retry_ready(self, valid, was_pressed, home, now):
-        """A fresh neutral L1 press in HOLD requests checked fixed-ready motion.
+        """A fresh neutral L1 press rechecks and enters from the current pose.
 
-        Keep the L1 freshness checks before motion starts; collision validation
-        and mode-manager ownership remain in drive_ready.
+        L1 and R2 never request posture motion. request_named_pose exclusively
+        owns movement to the configured checked pose.
         """
         s = self.status
         if (valid and self.deadman and not was_pressed and not home
@@ -70,11 +70,11 @@ class TcpMotionWorkflow:
                 and now-self.state_time < .3 and not np.any(self.twist)):
             self._reset_ready()
             self.ready_goal = self.default_ready_goal.copy()
-            self.explicit_ready = True
+            self.explicit_ready = False
             self.named_one_shot = False
             self.entry_retry_count = 0
             self.auto_entry_armed = True
-            self.reason = 'L1 requested collision-checked motion to TCP ready'
+            self.reason = 'L1 requested collision-checked entry from current pose'
 
     def _reset_ready(self):
         for future in self.ready_checks:
@@ -134,7 +134,7 @@ class TcpMotionWorkflow:
                 return
             if not vars(self).get('explicit_ready', False):
                 self.reason = ('validating current pose for TCP entry; '
-                               'press R2 only if a nearest ready move is required')
+                               'R2 repeats this read-only inspection')
                 return
             if not self.check.service_is_ready():
                 self.reason = 'waiting for MoveIt collision service before TCP ready'

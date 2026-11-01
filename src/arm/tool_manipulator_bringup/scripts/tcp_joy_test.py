@@ -26,7 +26,7 @@ try:
 except ImportError:
     from arm_shared_kinematics import ArmKinematics, ARM_JOINTS
 from tcp_joy_core import (TcpStepper, joy_twist, LimitBlocked, SafetyError,
-                          TcpMetrics, EeDpad, nearest_tcp_entry)
+                          TcpMetrics, EeDpad)
 from arm_mode_core import TCP_ENTRY_TOLERANCE, non_arm_feedback_changed
 from tcp_motion_workflow import TcpMotionWorkflow
 
@@ -55,6 +55,7 @@ class TcpJoy(TcpMotionWorkflow, Node):
         self.diag = self.create_publisher(String, '/arm/tcp_joy/status', 1)
         self.entry_pub = self.create_publisher(String, '/arm/tcp_joy/entry_status', 1)
         self.entry_pending = None
+        self.r2_assessment_requested = False
         self.check = self.create_client(GetStateValidity, '/check_state_validity')
         self.cancel = self.create_client(Trigger, '/arm/cancel')
         self.tool_mode = self.create_client(Trigger, '/arm/set_mode/tool_auto')
@@ -136,21 +137,32 @@ class TcpJoy(TcpMotionWorkflow, Node):
     def assess_entry(self, now):
         """Read-only assessment in HOLD; never requests motion or changes mode."""
         s = self.status
+        velocities = s.get('velocities_rad_s')
+        stopped = (isinstance(velocities, list) and len(velocities) == len(ARM_JOINTS)
+                   and np.all(np.isfinite(velocities))
+                   and max(map(abs, velocities)) <= .02)
         eligible = (now-self.status_time < .3 and s.get('mode') == 'hold'
                     and not s.get('transitioning')
                     and s.get('ready') and s.get('startup_complete')
                     and s.get('entry_alignment_complete', True)
-                    and now-self.state_time < .3 and self.measured is not None)
+                    and stopped and now-self.state_time < .3 and self.measured is not None)
         if not eligible:
             if self.entry_pending:
                 self.entry_pending['future'].cancel()
             self.entry_pending = None
             self.ready_safe_at = None
+            if vars(self).get('r2_assessment_requested', False):
+                self.reason = 'R2 current-pose inspection requires fresh stopped HOLD feedback'
+                self.r2_assessment_requested = False
             return
 
         def report(safe, reason, q):
             self.entry_pub.publish(String(data=json.dumps(dict(
                 epoch=s.get('epoch'), safe=safe, reason=reason, positions=q.tolist()))))
+            if vars(self).get('r2_assessment_requested', False):
+                self.reason = ('R2 current pose verified; no motion requested' if safe else
+                               'R2 current pose blocked: '+reason)
+                self.r2_assessment_requested = False
             if (safe and self.auto_entry_armed and self.ready_state in ('idle', 'await_entry')
                     and not vars(self).get('returning_home', False)
                     and not vars(self).get('explicit_ready', False)):
@@ -264,7 +276,7 @@ class TcpJoy(TcpMotionWorkflow, Node):
         valid = (len(msg.axes) >= 5 and len(msg.buttons) >= 6
                  and np.all(np.isfinite(msg.axes))
                  and all(b in (0, 1) for b in msg.buttons))
-        nearest = valid and len(msg.axes) > 5 and msg.axes[5] < -.5
+        inspect_entry = valid and len(msg.axes) > 5 and msg.axes[5] < -.5
         if hasattr(self, 'ee_dpad'):
             previous_direction = self.ee_dpad.direction
             self.ee_dpad.update(msg.axes, enabled=bool(valid and msg.axes[2] >= -.5
@@ -281,7 +293,7 @@ class TcpJoy(TcpMotionWorkflow, Node):
             self.deadman = self.deadman_engaged = self.rearmed = False
             self.twist = np.zeros(6)
             self.previous_home = bool(msg.buttons[3])
-            self.previous_nearest = nearest
+            self.previous_nearest = inspect_entry
             if vars(self).get('ready_enabled', False):
                 if self.ready_state in ('request_tool', 'wait_tool', 'executing'):
                     if self.cancel.service_is_ready():
@@ -295,19 +307,13 @@ class TcpJoy(TcpMotionWorkflow, Node):
                 self.pub.publish(String(data=json.dumps(dict(epoch=self.epoch, pause=True))))
             self.reason = 'L2 path selection; TCP input paused'
             return
-        if nearest and not self.previous_nearest:
-            try:
-                if self.measured is None or time.monotonic()-self.state_time >= .3:
-                    raise ValueError('R2 nearest entry requires fresh joint feedback')
-                goal = nearest_tcp_entry(self.model, self.measured, self.default_ready_goal)
-                accepted, reason = self.request_named_pose(
-                    False, time.monotonic(), goal=goal, label='nearest TCP entry pose')
-                if not accepted:
-                    raise ValueError(reason)
-                self.reason = reason
-            except ValueError as exc:
-                self.reason = 'R2 nearest TCP entry blocked: '+str(exc)
-        self.previous_nearest = nearest
+        if inspect_entry and not self.previous_nearest:
+            self.auto_entry_armed = False
+            self.r2_assessment_requested = True
+            self.assess_entry(time.monotonic())
+            if self.r2_assessment_requested:
+                self.reason = 'R2 checking current stopped pose; no motion requested'
+        self.previous_nearest = inspect_entry
         self.deadman, self.twist = joy_twist(msg.axes, msg.buttons)
         wrist_mode = valid and bool(msg.buttons[5])
         if wrist_mode != vars(self).get('wrist_mode', False):

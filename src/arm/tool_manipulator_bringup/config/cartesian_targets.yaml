@@ -11,8 +11,29 @@ targets:
     surface_plane_tilt_from_world_xy_deg: 35.0
     approach_z_tilt_from_world_xy_deg: -55.0
     orientation_xyzw: [0.0, 0.9537169507482269, 0.0, 0.30070579950427306]
-    executable: true
-    role: measured_joint_pre_dock
+    # Final gear-mated pose, not a collision-free pre-dock.  The removal
+    # workflow must first reach a separate pre-dock, rotate EE to retract the
+    # rack, confirm the changed mechanism/scene state, then replan a straight
+    # insertion from fresh feedback.
+    executable: false
+    role: measured_final_mating_after_rack_removal
+    required_prior_stage: ee_rack_removal_confirmed
+    required_final_motion: straight_tcp_approach
+    # The collision-free pre-dock is 30 mm away from the final mating point
+    # along TCP local -Z.  The subsequent insertion reverses this offset.
+    pre_dock_offset_tcp_m: [0.0, 0.0, -0.030]
+    rack_removal_ee_command:
+      duration_s: 2.0
+      velocity_rad_s: 5.0
+      joint_direction: positive
+      physical_direction: ccw
+      physical_viewpoint: gripper_toward_motor
+      # Do not declare success from the two-second command alone.  Accumulate
+      # positive, unwrapped ee_joint feedback from the command start.
+      completion_feedback: ee_joint_accumulated_positive_displacement
+      # 10% completion tolerance around the nominal 5 rad/s * 2 s travel.
+      minimum_displacement_rad: 9.0
+      expected_displacement_rad: 10.0
     # After fresh /arm/docked=true feedback, retreat straight away from the
     # box along TCP -Z before MoveIt plans directly to BACK.
     retreat_distance_m: 0.030
@@ -40,8 +61,15 @@ targets:
     joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
     joint_goal_rad: [-2.5280003384357435, 0.8353145906571304, 1.5156438585160097,
       -1.5091862255047854, -0.2316310989709387, -0.0828349625456184]
-    executable: true
-    role: measured_joint_pre_dock
+    # Contact/grasp pose: rack_left intentionally touches the supply box here.
+    # It must not be used as an ordinary collision-free MoveIt entry goal.
+    executable: false
+    role: measured_final_grasp_contact
+    required_prior_stage: collision_free_pregrasp
+    required_scene_transition: attach_supply_box_after_grasp_confirmation
+    grasp_stage_allowed_contacts:
+      - [rack_left, supply_box]
+      - [rack_right, supply_box]
     retreat_distance_m: 0.030
     retreat_axis_tcp: [0.0, 0.0, -1.0]
   supply_box_center:

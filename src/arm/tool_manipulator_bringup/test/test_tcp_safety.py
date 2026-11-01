@@ -140,6 +140,53 @@ def test_success_after_general_failure_resets_counter_after_collision_only():
     np.testing.assert_allclose(n.stepper.q, .001)
 
 
+def test_collision_wait_does_not_integrate_catch_up_time():
+    n = node()
+    original_candidate = n.stepper.candidate
+    n.stepper.candidate = Mock(wraps=original_candidate)
+    tick(n, 10.02)
+    assert n.pending is not None
+    for future in n.pending['futures']:
+        future.done.return_value = False
+    assert n.stepper.candidate.call_count == 1
+    for now in (10.04, 10.08, 10.12):
+        tick(n, now)
+    assert n.stepper.candidate.call_count == 1
+    for future in n.pending['futures']:
+        future.done.return_value = True
+        future.result.return_value = SimpleNamespace(valid=True)
+    tick(n, 10.14)
+    assert n.stepper.candidate.call_count == 1
+    tick(n, 10.16)
+    assert n.stepper.candidate.call_count == 2
+    # Candidate integration remains one 20-ms control quantum after the wait.
+    assert n.stepper.candidate.call_args.args[2] == pytest.approx(.02)
+
+
+def test_cancelled_old_collision_response_cannot_commit_after_repress():
+    n = node()
+    tick(n, 10.02)
+    old = n.pending
+    TcpJoy.on_joy(n, SimpleNamespace(axes=[0.]*8, buttons=[0]*13))
+    assert n.pending is None
+    old_q = old['q'].copy()
+    for future in old['futures']:
+        future.done.return_value = True
+        future.result.return_value = SimpleNamespace(valid=True)
+    # Re-arm/repress creates a distinct transaction from measured feedback.
+    release = SimpleNamespace(axes=[0.]*8, buttons=[0]*13)
+    press = SimpleNamespace(axes=[0., 1., 0., 0., 0., 0., 0., 0.],
+                            buttons=[0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0])
+    with patch('time.monotonic', return_value=10.03):
+        TcpJoy.on_joy(n, release)
+    with patch('time.monotonic', return_value=10.04):
+        TcpJoy.on_joy(n, press)
+    tick(n, 10.06)
+    assert n.pending is not old
+    np.testing.assert_array_equal(n.stepper.q, n.measured)
+    np.testing.assert_array_equal(old['q'], old_q)
+
+
 def test_mutating_solver_cannot_modify_accepted_seed_or_pose():
     s = stepper()
     before_q, before_pose = s.q.copy(), s.pose.copy()

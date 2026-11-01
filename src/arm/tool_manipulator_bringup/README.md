@@ -45,7 +45,7 @@ MANUAL/TCP_IK/TOOL_AUTO를 중재하지만, 다른 launch와의 동시 실행은
 `ik_manual.launch.py`도 첫 Options arm 진입에서 RMD 시작 복구 완료 후 DXL
 base/roll/yaw를 0 rad로 정렬한다. 이후 현재 자세의 TCP 진입 조건을 검사한다.
 L1은 deadman 전용이며 자세 이동을 시작하지 않는다. 현재 자세가 부적합할 때만
-R2로 가장 가까운 검증된 진입 자세를 명시적으로 요청한다.
+R2는 현재 정지 자세의 TCP 진입 가능 여부만 검사하며 움직임을 요청하지 않는다.
 
 ```bash
 # 빌드 전에는 소스 launch를 직접 지정한다.
@@ -90,8 +90,14 @@ release는 `false -> true`를 즉시 발행하고, 이후 새 `/arm/docked` 피�
 `true` 또는 `false`가 될 때까지 HOLD를 유지한다. 같은 계약을 tool1/tool2에도
 적용한다.
 
-2026-11-01 이후 실측 joint goal이 있는 tool은 Cartesian axis IK를 다시 풀지 않는다.
-BACK 피드백을 시작 상태로 하여 MoveIt이 실측 joint goal까지 전역 경로를 계획한다.
+2026-11-01 이후 기록된 tool0/tool2 joint goal은 각각 최종 기어 맞물림과 최종 grasp
+접촉 자세로 재분류됐다. collision-free pre-dock/pre-grasp가 아니므로 BACK에서 해당
+goal까지 직접 전역 계획하지 않는다. 별도 진입 목표와 단계별 scene 전이가 구현될
+때까지 실행 비활성 상태를 유지한다.
+tool0 pre-dock은 최종점의 TCP local `-Z` 30 mm이며, rack 제거 명령은 10% 속도·2초로
+지정됐다. 단, 10%의 기준 속도와 회전 부호 및 제거 완료 feedback은 아직 미확정이므로
+이 시간 명령만으로 다음 직선 접근을 시작하지 않는다. tool2 grasp에서는 양쪽 rack과
+supply box 접촉만 grasp 단계에 한정해 허용하며 전역 allowed-collision로 만들지 않는다.
 base 목표는 soft limit 안에서 현재 BACK에 가장 가까운 `2π` 동치각을 선택하므로
 `-π → +π`의 불필요한 한 바퀴 회전을 만들지 않는다. 저장 YAML waypoint는 테스트와
 fallback 자료로만 남고 production 경로로 직접 재생하지 않는다. tool1 실측값은

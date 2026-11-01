@@ -11,9 +11,8 @@ TCP_ENTRY_TOLERANCE = (.02, .001, .001, .001, .02, .02)
 # MX-106(2.0): one Goal Velocity count is 0.229 rpm (0.0239691227 rad/s).
 # Tool-specific commanded speeds remain separate from this manual safety ceiling.
 MANUAL_EE_MAX_VELOCITY_RAD_S = 400 * 0.0239691227
-# Requested TCP gripper jog ceiling.  The configured ID-4 Velocity Limit is
-# currently raw 400 (9.58764908 rad/s), so commands above that remain subject
-# to the motor's independently configured hardware register.
+# Requested TCP gripper jog ceiling.  The ID-4 hardware Velocity Limit was
+# configured independently in Dynamixel Wizard to 16.8 rad/s (about raw 701).
 TCP_EE_MAX_VELOCITY_RAD_S = 16.8
 OUTWARD_LIMIT_GUARD_DURATION_SEC = .1
 

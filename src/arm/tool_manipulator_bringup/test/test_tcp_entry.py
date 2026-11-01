@@ -114,7 +114,8 @@ def test_manager_rejects_old_or_malformed_proof():
 
 def assessment_node():
     n = Mock()
-    n.status = dict(mode='hold', ready=True, startup_complete=True, epoch='e')
+    n.status = dict(mode='hold', ready=True, startup_complete=True, epoch='e',
+                    velocities_rad_s=[0.]*6)
     n.status_time = n.state_time = 1.
     n.measured = np.zeros(6)
     n.full_state = dict(zip(('a', 'b', 'c', 'd', 'e', 'f'), [0.]*6))
@@ -278,7 +279,7 @@ def test_tcp_ready_path_is_checked_before_managed_execution():
     assert n.ready_state == 'executing'
 
 
-def test_l1_requests_fixed_ready_motion_only_after_collision_validation():
+def test_l1_rearms_current_pose_entry_without_requesting_ready_motion():
     n = ready_node()
     n.ready_state = 'failed'
     n.auto_entry_armed = False
@@ -287,11 +288,12 @@ def test_l1_requests_fixed_ready_motion_only_after_collision_validation():
     n.twist = np.zeros(6)
     TcpJoy.retry_ready(n, True, False, False, 1.)
     assert n.auto_entry_armed
-    assert n.explicit_ready
+    assert not n.explicit_ready
     assert not n.named_one_shot
     TcpJoy.drive_ready(n, 1.)
-    assert n.ready_state == 'checking'
-    n.check.call_async.assert_called()
+    assert n.ready_state == 'idle'
+    assert 'current pose' in n.reason
+    n.check.call_async.assert_not_called()
     n.tool_mode.call_async.assert_not_called()
     n.tool_pub.publish.assert_not_called()
 
@@ -481,6 +483,7 @@ def test_fresh_l1_retry_resets_entry_settling_deadline():
     n.twist = np.zeros(6)
     TcpJoy.retry_ready(n, True, False, False, 1.)
     assert n.auto_entry_armed and n.ready_state == 'idle'
+    assert not n.explicit_ready
     assert n.entry_deadline is None and n.entry_retry_after == 0.
 
 

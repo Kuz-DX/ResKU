@@ -1,4 +1,4 @@
-"""R2 nearest TCP entry geometry without motors or ROS services."""
+"""Reusable nearest-entry geometry without motors or ROS services."""
 from pathlib import Path
 import sys
 

@@ -30,3 +30,5 @@ linear_speed_m_s: 0.005
 # service rejects any arm joint farther than this from the dynamic HOME target.
 place_test_home_tolerance_rad: 0.10
 place_test_fallback_extension_m: 0.20
+place_test_clearance_max_m: 0.15
+place_test_clearance_step_m: 0.02
