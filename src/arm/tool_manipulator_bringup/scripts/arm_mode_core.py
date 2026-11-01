@@ -15,6 +15,7 @@ MANUAL_EE_MAX_VELOCITY_RAD_S = 400 * 0.0239691227
 # currently raw 400 (9.58764908 rad/s), so commands above that remain subject
 # to the motor's independently configured hardware register.
 TCP_EE_MAX_VELOCITY_RAD_S = 16.8
+OUTWARD_LIMIT_GUARD_DURATION_SEC = .1
 
 
 def non_arm_feedback_changed(current, snapshot, arm_joints):
@@ -55,6 +56,10 @@ class ModeCore:
                 or not all(math.isfinite(a) and 0 < a <= 2. for a in self.tcp_accelerations)):
             raise ValueError('invalid TCP acceleration limits')
         self.tcp_velocity = [0.]*len(speeds)
+        # Joint-state velocity estimates can contain a single outward spike
+        # while a loaded joint settles.  Keep the near-limit guard, but require
+        # persistence before latching a system-wide fault.
+        self.outward_limit_since = [None]*len(speeds)
         self.mode = 'hold'
         self.requested = 'hold'
         self.transitioning = False
@@ -302,13 +307,19 @@ class ModeCore:
             # command the reviewed inward recovery target.
             startup_rmd = (self.startup_enabled and not self.startup_complete
                            and 1 <= index <= 3)
-            if (not startup_rmd and
-                    ((value > upper-.05 and speed > .02)
-                     or (value < lower+.05 and speed < -.02))):
+            moving_outward = (not startup_rmd and
+                              ((value > upper-.05 and speed > .02)
+                               or (value < lower+.05 and speed < -.02)))
+            if not moving_outward:
+                self.outward_limit_since[index] = None
+            elif self.outward_limit_since[index] is None:
+                self.outward_limit_since[index] = now
+            elif now-self.outward_limit_since[index] >= OUTWARD_LIMIT_GUARD_DURATION_SEC:
                 self.fault(
                     'joint moving outward near soft limit: %s position=%.6f '
-                    'velocity=%.6f allowed=[%.6f, %.6f]' %
-                    (self.joint_names[index], value, speed, lower, upper))
+                    'velocity=%.6f allowed=[%.6f, %.6f] sustained=%.3fs' %
+                    (self.joint_names[index], value, speed, lower, upper,
+                     OUTWARD_LIMIT_GUARD_DURATION_SEC))
                 return
         if (not self.fresh(now) or self.entry_anchor is None
                 or max(map(abs, velocity)) > .02

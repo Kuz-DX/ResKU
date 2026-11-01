@@ -268,13 +268,26 @@ def test_loaded_shoulder_can_use_tighter_path_limits():
     assert c.path_feedback_leads[1] == .015
 
 
-def test_outward_motion_near_soft_limit_faults_before_crossing_limit():
+def test_outward_motion_near_soft_limit_faults_after_persistent_motion():
     c = ModeCore([(-2., 2.)]*6, [.12]*6,
                  joint_names=['base', 'shoulder', 'elbow', 'pitch', 'roll', 'yaw'])
     c.feedback([0., 1.96, 0., 0., 0., 0.], [0., .03, 0., 0., 0., 0.], 0.)
+    assert c.mode != 'fault'
+    c.feedback([0., 1.962, 0., 0., 0., 0.], [0., .03, 0., 0., 0., 0.], .05)
+    assert c.mode != 'fault'
+    c.feedback([0., 1.964, 0., 0., 0., 0.], [0., .03, 0., 0., 0., 0.], .101)
     assert c.mode == 'fault'
     assert 'shoulder' in c.reason
     assert 'moving outward near soft limit' in c.reason
+
+
+def test_single_outward_velocity_sample_near_limit_does_not_fault():
+    c = ModeCore([(-2., 2.)]*6, [.12]*6,
+                 joint_names=['base', 'shoulder', 'elbow', 'pitch', 'roll', 'yaw'])
+    c.feedback([0., 0., 0., -1.955, 0., 0.], [0., 0., 0., -.0254, 0., 0.], 0.)
+    c.feedback([0., 0., 0., -1.950, 0., 0.], [0.]*6, .02)
+    assert c.mode != 'fault'
+    assert c.outward_limit_since[3] is None
 
 
 def test_path_continues_through_intermediate_waypoint_without_stopping():
@@ -454,6 +467,7 @@ def test_outward_velocity_guard_returns_after_startup_completion():
     c.begin_startup(0.)
     assert c.startup_complete
     c.feedback([0., 1.96, 0., 0., 0., 0.], [0., .03, 0., 0., 0., 0.], .01)
+    c.feedback([0., 1.962, 0., 0., 0., 0.], [0., .03, 0., 0., 0., 0.], .12)
     assert c.mode == 'fault'
     assert 'moving outward near soft limit' in c.reason
 
