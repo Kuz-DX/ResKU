@@ -61,6 +61,7 @@ class TcpJoy(TcpMotionWorkflow, Node):
         self.r2_assessment_requested = False
         self.check = self.create_client(GetStateValidity, '/check_state_validity')
         self.cancel = self.create_client(Trigger, '/arm/cancel')
+        self.go_home = self.create_client(Trigger, '/arm/go_home')
         self.tool_mode = self.create_client(Trigger, '/arm/set_mode/tool_auto')
         self.tcp_mode = self.create_client(Trigger, '/arm/set_mode/tcp_ik')
         ready_path = Path(param('tcp_ready_yaml', ''))
@@ -122,8 +123,6 @@ class TcpJoy(TcpMotionWorkflow, Node):
         self.create_subscription(Joy, '/joy', self.on_joy, 1)
         self.create_service(Trigger, '/arm/go_tcp_ready',
                             lambda req, res: self.named_pose_service(False, res))
-        self.create_service(Trigger, '/arm/go_home',
-                            lambda req, res: self.named_pose_service(True, res))
         self.create_timer(.02, self.tick)
 
     def named_pose_service(self, home, response):
@@ -359,7 +358,12 @@ class TcpJoy(TcpMotionWorkflow, Node):
                 and vars(self).get('ready_enabled', False)
                 and self.status.get('focus') == 'arm'
                 and self.status.get('mode') != 'fault'):
-            _, self.reason = self.request_named_pose(True, self.joy_time)
+            go_home = vars(self).get('go_home')
+            if go_home is not None and go_home.service_is_ready():
+                go_home.call_async(Trigger.Request())
+                self.reason = 'requested collision-free MoveIt HOME route'
+            else:
+                self.reason = 'MoveIt HOME route service unavailable'
         self.previous_home = home
         ee_layer_active = (hasattr(self, 'ee_dpad') and
                            (self.ee_dpad.direction or self.ee_dpad.vertical))

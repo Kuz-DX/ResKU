@@ -495,6 +495,7 @@ class ToolTrajectoryJoy(Node):
         self.create_subscription(String, '/arm/control_status', self.on_status, qos)
         self.create_subscription(JointState, '/joint_states', self.on_state, 1)
         self.create_subscription(Joy, '/joy', self.on_joy, 1)
+        self.create_service(Trigger, '/arm/go_home', self.go_home_service)
         self.docking_command = self.create_publisher(Bool, '/arm/docking', 10)
         docking_qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
                                  durability=DurabilityPolicy.TRANSIENT_LOCAL)
@@ -627,6 +628,63 @@ class ToolTrajectoryJoy(Node):
                 raise RuntimeError('fresh ready arm focus and cancel/HOLD service are required')
         except (ValueError, RuntimeError) as exc:
             self.report('blocked', str(exc))
+
+    def go_home_service(self, request, response):
+        del request
+        if self.stage != 'idle':
+            response.success = False
+            response.message = 'HOME request rejected while another path is active'
+            return response
+        try:
+            self.request_named_route('home')
+            response.success = True
+            response.message = 'collision-free MoveIt HOME route requested'
+        except (ValueError, RuntimeError) as exc:
+            response.success = False
+            response.message = str(exc)
+            self.report('blocked', response.message)
+        return response
+
+    def request_named_route(self, target):
+        """Stop if needed, then plan a collision-free route to a named pose."""
+        now = time.monotonic()
+        if target not in self.route_poses:
+            raise ValueError(f'unknown MoveIt route target: {target}')
+        if self.status.get('mode') == 'hold':
+            self.healthy_hold(now)
+            self.begin_named_route(target)
+        elif (now-self.status_time < .3 and now-self.state_time < .3
+              and self.full_state is not None and self.status.get('ready')
+              and self.status.get('startup_complete')
+              and self.status.get('focus') == 'arm'
+              and not self.status.get('transitioning')
+              and self.cancel.service_is_ready()):
+            self.route_kind = target+'_pending'
+            self.future = self.cancel.call_async(Trigger.Request())
+            self.stage, self.started = 'request_hold', now
+            self.report('stopping', f'requesting HOLD before {target.upper()} route')
+        else:
+            raise RuntimeError('fresh ready arm focus and cancel/HOLD service are required')
+
+    def begin_named_route(self, target):
+        now = time.monotonic()
+        status = self.healthy_hold(now)
+        measured = np.asarray([self.full_state[j] for j in ARM_JOINTS], dtype=float)
+        goal = self.route_poses[target].copy()
+        if not self.model.within_limits(goal):
+            raise ValueError(f'MoveIt route {target} violates joint limits')
+        if not self.planner.service_is_ready():
+            raise RuntimeError('MoveIt route planner unavailable')
+        self.path_id = None
+        self.route_kind = target
+        self.route_labels = [target]
+        self.snapshot = dict(self.full_state)
+        self.original_epoch = status['epoch']
+        self.route_goals = [goal]
+        self.route_waypoints, self.route_durations = [], []
+        self.route_index = 0
+        self.route_start = measured
+        self._request_route_leg()
 
     def back_is_ready(self, now):
         try:
@@ -1005,6 +1063,14 @@ class ToolTrajectoryJoy(Node):
         self.reset()
 
     def path_completed(self):
+        if getattr(self, 'route_kind', None) == 'home':
+            measured = np.asarray([self.full_state[j] for j in ARM_JOINTS], dtype=float)
+            error = float(np.max(np.abs(measured-self.route_poses['home'])))
+            if error > self.back_tolerance:
+                raise RuntimeError(f'HOME completion feedback mismatch ({error:.4f} rad)')
+            self.report('completed', 'HOME reached through collision-free MoveIt route')
+            self.reset()
+            return
         if getattr(self, 'route_kind', None) == 'back':
             measured = np.asarray([self.full_state[j] for j in ARM_JOINTS], dtype=float)
             error = float(np.max(np.abs(measured-self.route_poses['back'])))
@@ -1139,6 +1205,8 @@ class ToolTrajectoryJoy(Node):
                 if (self.status.get('mode') == 'hold' and not self.status.get('transitioning')):
                     if getattr(self, 'route_kind', None) == 'back_pending':
                         self.begin_back()
+                    elif getattr(self, 'route_kind', None) == 'home_pending':
+                        self.begin_named_route('home')
                     else:
                         self.begin(self.path_id)
                     return

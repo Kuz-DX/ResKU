@@ -219,16 +219,19 @@ completed startup/alignment and MoveIt state validity remain required.
 Explicit requests are not restricted by the small automatic-entry distance
 limit. A service success means accepted, not motion completed.
 
-HOME (also square without L2) always visits TCP ready first, then checks and
-executes a second leg to startup home. Its shoulder/elbow/wrist-pitch values
-come from `startup_goal_rad`; base/wrist-roll/wrist-yaw are all zero.
-Successful HOME remains in HOLD. Pressing square again cancels HOME.
+HOME (also square without L2) is planned from the fresh measured pose to the
+SRDF `home` pose through MoveIt, then every returned trajectory sample is
+checked again through `/check_state_validity` before mode-manager execution.
+This is required for BACK returns: a direct base sweep intersects the circuit
+box even though both endpoint states are valid. Successful HOME remains in
+HOLD.
 Neutral L1 in HOLD rearms collision-checked entry from the current pose and
 never requests posture motion. R2 only inspects the current stopped pose; use
 `/arm/go_tcp_ready` for the configured fixed-pose move.
-Each leg currently checks a direct joint-space line. If that line collides,
-the request fails in HOLD; it does not claim reachability from every pose or
-bypass faults. Inspect `/arm/tcp_joy/status` and `/arm/control_status`.
+The fixed `/arm/go_tcp_ready` move still checks a direct joint-space line. If
+that line or a planned HOME route collides, the request fails in HOLD; neither
+service bypasses faults. Inspect `/arm/tcp_joy/status`,
+`/arm/tool_trajectory/status`, and `/arm/control_status`.
 
 ```bash
 source /opt/ros/humble/setup.bash

@@ -644,6 +644,23 @@ def test_automatic_return_plans_directly_to_back_without_home():
     node._request_route_leg.assert_called_once()
 
 
+def test_home_route_uses_moveit_from_current_pose():
+    measured = np.array([-math.pi, 1.35, 1.47, -1.49, 0., 0.])
+    home = np.array([0., 1.35, 1.47, -1.49, 0., 0.])
+    node = SimpleNamespace(
+        healthy_hold=Mock(return_value={'epoch': 'hold'}), planner=Mock(),
+        model=Mock(), route_poses={'home': home},
+        full_state=dict(zip(ARM_JOINTS, measured)), _request_route_leg=Mock())
+    node.planner.service_is_ready.return_value = True
+    node.model.within_limits.return_value = True
+    ToolTrajectoryJoy.begin_named_route(node, 'home')
+    assert node.route_kind == 'home'
+    assert node.route_labels == ['home']
+    np.testing.assert_array_equal(node.route_start, measured)
+    np.testing.assert_array_equal(node.route_goals, [home])
+    node._request_route_leg.assert_called_once()
+
+
 def test_home_back_route_starts_at_interrupted_measured_pose():
     measured = np.array([.37, 1.31, 1.42, -1.37, .04, -.03])
     home, back = np.ones(6)*.1, np.ones(6)*.2
