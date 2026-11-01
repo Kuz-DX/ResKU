@@ -4,6 +4,15 @@
 targets:
   tool0:
     joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
+    # 2026-11-01 capture `pre0`: collision-free approach pose before `finger`.
+    pre_joint_goal_rad: [3.1001751723166735, 0.6403612785882697, 1.209862232156147,
+      -1.427330240975674, -0.0030679615759781065, -0.021475731030191625]
+    executable: true
+    role: measured_collision_free_pre_dock
+    final_capture_label: finger
+    final_joint_goal_rad: [3.1001751723166735, 0.5722934777079072, 1.3671164350450915,
+      -1.2596040892063745, -2.0694557179012918e-13, -0.05829126993944733]
+    # Legacy final mating capture retained for comparison only.
     joint_goal_rad: [3.1231848841349588, 0.13823006976715305, 1.2369147556672264,
       -1.093099662587149, -0.00766990393963507, -0.013805827090765277]
     reference_frame_id: arm_world
@@ -15,8 +24,7 @@ targets:
     # workflow must first reach a separate pre-dock, rotate EE to retract the
     # rack, confirm the changed mechanism/scene state, then replan a straight
     # insertion from fresh feedback.
-    executable: false
-    role: measured_final_mating_after_rack_removal
+    final_role: measured_final_mating_after_rack_removal
     required_prior_stage: ee_rack_removal_confirmed
     required_final_motion: straight_tcp_approach
     # The collision-free pre-dock is 30 mm away from the final mating point
@@ -59,6 +67,17 @@ targets:
     retreat_axis_tcp: [0.0, 0.0, -1.0]
   tool2:
     joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
+    # 2026-11-01 capture `tool1pre`, mapped to logical tool2.  Preserve it but
+    # do not execute: elbow and wrist_pitch exceed the 0.02-rad planning margin.
+    pre_joint_goal_rad: [3.3410101560147196, 1.0098475158565634, 1.5908676398244423,
+      -1.5940091046462999, -0.5016117176388115, -2.02485464000884]
+    pre_capture_label: tool1pre
+    blocked_reason: >-
+      captured tool2 pre violates planning limits: elbow_joint=1.590868 allowed<=1.557952;
+      wrist_pitch_joint=-1.594009 allowed>=-1.576453; reteach inside limits
+    final_capture_label: tool1
+    final_joint_goal_rad: [3.034213998437591, 0.6241297112184002, 1.5446163880149817,
+      -1.4226177774267788, -0.3451456772744761, -1.7732817907955942]
     joint_goal_rad: [-2.5280003384357435, 0.8353145906571304, 1.5156438585160097,
       -1.5091862255047854, -0.2316310989709387, -0.0828349625456184]
     # Contact/grasp pose: rack_left intentionally touches the supply box here.

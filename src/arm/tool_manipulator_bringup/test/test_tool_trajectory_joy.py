@@ -588,13 +588,35 @@ def test_pre_dock_targets_prefer_reviewed_joint_goal(tmp_path):
     np.testing.assert_allclose(targets[0]['retreat_axis'], [0., 0., -1.])
 
 
-def test_source_contact_and_out_of_margin_targets_all_fail_closed():
+def test_pre_dock_targets_prefer_explicit_pre_over_final_capture(tmp_path):
+    target_file = tmp_path/'targets.yaml'
+    pre = [.1, .2, .3, -.4, .5, -.6]
+    final = [.6, .5, .4, -.3, .2, -.1]
+    target_file.write_text(yaml.safe_dump({'targets': {
+        'tool0': dict(joint_names=list(ARM_JOINTS), pre_joint_goal_rad=pre,
+                      joint_goal_rad=final, executable=True)}}))
+    targets = load_pre_dock_targets(target_file)
+    np.testing.assert_allclose(targets[0]['joint_goal'], pre)
+
+
+def test_source_pre_targets_enable_tool0_and_explain_blocked_tool2():
+    from tool_trajectory_joy import ArmKinematics
     source = Path(__file__).resolve().parents[1] / 'config/cartesian_targets.yaml'
     targets = load_pre_dock_targets(source)
-    # All three stored joint goals are final/contact or out-of-margin
-    # references, not collision-free pre-dock execution targets.
-    assert targets == {}
+    assert set(targets) == {0, 2}
+    np.testing.assert_allclose(targets[0]['joint_goal'], [
+        3.1001751723166735, 0.6403612785882697, 1.209862232156147,
+        -1.427330240975674, -0.0030679615759781065, -0.021475731030191625])
+    assert 'violates planning limits' in targets[2]['blocked_reason']
     data = yaml.safe_load(source.read_text())['targets']
+    model = ArmKinematics(
+        SCRIPTS.parent.parent/'tool_manipulator_description/urdf/tool_manipulator.urdf.xacro',
+        SCRIPTS.parent/'config/hardware.yaml')
+    assert model.within_limits(data['tool0']['pre_joint_goal_rad'], .02)
+    assert not model.within_limits(data['tool2']['pre_joint_goal_rad'], .02)
+    tool2_pre = dict(zip(ARM_JOINTS, data['tool2']['pre_joint_goal_rad']))
+    assert tool2_pre['elbow_joint'] > model.limits['elbow_joint'][1]-.02
+    assert tool2_pre['wrist_pitch_joint'] < model.limits['wrist_pitch_joint'][0]+.02
     assert data['tool0']['pre_dock_offset_tcp_m'] == [0., 0., -.030]
     assert data['tool0']['rack_removal_ee_command'] == {
         'duration_s': 2., 'velocity_rad_s': 5.,
@@ -659,6 +681,19 @@ def test_home_route_uses_moveit_from_current_pose():
     np.testing.assert_array_equal(node.route_start, measured)
     np.testing.assert_array_equal(node.route_goals, [home])
     node._request_route_leg.assert_called_once()
+
+
+@pytest.mark.parametrize('route,path_id,expected', [
+    ('home', None, 'HOME route'),
+    ('back', None, 'BACK staging'),
+    ('dock_retreat', None, 'docking retreat'),
+    ('tool', 0, 'tool0 (gripper)'),
+    ('tool', 1, 'tool1 (drill)'),
+    ('tool', 2, 'tool2 (supply_box)'),
+])
+def test_operation_label_separates_named_routes_from_tool_ids(route, path_id, expected):
+    node = SimpleNamespace(route_kind=route, path_id=path_id)
+    assert ToolTrajectoryJoy.operation_label(node, path_id) == expected
 
 
 def test_home_back_route_starts_at_interrupted_measured_pose():

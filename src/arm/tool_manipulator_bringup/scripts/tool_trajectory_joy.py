@@ -68,7 +68,11 @@ def load_pre_dock_targets(path):
         path_id = int(key[4:])
         if path_id not in TOOL_IDS or not isinstance(value, dict):
             continue
-        if value.get('executable') is not True:
+        executable = value.get('executable') is True
+        if not executable:
+            reason = value.get('blocked_reason')
+            if isinstance(reason, str) and reason.strip():
+                targets[path_id] = {'blocked_reason': reason.strip()}
             continue
         retreat_distance = float(value.get('retreat_distance_m', .030))
         retreat_axis = np.asarray(value.get('retreat_axis_tcp', [0., 0., -1.]), dtype=float)
@@ -79,7 +83,9 @@ def load_pre_dock_targets(path):
             raise ValueError(f'{path}: {key} has invalid Cartesian retreat settings')
         retreat_axis /= axis_norm
         retreat = dict(retreat_distance=retreat_distance, retreat_axis=retreat_axis)
-        joint_goal = value.get('joint_goal_rad')
+        # PRE is the only ordinary collision-free MoveIt entry goal.  Keep
+        # joint_goal_rad/final_joint_goal_rad as diagnostic final captures.
+        joint_goal = value.get('pre_joint_goal_rad', value.get('joint_goal_rad'))
         if joint_goal is not None:
             joint_goal = np.asarray(joint_goal, dtype=float)
             if (value.get('joint_names') != list(ARM_JOINTS)
@@ -845,8 +851,7 @@ class ToolTrajectoryJoy(Node):
             self.future = self.collision.call_async(self.requests[0])
             approach = ('; approaching taught start from %.4f rad' % path['start_error']
                         if path['start_error'] > self.start_tolerance else '')
-            label = ('BACK staging' if getattr(self, 'route_kind', None) == 'back'
-                     else tool_label(path_id))
+            label = ToolTrajectoryJoy.operation_label(self, path_id)
             self.report('checking',
                         f'checking {label} path '
                         f'({len(self.requests)} samples, '
@@ -856,8 +861,15 @@ class ToolTrajectoryJoy(Node):
             self.begin_failed(str(exc))
 
     def operation_label(self, path_id=None):
-        return ('BACK staging' if getattr(self, 'route_kind', None) == 'back'
-                else tool_label(self.path_id if path_id is None else path_id))
+        route = getattr(self, 'route_kind', None)
+        if route == 'home':
+            return 'HOME route'
+        if route == 'back':
+            return 'BACK staging'
+        if route == 'dock_retreat':
+            return 'docking retreat'
+        selected = self.path_id if path_id is None else path_id
+        return tool_label(selected)
 
     def begin_back(self, via_home=True):
         now = time.monotonic()
@@ -954,6 +966,9 @@ class ToolTrajectoryJoy(Node):
         if path_id not in self.pre_dock_targets:
             raise ValueError(f'{tool_label(path_id)} has no execution-enabled pre-dock pose')
         target = self.pre_dock_targets[path_id]
+        if 'blocked_reason' in target:
+            raise ValueError(f'{tool_label(path_id)} pre-dock blocked: '
+                             +target['blocked_reason'])
         if 'joint_goal' in target:
             pre_dock = nearest_base_equivalent(
                 target['joint_goal'], measured, self.model.limits, self.margin)
@@ -1346,8 +1361,7 @@ class ToolTrajectoryJoy(Node):
                 self.publisher.publish(String(data=json.dumps(command)))
                 self.stage = 'executing'
                 self.started = now
-                label = ('BACK staging' if getattr(self, 'route_kind', None) == 'back'
-                         else tool_label(self.path_id))
+                label = ToolTrajectoryJoy.operation_label(self)
                 self.report('executing', f'executing {label} path')
                 return
             if self.stage == 'executing':
