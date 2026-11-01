@@ -1,0 +1,155 @@
+# Offline FK candidates only; not connected to runtime motion targets.
+# Positions in metres, joint angles in radians, quaternion order x,y,z,w.
+version: 1
+source: User measured positions_rad, 2026-11-01
+urdf: src/arm/tool_manipulator_description/urdf/tool_manipulator.urdf.xacro
+hardware_yaml: src/arm/tool_manipulator_bringup/config/hardware.yaml
+joint_coordinate_convention: Calibrated joint_states radians; motor signs and zero
+  offsets are not applied twice
+frame_id: arm_world
+equivalent_frame_id: base_actuator
+target_link: tcp_link
+tcp_definition: Common driven spur-gear centre; not a tool-specific working tip
+joint_names:
+- base_joint
+- shoulder_joint
+- elbow_joint
+- wrist_pitch_joint
+- wrist_roll_joint
+- wrist_yaw_joint
+role: offline_measured_fk_candidates
+collision_checked: false
+targets:
+  tool0:
+    positions_rad:
+    - 3.1231848841349588
+    - 0.13823006976715305
+    - 1.2369147556672264
+    - -1.093099662587149
+    - -0.00766990393963507
+    - -0.013805827090765277
+    position_m:
+    - -0.3430289118705811
+    - 0.00749155467202008
+    - 0.23736132013219657
+    orientation_xyzw:
+    - 0.626159860840814
+    - -0.6315336688407828
+    - -0.3308624964036801
+    - 0.31562487586664884
+    transform:
+    - - -0.016609532811950076
+      - -0.5820251996825845
+      - -0.8130011010781086
+      - -0.3430289118705811
+    - - -0.999738937107949
+      - -0.0030923257093253085
+      - 0.022638355770152864
+      - 0.00749155467202008
+    - - -0.01569015774418223
+      - 0.8131648691723932
+      - -0.5818218924153744
+      - 0.23736132013219657
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+    tcp_z_axis_in_frame:
+    - -0.8130011010781086
+    - 0.022638355770152864
+    - -0.5818218924153744
+    tcp_z_elevation_from_xy_deg: -35.57878713288886
+    within_hardware_limits: true
+    limit_violations: []
+    executable: false
+  tool1:
+    positions_rad:
+    - 2.853204265467086
+    - 0.6768386626181123
+    - 1.5817918531455613
+    - -1.418254454296793
+    - -0.09357282806123068
+    - -1.661301193279943
+    position_m:
+    - -0.20148271844900895
+    - 0.07471820232827961
+    - 0.20874469429794734
+    orientation_xyzw:
+    - -0.9101182784793069
+    - 0.10904321368696868
+    - 0.38224233238536504
+    - 0.11698331530298203
+    transform:
+    - - 0.6840007537628283
+      - -0.2879163944244391
+      - -0.6702589937281807
+      - -0.20148271844900895
+    - - -0.10905249325810146
+      - -0.9488489629790823
+      - 0.2962991717297093
+      - 0.07471820232827961
+    - - -0.721283940321753
+      - -0.12957544240769864
+      - -0.6804114065466385
+      - 0.20874469429794734
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+    tcp_z_axis_in_frame:
+    - -0.6702589937281807
+    - 0.2962991717297093
+    - -0.6804114065466385
+    tcp_z_elevation_from_xy_deg: -42.87580017251444
+    within_hardware_limits: false
+    limit_violations:
+    - joint: elbow_joint
+      value_rad: 1.5817918531455613
+      lower_rad: -1.4960962
+      upper_rad: 1.5779521
+      excess_rad: 0.0038397531455611755
+    executable: false
+    note: 바꾼 위치 / 연필 표시 위치. 틸팅 각도를 살짝 올려야 함. FK는 입력 원본이며 틸팅 보정은 적용하지 않음.
+    tilt_adjustment_pending: true
+  tool2:
+    positions_rad:
+    - -2.5280003384357435
+    - 0.8353145906571304
+    - 1.5156438585160097
+    - -1.5091862255047854
+    - -0.2316310989709387
+    - -0.0828349625456184
+    position_m:
+    - -0.1667031722451921
+    - -0.07434446755134322
+    - 0.24717163952933086
+    orientation_xyzw:
+    - 0.7774065539729194
+    - -0.4217704536110385
+    - -0.3153152357207114
+    - 0.34398406419931943
+    transform:
+    - - 0.44537197316626204
+      - -0.43884739724435146
+      - -0.780420891218225
+      - -0.1667031722451921
+    - - -0.8727010623930584
+      - -0.40756929607531456
+      - -0.26884963194079264
+      - -0.07434446755134322
+    - - -0.20009163204896296
+      - 0.8008122319423767
+      - -0.5645025313986214
+      - 0.24717163952933086
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+    tcp_z_axis_in_frame:
+    - -0.780420891218225
+    - -0.26884963194079264
+    - -0.5645025313986214
+    tcp_z_elevation_from_xy_deg: -34.367753331458665
+    within_hardware_limits: true
+    limit_violations: []
+    executable: false

@@ -211,12 +211,38 @@
     </joint>
   </xacro:macro>
 
-  <!-- Tool 1 centre measured in arm_world: (-317.806, +90, +163.912) mm. -->
-  <link name="tool_case_y_plus"/>
+  <!-- Toolbox 2: the highlighted collar midpoint in STL coordinates is
+       (25, 21.939120, 68.385120) mm. Its arm_world X/Y is offset from
+       the toolbox 1 centre by (+139, +80.6) mm.
+       Rotating the STL +55 degrees about world X makes the broad underside
+       horizontal. Its collar centre is 37.728826 mm above that contact plane.
+       Set Z from the circuit-box top (372 mm above the wheel axle).
+       The case marker and dock references follow the corrected collar centre;
+       the case yaw matches the long base boundary horizontal:vertical ratio
+       33.7:70.2 in plan view (64.356341 degrees from +X). -->
+  <xacro:property name="toolbox2_yaw" value="${atan2(70.2, 33.7)}"/>
+  <xacro:property name="toolbox2_collar_height" value="0.037728826"/>
+  <xacro:property name="toolbox2_arm_world_z" value="$(arg arm_world_z)"/>
+  <link name="tool_case_y_plus">
+    <visual>
+      <origin xyz="-0.058121043453 0.043434048490 -0.022765704393" rpy="${55*pi/180} ${pi/4} 0"/>
+      <geometry>
+        <mesh filename="${mesh_path}/toolbox1.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <material name="petg_charcoal"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.058121043453 0.043434048490 -0.022765704393" rpy="${55*pi/180} ${pi/4} 0"/>
+      <geometry>
+        <mesh filename="${mesh_path}/toolbox1.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </collision>
+  </link>
   <joint name="arm_world_to_tool_case_y_plus" type="fixed">
     <parent link="arm_world"/><child link="tool_case_y_plus"/>
-    <!-- Retain the former case-2 orientation for its dock reference frames. -->
-    <origin xyz="-0.317806 0.090 0.163912" rpy="0 -0.785398163397 0"/>
+    <!-- World-Z yaw sets the base edge ratio without changing contact height.
+         Rotate about the collar centre; keep the underside on the box top. -->
+    <origin xyz="-0.255506 0.0806 ${float(wheel_axle_z) + 0.372 - float(imu_z) - float(toolbox2_arm_world_z) + toolbox2_collar_height}" rpy="0 ${-pi/4} ${toolbox2_yaw}"/>
   </joint>
   <xacro:tool_case_center_marker case_link="tool_case_y_plus" marker_link="tool_case_y_plus_center"/>
   <!-- Former dock reference planes remain at local X = +/-18.4 mm. -->
@@ -239,13 +265,31 @@
     <origin xyz="-0.236197 -0.120 0.182" rpy="0 0 0"/>
   </joint>
 
-  <!-- Former case 1 frame retained for its centre marker and dock references. -->
-  <link name="tool_case_1"/>
+  <!-- Toolbox 1 Drawing1.stl: the selected front circle (radius 10.15 mm)
+       is centred at CAD (113.500001, 27.701940, 143.046537) mm.
+       Align that circle centre with the existing case marker. Counter-rotate
+       the case pitch so CAD Z stays up. Yaw the case +90 degrees so its
+       front face points toward the arm; dock references rotate with it. -->
+  <link name="tool_case_1">
+    <visual>
+      <origin xyz="-0.182277789742 -0.027701940392 0.010925634828" rpy="0 0.959931088597 0"/>
+      <geometry>
+        <mesh filename="${mesh_path}/Drawing1.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <material name="petg_charcoal"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.182277789742 -0.027701940392 0.010925634828" rpy="0 0.959931088597 0"/>
+      <geometry>
+        <mesh filename="${mesh_path}/Drawing1.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </collision>
+  </link>
   <joint name="arm_world_to_tool_case_1" type="fixed">
     <parent link="arm_world"/><child link="tool_case_1"/>
     <!-- Tool 0 centre measured in arm_world: (-394.506, 0, +212.964) mm. -->
-    <!-- Retain the former case-1 orientation for its dock reference frames. -->
-    <origin xyz="-0.394506 0 0.212964" rpy="0 -0.959931088597 0"/>
+    <!-- Rotate the visible gear/front face from CAD -Y toward arm_world +X. -->
+    <origin xyz="-0.394506 0 0.212964" rpy="0 -0.959931088597 ${pi/2}"/>
   </joint>
   <xacro:tool_case_center_marker case_link="tool_case_1" marker_link="tool_case_1_center"/>
   <!-- Former case-1 dock reference planes remain at X = +/-18.4 mm. -->
