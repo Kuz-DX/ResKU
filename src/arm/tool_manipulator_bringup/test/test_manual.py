@@ -577,16 +577,17 @@ def test_measured_stop_pose_camera_world_transform_regression():
     path = Path(__file__).resolve().parents[2] / 'tool_manipulator_description/urdf/tool_manipulator.urdf.xacro'
     chain = ArmChain(
         xacro.process_file(str(path)).toxml(), root='world', tip='cam_link')
-    # The corrected URDF axes use the joint-state sign convention directly.
+    # ID 3 uses the same calibrated joint-state values, with physical -Z
+    # rotation. Its camera pose intentionally differs from the old +Z model.
     measured = dict(zip(
         JOINTS, np.deg2rad([0., -85.140, -86.340, 89.200, -5.098, -3.604])))
     camera, _ = chain.pose_and_jacobian(measured)
     np.testing.assert_allclose(
-        camera[:3, 3], [0.15347243, -0.00601448, 0.45803051], atol=1e-7)
+        camera[:3, 3], [0.15453110, -0.01788162, 0.45803791], atol=1e-7)
     np.testing.assert_allclose(camera[:3, :3], [
-        [-0.99601989, -0.08912048, 0.00138186],
-        [-0.08885953, 0.99407433, 0.06261153],
-        [-0.00695364, 0.06223954, -0.99803702],
+        [-0.99601989, -0.08824279, 0.01255304],
+        [-0.08885953, 0.99407433, -0.06261153],
+        [-0.00695364, -0.06347779, -0.99795903],
     ], atol=1e-7)
 
 

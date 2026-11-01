@@ -161,7 +161,14 @@ class TcpStepper:
         self.pose = self.model.fk(self.q)
 
     def wrist_candidate(self, measured, direction, dt):
-        """Direct roll/yaw proposal; caller must collision-check before commit."""
+        """Jog calibrated joint coordinates, preserving the motor input mapping.
+
+        These inputs are joint jogs, not TCP-local angular twists. A negative
+        URDF wrist axis must therefore not negate the requested motor angle.
+        The returned FK pose uses the corrected URDF axis; Cartesian rotation
+        in candidate() independently uses that axis through the Jacobian/IK.
+        Caller must collision-check before commit.
+        """
         direction = np.asarray(direction, dtype=float)
         if direction.shape != (2,) or not np.all(np.isfinite(direction)) or not 0 < dt <= .1:
             raise ValueError('invalid wrist increment')

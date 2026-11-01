@@ -136,7 +136,9 @@ def test_terminal_tcp_matches_docking_center_with_reversed_camera_orientation():
     previous = model.fk(np.array([3.011907106470, .628082201261, 1.555196620372,
                                  -1.429415788244, -.206484847228, -1.548450778811]))
     np.testing.assert_allclose(actual[:3, 3], target[:3, 3], atol=1e-9, rtol=0.)
-    angle = 2.*1.548450778811
+    # The physical ID 3 axis is local -Z; changing calibrated q from -a to
+    # +a rotates the camera by -2a without changing the TCP position.
+    angle = -2.*1.548450778811
     rotation = np.array([[np.cos(angle), -np.sin(angle), 0.],
                          [np.sin(angle), np.cos(angle), 0.], [0., 0., 1.]])
     np.testing.assert_allclose(actual[:3, :3], previous[:3, :3]@rotation,

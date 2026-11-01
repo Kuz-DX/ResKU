@@ -695,7 +695,10 @@
         xyz="-0.075000 0 0"
         rpy="${pi/2} 0 ${-pi/2}"/>
 
-    <axis xyz="0 0 1"/>
+    <!-- ID 3: positive calibrated /joint_states rotates about local -Z.
+         Keep the hardware encoder/command sign unchanged; FK, IK and RViz
+         consume this same axis so the model follows the physical wrist. -->
+    <axis xyz="0 0 -1"/>
 
     <limit
         lower="-5.76"
