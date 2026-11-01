@@ -352,7 +352,9 @@ Tool2 완료 조건: gripper와 payload 실측 보정, attached/world scene 전�
   planning scene에 포함했고 tool 0/1/2별 collision geometry 존재를 정적 검증한다.
 - [x] SRDF allowed-collision matrix를 고정 조립면·직접 인접면·명시된 fixture resting
   contact로 제한했다. rack/supply-box, rack/circuit-box 및 비인접 arm/fixture 접촉이
-  전역 허용되지 않는 회귀 테스트를 추가했다.
+  전역 허용되지 않는 회귀 테스트를 추가했다. merge에서 들어온
+  `rack_left/right <-> tool_case_1` 전역 제외도 제거했으며, `ik_manual`의 rack 제거
+  planning-scene 단계 전이가 구현될 때 해당 단계에서만 제한적으로 허용한다.
 - [x] HOME/BACK은 고정 joint 직선으로 실행하지 않고 현재 정지 실측 snapshot을
   MoveIt start state로 사용해 각 named pose까지 계획한다.
 - [x] 현재 자세→기록 경로 진입, 전체 기록/계획 경로, EE motion과 retreat/귀환을
