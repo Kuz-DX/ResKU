@@ -12,6 +12,12 @@ tools:
     actuation_enabled: false
     desired_docked: true           # true=attach pulse, false=release pulse
     actuation_timeout_s: null      # establish with actual Arduino firmware
+    # Measured tag-to-final-TCP translation, expressed in the confirmed
+    # tag/TCP-aligned axes: +X up, +Y left, +Z from TCP toward the box.
+    # Final TCP is therefore below and in front of the tag centre.
+    measured_tag_tcp_xyz_m: [-0.0457, 0.0, -0.0445]
+    measured_tag_tcp_xyzw: [0.0, 0.0, 0.0, 1.0]
+    measured_pre_dock_30mm_xyz_m: [-0.0457, 0.0, -0.0745]
     stages:
       - {name: coarse, xyz_m: null, xyzw: null}
       - {name: fine, xyz_m: null, xyzw: null}
@@ -63,6 +69,12 @@ tools:
     tag_id: 1
     tag_size_m: 0.020             # measured outer black square, excluding white margin
     advance_distance_m: 0.030
+    # Confirmed tag/TCP-aligned measurement. The current camera-normal mode
+    # does not yet consume the lateral X offset; retain it explicitly so the
+    # next tag-relative staged approach cannot silently lose this geometry.
+    measured_tag_tcp_xyz_m: [-0.0457, 0.0, -0.0500]
+    measured_tag_tcp_xyzw: [0.0, 0.0, 0.0, 1.0]
+    measured_pre_dock_30mm_xyz_m: [-0.0457, 0.0, -0.0800]
     actuation_enabled: false     # finish in HOLD, no attach/release command
     tag_max_age_s: 0.25
     min_decision_margin: 40.0

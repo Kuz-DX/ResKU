@@ -748,81 +748,24 @@ def test_main_spins_tf_concurrently_and_shuts_executor_down_before_node():
     n.fail.assert_not_called()
 
 
-@pytest.mark.parametrize('entry_offset', [0., .272])
-def test_l2_circle_from_tcp_mode_keeps_docking_through_entry_plan_and_execution(tmp_path, entry_offset):
+def test_tool_request_from_tcp_mode_is_blocked_until_verified_back(tmp_path):
     from sensor_msgs.msg import Joy
-    from tool_trajectory_joy import load_path
     n = camera_node(tmp_path)
-    del n.begin  # Use both real begin methods, rather than pre-arming the fixture.
-    n.paths = {1: load_path(ROOT/'config/tool1_trajectory.yaml', n.model)}
+    n.paths = {1: dict(after_path=None)}
     n.settings = load_settings(ROOT/'config/tool_docking.yaml')
     n.active, n.stage, n.docking_started = False, 'idle', None
     n.combos, n.l2_axis, n.l2_threshold, n.first_button, n.third_button = (
         [False]*3, 2, -.5, 2, 0)
     n.second_button = 1
     n.requested_docked_state, n.use_nearest_entry = None, False
-    measured = n.paths[1]['start'].copy()
-    measured[0] += entry_offset
-    n.full_state = dict(zip(ARM_JOINTS, measured))
+    n.full_state = dict(zip(ARM_JOINTS, np.zeros(6)))
     n.status_time = n.state_time = 1.
     n.status = dict(mode='tcp_ik', epoch='tcp', ready=True, startup_complete=True,
                     focus='arm', transitioning=False)
-    n.start_tolerance, n.max_start_delta, n.approach_speed = .03, .1, .05
-    n.shoulder_isolation_half_width = .08
-    n.collision_step, n.collision_timeout = .005, 10.
-    n.planning_timeout, n.planning_attempts = 8., 3
-    n.planning_velocity_scale, n.planning_acceleration_scale = .08, .4
-    n.publisher = Mock()
-    n.cancel, n.mode, n.collision, n.planner = Mock(), Mock(), Mock(), Mock()
-    for client in (n.cancel, n.mode, n.collision, n.planner):
-        client.service_is_ready.return_value = True
-        client.call_async.return_value.done.return_value = True
-    n.cancel.call_async.return_value.result.return_value = SimpleNamespace(success=True)
-    n.mode.call_async.return_value.result.return_value = SimpleNamespace(success=True)
-    n.collision.call_async.return_value.result.return_value = SimpleNamespace(valid=True)
-    trajectory = SimpleNamespace(joint_names=list(ARM_JOINTS), points=[SimpleNamespace(
-        positions=n.paths[1]['start'].tolist(),
-        time_from_start=SimpleNamespace(sec=4, nanosec=0))])
-    n.planner.call_async.return_value.result.return_value = SimpleNamespace(
-        motion_plan_response=SimpleNamespace(error_code=SimpleNamespace(val=1),
-                                            trajectory=SimpleNamespace(joint_trajectory=trajectory)))
     with patch('tool_docking_coordinator.time.monotonic', return_value=1.1):
-        n.tick()
-        assert n.stage == 'idle' and not n.active
-        n.publisher.publish.assert_not_called()
         n.on_joy(Joy(axes=[0., 0., -1.], buttons=[0, 1, 0, 0, 0]))
-        assert n.stage == 'request_hold'
-        n.tick()
-        n.status.update(mode='hold', epoch='hold')
-        n.tick()
-        assert n.active
-        if entry_offset:
-            assert n.stage == 'planning_entry'
-            n.tick()
-        assert n.stage == 'checking'
-        # Releasing both controls does not remove the docking continuation.
-        n.on_joy(Joy(axes=[0., 0., 1.], buttons=[0]*5))
-        for _ in n.requests:
-            n.tick()
-        assert n.stage == 'request_mode'
-        n.tick()
-        n.status.update(mode='tool_auto', epoch='tool')
-        n.tick()
-        assert n.stage == 'executing' and n.active
-        n.publisher.publish.assert_called_once()
-        # A separate manager confirms the path endpoint and returns HOLD.
-        n.full_state = dict(zip(ARM_JOINTS, n.paths[1]['waypoints'][-1]))
-        n.status.update(mode='hold', epoch='completed',
-                        last_execution_id=n.execution_id, last_execution_result='succeeded')
-        n.tick()
-        assert n.stage == 'dock_acquire' and n.active
-        for i in range(n.cfg['stable_samples']):
-            n.feedback_sequence += 1
-            n.observation = (i+1, 1.1, transform([0, 0, .2], [0, 0, 0, 1]))
-            n.tick()
-        assert n.stage == 'dock_advance_plan'
-    n.fail.assert_not_called()
-    n.reset.assert_not_called()
+    assert n.stage == 'idle' and not n.active
+    assert 'fresh stopped HOLD' in n.report.call_args.args[1]
 
 
 @pytest.mark.parametrize('failure', [None, 'feedback', 'focus', 'fault', 'epoch', 'tag', 'timeout'])

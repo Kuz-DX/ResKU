@@ -75,15 +75,30 @@ L2 + □       → MoveIt 현재→home→back, BACK 피드백 확인
 L2 + △/○/×  → 각각 tool0/tool1/tool2 pre-dock (확인된 BACK에서만 허용)
 ```
 
-tool 요청은 `cartesian_targets.yaml`의 tool별 `arm_world`
-pre-dock pose까지 별도로 계획한다. pre-dock pose는 BACK을 seed로 bounded axis IK를
-통과해야 하며, 기존 tool YAML의 마지막 관절점은 실행 목표로 사용하지 않는다.
+tool 요청은 `cartesian_targets.yaml`의 검토된 tool별 목표까지 별도로 계획한다.
+실측 joint goal이 있으면 이를 우선 사용하고, 없는 경우에만 BACK seed의 bounded
+axis IK로 Cartesian TCP 목표를 계산한다. 기존 tool YAML의 마지막 관절점은 실행
+목표로 사용하지 않는다.
 BACK 경로와 tool 경로는 각각 전체 샘플의 충돌 검사가 끝난 뒤 manager가 실행한다.
 tool IK나 계획이 실패해도 로봇이 BACK에 머물면 다른 tool을 다시 선택할 수 있다.
 마지막 도킹 준비 자세에서 docking은 `/arm/docking`에 `true -> false`,
 release는 `false -> true`를 즉시 발행하고, 이후 새 `/arm/docked` 피드백이 각각
 `true` 또는 `false`가 될 때까지 HOLD를 유지한다. 같은 계약을 tool1/tool2에도
 적용한다.
+
+2026-11-01 이후 실측 joint goal이 있는 tool은 Cartesian axis IK를 다시 풀지 않는다.
+BACK 피드백을 시작 상태로 하여 MoveIt이 실측 joint goal까지 전역 경로를 계획한다.
+base 목표는 soft limit 안에서 현재 BACK에 가장 가까운 `2π` 동치각을 선택하므로
+`-π → +π`의 불필요한 한 바퀴 회전을 만들지 않는다. 저장 YAML waypoint는 테스트와
+fallback 자료로만 남고 production 경로로 직접 재생하지 않는다. tool1 실측값은
+elbow planning limit을 넘으므로 수정 측정 전까지 fail-closed로 차단된다.
+
+AprilTag와 TCP 축은 `+X=위`, `+Y=왼쪽`, `+Z=TCP에서 박스를 보는 방향`으로 일치한다.
+실측 최종 `T_tag_tcp` translation은 tool0 `[-0.0457, 0, -0.0445] m`, tool1
+`[-0.0457, 0, -0.0500] m`이며 회전은 identity다. 최종점에서 30 mm 물러난
+pre-dock은 각각 `[-0.0457, 0, -0.0745] m`, `[-0.0457, 0, -0.0800] m`다.
+현재 tool1 `camera_normal_advance`는 X 오프셋을 사용하지 않으므로 이 측정값을
+기록만 하며, tag-relative staged approach로 전환하기 전에는 최종 도킹에 사용하지 않는다.
 
 `enable_docking_motion:=false`를 명시하면 활성 경로의 저장 궤적 이후 태그와 목표 오차를
 `preview` 상태로 출력하며 보정 이동이나 Arduino 구동은 실행하지 않는다.

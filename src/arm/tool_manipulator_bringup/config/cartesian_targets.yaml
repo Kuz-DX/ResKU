@@ -1,24 +1,37 @@
-# Reviewed Cartesian pre-dock poses in arm_world. tool0/tool1 are converted to
-# bounded axis-IK joint goals, then planned by MoveIt from current -> home -> back.
+# Reviewed tool approach goals. Measured joint goals are preferred and are
+# planned globally by MoveIt from the feedback-verified BACK pose. Cartesian
+# object references remain documentation; they are not treated as TCP poses.
 targets:
   tool0:
-    frame_id: arm_world
-    target_link: tcp_link
-    position_m: [-0.394506, 0.0, 0.212964]
+    joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
+    joint_goal_rad: [3.1231848841349588, 0.13823006976715305, 1.2369147556672264,
+      -1.093099662587149, -0.00766990393963507, -0.013805827090765277]
+    reference_frame_id: arm_world
+    reference_object_position_m: [-0.394506, 0.0, 0.212964]
     surface_plane_tilt_from_world_xy_deg: 35.0
     approach_z_tilt_from_world_xy_deg: -55.0
     orientation_xyzw: [0.0, 0.9537169507482269, 0.0, 0.30070579950427306]
     executable: true
-    role: actual_pre_dock
+    role: measured_joint_pre_dock
   tool1:
-    frame_id: arm_world
-    target_link: tcp_link
-    position_m: [-0.317806, 0.090, 0.163912]
+    joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
+    # Retained for diagnosis only: elbow=1.581792 exceeds the 1.577952 hard
+    # soft-limit endpoint and the 1.557952 planning-margin endpoint.
+    joint_goal_rad: [2.853204265467086, 0.6768386626181123, 1.5817918531455613,
+      -1.418254454296793, -0.09357282806123068, -1.661301193279943]
+    reference_frame_id: arm_world
+    reference_object_position_m: [-0.317806, 0.090, 0.163912]
     surface_plane_tilt_from_world_xy_deg: 55.0
     approach_z_tilt_from_world_xy_deg: -35.0
     orientation_xyzw: [0.0, 0.8870108331782217, 0.0, 0.4617486132350339]
     executable: true
-    role: actual_pre_dock
+    role: measured_joint_pre_dock_requires_limit_correction
+  tool2:
+    joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
+    joint_goal_rad: [-2.5280003384357435, 0.8353145906571304, 1.5156438585160097,
+      -1.5091862255047854, -0.2316310989709387, -0.0828349625456184]
+    executable: true
+    role: measured_joint_pre_dock
   supply_box_center:
     frame_id: base_actuator
     position_m: [-0.236197, -0.120, 0.182]

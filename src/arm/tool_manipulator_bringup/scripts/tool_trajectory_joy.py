@@ -57,7 +57,7 @@ def load_route_poses(robot_description_semantic):
 
 
 def load_pre_dock_targets(path):
-    """Load reviewed arm_world TCP pre-dock poses for MoveIt route entry."""
+    """Load reviewed joint or arm_world TCP goals for MoveIt route entry."""
     data = yaml.safe_load(Path(path).read_text())
     if not isinstance(data, dict) or not isinstance(data.get('targets'), dict):
         raise ValueError(f'{path}: targets must be a mapping')
@@ -69,6 +69,15 @@ def load_pre_dock_targets(path):
         if path_id not in TOOL_IDS or not isinstance(value, dict):
             continue
         if value.get('executable') is not True:
+            continue
+        joint_goal = value.get('joint_goal_rad')
+        if joint_goal is not None:
+            joint_goal = np.asarray(joint_goal, dtype=float)
+            if (value.get('joint_names') != list(ARM_JOINTS)
+                    or joint_goal.shape != (len(ARM_JOINTS),)
+                    or not np.all(np.isfinite(joint_goal))):
+                raise ValueError(f'{path}: {key} has an invalid reviewed joint goal')
+            targets[path_id] = dict(joint_goal=joint_goal)
             continue
         position = np.asarray(value.get('position_m'), dtype=float)
         quaternion = np.asarray(value.get('orientation_xyzw'), dtype=float)
@@ -86,6 +95,23 @@ def load_pre_dock_targets(path):
         targets[path_id] = dict(position=position, quaternion=quaternion,
                                 approach_axis=approach_axis)
     return targets
+
+
+def nearest_base_equivalent(goal, reference, limits, margin=.0):
+    """Choose the 2-pi-equivalent base goal nearest feedback within limits."""
+    goal, reference = np.asarray(goal, dtype=float), np.asarray(reference, dtype=float)
+    if (goal.shape != (len(ARM_JOINTS),) or reference.shape != goal.shape
+            or not np.all(np.isfinite(goal)) or not np.all(np.isfinite(reference))
+            or not math.isfinite(margin) or margin < 0):
+        raise ValueError('invalid joint goal equivalence input')
+    lower, upper = limits['base_joint'][0]+margin, limits['base_joint'][1]-margin
+    candidates = [goal[0]+2.*math.pi*k for k in range(-2, 3)
+                  if lower <= goal[0]+2.*math.pi*k <= upper]
+    if not candidates:
+        raise ValueError('reviewed base goal has no equivalent within joint limits')
+    result = goal.copy()
+    result[0] = min(candidates, key=lambda value: abs(value-reference[0]))
+    return result
 
 
 def load_path(path, model, margin=.02):
@@ -506,8 +532,8 @@ class ToolTrajectoryJoy(Node):
             msg.axes, msg.buttons, self.combos, self.l2_axis,
             self.l2_threshold, self.first_button, self.third_button, self.second_button)
         back_request, self.back_combo = requested_back(
-            msg.axes, msg.buttons, self.back_combo, self.l2_axis,
-            self.l2_threshold, self.back_button)
+            msg.axes, msg.buttons, getattr(self, 'back_combo', False), self.l2_axis,
+            self.l2_threshold, getattr(self, 'back_button', 3))
         if back_request and request is None:
             self.request_back()
         elif request is not None and not self.back_combo:
@@ -690,15 +716,19 @@ class ToolTrajectoryJoy(Node):
             self.future = self.collision.call_async(self.requests[0])
             approach = ('; approaching taught start from %.4f rad' % path['start_error']
                         if path['start_error'] > self.start_tolerance else '')
+            label = ('BACK staging' if getattr(self, 'route_kind', None) == 'back'
+                     else tool_label(path_id))
             self.report('checking',
-                        f'checking {self.operation_label()} path ({len(self.requests)} samples, '
+                        f'checking {label} path '
+                        f'({len(self.requests)} samples, '
                         f'{budget:.1f}s budget){approach}')
         except (ValueError, RuntimeError, KeyError) as exc:
             self.path_id = path_id
             self.begin_failed(str(exc))
 
-    def operation_label(self):
-        return 'BACK staging' if self.route_kind == 'back' else tool_label(self.path_id)
+    def operation_label(self, path_id=None):
+        return ('BACK staging' if getattr(self, 'route_kind', None) == 'back'
+                else tool_label(self.path_id if path_id is None else path_id))
 
     def begin_back(self):
         now = time.monotonic()
@@ -722,33 +752,47 @@ class ToolTrajectoryJoy(Node):
         self._request_route_leg()
 
     def request_route_plan(self, path_id, measured, status):
-        """Plan verified BACK -> reviewed Cartesian pre-dock."""
+        """Plan verified BACK -> reviewed joint or Cartesian pre-dock."""
         if not self.planner.service_is_ready():
             raise RuntimeError('MoveIt route planner unavailable')
         if path_id not in self.pre_dock_targets:
             raise ValueError(f'{tool_label(path_id)} has no execution-enabled pre-dock pose')
         target = self.pre_dock_targets[path_id]
-        nominal_final = np.asarray(self.paths[path_id]['waypoints'][-1], dtype=float)
-        seeds = [('current feedback', np.asarray(measured, dtype=float)),
-                 ('nominal YAML final', nominal_final),
-                 ('SRDF back', self.route_poses['back'].copy())]
-        pre_dock, errors = None, []
-        for seed_name, seed in seeds:
-            if not self.model.within_limits(seed, self.margin):
-                errors.append(f'{seed_name}: seed violates soft limits')
-                continue
-            try:
-                pre_dock = self.model.solve_axis(
-                    target['position'], target['approach_axis'], np.asarray([0., 0., 1.]),
-                    seed, margin_rad=self.margin, max_iterations=500,
-                    max_time_s=.5, joint_step_rad=6.)
-                break
-            except ValueError as exc:
-                errors.append(f'{seed_name}: {exc}')
-        if pre_dock is None:
-            raise ValueError(f'{tool_label(path_id)} pre-dock axis IK failed: '
-                             + ' | '.join(errors))
-        pre_dock = np.asarray(pre_dock, dtype=float)
+        if 'joint_goal' in target:
+            pre_dock = nearest_base_equivalent(
+                target['joint_goal'], measured, self.model.limits, self.margin)
+            if not self.model.within_limits(pre_dock, self.margin):
+                violations = []
+                for name, value in zip(ARM_JOINTS, pre_dock):
+                    low, high = self.model.limits[name]
+                    if not low+self.margin <= value <= high-self.margin:
+                        violations.append(
+                            f'{name}={value:.6f} allowed=[{low+self.margin:.6f}, '
+                            f'{high-self.margin:.6f}]')
+                raise ValueError(f'{tool_label(path_id)} reviewed joint goal violates '
+                                 f'planning limits: {"; ".join(violations)}')
+        else:
+            nominal_final = np.asarray(self.paths[path_id]['waypoints'][-1], dtype=float)
+            seeds = [('current feedback', np.asarray(measured, dtype=float)),
+                     ('nominal YAML final', nominal_final),
+                     ('SRDF back', self.route_poses['back'].copy())]
+            pre_dock, errors = None, []
+            for seed_name, seed in seeds:
+                if not self.model.within_limits(seed, self.margin):
+                    errors.append(f'{seed_name}: seed violates soft limits')
+                    continue
+                try:
+                    pre_dock = self.model.solve_axis(
+                        target['position'], target['approach_axis'], np.asarray([0., 0., 1.]),
+                        seed, margin_rad=self.margin, max_iterations=500,
+                        max_time_s=.5, joint_step_rad=6.)
+                    break
+                except ValueError as exc:
+                    errors.append(f'{seed_name}: {exc}')
+            if pre_dock is None:
+                raise ValueError(f'{tool_label(path_id)} pre-dock axis IK failed: '
+                                 + ' | '.join(errors))
+            pre_dock = np.asarray(pre_dock, dtype=float)
         goals = [pre_dock]
         for label, goal in zip((f'{tool_label(path_id)} pre-dock',), goals):
             if not self.model.within_limits(goal):
@@ -823,7 +867,7 @@ class ToolTrajectoryJoy(Node):
         self.reset()
 
     def path_completed(self):
-        if self.route_kind == 'back':
+        if getattr(self, 'route_kind', None) == 'back':
             measured = np.asarray([self.full_state[j] for j in ARM_JOINTS], dtype=float)
             error = float(np.max(np.abs(measured-self.route_poses['back'])))
             if error > self.back_tolerance:
@@ -960,7 +1004,7 @@ class ToolTrajectoryJoy(Node):
                 return
             if self.stage == 'wait_hold':
                 if (self.status.get('mode') == 'hold' and not self.status.get('transitioning')):
-                    if self.route_kind == 'back_pending':
+                    if getattr(self, 'route_kind', None) == 'back_pending':
                         self.begin_back()
                     else:
                         self.begin(self.path_id)
@@ -1080,7 +1124,7 @@ class ToolTrajectoryJoy(Node):
                 if not self.unchanged(validation=True):
                     raise RuntimeError('robot moved before path execution; '
                                        + self.snapshot_change_reason(validation=True))
-                if self.route_kind == 'tool':
+                if getattr(self, 'route_kind', None) == 'tool':
                     self.back_ready = False
                     self.back_ready_epoch = None
                 self.execution_id = 'tool-path-'+uuid.uuid4().hex
@@ -1101,7 +1145,9 @@ class ToolTrajectoryJoy(Node):
                 self.publisher.publish(String(data=json.dumps(command)))
                 self.stage = 'executing'
                 self.started = now
-                self.report('executing', f'executing {self.operation_label()} path')
+                label = ('BACK staging' if getattr(self, 'route_kind', None) == 'back'
+                         else tool_label(self.path_id))
+                self.report('executing', f'executing {label} path')
                 return
             if self.stage == 'executing':
                 s = self.status

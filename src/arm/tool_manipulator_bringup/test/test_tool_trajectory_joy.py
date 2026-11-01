@@ -1,5 +1,6 @@
 """Offline validation of captured path loading and joystick request edges."""
 import json
+import math
 from pathlib import Path
 import sys
 from unittest.mock import Mock
@@ -15,7 +16,7 @@ sys.path.insert(0, str(SCRIPTS))
 from tool_trajectory_joy import (collision_check_budget, execution_plan, load_path,
                                  isolate_shoulder_zero_crossings, nearest_path_suffix,
                                  load_pre_dock_targets, load_route_poses,
-                                 planned_entry, planned_leg,
+                                 nearest_base_equivalent, planned_entry, planned_leg,
                                  requested_back, requested_path, ARM_JOINTS,
                                  ToolTrajectoryJoy)
 from tool_trajectory_joy import reverse_path
@@ -551,6 +552,26 @@ def test_pre_dock_targets_load_reviewed_arm_world_tcp_poses(tmp_path):
     np.testing.assert_allclose(targets[0]['approach_axis'], [0., 0., -1.])
 
 
+def test_pre_dock_targets_prefer_reviewed_joint_goal(tmp_path):
+    target_file = tmp_path/'targets.yaml'
+    goal = [.1, .2, .3, -.4, .5, -.6]
+    target_file.write_text(yaml.safe_dump({'targets': {
+        'tool0': dict(joint_names=list(ARM_JOINTS), joint_goal_rad=goal,
+                      executable=True)}}))
+    targets = load_pre_dock_targets(target_file)
+    np.testing.assert_allclose(targets[0]['joint_goal'], goal)
+    assert set(targets[0]) == {'joint_goal'}
+
+
+def test_nearest_base_equivalent_avoids_full_turn_from_back():
+    limits = {'base_joint': (-3.503, 3.614)}
+    goal = np.array([3.123184884, .1, .2, -.3, 0., 0.])
+    result = nearest_base_equivalent(
+        goal, np.array([-math.pi, .1, .2, -.3, 0., 0.]), limits, .02)
+    assert result[0] == pytest.approx(3.123184884-2.*math.pi)
+    np.testing.assert_array_equal(result[1:], goal[1:])
+
+
 def test_verified_back_tool_request_plans_only_pre_dock_leg():
     home, back, pre_dock = np.ones(6)*.1, np.ones(6)*.2, np.ones(6)*.3
     node = SimpleNamespace(
@@ -576,6 +597,46 @@ def test_verified_back_tool_request_plans_only_pre_dock_leg():
     assert [constraint.position for constraint in
             request.goal_constraints[0].joint_constraints] == pytest.approx(pre_dock)
     node.report.assert_called_once()
+
+
+def test_reviewed_joint_goal_is_moveit_goal_with_nearest_base_equivalent():
+    goal = np.array([3.123184884, .1, .2, -.3, 0., 0.])
+    limits = {name: (-4., 4.) for name in ARM_JOINTS}
+    limits['base_joint'] = (-3.503, 3.614)
+    node = SimpleNamespace(
+        planner=Mock(), model=Mock(limits=limits), margin=.02,
+        pre_dock_targets={0: {'joint_goal': goal}},
+        full_state=dict(zip(ARM_JOINTS, np.zeros(6))),
+        planning_attempts=3, planning_timeout=8., planning_velocity_scale=.08,
+        planning_acceleration_scale=.4, report=Mock())
+    node._request_route_leg = lambda: ToolTrajectoryJoy._request_route_leg(node)
+    node.planner.service_is_ready.return_value = True
+    node.model.within_limits.return_value = True
+    measured = np.array([-math.pi, 0., 0., 0., 0., 0.])
+    ToolTrajectoryJoy.request_route_plan(node, 0, measured, {'epoch': 'hold'})
+    assert node.route_goals[0][0] == pytest.approx(goal[0]-2.*math.pi)
+    node.model.solve_axis.assert_not_called()
+    request = node.planner.call_async.call_args.args[0].motion_plan_request
+    assert [constraint.position for constraint in
+            request.goal_constraints[0].joint_constraints] == pytest.approx(
+                node.route_goals[0])
+
+
+def test_reviewed_joint_goal_outside_margin_is_blocked_before_moveit():
+    goal = np.array([2.85, .67, 1.581792, -1.4, 0., 0.])
+    limits = {name: (-4., 4.) for name in ARM_JOINTS}
+    limits['base_joint'] = (-3.503, 3.614)
+    limits['elbow_joint'] = (-1.4960962, 1.5779521)
+    node = SimpleNamespace(
+        planner=Mock(), model=Mock(limits=limits), margin=.02,
+        pre_dock_targets={1: {'joint_goal': goal}}, paths={},
+        full_state=dict(zip(ARM_JOINTS, np.zeros(6))))
+    node.planner.service_is_ready.return_value = True
+    node.model.within_limits.return_value = False
+    with pytest.raises(ValueError, match='elbow_joint=.*allowed='):
+        ToolTrajectoryJoy.request_route_plan(
+            node, 1, np.array([-math.pi, 0., 0., 0., 0., 0.]), {'epoch': 'hold'})
+    node.planner.call_async.assert_not_called()
 
 
 def test_shoulder_zero_crossing_is_staged_and_other_joints_hold():

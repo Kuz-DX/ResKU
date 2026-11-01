@@ -84,6 +84,15 @@
 
 ### 다음 우선순위
 
+- [x] 실측 tool0/tool2 끝점을 MoveIt joint goal로 사용하고, BACK 기준 가장 가까운
+  base `2π` 동치각을 선택하도록 했다. 저장 경로 직접 재생은 production에 합치지 않았다.
+- [ ] tool1 끝점의 elbow `1.581792 rad`를 planning 상한 `1.557952 rad` 이하로
+  다시 측정한다. 자동 clamp는 TCP pose를 바꾸므로 금지한다.
+- [x] tag/TCP 축 일치와 tag→TCP 오프셋을 기록했다: tool0
+  `[-45.7, 0, -44.5] mm`, tool1 `[-45.7, 0, -50.0] mm`.
+- [ ] tool1의 기존 camera-normal 30 mm 전진을 X 45.7 mm 오프셋까지 사용하는
+  tag-relative coarse/fine/dock 단계로 교체하고 mock collision 회귀를 통과시킨다.
+
 - [ ] 실기에서 관절별 zero/sign과 soft limit를 저속으로 재검증하고, 허용 범위
   밖 캡처가 영점 불일치인지 실제 작업공간 요구인지 구분한다.
 - [ ] 실제 도킹 자세에서 `base_actuator -> tcp_link`와 tool-specific TCP TF를
