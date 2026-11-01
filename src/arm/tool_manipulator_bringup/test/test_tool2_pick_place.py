@@ -11,7 +11,9 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'scripts'))
 from tool2_sequence import PickPlaceSequence, checked_config, STAGES
-from person_place_geometry import placement_targets, person_on_floor, aligned_base
+from person_place_geometry import (placement_targets, placement_targets_for_direction,
+                                   person_on_floor, person_direction_on_floor,
+                                   aligned_base)
 from tool2_pick_place_coordinator import Tool2PickPlaceCoordinator
 from tool_trajectory_joy import ARM_JOINTS
 
@@ -93,6 +95,29 @@ def test_foot_ray_uses_full_box_and_calibrated_floor():
         person_on_floor(payload, matrix, np.zeros(5), camera, .8)
 
 
+def test_direction_only_accepts_clipped_person_and_uses_bbox_centre_x():
+    camera = np.eye(4)
+    camera[:3, :3] = [[0., 0., 1.], [-1., 0., 0.], [0., -1., 0.]]
+    matrix = np.array([[500., 0., 320.], [0., 500., 240.], [0., 0., 1.]])
+    payload = dict(image_size=dict(width=640, height=480), detections=[dict(
+        class_name='person', confidence=.9, xyxy=[400., 0., 500., 480.])])
+    direction = person_direction_on_floor(payload, matrix, np.zeros(5), camera, .8)
+    expected = np.array([1., -.26])
+    expected /= np.linalg.norm(expected)
+    np.testing.assert_allclose(direction, expected)
+
+
+def test_direction_only_target_is_chassis_boundary_without_person_distance():
+    cfg = config()
+    cfg.update(placement_mode='chassis_edge', chassis_half_extents_m=[.39, .25],
+               edge_clearance_m=0.)
+    base = np.eye(4)
+    base[:3, 3] = [.1921, 0., .235]
+    _, target = placement_targets_for_direction([1., 0.], base, cfg, np.eye(4))
+    bottom = target @ np.r_[cfg['tcp_to_object_bottom_m'], 1.]
+    np.testing.assert_allclose(bottom[:3], [.39, 0., 0.], atol=1e-12)
+
+
 @pytest.mark.parametrize('person,expected', [([2., 0., 0.], [.39, 0., 0.]),
                                             ([.1921, 2., 0.], [.1921, .25, 0.])])
 def test_vehicle_boundary_comes_from_chassis_not_arm_reach(person, expected):
@@ -126,8 +151,10 @@ def coordinator():
     n.full_state = dict(zip(ARM_JOINTS, np.ones(6)*.1))
     n.paths = {2: dict(start=np.zeros(6), waypoints=[np.ones(6)*.1], durations=[2.], total=2.)}
     n.start_tolerance, n.max_start_delta, n.approach_speed = .03, .1, .05
+    n.margin = .02
     n.pick_ready = np.ones(6)*.01
     n.place_test_enabled = False
+    n.place_test_fallback_extension = .20
     n.begin, n.report, n.reset = Mock(), Mock(), Mock()
     n.status = dict(epoch='stopped')
     return n
@@ -180,6 +207,26 @@ def test_place_test_stops_at_preplace_without_descent_or_release():
         'completed', 'tool2 place test reached preplace; remain HOLD')
     n.reset.assert_called_once()
     n.begin.assert_not_called()
+
+
+def test_place_test_floor_ik_failure_extends_at_home_height():
+    n = coordinator()
+    n.place_test_enabled = True
+    n.pick_sequence.stage = 'align'
+    n.pick_preplace = np.eye(4)
+    n.pick_direction_base = np.array([1., 0., 0.])
+    n.model = Mock()
+    home_pose = np.eye(4)
+    home_pose[:3, 3] = [.1, .2, .4]
+    n.model.fk.return_value = home_pose.copy()
+    n.model.solve.side_effect = [ValueError('no floor IK'), np.ones(6)*.2]
+    n.current_q = Mock(return_value=np.ones(6)*.1)
+    n.request_entry_plan = Mock()
+    n.path_completed()
+    fallback = n.model.solve.call_args_list[1].args[0]
+    np.testing.assert_allclose(fallback[:3, 3], [.3, .2, .4])
+    assert n.pick_place_test_fallback
+    n.request_entry_plan.assert_called_once()
 
 
 def test_runtime_grasps_returns_full_route_then_exact_ready_before_person():

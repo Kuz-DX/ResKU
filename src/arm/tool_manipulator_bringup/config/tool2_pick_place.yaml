@@ -29,3 +29,4 @@ linear_speed_m_s: 0.005
 # Explicitly launched development mode. The operator moves HOME first; the
 # service rejects any arm joint farther than this from the dynamic HOME target.
 place_test_home_tolerance_rad: 0.10
+place_test_fallback_extension_m: 0.20

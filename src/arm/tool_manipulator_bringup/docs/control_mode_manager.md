@@ -127,10 +127,18 @@ requires fresh feedback, arm focus, completed startup, HOLD ownership, and a
 maximum per-joint HOME error of 0.10 rad. HOME uses `startup_goal_rad` for
 shoulder/elbow/wrist-pitch and zero for base/wrist-roll/wrist-yaw.
 
-After five stable person observations, the test turns only `base_joint` toward
-the person, plans and executes the full-arm transit to preplace, and stops in
-HOLD. It never creates the descent path and never commands the gripper. The
-normal `enabled: false` guard continues to protect the complete pick/place
+The test uses only bbox horizontal centre `(x1+x2)/2`; clipped head or feet and
+person distance are irrelevant. The calibrated optical ray at camera principal
+Y is transformed to a horizontal world bearing. After five stable bearing
+observations, the test turns only `base_joint` toward the person and targets the
+chassis footprint boundary with zero added edge clearance. It does not claim or
+check human stand-off distance in this development mode.
+
+It then plans and executes the full-arm transit to floor preplace. If that IK
+has no solution, it preserves the post-alignment HOME TCP height and orientation
+and instead extends 0.20 m along the person bearing. Either outcome stops in
+HOLD. The test never creates the descent path and never commands the gripper.
+The normal `enabled: false` guard continues to protect the complete pick/place
 sequence. Full pick/place and place-test launch options are mutually exclusive.
 
 Use separate terminals (replace `<ARM_D435I_SERIAL>` with the measured arm
