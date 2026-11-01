@@ -237,9 +237,23 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                     or angle > self.cfg['angle_tolerance_rad']
                     or np.max(np.abs(self.velocity)) > self.cfg['stopped_speed_rad_s']):
                 raise RuntimeError('advance endpoint feedback outside tolerance; remain HOLD')
-            self.report('completed', 'tag-normal advance %.1f mm completed; HOLD; no actuation' %
-                        (self.cfg['advance_distance_m']*1000.))
-            self.reset()
+            if self.path_id == 0 and self.cfg['actuation_enabled']:
+                self.hold_epoch = self.status['epoch']
+                self.lock_goal = q.copy()
+                self.expected_docked = self.cfg['desired_docked']
+                self.command_feedback_sequence = self.docked_feedback_sequence
+                self.actuation_deadline = time.monotonic()+self.cfg['actuation_timeout_s']
+                self.snapshot = dict(self.full_state)
+                self.send_docking_pulse(self.expected_docked)
+                self.stage = 'dock_actuate'
+                action = 'dock' if self.expected_docked else 'release'
+                self.report('actuating',
+                            'tag-normal advance completed; Arduino %s pulse sent; '
+                            'waiting for /arm/docked' % action)
+            else:
+                self.report('completed', 'tag-normal advance %.1f mm completed; HOLD; no actuation' %
+                            (self.cfg['advance_distance_m']*1000.))
+                self.reset()
             return
         if self.docking_started is None:
             # Do not let a noisy pose observed during approach permanently
@@ -416,11 +430,18 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             self.begin(self.path_id, self.advance_plan)
 
     def observe(self, now):
-        stamp, base_tag = self.fresh_observation(now)
+        locked_actuation = self.stage == 'dock_actuate' and self.advance_locked
+        if not locked_actuation:
+            stamp, base_tag = self.fresh_observation(now)
         q = np.asarray([self.full_state[j] for j in ARM_JOINTS])
         current = self.model.fk(q)
         camera_mode = self.cfg.get('alignment_mode') == 'camera_normal_advance'
-        if camera_mode:
+        if locked_actuation:
+            aligned = (np.linalg.norm(current[:3, 3]-self.advance_target[:3, 3])
+                       <= self.cfg['position_tolerance_m']
+                       and direction_angle(current[:3, :3] @ self.advance_local_axis,
+                                           self.advance_direction) <= self.cfg['angle_tolerance_rad'])
+        elif camera_mode:
             tag_normal, tag_distance = self.camera_advance_direction(base_tag, current)
             aligned = True  # Tool 1 uses the taught endpoint; no visual correction.
         else:

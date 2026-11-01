@@ -101,9 +101,9 @@ def load_path(path, model, margin=.02):
                 after_path=after)
     if data.get('mid_path_ee_open'):
         action = data['mid_path_ee_open']
-        if action != dict(after_point=14, velocity_rad_s=-.48, duration_sec=2.):
+        if action != dict(after_point=15, velocity_rad_s=-1., duration_sec=3.2):
             raise ValueError('invalid test mid-path EE opening')
-        index = data.get('source_point_indices', list(range(len(points))))[13]
+        index = data.get('source_point_indices', list(range(len(points))))[14]
         result['ee_split_index'] = index
     return result
 
@@ -610,16 +610,18 @@ class ToolTrajectoryJoy(Node):
 
     def handle_mid_path_ee(self):
         if self.ee_mid_phase == 'approach':
+            ee_start = self.full_state['ee_joint']
+            ee_target = ee_start - 3.2
             self.ee_mid_phase = 'opening'
             q = np.asarray([self.full_state[j] for j in ARM_JOINTS])
-            self.report('opening', 'point 14 reached; checking EE opening at -0.48 rad/s for 2s')
-            self.begin(self.path_id, dict(start=q, waypoints=[q], durations=[2.], total=2.,
-                start_error=0., ee_target_rad=self.full_state['ee_joint']-.96,
-                ee_duration_sec=2., ee_velocity_rad_s=-.48))
+            self.report('opening', 'point 15 reached; checking EE opening at -1 rad/s for 3.2s')
+            self.begin(self.path_id, dict(start=q, waypoints=[q], durations=[3.2], total=3.2,
+                start_error=0., ee_target_rad=ee_target,
+                ee_duration_sec=3.2, ee_velocity_rad_s=-1.))
             return True
         if self.ee_mid_phase == 'opening':
             self.ee_mid_phase = 'tail'
-            self.report('resuming', 'EE stopped; checking continuation to point 15')
+            self.report('resuming', 'EE stopped; checking continuation to point 16')
             path = execution_plan(self.ee_tail, [self.full_state[j] for j in ARM_JOINTS],
                 self.start_tolerance, self.max_start_delta, self.approach_speed)
             self.begin(self.path_id, path)

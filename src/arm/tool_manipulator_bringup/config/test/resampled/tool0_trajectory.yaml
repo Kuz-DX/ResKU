@@ -1,9 +1,9 @@
 # Generated from ../tool0_trajectory.yaml; do not edit sampled points by hand.
 # Nominal times only: manager acceleration/jerk/feedback guards remain active.
 mid_path_ee_open:
-  after_point: 14
-  velocity_rad_s: -0.48
-  duration_sec: 2.0
+  after_point: 15
+  velocity_rad_s: -1.0
+  duration_sec: 3.2
 execution_enabled: true
 joint_names:
 - base_joint

@@ -83,3 +83,14 @@ def test_real_mode_rejects_mock_initial_positions_before_hardware_access():
             mock_initial_positions_file=str(ROOT / "test/storage_pose_initial_positions.yaml"),
         )
     validate.assert_not_called()
+
+
+def test_mock_dynamics_opt_in_for_velocity_integration():
+    import xml.etree.ElementTree as ET
+    description = {"robot_description": ROBOT.replace(
+        '<joint name="ee_joint">',
+        '<hardware><plugin>mock_components/GenericSystem</plugin></hardware><joint name="ee_joint">')}
+    normal = ET.fromstring(common._mock_velocity_ee(description)["robot_description"])
+    assert normal.find("ros2_control/hardware/param") is None
+    enabled = ET.fromstring(common._mock_velocity_ee(description, True)["robot_description"])
+    assert enabled.find("ros2_control/hardware/param[@name='calculate_dynamics']").text == 'true'

@@ -33,7 +33,7 @@ def validate_hardware(hardware_file: str, error_prefix: str = "real control bloc
         raise RuntimeError(f"{error_prefix}: " + "; ".join(errors))
 
 
-def _mock_velocity_ee(description: dict) -> dict:
+def _mock_velocity_ee(description: dict, calculate_dynamics=False) -> dict:
     """Make mock ee_joint match the real velocity-only interface."""
     result = dict(description)
     root = ET.fromstring(result["robot_description"])
@@ -41,6 +41,14 @@ def _mock_velocity_ee(description: dict) -> dict:
     if command is None:
         raise RuntimeError("Mock EE command interface missing")
     command.set("name", "velocity")
+    if calculate_dynamics:
+        hardware = root.find("ros2_control/hardware")
+        if hardware is None:
+            raise RuntimeError("Mock hardware element missing")
+        param = hardware.find("param[@name='calculate_dynamics']")
+        if param is None:
+            param = ET.SubElement(hardware, "param", name="calculate_dynamics")
+        param.text = "true"
     result["robot_description"] = ET.tostring(root, encoding="unicode")
     return result
 
@@ -53,6 +61,7 @@ def build_arm_base(
     use_mesh: str = "true",
     mock_initial_positions_file: str = "",
     mock_ee_velocity: bool = False,
+    mock_calculate_dynamics: bool = False,
     manual_controller_file: str = '',
     error_prefix: str = "real control blocked",
 ):
@@ -89,7 +98,7 @@ def build_arm_base(
     )
     description = dict(moveit_config.robot_description)
     if not real_hardware and mock_ee_velocity:
-        description = _mock_velocity_ee(description)
+        description = _mock_velocity_ee(description, mock_calculate_dynamics)
 
     controller_files = [
         str(moveit_share / "config/ros2_controllers.yaml"),

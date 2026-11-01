@@ -45,6 +45,7 @@ def bringup(context):
     base = common.build_arm_base(
         real_hardware=real,
         hardware_file=LaunchConfiguration('hardware_config').perform(context), mock_ee_velocity=True,
+        mock_calculate_dynamics=True,
         # Use the same mounted-tool geometry for display and collision checks.
         tool_id=LaunchConfiguration('tool_id').perform(context),
         mock_initial_positions_file=initial,
@@ -154,7 +155,7 @@ def generate_launch_description():
                                            'person align and move to preplace without descent/release')),
         DeclareLaunchArgument('tool2_pick_place_config', default_value=str(hardware_default.parent/'tool2_pick_place.yaml')),
         DeclareLaunchArgument('enable_docking_motion', default_value='true', choices=['true', 'false']),
-        DeclareLaunchArgument('docking_config', default_value=str(hardware_default.parent/'tool_docking.yaml')),
+        DeclareLaunchArgument('docking_config', default_value=str(hardware_default.parent/'test/tool_docking.yaml')),
         DeclareLaunchArgument('docking_camera_frame', default_value='arm_camera_color_optical_frame'),
         DeclareLaunchArgument('launch_docking_bridge', default_value='true', choices=['true', 'false']),
         DeclareLaunchArgument('docking_serial_port', default_value='/dev/ttyACM0'),

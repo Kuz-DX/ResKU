@@ -13,18 +13,21 @@ def core():
     c.focus, c.ready, c.mode = 'arm', True, 'tool_auto'
     c.feedback([0.]*6, [0.]*6, 0.)
     c.ee_position, c.ee_velocity, c.ee_state_time = 1., 0., 0.
-    assert c.timed_ee(c.epoch, 'open', -.48, 2., 0.)
+    assert c.timed_ee(c.epoch, 'open', -1., 3.2, 0.)
     return c
 
 
-def test_two_seconds_then_zero_and_hold():
+def test_three_point_two_seconds_then_zero_and_hold():
     c = core()
-    for t in [.01, 1., 1.99]:
+    for t in [.01, 1., 3.19]:
         c.ee_state_time = t
         c.run_ee(t)
-        assert c.ee == -.48
-    c.ee_state_time = 2.
-    c.run_ee(2.)
+        assert c.ee == -1.
+    c.ee_state_time = 3.2
+    c.run_ee(3.2)
+    assert c.ee == 0. and c.mode == 'tool_auto'
+    c.ee_state_time = 3.51
+    c.run_ee(3.51)
     assert c.ee == 0. and c.mode == 'hold'
     assert c.last_execution_id == 'open' and c.last_execution_result == 'succeeded'
 
@@ -42,13 +45,13 @@ def test_arm_drift_stops():
     assert c.ee == 0. and c.last_execution_result == 'aborted'
 
 
-def test_split_at_source_point_14():
+def test_split_at_source_point_15():
     p = Path(__file__).resolve().parents[1]/'config/test/resampled/tool0_trajectory.yaml'
     d = yaml.safe_load(p.read_text())
     m = Mock(); m.within_limits.return_value = True
     path = load_path(p, m)
     i = path['ee_split_index']
-    assert i == d['source_point_indices'][13]
+    assert i == d['source_point_indices'][14]
     assert list(path['waypoints'][i-1]) == d['points'][i]['positions_rad']
 
 
@@ -58,16 +61,69 @@ def test_middle_action_precedes_tail():
     from tool_trajectory_joy_test import ToolTrajectoryJoy, ARM_JOINTS
     q = np.zeros(6)
     n = SimpleNamespace(ee_mid_phase='approach', path_id=0,
-        full_state=dict(zip(ARM_JOINTS, q), ee_joint=1.),
+        full_state=dict(zip(ARM_JOINTS, q), ee_joint=0.),
         report=Mock(), begin=Mock(), start_tolerance=.03, max_start_delta=.1,
         approach_speed=.05,
         ee_tail=dict(start=q, waypoints=[q+.01], durations=[1.], total=1.))
     assert ToolTrajectoryJoy.handle_mid_path_ee(n)
     assert n.ee_mid_phase == 'opening'
     command = n.begin.call_args.args[1]
-    assert command['ee_duration_sec'] == 2. and command['ee_velocity_rad_s'] == -.48
-    assert command['ee_target_rad'] == pytest.approx(.04)
+    assert command['ee_duration_sec'] == 3.2 and command['ee_velocity_rad_s'] == -1.
+    assert command['ee_target_rad'] == pytest.approx(-3.2)
     assert ToolTrajectoryJoy.handle_mid_path_ee(n)
     assert n.ee_mid_phase == 'tail'
     assert 'ee_duration_sec' not in n.begin.call_args.args[1]
     assert not ToolTrajectoryJoy.handle_mid_path_ee(n)
+
+
+def test_coasting_and_position_drift_delay_completion():
+    c = core()
+    c.ee_velocity = -.1
+    for t in (3.2, 3.25):
+        c.ee_state_time = t
+        c.run_ee(t)
+        assert c.ee == 0. and c.execution_id == 'open'
+    c.ee_velocity = 0.
+    c.ee_state_time = 3.3
+    c.run_ee(3.3)
+    c.ee_position -= .03068
+    c.ee_state_time = 3.5
+    c.run_ee(3.5)
+    assert c.execution_id == 'open'
+    c.ee_state_time = 3.81
+    c.run_ee(3.81)
+    assert c.last_execution_result == 'succeeded'
+
+
+def test_settling_timeout_aborts_without_resuming():
+    c = core()
+    c.ee_velocity = -.1
+    c.ee_state_time = 6.21
+    c.run_ee(6.21)
+    assert c.ee == 0. and c.last_execution_result == 'aborted'
+
+
+@pytest.mark.parametrize('start', [0., -3., 4.])
+def test_continuous_ee_timed_motion_has_no_position_bounds(start):
+    c = TimedCore([(-4., 4.)]*6, [.12]*6)
+    c.focus, c.ready, c.mode = 'arm', True, 'tool_auto'
+    c.feedback([0.]*6, [0.]*6, 0.)
+    c.ee_position, c.ee_velocity, c.ee_state_time = start, 0., 0.
+    assert c.timed_ee(c.epoch, 'open', -1., 3.2, 0.)
+    for t in (1., 3.19):
+        c.ee_position = start-t
+        c.ee_state_time = t
+        c.run_ee(t)
+        assert c.ee == -1.
+    c.ee_state_time = 3.2
+    c.run_ee(3.2)
+    assert c.ee == 0.
+
+
+def test_common_position_goal_still_bounded():
+    c = TimedCore([(-4., 4.)]*6, [.12]*6)
+    c.focus, c.ready, c.mode = 'arm', True, 'tool_auto'
+    c.feedback([0.]*6, [0.]*6, 0.)
+    c.ee_position, c.ee_velocity, c.ee_state_time = 0., 0., 0.
+    with pytest.raises(ValueError, match='invalid ee goal'):
+        c.close_ee(c.epoch, 'open', -3., 0.)

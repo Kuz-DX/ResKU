@@ -10,15 +10,32 @@ from arm_mode_core import ModeCore
 class TestModeCore(ModeCore):
     def timed_ee(self, epoch, execution_id, velocity, duration, now):
         if (type(velocity) not in (float, int) or not math.isfinite(velocity)
-                or velocity != -.48 or duration != 2.):
-            raise ValueError('test EE opening requires -0.48 rad/s for 2 seconds')
-        target = self.ee_position + velocity*duration if self.ee_position is not None else float('nan')
-        accepted = self.close_ee(epoch, execution_id, target, now, speed=.12)
-        if accepted:
-            self.timed_ee_id = execution_id
-            self.timed_ee_velocity = velocity
-            self.timed_ee_end = now+duration
-        return accepted
+                or velocity != -1. or duration != 3.2):
+            raise ValueError('test EE opening requires -1 rad/s for 3.2 seconds')
+        # Timed velocity control of continuous EE: no position-goal bounds.
+        # Keep ownership, freshness and stopped-arm checks independent of close_ee.
+        if (self.mode != 'tool_auto' or epoch != self.epoch or self.transitioning or
+                self.focus != 'arm' or not self.ready or not self.fresh(now)):
+            return False
+        if self.execution_id is not None:
+            raise ValueError('execution already active; cancel first')
+        if not isinstance(execution_id, str) or not execution_id:
+            raise ValueError('invalid ee execution id')
+        if (not 0 <= now-self.ee_state_time < .3 or self.ee_position is None
+                or not math.isfinite(self.ee_position)):
+            raise ValueError('fresh finite ee feedback required')
+        if max(map(abs, self.velocity)) > .02:
+            raise ValueError('arm must be stopped before ee motion')
+        self.target = self.goal = list(self.position)
+        self.execution_id = execution_id
+        self.ee_goal = self.ee_position + velocity*duration
+        self.started = now
+        self.timed_ee_id = execution_id
+        self.timed_ee_velocity = velocity
+        self.timed_ee_end = now+duration
+        self.timed_ee_stable_since = None
+        self.timed_ee_stable_position = None
+        return True
 
     def run_ee(self, now):
         if getattr(self, 'timed_ee_id', None) != self.execution_id or self.execution_id is None:
@@ -30,12 +47,25 @@ class TestModeCore(ModeCore):
                 self.position, self.goal, (.02,.005,.005,.005,.02,.02))):
             self.abort_path_to_hold('arm moved during timed ee', now)
         elif now >= self.timed_ee_end:
-            completed = self.execution_id
-            self.request('hold', now)
-            self.last_execution_id, self.last_execution_result = completed, 'succeeded'
-            self.reason = 'timed ee opening completed; HOLD'
-        elif self.ee_position <= -2.351592547829:
-            self.abort_path_to_hold('timed ee reached lower limit', now)
+            # Zero command is not proof of mechanical standstill. Keep ownership
+            # until fresh position and velocity remain stable before tail validation.
+            self.reason = 'timed ee opening stopped; waiting for stable feedback'
+            if now-self.timed_ee_end > 3.:
+                self.abort_path_to_hold('timed ee failed to settle after stop', now)
+                return
+            if (not math.isfinite(self.ee_position) or not math.isfinite(self.ee_velocity)
+                    or abs(self.ee_velocity) > .02):
+                self.timed_ee_stable_since = None
+                return
+            if (self.timed_ee_stable_since is None
+                    or abs(self.ee_position-self.timed_ee_stable_position) > .002):
+                self.timed_ee_stable_since = now
+                self.timed_ee_stable_position = self.ee_position
+            elif now-self.timed_ee_stable_since >= .3:
+                completed = self.execution_id
+                self.request('hold', now)
+                self.last_execution_id, self.last_execution_result = completed, 'succeeded'
+                self.reason = 'timed ee opening settled; HOLD'
         else:
             self.ee = self.timed_ee_velocity
 

@@ -6,7 +6,7 @@
 # First wrist pitch retains the adjusted magnitude: -1.45 rad.
 # Points 3 through 15 hold the point-5 posture; only base rotates.
 # Points 16 through 18 move only RMD joints; base/roll/yaw remain fixed.
-mid_path_ee_open: {after_point: 14, velocity_rad_s: -0.48, duration_sec: 2.0}
+mid_path_ee_open: {after_point: 15, velocity_rad_s: -1.0, duration_sec: 3.2}
 execution_enabled: true
 timing_mode: joint_limits
 joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
