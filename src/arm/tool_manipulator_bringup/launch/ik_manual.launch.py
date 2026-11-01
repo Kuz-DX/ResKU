@@ -71,7 +71,11 @@ def bringup(context):
                                                       'tcp_translation_frame').perform(context)}],
                    output='screen')
         docking = LaunchConfiguration('enable_tool_docking').perform(context) == 'true'
-        pick_place = LaunchConfiguration('enable_tool2_pick_place').perform(context) == 'true'
+        full_pick_place = LaunchConfiguration('enable_tool2_pick_place').perform(context) == 'true'
+        place_test = LaunchConfiguration('enable_tool2_place_test').perform(context) == 'true'
+        if full_pick_place and place_test:
+            raise ValueError('full tool2 pick/place and place-test mode are mutually exclusive')
+        pick_place = full_pick_place or place_test
         if pick_place and not docking:
             raise ValueError('tool2 (supply_box) pick/place requires the managed docking coordinator')
         docking_parameters = ({
@@ -83,7 +87,8 @@ def bringup(context):
         if pick_place:
             docking_parameters.update(
                 pick_place_config=LaunchConfiguration('tool2_pick_place_config').perform(context),
-                pick_place_ready_yaml=str(ready_config))
+                pick_place_ready_yaml=str(ready_config),
+                tool2_place_test_enabled=place_test)
         tool_script = ('tool2_pick_place_coordinator.py' if pick_place else
                        'tool_docking_coordinator.py' if docking else 'tool_trajectory_joy.py')
         tool_paths = Node(executable=sys.executable,
@@ -140,6 +145,9 @@ def generate_launch_description():
         # Enabling the producer does not submit a path at launch time.
         DeclareLaunchArgument('enable_tool_docking', default_value='true', choices=['true', 'false']),
         DeclareLaunchArgument('enable_tool2_pick_place', default_value='false', choices=['true', 'false']),
+        DeclareLaunchArgument('enable_tool2_place_test', default_value='false', choices=['true', 'false'],
+                              description=('Development service: require operator-completed HOME, then '
+                                           'person align and move to preplace without descent/release')),
         DeclareLaunchArgument('tool2_pick_place_config', default_value=str(hardware_default.parent/'tool2_pick_place.yaml')),
         DeclareLaunchArgument('enable_docking_motion', default_value='true', choices=['true', 'false']),
         DeclareLaunchArgument('docking_config', default_value=str(hardware_default.parent/'tool_docking.yaml')),

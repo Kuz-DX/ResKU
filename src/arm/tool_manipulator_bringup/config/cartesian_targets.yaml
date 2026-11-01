@@ -13,6 +13,10 @@ targets:
     orientation_xyzw: [0.0, 0.9537169507482269, 0.0, 0.30070579950427306]
     executable: true
     role: measured_joint_pre_dock
+    # After fresh /arm/docked=true feedback, retreat straight away from the
+    # box along TCP -Z before MoveIt plans directly to BACK.
+    retreat_distance_m: 0.030
+    retreat_axis_tcp: [0.0, 0.0, -1.0]
   tool1:
     joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
     # Retained for diagnosis only: elbow=1.581792 exceeds the 1.577952 hard
@@ -26,12 +30,16 @@ targets:
     orientation_xyzw: [0.0, 0.8870108331782217, 0.0, 0.4617486132350339]
     executable: true
     role: measured_joint_pre_dock_requires_limit_correction
+    retreat_distance_m: 0.030
+    retreat_axis_tcp: [0.0, 0.0, -1.0]
   tool2:
     joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
     joint_goal_rad: [-2.5280003384357435, 0.8353145906571304, 1.5156438585160097,
       -1.5091862255047854, -0.2316310989709387, -0.0828349625456184]
     executable: true
     role: measured_joint_pre_dock
+    retreat_distance_m: 0.030
+    retreat_axis_tcp: [0.0, 0.0, -1.0]
   supply_box_center:
     frame_id: base_actuator
     position_m: [-0.236197, -0.120, 0.182]

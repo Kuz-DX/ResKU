@@ -20,20 +20,21 @@ class PickPlaceSequence:
         self.stage = 'failed'
 
 
-def checked_config(data):
+def checked_config(data, place_test=False):
     """Do not invent gripper calibration, floor frame or placement geometry."""
-    if data.get('enabled') is not True:
+    if not place_test and data.get('enabled') is not True:
         raise ValueError(f'{tool_label(SUPPLY_BOX)} pick/place disabled; measure and enable its configuration first')
     for key in ('floor_frame', 'person_ground_frame', 'person_topic', 'person_camera_info_topic'):
         if not isinstance(data.get(key), str) or not data[key].strip():
             raise ValueError(f'missing {key}')
-    ranges = dict(close_rad=(-2.351592547829, 2.839398438376),
-                  open_rad=(-2.351592547829, 2.839398438376),
-                  ee_speed_rad_s=(0., .12),
-                  preplace_height_m=(0., .3), person_clearance_m=(0., 5.),
+    ranges = dict(preplace_height_m=(0., .3), person_clearance_m=(0., 5.),
                   max_detection_age_s=(0., .5), min_confidence=(0., 1.),
                   stable_angle_rad=(0., .1), acquire_timeout_s=(0., 30.),
                   sequence_timeout_s=(0., 1800.), linear_speed_m_s=(0., .02))
+    if not place_test:
+        ranges.update(close_rad=(-2.351592547829, 2.839398438376),
+                      open_rad=(-2.351592547829, 2.839398438376),
+                      ee_speed_rad_s=(0., .12))
     mode = data.get('placement_mode')
     if mode == 'radius':
         ranges['place_radius_m'] = (0., 1.)
@@ -49,7 +50,7 @@ def checked_config(data):
         value = data.get(key)
         if type(value) not in (float, int) or not math.isfinite(value) or not low < value <= high:
             raise ValueError(f'{key} must be measured/configured in ({low}, {high}]')
-    if data['close_rad'] == data['open_rad']:
+    if not place_test and data['close_rad'] == data['open_rad']:
         raise ValueError('open and close targets must differ')
     if type(data.get('stable_samples')) is not int or not 3 <= data['stable_samples'] <= 100:
         raise ValueError('stable_samples must be 3..100')

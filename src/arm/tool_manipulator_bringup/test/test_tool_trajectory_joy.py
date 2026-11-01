@@ -583,7 +583,9 @@ def test_pre_dock_targets_prefer_reviewed_joint_goal(tmp_path):
                       executable=True)}}))
     targets = load_pre_dock_targets(target_file)
     np.testing.assert_allclose(targets[0]['joint_goal'], goal)
-    assert set(targets[0]) == {'joint_goal'}
+    assert set(targets[0]) == {'joint_goal', 'retreat_distance', 'retreat_axis'}
+    assert targets[0]['retreat_distance'] == pytest.approx(.030)
+    np.testing.assert_allclose(targets[0]['retreat_axis'], [0., 0., -1.])
 
 
 def test_nearest_base_equivalent_avoids_full_turn_from_back():
@@ -593,6 +595,32 @@ def test_nearest_base_equivalent_avoids_full_turn_from_back():
         goal, np.array([-math.pi, .1, .2, -.3, 0., 0.]), limits, .02)
     assert result[0] == pytest.approx(3.123184884-2.*math.pi)
     np.testing.assert_array_equal(result[1:], goal[1:])
+
+
+def test_face_button_requests_complete_autonomous_docking_sequence():
+    node = SimpleNamespace(
+        combos=[False]*3, back_combo=False, l2_axis=2, l2_threshold=-.5,
+        first_button=2, second_button=1, third_button=0, back_button=3,
+        request_path=Mock(), request_back=Mock())
+    ToolTrajectoryJoy.on_joy(
+        node, SimpleNamespace(axes=[0., 0., -1.], buttons=[0, 0, 1, 0]))
+    node.request_path.assert_called_once_with(0, desired_docked=True)
+    node.request_back.assert_not_called()
+
+
+def test_automatic_return_plans_directly_to_back_without_home():
+    node = SimpleNamespace(
+        healthy_hold=Mock(return_value={'epoch': 'hold'}),
+        planner=Mock(), model=Mock(), route_poses={
+            'home': np.ones(6)*.1, 'back': np.ones(6)*.2},
+        full_state=dict(zip(ARM_JOINTS, np.zeros(6))),
+        _request_route_leg=Mock())
+    node.planner.service_is_ready.return_value = True
+    node.model.within_limits.return_value = True
+    ToolTrajectoryJoy.begin_back(node, via_home=False)
+    assert node.route_labels == ['back']
+    np.testing.assert_allclose(node.route_goals, [np.ones(6)*.2])
+    node._request_route_leg.assert_called_once()
 
 
 def test_verified_back_tool_request_plans_only_pre_dock_leg():

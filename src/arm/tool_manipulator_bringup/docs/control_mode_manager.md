@@ -117,6 +117,64 @@ with `ik_manual.launch.py`; one L2+X request then selects the full continuation.
 Robot startup alone never initiates this sequence. ROS packages were not built
 as part of this change.
 
+### Tool-2 HOME-to-preplace service test
+
+`enable_tool2_place_test:=true` is a separate development mode. It accepts no
+L2+X full tool-2 sequence and does not require the unmeasured gripper close/open
+calibration. The operator must first call `/arm/go_home` and wait for the
+dynamic startup HOME to complete in HOLD. `/arm/tool2/start_place_test` then
+requires fresh feedback, arm focus, completed startup, HOLD ownership, and a
+maximum per-joint HOME error of 0.10 rad. HOME uses `startup_goal_rad` for
+shoulder/elbow/wrist-pitch and zero for base/wrist-roll/wrist-yaw.
+
+After five stable person observations, the test turns only `base_joint` toward
+the person, plans and executes the full-arm transit to preplace, and stops in
+HOLD. It never creates the descent path and never commands the gripper. The
+normal `enabled: false` guard continues to protect the complete pick/place
+sequence. Full pick/place and place-test launch options are mutually exclusive.
+
+Use separate terminals (replace `<ARM_D435I_SERIAL>` with the measured arm
+camera serial):
+
+```bash
+# Terminal 1: arm camera
+source /opt/ros/humble/setup.bash
+source ~/ResKU/install/setup.bash
+ros2 launch vision arm_camera.launch.py serial_no:=<ARM_D435I_SERIAL>
+
+# Terminal 2: arm-camera person inference only
+source /opt/ros/humble/setup.bash
+source ~/ResKU/install/setup.bash
+ros2 launch vision person_detection.launch.py \
+  enable_side_cameras:=false enable_arm_camera:=true
+
+# Terminal 3: source-tree launch, so this test does not require a package build
+source /opt/ros/humble/setup.bash
+source ~/ResKU/install/setup.bash
+ros2 launch ~/ResKU/src/arm/tool_manipulator_bringup/launch/ik_manual.launch.py \
+  tool_id:=2 enable_tool2_place_test:=true \
+  launch_docking_bridge:=false enable_docking_motion:=false
+
+# Terminal 4: inspect inputs/status
+source /opt/ros/humble/setup.bash
+source ~/ResKU/install/setup.bash
+ros2 topic echo /arm/person/detections
+# In another tab when needed:
+ros2 topic echo /arm/control_status
+
+# Terminal 5: operator-controlled HOME, then wait for HOLD/HOME completion
+source /opt/ros/humble/setup.bash
+source ~/ResKU/install/setup.bash
+ros2 service call /arm/go_home std_srvs/srv/Trigger '{}'
+
+# Only after Terminal 4 shows fresh HOLD and HOME completion:
+ros2 service call /arm/tool2/start_place_test std_srvs/srv/Trigger '{}'
+```
+
+A successful `/arm/go_home` response means accepted, not arrived. Likewise, a
+successful start response means person acquisition started; completion is the
+`tool2 place test reached preplace; remain HOLD` coordinator report.
+
 `ik_manual.launch.py` starts the mode-managed IK/manual stack, initially in
 HOLD, using real hardware and an externally published `/joy` topic by default.
 It does not modify the legacy manual launch.

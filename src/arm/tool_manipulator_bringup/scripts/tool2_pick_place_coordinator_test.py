@@ -28,8 +28,14 @@ from person_place_geometry import person_on_floor, placement_targets, aligned_ba
 class Tool2PickPlaceCoordinator(ToolDockingCoordinator):
     def __init__(self):
         super().__init__()
+        self.place_test_enabled = bool(self.declare_parameter(
+            'tool2_place_test_enabled', False).value)
         self.pick_config = checked_config(yaml.safe_load(Path(self.declare_parameter(
-            'pick_place_config', '').value).read_text()))
+            'pick_place_config', '').value).read_text()), self.place_test_enabled)
+        self.place_test_home_tolerance = float(
+            self.pick_config.get('place_test_home_tolerance_rad', .10))
+        if not 0. < self.place_test_home_tolerance <= .10:
+            raise ValueError('place_test_home_tolerance_rad must be in (0, 0.10]')
         if self.pick_config['placement_mode'] == 'chassis_edge':
             robot = ET.fromstring(self.get_parameter('robot_description').value)
             link = next((link for link in robot.findall('link')
@@ -56,6 +62,9 @@ class Tool2PickPlaceCoordinator(ToolDockingCoordinator):
                                  self.on_person_camera, qos_profile_sensor_data)
         self.create_subscription(String, self.pick_config['person_topic'],
                                  self.on_person, qos_profile_sensor_data)
+        if self.place_test_enabled:
+            self.create_service(Trigger, '/arm/tool2/start_place_test',
+                                self.start_place_test)
 
     def reset(self):
         super().reset()
@@ -65,7 +74,46 @@ class Tool2PickPlaceCoordinator(ToolDockingCoordinator):
         self.person_last_received = -math.inf
         self.person_sample = None
 
+    def start_place_test(self, _request, response):
+        """Start person alignment from operator-confirmed dynamic HOME."""
+        try:
+            if not self.place_test_enabled:
+                raise RuntimeError('tool2 place test is not enabled')
+            if self.pick_sequence is not None or self.stage != 'idle':
+                raise RuntimeError('tool2 coordinator is busy')
+            status = self.healthy_hold(time.monotonic())
+            home = np.asarray(status.get('startup_goal_rad'), dtype=float)
+            if home.shape != (6,) or not np.all(np.isfinite(home)):
+                raise RuntimeError('dynamic HOME target is unavailable')
+            home = home.copy()
+            home[[0, 4, 5]] = 0.
+            error = float(np.max(np.abs(self.current_q()-home)))
+            if error > self.place_test_home_tolerance:
+                raise RuntimeError(
+                    f'HOME error {error:.6f} rad exceeds '
+                    f'{self.place_test_home_tolerance:.6f} rad')
+            self.pick_sequence = PickPlaceSequence()
+            self.pick_sequence.stage = 'person'
+            self.pick_started = time.monotonic()
+            self.pick_hold_epoch = status['epoch']
+            self.pick_wait_started = self.pick_started
+            self.person_stamp = -1
+            self.person_count = 0
+            self.person_sample = None
+            self.stage = 'pick_person'
+            self.report('place_test', 'waiting for stable person observation from HOME')
+            response.success = True
+            response.message = 'tool2 place test started; waiting for person'
+        except (ValueError, RuntimeError, KeyError) as exc:
+            response.success = False
+            response.message = str(exc)
+        return response
+
     def begin(self, path_id, planned_path=None):
+        if path_id == 2 and self.place_test_enabled and self.pick_sequence is None:
+            self.report('rejected',
+                        'full tool2 sequence disabled in place-test mode; call start_place_test')
+            return
         if path_id == 2 and self.pick_sequence is None:
             self.pick_sequence = PickPlaceSequence()
             self.pick_started = time.monotonic()
@@ -160,6 +208,10 @@ class Tool2PickPlaceCoordinator(ToolDockingCoordinator):
     def path_completed(self):
         if self.pick_sequence is None:
             super().path_completed()
+            return
+        if self.place_test_enabled and self.pick_sequence.stage == 'preplace':
+            self.report('completed', 'tool2 place test reached preplace; remain HOLD')
+            self.reset()
             return
         stage = self.pick_sequence.complete(self.pick_sequence.stage)
         self.report('pick_place', stage)

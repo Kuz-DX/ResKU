@@ -70,6 +70,15 @@ def load_pre_dock_targets(path):
             continue
         if value.get('executable') is not True:
             continue
+        retreat_distance = float(value.get('retreat_distance_m', .030))
+        retreat_axis = np.asarray(value.get('retreat_axis_tcp', [0., 0., -1.]), dtype=float)
+        axis_norm = float(np.linalg.norm(retreat_axis))
+        if (not math.isfinite(retreat_distance) or not .005 <= retreat_distance <= .100
+                or retreat_axis.shape != (3,) or not np.all(np.isfinite(retreat_axis))
+                or axis_norm < 1e-9):
+            raise ValueError(f'{path}: {key} has invalid Cartesian retreat settings')
+        retreat_axis /= axis_norm
+        retreat = dict(retreat_distance=retreat_distance, retreat_axis=retreat_axis)
         joint_goal = value.get('joint_goal_rad')
         if joint_goal is not None:
             joint_goal = np.asarray(joint_goal, dtype=float)
@@ -77,7 +86,7 @@ def load_pre_dock_targets(path):
                     or joint_goal.shape != (len(ARM_JOINTS),)
                     or not np.all(np.isfinite(joint_goal))):
                 raise ValueError(f'{path}: {key} has an invalid reviewed joint goal')
-            targets[path_id] = dict(joint_goal=joint_goal)
+            targets[path_id] = dict(joint_goal=joint_goal, **retreat)
             continue
         position = np.asarray(value.get('position_m'), dtype=float)
         quaternion = np.asarray(value.get('orientation_xyzw'), dtype=float)
@@ -93,7 +102,7 @@ def load_pre_dock_targets(path):
         approach_axis = np.asarray([
             2.*(x*z+w*y), 2.*(y*z-w*x), 1.-2.*(x*x+y*y)], dtype=float)
         targets[path_id] = dict(position=position, quaternion=quaternion,
-                                approach_axis=approach_axis)
+                                approach_axis=approach_axis, **retreat)
     return targets
 
 
@@ -589,7 +598,9 @@ class ToolTrajectoryJoy(Node):
         if back_request and request is None:
             self.request_back()
         elif request is not None and not self.back_combo:
-            self.request_path(request)
+            # A face-button tool request owns the complete autonomous sequence:
+            # approach, Arduino docking, Cartesian retreat, and direct BACK.
+            self.request_path(request, desired_docked=True)
 
     def request_back(self):
         if self.stage != 'idle':
@@ -651,7 +662,10 @@ class ToolTrajectoryJoy(Node):
             self.report('blocked', 'this path defines ee close and return, not tool release')
             self.reset()
             return
-        if desired_docked is not None and not close_and_return:
+        # UI desired-state requests may short-circuit against the known latch
+        # state. A joystick autonomous sequence must still visit its selected
+        # tool pose and obtain fresh post-command feedback.
+        if desired_docked is not None and not close_and_return and nearest_entry:
             if self.docked_state is None:
                 self.path_id = request
                 self.report('blocked', 'docking mechanism state is UNKNOWN; initialize it first')
@@ -782,18 +796,19 @@ class ToolTrajectoryJoy(Node):
         return ('BACK staging' if getattr(self, 'route_kind', None) == 'back'
                 else tool_label(self.path_id if path_id is None else path_id))
 
-    def begin_back(self):
+    def begin_back(self, via_home=True):
         now = time.monotonic()
         status = self.healthy_hold(now)
         if not self.planner.service_is_ready():
             raise RuntimeError('MoveIt route planner unavailable')
-        goals = [self.route_poses['home'].copy(), self.route_poses['back'].copy()]
-        for label, goal in zip(('home', 'back'), goals):
+        labels = ['home', 'back'] if via_home else ['back']
+        goals = [self.route_poses[label].copy() for label in labels]
+        for label, goal in zip(labels, goals):
             if not self.model.within_limits(goal):
                 raise ValueError(f'MoveIt route {label} violates joint limits')
         self.path_id = None
         self.route_kind = 'back'
-        self.route_labels = ['home', 'back']
+        self.route_labels = labels
         self.snapshot = dict(self.full_state)
         self.original_epoch = status['epoch']
         self.route_goals = goals
@@ -802,6 +817,63 @@ class ToolTrajectoryJoy(Node):
         self.route_start = np.asarray(
             [self.full_state[j] for j in ARM_JOINTS], dtype=float)
         self._request_route_leg()
+
+    def begin_docking_actuation(self, desired=True):
+        """Command Arduino only from stopped HOLD and wait for fresh feedback."""
+        self.healthy_hold(time.monotonic())
+        if (self.docking_command.get_subscription_count() == 0
+                or self.count_publishers('/arm/docked') == 0):
+            raise RuntimeError('Arduino command/status connection unavailable')
+        self.snapshot = dict(self.full_state)
+        self.command_feedback_sequence = self.docked_feedback_sequence
+        self.actuation_deadline = time.monotonic()+self.actuation_timeout
+        self.requested_docked_state = bool(desired)
+        self.send_docking_pulse(self.requested_docked_state)
+        self.stage = 'wait_docked'
+        action = 'dock' if self.requested_docked_state else 'release'
+        self.report('actuating', f'Arduino {action} pulse sent; waiting for /arm/docked')
+
+    def begin_docking_retreat(self):
+        """Build a checked straight TCP retreat before planning directly to BACK."""
+        self.healthy_hold(time.monotonic())
+        target = self.pre_dock_targets.get(self.path_id)
+        if target is None:
+            raise RuntimeError(f'{tool_label(self.path_id)} retreat configuration unavailable')
+        distance = float(target['retreat_distance'])
+        local_axis = np.asarray(target['retreat_axis'], dtype=float)
+        seed = np.asarray([self.full_state[j] for j in ARM_JOINTS], dtype=float)
+        origin = self.model.fk(seed)
+        direction = origin[:3, :3] @ local_axis
+        count = max(1, math.ceil(distance/.003))
+        waypoints, durations = [], []
+        previous = seed.copy()
+        for index in range(1, count+1):
+            pose = origin.copy()
+            pose[:3, 3] += direction*(distance*index/count)
+            try:
+                solved = self.model.solve(
+                    pose, previous, self.margin, max_iterations=100, max_time_s=.05)
+            except ValueError as exc:
+                raise RuntimeError(f'docking retreat IK point {index}/{count}: {exc}') from exc
+            solved = np.asarray(solved, dtype=float)
+            if (not self.model.within_limits(solved, self.margin)
+                    or np.max(np.abs(solved-previous)) > .03):
+                raise RuntimeError('docking retreat IK exceeds joint step/limits')
+            actual = self.model.fk(solved)
+            residual = self.model.pose_error(solved, pose)
+            if np.linalg.norm(residual[:3]) > 1e-4 or np.linalg.norm(residual[3:]) > 1e-3:
+                raise RuntimeError('docking retreat IK residual too large')
+            step_distance = float(np.linalg.norm(actual[:3, 3]-self.model.fk(previous)[:3, 3]))
+            durations.append(max(.05, float(np.max(np.abs(solved-previous)))/.025,
+                                 step_distance/.005))
+            waypoints.append(solved.copy())
+            previous = solved
+        self.route_kind = 'dock_retreat'
+        self.report('retreating', f'planning checked {distance*1000.:.1f} mm TCP retreat')
+        self.begin(self.path_id, dict(
+            start=seed, waypoints=waypoints, durations=durations,
+            total=sum(durations), start_error=0., cartesian_line=True,
+            stop_at_waypoints=[False]*(count-1)+[True]))
 
     def request_route_plan(self, path_id, measured, status):
         """Plan verified BACK -> reviewed joint or Cartesian pre-dock."""
@@ -929,6 +1001,10 @@ class ToolTrajectoryJoy(Node):
             self.report('completed', 'BACK reached and feedback verified; select tool0/1/2')
             self.reset()
             return
+        if getattr(self, 'route_kind', None) == 'dock_retreat':
+            self.report('retreated', 'Cartesian docking retreat completed; planning direct BACK')
+            self.begin_back(via_home=False)
+            return
         after = self.paths[self.path_id].get('after_path')
         if after is not None:
             if self.sequence_phase == 'approach':
@@ -952,16 +1028,7 @@ class ToolTrajectoryJoy(Node):
                 self.reset()
             return
         if self.requested_docked_state is not None:
-            if (self.docking_command.get_subscription_count() == 0
-                    or self.count_publishers('/arm/docked') == 0):
-                raise RuntimeError('Arduino command/status connection unavailable')
-            self.snapshot = dict(self.full_state)
-            self.command_feedback_sequence = self.docked_feedback_sequence
-            self.actuation_deadline = time.monotonic()+self.actuation_timeout
-            self.send_docking_pulse(self.requested_docked_state)
-            self.stage = 'wait_docked'
-            action = 'dock' if self.requested_docked_state else 'release'
-            self.report('actuating', f'Arduino {action} pulse sent; waiting for /arm/docked')
+            self.begin_docking_actuation(self.requested_docked_state)
             return
         self.report('completed', f'{tool_label(self.path_id)} path completed; HOLD')
         self.reset()
@@ -1041,8 +1108,8 @@ class ToolTrajectoryJoy(Node):
                 if (self.docked_feedback_sequence > self.command_feedback_sequence
                         and self.docked_state == self.requested_docked_state):
                     state = 'docked' if self.requested_docked_state else 'released'
-                    self.report(state, f'Arduino {state} state confirmed; remain HOLD')
-                    self.reset()
+                    self.report(state, f'Arduino {state} state confirmed; starting retreat')
+                    self.begin_docking_retreat()
                 return
             if self.stage == 'request_hold':
                 if not self.future.done():

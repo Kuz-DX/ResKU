@@ -66,7 +66,7 @@ tools:
     require_l2_hold: false
     alignment_mode: camera_normal_advance
     tag_family: tag36h11
-    tag_id: 1
+    tag_id: 0
     tag_size_m: 0.020             # measured outer black square, excluding white margin
     advance_distance_m: 0.030
     # Confirmed tag/TCP-aligned measurement. The current camera-normal mode
@@ -83,7 +83,11 @@ tools:
       -1.389980, -0.085903, -1.805495]
     measured_final_dock_executable: false
     measured_final_dock_blocker: elbow exceeds configured soft limit by 0.0127409 rad
-    actuation_enabled: false     # finish in HOLD, no attach/release command
+    # The joystick request owns the complete sequence: final tag-normal
+    # approach, Arduino attach, checked TCP retreat, then direct MoveIt BACK.
+    actuation_enabled: true
+    desired_docked: true
+    actuation_timeout_s: 10.0
     tag_max_age_s: 0.25
     min_decision_margin: 40.0
     max_reprojection_px: 1.5

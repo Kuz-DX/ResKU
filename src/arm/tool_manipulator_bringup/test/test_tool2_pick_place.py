@@ -33,6 +33,13 @@ def test_unmeasured_configuration_cannot_enable_sequence():
         checked_config(data)
 
 
+def test_place_test_configuration_does_not_invent_gripper_calibration():
+    data = yaml.safe_load((ROOT/'config/tool2_pick_place.yaml').read_text())
+    result = checked_config(data, place_test=True)
+    assert result['enabled'] is False
+    assert result['close_rad'] is None and result['open_rad'] is None
+
+
 def test_sequence_order_rejects_duplicate_and_failed_completions():
     sequence = PickPlaceSequence()
     for current, following in zip(STAGES, STAGES[1:]):
@@ -120,9 +127,59 @@ def coordinator():
     n.paths = {2: dict(start=np.zeros(6), waypoints=[np.ones(6)*.1], durations=[2.], total=2.)}
     n.start_tolerance, n.max_start_delta, n.approach_speed = .03, .1, .05
     n.pick_ready = np.ones(6)*.01
+    n.place_test_enabled = False
     n.begin, n.report, n.reset = Mock(), Mock(), Mock()
     n.status = dict(epoch='stopped')
     return n
+
+
+def test_place_test_service_requires_home_then_starts_person_stage():
+    n = coordinator()
+    n.place_test_enabled = True
+    n.place_test_home_tolerance = .10
+    n.pick_sequence = None
+    n.stage = 'idle'
+    n.full_state = dict(zip(ARM_JOINTS, [.05, .2, .3, -.4, .02, -.01]))
+    n.healthy_hold = Mock(return_value={
+        'epoch': 'home-hold',
+        'startup_goal_rad': [.8, .2, .3, -.4, .7, -.6],
+    })
+    response = Mock()
+    with patch('tool2_pick_place_coordinator.time.monotonic', return_value=10.):
+        n.start_place_test(None, response)
+    assert response.success
+    assert n.pick_sequence.stage == 'person'
+    assert n.stage == 'pick_person'
+    assert n.pick_hold_epoch == 'home-hold'
+
+
+def test_place_test_service_rejects_pose_outside_home_tolerance():
+    n = coordinator()
+    n.place_test_enabled = True
+    n.place_test_home_tolerance = .10
+    n.pick_sequence = None
+    n.stage = 'idle'
+    n.full_state = dict(zip(ARM_JOINTS, [.101, .2, .3, -.4, 0., 0.]))
+    n.healthy_hold = Mock(return_value={
+        'epoch': 'home-hold',
+        'startup_goal_rad': [0., .2, .3, -.4, 0., 0.],
+    })
+    response = Mock()
+    n.start_place_test(None, response)
+    assert not response.success
+    assert 'exceeds' in response.message
+    assert n.pick_sequence is None
+
+
+def test_place_test_stops_at_preplace_without_descent_or_release():
+    n = coordinator()
+    n.place_test_enabled = True
+    n.pick_sequence.stage = 'preplace'
+    n.path_completed()
+    n.report.assert_called_once_with(
+        'completed', 'tool2 place test reached preplace; remain HOLD')
+    n.reset.assert_called_once()
+    n.begin.assert_not_called()
 
 
 def test_runtime_grasps_returns_full_route_then_exact_ready_before_person():

@@ -181,10 +181,10 @@ def load_settings(filename):
                       linear_speed_m_s=(0, .02), angular_speed_rad_s=(0, .1),
                       stopped_speed_rad_s=(0, .02), joint_tolerance_rad=(0, .02),
                       acquire_timeout_s=(0, 30), sequence_timeout_s=(0, 600))
-        if mode == 'tag_tcp_stages':
-            limits['actuation_timeout_s'] = (0, 120)
-        else:
+        if mode == 'camera_normal_advance':
             limits['advance_distance_m'] = (0, .10)
+        if mode == 'tag_tcp_stages' or item.get('actuation_enabled') is True:
+            limits['actuation_timeout_s'] = (0, 120)
         for name, (low, high) in limits.items():
             value = item.get(name)
             if (type(value) not in (int, float) or not math.isfinite(value)
@@ -195,8 +195,9 @@ def load_settings(filename):
         if type(item.get('actuation_enabled')) is not bool:
             raise ValueError('explicit actuation_enabled required')
         if mode == 'camera_normal_advance':
-            if item['actuation_enabled']:
-                raise ValueError('camera-normal advance ends in HOLD; actuation must be disabled')
+            if (item['actuation_enabled']
+                    and type(item.get('desired_docked')) is not bool):
+                raise ValueError('camera-normal actuation requires desired_docked state')
             result[tool_id] = item
             continue
         if type(item.get('desired_docked')) is not bool:
