@@ -52,4 +52,6 @@ install(PROGRAMS
   scripts/tool2_pick_place_coordinator_test.py
   scripts/tcp_joy_test.py
   DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS scripts/arm_control_mode_manager_test.py DESTINATION lib/${PROJECT_NAME})
 ament_package()
+

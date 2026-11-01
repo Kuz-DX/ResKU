@@ -99,4 +99,7 @@
     <disable_collisions link1="rack_left" link2="tool_spurgear" reason="ToolMating"/>
     <disable_collisions link1="rack_right" link2="tool_spurgear" reason="ToolMating"/>
     <disable_collisions link1="rack_left" link2="wrist_link_yaw" reason="ToolMating"/>
+    <!-- Requested gripper-finger / tool-case-1 collision exclusions. -->
+    <disable_collisions link1="rack_left" link2="tool_case_1" reason="UserRequested"/>
+    <disable_collisions link1="rack_right" link2="tool_case_1" reason="UserRequested"/>
 </robot>

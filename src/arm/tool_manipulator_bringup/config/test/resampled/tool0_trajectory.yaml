@@ -1,5 +1,9 @@
 # Generated from ../tool0_trajectory.yaml; do not edit sampled points by hand.
 # Nominal times only: manager acceleration/jerk/feedback guards remain active.
+mid_path_ee_open:
+  after_point: 14
+  velocity_rad_s: -0.48
+  duration_sec: 2.0
 execution_enabled: true
 joint_names:
 - base_joint
@@ -35,7 +39,6 @@ source_point_indices:
 - 108
 - 129
 - 140
-- 143
 points:
 - time_from_start_sec: 0.0
   positions_rad:
@@ -1163,29 +1166,5 @@ points:
   - 0.12042771172970601
   - 1.13376586611655
   - -1.2023573110462493
-  - 0.0
-  - 0.0
-- time_from_start_sec: 70.5
-  positions_rad:
-  - 3.141592653589793
-  - 0.10349802026014446
-  - 1.1420852706598303
-  - -1.1829259556266496
-  - 0.0
-  - 0.0
-- time_from_start_sec: 71.0
-  positions_rad:
-  - 3.141592653589793
-  - 0.08656832879058289
-  - 1.1504046752031107
-  - -1.16349460020705
-  - 0.0
-  - 0.0
-- time_from_start_sec: 71.5
-  positions_rad:
-  - 3.141592653589793
-  - 0.06963863732102132
-  - 1.1587240797463911
-  - -1.1440632447874504
   - 0.0
   - 0.0

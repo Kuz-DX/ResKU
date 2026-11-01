@@ -222,6 +222,8 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         return response
 
     def path_completed(self):
+        if self.handle_mid_path_ee():
+            return
         if not self.active:
             super().path_completed()
             return
