@@ -17,6 +17,7 @@ from tool_trajectory_joy import (collision_check_budget, execution_plan, load_pa
                                  isolate_shoulder_zero_crossings, nearest_path_suffix,
                                  load_pre_dock_targets, load_route_poses,
                                  nearest_base_equivalent, planned_entry, planned_leg,
+                                 simplify_timed_waypoints,
                                  requested_back, requested_path, ARM_JOINTS,
                                  ToolTrajectoryJoy)
 from tool_trajectory_joy import reverse_path
@@ -535,6 +536,28 @@ def test_planned_leg_uses_only_moveit_points_and_reaches_requested_goal():
     waypoints, durations = planned_leg(trajectory, np.zeros(6), np.ones(6)*.4)
     np.testing.assert_array_equal(waypoints, [[.2]*6, [.4]*6])
     assert durations == [1., 1.]
+
+
+def test_dense_linear_moveit_samples_collapse_and_preserve_total_duration():
+    start = np.zeros(6)
+    waypoints = [np.full(6, index/1200.) for index in range(1, 1201)]
+    durations = [.02]*1200
+    reduced, timing = simplify_timed_waypoints(start, waypoints, durations)
+    assert len(reduced) == 1
+    np.testing.assert_allclose(reduced[-1], np.ones(6))
+    assert timing == pytest.approx([24.])
+
+
+def test_moveit_simplification_retains_joint_space_corner():
+    start = np.zeros(6)
+    waypoints = [np.array([.1, 0, 0, 0, 0, 0]),
+                 np.array([.2, 0, 0, 0, 0, 0]),
+                 np.array([.2, .1, 0, 0, 0, 0])]
+    reduced, timing = simplify_timed_waypoints(
+        start, waypoints, [.5, .5, 1.], max_waypoints=2)
+    assert len(reduced) == 2
+    np.testing.assert_allclose(reduced[0], waypoints[1])
+    assert sum(timing) == pytest.approx(2.)
 
 
 def test_pre_dock_targets_load_reviewed_arm_world_tcp_poses(tmp_path):

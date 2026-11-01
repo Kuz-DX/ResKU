@@ -272,6 +272,58 @@ def execution_timeout(path, measured, speed_limits):
     return duration+5.*len(path['waypoints'])+30.
 
 
+def simplify_timed_waypoints(start, waypoints, durations, tolerance=.001,
+                             max_waypoints=500):
+    """Remove dense time samples without changing joint-path geometry.
+
+    RDP uses joint-space line deviation rather than timestamp fraction, so
+    acceleration samples on one geometric segment collapse correctly. Segment
+    durations are accumulated between retained points. The caller still runs
+    dense collision interpolation over every retained segment.
+    """
+    if (len(waypoints) != len(durations) or not 0 < tolerance <= .005
+            or max_waypoints < 1):
+        raise ValueError('invalid MoveIt waypoint simplification input')
+    if len(waypoints) <= max_waypoints:
+        return list(waypoints), list(durations)
+    points = [np.asarray(start, dtype=float)] + [
+        np.asarray(q, dtype=float) for q in waypoints]
+    keep = {0, len(points)-1}
+    stack = [(0, len(points)-1)]
+    while stack:
+        first, last = stack.pop()
+        if last <= first+1:
+            continue
+        a, b = points[first], points[last]
+        direction = b-a
+        norm2 = float(direction@direction)
+        worst_index, worst_error = None, -1.
+        for index in range(first+1, last):
+            if norm2 <= 1e-18:
+                error = float(np.max(np.abs(points[index]-a)))
+            else:
+                fraction = float(np.clip(
+                    (points[index]-a)@direction/norm2, 0., 1.))
+                error = float(np.max(np.abs(
+                    points[index]-(a+fraction*direction))))
+            if error > worst_error:
+                worst_index, worst_error = index, error
+        if worst_error > tolerance:
+            keep.add(worst_index)
+            stack.extend(((first, worst_index), (worst_index, last)))
+    indices = sorted(keep)
+    if len(indices)-1 > max_waypoints:
+        raise ValueError(
+            f'MoveIt leg needs {len(indices)-1} geometric waypoints after '
+            f'{tolerance:.4f}-rad simplification; limit is {max_waypoints}')
+    cumulative = np.concatenate(
+        ([0.], np.cumsum(np.asarray(durations, dtype=float))))
+    simplified_waypoints = [points[index] for index in indices[1:]]
+    simplified_durations = [float(cumulative[index]-cumulative[previous])
+                            for previous, index in zip(indices, indices[1:])]
+    return simplified_waypoints, simplified_durations
+
+
 def planned_leg(trajectory, start, goal, minimum_duration=.02):
     """Convert one MoveIt leg into manager waypoints and validate its endpoint."""
     names = list(trajectory.joint_names)
@@ -298,7 +350,7 @@ def planned_leg(trajectory, start, goal, minimum_duration=.02):
     if float(np.max(np.abs(waypoints[-1]-np.asarray(goal, dtype=float)))) > .01:
         raise ValueError('MoveIt plan did not reach the requested route goal')
     waypoints[-1] = np.asarray(goal, dtype=float)
-    return waypoints, durations
+    return simplify_timed_waypoints(start, waypoints, durations)
 
 
 def planned_entry(path, trajectory, measured, minimum_duration=.02):

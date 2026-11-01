@@ -12,22 +12,24 @@ convention). Release left/right to stop. Release L1 or lose fresh joystick
 input to stop through the manager. Diagonal presses change speed only. The arm
 sticks are suppressed while D-pad is active. EE jog holds the current arm pose
 and does not require a new Cartesian IK/collision candidate or an available
-MoveIt state-validity service. Hardware faults, stale feedback, inactive TCP_IK,
-EE travel limits and L2 path selection still suppress it. This applies to
-`ik_manual.launch.py`; standalone manual retains its existing tool layer.
-EE feedback and calibrated gripper travel bounds gate rotation. The selected
-speed is published as `ee_speed_rad_s` on `/arm/tcp_joy/status`.
+MoveIt state-validity service. Stale EE feedback, an inactive EE controller,
+Dynamixel communication failure and L2 path selection still suppress it. RMD
+arm faults do not. Velocity-mode jog does not interpret the accumulated
+`ee_joint` position as a software travel limit. This applies to
+`ik_manual.launch.py`; standalone manual retains its existing tool layer. The
+selected speed is published as `ee_speed_rad_s` on `/arm/tcp_joy/status`.
 The configured Dynamixel ID-4 Velocity Limit remains raw 400, equivalent to
 9.58764908 rad/s. Values above that are accepted by the TCP manager but cannot
 produce 16.8 rad/s until the independent motor register is deliberately changed
 to about raw 701 and read back. Launch does not write EEPROM limit registers.
 
-An arm `fault` does not automatically remove the independently controlled EE
-jog. L1+R1+D-pad left/right may continue through the manager while arm focus,
-controllers and fresh EE feedback remain healthy. This is a degraded EE-only
-path: it never clears the arm fault or sends new arm-joint targets. Releasing the
-buttons, stale Joy (250 ms), stale EE feedback (300 ms), inactive controllers or
-an EE travel limit commands zero. A Dynamixel `COMM_ERROR` still blocks the
+The independently controlled EE jog is available in `manual`, `tcp_ik`,
+`tool_auto`, `hold` and `fault`. L1+R1+D-pad left/right goes through the same
+manager-owned output while arm focus, controllers and fresh EE feedback remain
+healthy. In HOLD, this explicit EE layer suppresses the L1 TCP-ready request.
+In fault it never clears the arm fault or sends new arm-joint targets. Releasing
+the buttons, stale Joy (250 ms), stale EE feedback (300 ms), or inactive controllers
+commands zero. A Dynamixel `COMM_ERROR` still blocks the
 command in the hardware interface because ID 4 shares that U2D2 bus; RMD-only
 CAN faults do not.
 

@@ -110,8 +110,8 @@ class ControlModeManager(Node):
         self.activation_started = None
         self.activated = False
         self.last_error = ''
-        self.degraded_ee_velocity = 0.
-        self.degraded_ee_command_time = -float('inf')
+        self.independent_ee_velocity = 0.
+        self.independent_ee_command_time = -float('inf')
         self.last_report = None
         self.last_path_clamp_warning = -float('inf')
         self.path_clamp_warning_rad = float(self.declare_parameter(
@@ -232,27 +232,29 @@ class ControlModeManager(Node):
             data = json.loads(msg.data)
             if not isinstance(data, dict):
                 raise ValueError('command must be a JSON object')
-            if source == 'tcp_ik' and 'degraded_ee_velocity' in data:
-                velocity = data['degraded_ee_velocity']
+            if source == 'tcp_ik' and 'independent_ee_velocity' in data:
+                velocity = data['independent_ee_velocity']
                 now = time.monotonic()
                 accepted = bool(
-                    self.core.mode == 'fault' and self.core.focus == 'arm'
-                    and self.core.ready
+                    self.core.focus == 'arm' and self.core.ready
                     and self.controllers.get('ee_velocity_controller') == 'active'
                     and 0 <= now-self.core.ee_state_time < .3
                     and type(velocity) in (int, float) and not isinstance(velocity, bool)
                     and math.isfinite(velocity)
                     and abs(velocity) <= TCP_EE_MAX_VELOCITY_RAD_S)
                 if accepted:
-                    self.degraded_ee_velocity = float(velocity)
-                    self.degraded_ee_command_time = now
+                    self.independent_ee_velocity = float(velocity)
+                    self.independent_ee_command_time = now
                 self.last_error = ('' if accepted else
-                                   'rejected fault-state EE jog: controller or feedback unavailable')
+                                   'rejected independent EE jog: controller or feedback unavailable')
                 return
             elif (data.get('fault') and self.core.mode == source and
                     data.get('epoch') == self.core.epoch):
                 self.core.fault(source+' producer fault')
                 return
+            if source == 'tcp_ik':
+                self.independent_ee_velocity = 0.
+                self.independent_ee_command_time = -float('inf')
             if source == 'tcp_ik' and data.get('pause') is True:
                 accepted = self.core.pause_tcp(data['epoch'], time.monotonic())
             elif source == 'tcp_ik' and data.get('stop') is True:
@@ -425,19 +427,18 @@ class ControlModeManager(Node):
             self.last_path_clamp_warning = now
         if target is not None:
             self.position.publish(Float64MultiArray(data=target))
-        degraded_ee_enabled = bool(
-            self.core.mode == 'fault' and self.core.focus == 'arm'
-            and self.core.ready
+        independent_ee_enabled = bool(
+            self.core.focus == 'arm' and self.core.ready
             and self.controllers.get('ee_velocity_controller') == 'active'
             and 0 <= now-self.core.ee_state_time < .3
-            and now-self.degraded_ee_command_time < .25)
+            and now-self.independent_ee_command_time < .25)
         enabled = (self.core.ready and not self.core.transitioning and
                    (self.core.mode in ('manual', 'tcp_ik') or
                     (self.core.mode == 'tool_auto' and self.core.ee_goal is not None)))
-        ee_velocity = (self.degraded_ee_velocity if degraded_ee_enabled else
+        ee_velocity = (self.independent_ee_velocity if independent_ee_enabled else
                        self.core.ee if enabled else 0.)
-        if not degraded_ee_enabled:
-            self.degraded_ee_velocity = 0.
+        if not independent_ee_enabled:
+            self.independent_ee_velocity = 0.
         self.ee.publish(Float64MultiArray(data=[ee_velocity]))
         self.publish_status()
 
