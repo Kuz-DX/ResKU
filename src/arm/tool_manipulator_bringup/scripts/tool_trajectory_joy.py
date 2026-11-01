@@ -633,14 +633,19 @@ class ToolTrajectoryJoy(Node):
             status = self.healthy_hold(now)
         except RuntimeError as exc:
             return False, str(exc)
-        if not self.back_ready or status.get('epoch') != self.back_ready_epoch:
-            return False, 'press L2+square and complete HOME -> BACK first'
         measured = np.asarray([self.full_state[j] for j in ARM_JOINTS], dtype=float)
         error = float(np.max(np.abs(measured-self.route_poses['back'])))
         if error > self.back_tolerance:
             self.back_ready = False
             self.back_ready_epoch = None
-            return False, f'robot departed BACK pose ({error:.4f} rad)'
+            return False, (f'robot is not at BACK ({error:.4f} rad); '
+                           'press L2+square to plan HOME -> BACK')
+        # BACK is a measured pose, not a historical workflow permission.  A
+        # failed tool plan does not move the robot, so a fresh stopped HOLD at
+        # BACK remains eligible for another tool selection even if an old
+        # completion latch or manager epoch was cleared.
+        self.back_ready = True
+        self.back_ready_epoch = status.get('epoch')
         return True, ''
 
     def on_ui_request(self, msg, path_id, desired_docked):
@@ -799,6 +804,16 @@ class ToolTrajectoryJoy(Node):
     def begin_back(self, via_home=True):
         now = time.monotonic()
         status = self.healthy_hold(now)
+        measured = np.asarray(
+            [self.full_state[j] for j in ARM_JOINTS], dtype=float)
+        error = float(np.max(np.abs(measured-self.route_poses['back'])))
+        if error <= self.back_tolerance:
+            self.back_ready = True
+            self.back_ready_epoch = status.get('epoch')
+            self.report('completed',
+                        'already at BACK; no motion planned, select tool0/1/2')
+            self.reset()
+            return
         if not self.planner.service_is_ready():
             raise RuntimeError('MoveIt route planner unavailable')
         labels = ['home', 'back'] if via_home else ['back']
@@ -814,8 +829,7 @@ class ToolTrajectoryJoy(Node):
         self.route_goals = goals
         self.route_waypoints, self.route_durations = [], []
         self.route_index = 0
-        self.route_start = np.asarray(
-            [self.full_state[j] for j in ARM_JOINTS], dtype=float)
+        self.route_start = measured
         self._request_route_leg()
 
     def begin_docking_actuation(self, desired=True):

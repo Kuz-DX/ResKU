@@ -217,7 +217,7 @@
        Rotating the STL +55 degrees about world X makes the broad underside
        horizontal. Its collar centre is 37.728826 mm above that contact plane.
        Set Z from the circuit-box top (372 mm above the wheel axle).
-       The case marker and dock references follow the corrected collar centre;
+       This is only a mesh-placement reference, not a task-space target.
        the case yaw matches the long base boundary horizontal:vertical ratio
        33.7:70.2 in plan view (64.356341 degrees from +X). -->
   <xacro:property name="toolbox2_yaw" value="${atan2(70.2, 33.7)}"/>
@@ -244,7 +244,19 @@
          Rotate about the collar centre; keep the underside on the box top. -->
     <origin xyz="-0.255506 0.0806 ${float(wheel_axle_z) + 0.372 - float(imu_z) - float(toolbox2_arm_world_z) + toolbox2_collar_height}" rpy="0 ${-pi/4} ${toolbox2_yaw}"/>
   </joint>
-  <xacro:tool_case_center_marker case_link="tool_case_y_plus" marker_link="tool_case_y_plus_center"/>
+  <!-- Measured tool-1 docking-circle centre in arm_world.  This point and the
+       final tcp_link target are the same physical point.  Keep it independent
+       of the STL export origin and mesh-placement calculations above. -->
+  <link name="tool_case_y_plus_dock_point">
+    <visual>
+      <geometry><sphere radius="0.012"/></geometry>
+      <material name="tool_case_marker_blue"/>
+    </visual>
+  </link>
+  <joint name="arm_world_to_tool_case_y_plus_dock_point" type="fixed">
+    <parent link="arm_world"/><child link="tool_case_y_plus_dock_point"/>
+    <origin xyz="-0.317806 0.090 0.163912" rpy="0 0 0"/>
+  </joint>
   <!-- Former dock reference planes remain at local X = +/-18.4 mm. -->
   <link name="tool_case_y_plus_x_positive_face"/>
   <joint name="tool_case_y_plus_to_x_positive_face" type="fixed">

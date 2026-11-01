@@ -24,11 +24,15 @@ targets:
     joint_goal_rad: [2.853204265467086, 0.6768386626181123, 1.5817918531455613,
       -1.418254454296793, -0.09357282806123068, -1.661301193279943]
     reference_frame_id: arm_world
+    # Measured docking-circle centre and final tcp_link target.  This is not
+    # the STL export origin or the mesh-placement reference.
     reference_object_position_m: [-0.317806, 0.090, 0.163912]
     surface_plane_tilt_from_world_xy_deg: 55.0
     approach_z_tilt_from_world_xy_deg: -35.0
     orientation_xyzw: [0.0, 0.8870108331782217, 0.0, 0.4617486132350339]
-    executable: true
+    # Fail closed until a replacement capture stays below the 1.557952-rad
+    # planning-margin endpoint.  The measured value remains diagnostic data.
+    executable: false
     role: measured_joint_pre_dock_requires_limit_correction
     retreat_distance_m: 0.030
     retreat_axis_tcp: [0.0, 0.0, -1.0]

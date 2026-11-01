@@ -588,6 +588,13 @@ def test_pre_dock_targets_prefer_reviewed_joint_goal(tmp_path):
     np.testing.assert_allclose(targets[0]['retreat_axis'], [0., 0., -1.])
 
 
+def test_source_targets_fail_closed_for_out_of_margin_tool1():
+    targets = load_pre_dock_targets(
+        Path(__file__).resolve().parents[1] / 'config/cartesian_targets.yaml')
+    assert set(targets) == {0, 2}
+    assert 'joint_goal' in targets[0] and 'joint_goal' in targets[2]
+
+
 def test_nearest_base_equivalent_avoids_full_turn_from_back():
     limits = {'base_joint': (-3.503, 3.614)}
     goal = np.array([3.123184884, .1, .2, -.3, 0., 0.])
@@ -613,6 +620,7 @@ def test_automatic_return_plans_directly_to_back_without_home():
         healthy_hold=Mock(return_value={'epoch': 'hold'}),
         planner=Mock(), model=Mock(), route_poses={
             'home': np.ones(6)*.1, 'back': np.ones(6)*.2},
+        back_tolerance=.03,
         full_state=dict(zip(ARM_JOINTS, np.zeros(6))),
         _request_route_leg=Mock())
     node.planner.service_is_ready.return_value = True
@@ -621,6 +629,33 @@ def test_automatic_return_plans_directly_to_back_without_home():
     assert node.route_labels == ['back']
     np.testing.assert_allclose(node.route_goals, [np.ones(6)*.2])
     node._request_route_leg.assert_called_once()
+
+
+def test_fresh_hold_at_back_revalidates_without_historical_latch():
+    back = np.array([-.2, .3, .4, -.5, .1, -.1])
+    node = SimpleNamespace(
+        healthy_hold=Mock(return_value={'epoch': 'new-hold'}),
+        full_state=dict(zip(ARM_JOINTS, back)),
+        route_poses={'back': back}, back_tolerance=.03,
+        back_ready=False, back_ready_epoch=None)
+    ready, reason = ToolTrajectoryJoy.back_is_ready(node, 10.)
+    assert ready and reason == ''
+    assert node.back_ready and node.back_ready_epoch == 'new-hold'
+
+
+def test_back_request_at_back_is_a_no_motion_success():
+    back = np.array([-.2, .3, .4, -.5, .1, -.1])
+    node = SimpleNamespace(
+        healthy_hold=Mock(return_value={'epoch': 'hold'}),
+        full_state=dict(zip(ARM_JOINTS, back)), route_poses={'back': back},
+        back_tolerance=.03, back_ready=False, back_ready_epoch=None,
+        planner=Mock(), report=Mock(), reset=Mock())
+    ToolTrajectoryJoy.begin_back(node)
+    assert node.back_ready and node.back_ready_epoch == 'hold'
+    node.planner.call_async.assert_not_called()
+    node.report.assert_called_once_with(
+        'completed', 'already at BACK; no motion planned, select tool0/1/2')
+    node.reset.assert_called_once_with()
 
 
 def test_verified_back_tool_request_plans_only_pre_dock_leg():

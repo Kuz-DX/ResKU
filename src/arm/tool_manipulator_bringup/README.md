@@ -81,6 +81,10 @@ axis IK로 Cartesian TCP 목표를 계산한다. 기존 tool YAML의 마지막 �
 목표로 사용하지 않는다.
 BACK 경로와 tool 경로는 각각 전체 샘플의 충돌 검사가 끝난 뒤 manager가 실행한다.
 tool IK나 계획이 실패해도 로봇이 BACK에 머물면 다른 tool을 다시 선택할 수 있다.
+BACK 선택 가능 여부는 과거 시퀀스 완료 latch가 아니라 신선한 정지 HOLD 피드백과
+현재 관절값의 BACK 오차로 매번 다시 판정한다. 따라서 tool 목표/계획이 이동 전에
+실패한 뒤에는 HOME→BACK을 반복하지 않는다. L2+□를 다시 눌러도 이미 BACK이면
+이동을 계획하지 않고 tool0/1/2 선택 대기로 돌아간다.
 마지막 도킹 준비 자세에서 docking은 `/arm/docking`에 `true -> false`,
 release는 `false -> true`를 즉시 발행하고, 이후 새 `/arm/docked` 피드백이 각각
 `true` 또는 `false`가 될 때까지 HOLD를 유지한다. 같은 계약을 tool1/tool2에도

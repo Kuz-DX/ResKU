@@ -7,11 +7,13 @@ import xml.etree.ElementTree as ET
 
 import numpy as np
 import pytest
+import yaml
 
 
 ROOT = Path(__file__).resolve().parents[2]
 SRDF = ROOT / "tool_manipulator_moveit_config/config/tool_manipulator.srdf"
 XACRO = ROOT / "tool_manipulator_description/urdf/tool_manipulator.urdf.xacro"
+HARDWARE = ROOT / "tool_manipulator_bringup/config/hardware.yaml"
 JOINTS = {
     "base_joint",
     "shoulder_joint",
@@ -61,6 +63,16 @@ def test_only_requested_named_arm_poses_exist():
     assert poses["tcp_ready"] == TCP_READY
 
 
+def test_named_arm_poses_stay_inside_hardware_planning_margin():
+    limits = yaml.safe_load(HARDWARE.read_text())["joints"]
+    for pose_name, pose in _arm_poses().items():
+        for joint_name, value in pose.items():
+            low, high = limits[joint_name]["soft_limit_rad"]
+            assert low + .02 <= value <= high - .02, (
+                f"{pose_name}.{joint_name}={value} outside planning margin "
+                f"[{low + .02}, {high - .02}]")
+
+
 def test_rmd_urdf_axes_use_the_named_pose_sign_convention():
     result = subprocess.run(
         ["xacro", str(XACRO), "tool_id:=99",
@@ -91,11 +103,26 @@ def test_tool_case_centres_match_measured_arm_world_coordinates():
         xyz("arm_world_to_tool_case_1"),
         [-0.394506, 0.0, 0.212964], atol=1e-12)
     np.testing.assert_allclose(
-        xyz("arm_world_to_tool_case_y_plus"),
+        xyz("arm_world_to_tool_case_y_plus_dock_point"),
         [-0.317806, 0.090, 0.163912], atol=1e-12)
     np.testing.assert_allclose(
         xyz("arm_world_to_supplybox_pickup_area"),
         [-0.236197, -0.120, 0.182], atol=1e-12)
+
+
+def test_tool1_mesh_origin_is_not_the_docking_target():
+    result = subprocess.run(
+        ["xacro", str(XACRO), "tool_id:=99",
+         "use_mock_hardware:=true", "use_mesh:=false"],
+        check=True, capture_output=True, text=True,
+    )
+    root = ET.fromstring(result.stdout)
+    joints = {joint.attrib["name"]: joint for joint in root.findall("joint")}
+    mesh_origin = np.asarray([float(value) for value in joints[
+        "arm_world_to_tool_case_y_plus"].find("origin").attrib["xyz"].split()])
+    dock_point = np.asarray([float(value) for value in joints[
+        "arm_world_to_tool_case_y_plus_dock_point"].find("origin").attrib["xyz"].split()])
+    assert not np.allclose(mesh_origin, dock_point, rtol=0., atol=1e-12)
 
 
 @pytest.mark.parametrize(

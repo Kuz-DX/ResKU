@@ -58,6 +58,10 @@
 
 ### 작업 트리 — 커밋 전
 
+- [x] BACK 준비 상태를 과거 완료 latch/epoch가 아니라 신선한 정지 HOLD 피드백과
+  현재 BACK 자세 오차로 재검증한다. 움직임 전 tool 목표/계획 실패 뒤에는 BACK을
+  반복하지 않고 tool0/1/2를 다시 선택하며, 이미 BACK에서 L2+□를 눌러도 무이동으로
+  성공 처리한다.
 - [x] TCP 조이스틱 XY 평행이동을 `base_joint` yaw로 회전해 base가 +/-90도를
   넘어도 팔 기준 전방/좌우 의미가 유지되게 했다. `tcp_translation_frame:=base`
   로 기존 고정 프레임 동작을 비교할 수 있다.
@@ -77,13 +81,27 @@
   BACK은 `-pi`를 유지하되, 어느 방향도 base 단독 직선 회전 경로로 실행하지 않고
   MoveIt 회피 계획과 전체 경로 collision 검사를 계속 요구한다. tool1 고정 장착면의
   `tool_2_link <-> ee_actuator` 접촉은 SRDF `ToolMating`으로 제외했다.
+- [x] gripper 장착 planning scene에서 BACK부터 실측 tool0/tool2 joint goal까지
+  MoveIt 계획을 재현했다. 두 목표 모두 goal state 자체가 invalid여서 계획되지 않았다.
+  tool0은 `rack_right <-> tool_case_1`, tool2는 `rack_left <-> supply_box` 접촉이다.
+  이를 전역 allowed-collision로 숨기지 않고, 각 목표가 접촉 전 pre-dock인지 실제
+  mating/grasp 자세인지 정의한 뒤 planning-scene 단계 전이 또는 새 여유 자세로 해결한다.
 - [x] 사용자가 tool0 `[-0.394506, 0, 0.212964]`, 표면 35도와 tool1
   `[-0.317806, 0.090, 0.163912]`, 표면 55도를 `arm_world` 실제 pre-dock으로
   확정했다. L2 경로는 YAML 마지막 관절점 대신 이 pose의 bounded axis IK를 거쳐
   MoveIt `현재 -> home -> back -> pre-dock` 세 leg를 계획하도록 변경했다.
-- [ ] 현재 모델의 오프라인 axis IK는 tool0/tool1 모두 유효 seed 80개에서 해를 찾지
-  못했다. 또한 SRDF BACK shoulder 값은 hardware soft limit을 넘는다. 좌표계/TCP와
-  joint zero/limit을 실기에서 대조하기 전에는 fail-closed 상태를 유지한다.
+- [x] tool1 `[-0.317806, 0.090, 0.163912] m`는 도킹 원 중심과 최종
+  `tcp_link`가 일치해야 하는 동일한 작업점으로 정의했다. CAD/STL 배치 계산에서 나온
+  `[-0.255506, 0.080600, 0.172229] m`는 작업 의미가 없는 mesh reference로 분리하고,
+  시각/collision mesh 위치를 바꾸지 않는 별도 `tool_case_y_plus_dock_point` frame을
+  추가했다.
+- [x] 기존 axis IK/BACK limit 항목을 현재 모델 기준으로 재검증했다. tool0/tool1의
+  물체 기준 좌표는 TCP IK 목표가 아니며 런타임은 실측 joint goal을 사용하므로 seed
+  80개 axis IK 실패를 실행 blocker로 사용하지 않는다. SRDF BACK shoulder는
+  `1.358215 rad`로 hardware 상한 `1.4622368 rad`보다 약 `0.104 rad` 안쪽이고,
+  HOME/BACK/TCP_READY 전체가 0.02 rad planning margin 안임을 정적 테스트로 고정했다.
+  tool1 실측 elbow `1.581792 rad`는 planning 상한 `1.557952 rad`를 넘으므로 새 자세를
+  측정할 때까지 `cartesian_targets.yaml executable: false`로 fail-closed 처리한다.
 - [x] 실기 캡처에서 shoulder/elbow가 runtime soft limit를 넘는 값이 반복됐다.
   도킹 좌표를 확정하기 전에 joint zero/sign/감속기 기준과 실제 soft limit를
   대조해야 하며, 단순 limit 확장은 금지한다.
@@ -115,6 +133,110 @@
   확인한다. 현재 STL 원점의 X 편심 약 1.47 mm도 구분해 기록한다.
 - [ ] 최신 작업 트리 변경을 커밋하기 전 mock에서 base 0, +/-90, +/-180도 부근의
   조이스틱 방향과 L1 무이동 진입/R2 명시 이동을 확인한다.
+
+## Tool별 완성 계획
+
+현재 예상 완성 순서는 `tool0 -> tool1 -> tool2`다. 세 tool 모두 mock/MoveIt 통과와
+실기 완료를 구분한다. 실측 TCP, payload, 전류 또는 물리 체결 근거가 없는 항목은
+software 상태나 Arduino Bool만으로 완료 처리하지 않는다.
+
+### Tool0 — gripper 도킹
+
+현재 실측 pre-dock joint goal은 joint limit 안에 있고 MoveIt 실행 대상으로
+활성화돼 있다. tag 0 크기와 tag-to-TCP 오프셋, 체결 뒤 TCP `-Z` 30 mm 후퇴와
+BACK 복귀 흐름도 정의돼 있다. 다음 항목을 마쳐 첫 번째 완성 대상으로 삼는다.
+
+- [ ] `tool_docking.yaml`의 tag-relative `coarse`, `fine`, `dock` TCP pose를 실제
+  측정값으로 채운다. null pose나 카메라 중심을 목표로 대체하지 않는다.
+- [ ] 현재 camera-normal 30 mm 전진 대신 측정된 X/Z 오프셋
+  `[-45.7, 0, -44.5] mm`를 모두 사용하는 단계별 접근을 적용한다.
+- [ ] 각 단계의 IK, joint limit, 전체 보간 경로 collision과 최종 정지 오차를
+  mock에서 검증한다.
+- [ ] rack 장착 접근과 해체 확인 뒤의 최종 도킹을 서로 다른 planning-scene
+  상태로 모델링하고, 해체 뒤 현재 feedback에서 다시 계획한다.
+- [ ] 체결 명령에는 sequence ID와 timestamp를 추가해 명령 이전 ACK를 거부한다.
+- [ ] `/arm/docked`와 별도로 물리 체결을 확인할 센서 또는 명시적인 검증 절차를
+  정의한다.
+- [ ] tool0 장착 상태의 `HOME -> BACK -> pre-dock -> dock -> retreat -> BACK`에서
+  command/feedback/velocity/current와 최초 실패 원인을 기록한다.
+- [ ] tag 유실, 취소, collision, Arduino timeout에서 현재 실측 위치 HOLD와
+  firmware watchdog 동작을 실기에서 확인한다.
+
+Tool0 완료 조건: 측정된 3단계 TCP 목표, 장착 상태별 scene 전이, 전체 경로 collision
+통과, 새로운 체결 ACK와 물리 체결 확인, 전류를 포함한 저속 실기 왕복 기록이 모두 있다.
+
+### Tool1 — drill 도킹 및 구동
+
+tool1 drill 형상과 TCP는 모델에 포함돼 있고 고정 장착면
+`tool_2_link <-> ee_actuator`만 `ToolMating`으로 제외했다. `-pi` BACK은 `+pi`보다
+supply-box collision이 적으므로 유지한다. 그러나 현재 실측 pre-dock/final capture의
+elbow가 실행 한계를 넘으므로 fail-closed 상태를 유지한다.
+
+- [ ] elbow를 planning margin 상한 `1.557952 rad` 이하로 두면서 tag 가시성,
+  접근축과 기계 간극을 만족하는 pre-dock/final pose를 다시 측정한다.
+- [ ] 후보 `1.581792 rad`와 final capture `1.590693 rad`의 차이를 raw feedback,
+  zero/sign 및 캡처 시점과 함께 정리한다. 자동 clamp나 limit 확장은 금지한다.
+- [ ] `cartesian_targets.yaml`의 `executable`과 docking blocker가 서로 모순되지
+  않도록 하나의 authoritative 실행 가능 상태로 통합한다.
+- [ ] camera-normal 30 mm 전진을 측정된 X/Z 오프셋
+  `[-45.7, 0, -50.0] mm`를 사용하는 tag-relative coarse/fine/dock 접근으로 바꾼다.
+- [ ] drill 실제 회전축, 회전 방향, 감속비와 `ee_joint` 1:1 결합을 실물/RViz에서
+  대조하고 STL 원점의 약 1.47 mm X 편심을 TCP 보정과 구분한다.
+- [ ] cable, circuit box와 supply box를 포함한 drill swept volume collision을
+  접근·회전·후퇴 각각 검사한다.
+- [ ] drill 무회전/회전 상태의 전류, 진동과 정지 시간을 측정하고 과전류 및
+  회전 timeout 기준을 실측으로 정한다.
+- [ ] 도킹 완료, 팔 정지, 축 결합 확인이 모두 참일 때만 drill 회전을 허용하는
+  interlock과 firmware watchdog을 추가한다.
+- [ ] tool1 실제 질량, 무게중심과 관성을 측정해 임시 URDF 값을 교체한다.
+
+Tool1 완료 조건: limit 안의 재측정 자세와 전체 collision 경로, tag-relative 최종
+도킹, 실제 회전축/방향, interlock, 회전 전류·진동 및 watchdog 실기 기록이 모두 있다.
+
+### Tool2 — supply-box pick/place
+
+tool2 작업은 별도 툴 형상이 아니라 tool0과 같은 물리 gripper를 사용한다. pre-dock
+joint goal과 pick/place 상태 머신은 있으나 설정은 `enabled: false`이고 gripper 보정과
+payload/사람 안전 조건이 비어 있으므로 개발 모드로 유지한다.
+
+- [ ] 실측 `open_rad`, `close_rad`, `ee_speed_rad_s`를 입력하고 무부하/접촉/파지
+  전류를 분리해 측정한다.
+- [ ] supply box의 치수, 질량, 무게중심, 파지면과 마찰 조건을 기록하고 실제 grasp
+  TCP와 접근 자세를 확정한다.
+- [ ] 파지 성공을 gripper 위치와 전류로 교차 확인하고, 가능하면 접촉/압력 센서를
+  추가한다. 명령 완료만으로 파지 성공 처리하지 않는다.
+- [ ] 파지 뒤 supply box를 attached collision object와 payload 관성에 반영하고,
+  release 확인 뒤 world object로 전환한다.
+- [ ] payload 상태의 joint speed/acceleration/current 제한과 전체 pick-return-place
+  경로 collision을 검증한다.
+- [ ] 카메라-to-ground TF, 사람의 발 위치 추정, detection timestamp와 base 정지
+  조건을 검증한다.
+- [ ] 사람이 움직이거나 관측이 stale이면 고정한 배치 목표를 폐기하고 HOLD한 뒤
+  새 관측에서 다시 시작한다.
+- [ ] 사람과 팔/물체 사이의 최소거리, 접근 속도, 즉시 정지 조건을 별도의 안전
+  요구사항으로 정의한다.
+- [ ] 사람 대신 고정 더미 목표로 grasp, attached-object 이동, placement, release와
+  귀환 전체를 먼저 검증한다.
+- [ ] 고정 더미 실기와 사람 주변 안전 검토가 끝난 뒤에만
+  `tool2_pick_place.yaml enabled: true`로 변경한다.
+
+Tool2 완료 조건: gripper와 payload 실측 보정, attached/world scene 전이, 파지·해제
+물리 확인, 고정 더미 전체 시퀀스, 사람 관측 갱신 및 거리/정지 안전 조건이 모두 통과한다.
+
+### 세 tool 공통 완료 조건
+
+- [ ] 관절별 zero/sign, soft limit와 startup recovery endpoint를 저속 실측한다.
+- [ ] tool별 실제 작업 TCP, 질량, 무게중심과 관성을 측정한다.
+- [ ] `HOME -> BACK`을 base 단독 직선 회전으로 실행하지 않고 현재 feedback에서
+  MoveIt 회피 계획과 전체 sampled collision 검사를 수행한다.
+- [ ] chassis, circuit box, rack, 장착 tool과 운반 payload를 planning scene에
+  포함하고 장착/해체/파지/해제 상태 전이를 테스트한다.
+- [ ] 모든 실행에 timestamp, epoch, execution/sequence ID, command, feedback,
+  velocity, current, collision/planning 결과와 최초 실패 원인을 남긴다.
+- [ ] Arduino 통신 단절과 프로세스 종료 시 자체 정지하는 firmware watchdog을
+  검증한다.
+- [ ] 실패와 cancel 뒤 현재 실측 위치 HOLD, scene 갱신과 새 planning 정책을 세
+  tool에 동일하게 적용한다.
 
 ## 단계 0 — 기준선 고정과 재현 자료
 
