@@ -271,7 +271,11 @@ class TcpJoy(TcpMotionWorkflow, Node):
         nearest = valid and len(msg.axes) > 5 and msg.axes[5] < -.5
         if hasattr(self, 'ee_dpad'):
             previous_direction = self.ee_dpad.direction
-            self.ee_dpad.update(msg.axes, enabled=bool(valid and msg.axes[2] >= -.5
+            # EE jog is an explicit L1+R1 layer.  Keep it independent from
+            # Cartesian collision/IK readiness, but never from deadman, focus,
+            # active TCP ownership or the L2 tool-path selector.
+            self.ee_dpad.update(msg.axes, enabled=bool(valid and msg.buttons[4]
+                                and msg.buttons[5] and msg.axes[2] >= -.5
                                 and self.status.get('focus') == 'arm'
                                 and self.status.get('mode') == 'tcp_ik'))
             if previous_direction != self.ee_dpad.direction:
@@ -494,6 +498,16 @@ class TcpJoy(TcpMotionWorkflow, Node):
                         self.safety_stop('feedback lead exceeded', fault=False)
                     elif now-self.joy_time >= .25:
                         self.deadman_stop('joystick timeout')
+                    elif (hasattr(self, 'ee_dpad') and
+                          (self.ee_dpad.direction or self.ee_dpad.vertical)):
+                        # The arm target is the measured/last accepted pose, so
+                        # gripper jogging does not depend on MoveIt availability
+                        # or on whether a new Cartesian arm candidate is valid.
+                        # Manager feedback/fault/epoch and EE travel checks still
+                        # gate the command in publish().
+                        self.discard()
+                        self.reason = ('EE jog active' if self.ee_dpad.direction
+                                       else 'EE jog speed adjusted')
                     elif not self.check.service_is_ready():
                         self.discard()
                         self.rearmed = False

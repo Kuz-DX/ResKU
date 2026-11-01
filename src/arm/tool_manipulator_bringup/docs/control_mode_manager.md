@@ -2,18 +2,25 @@
 
 ## IK joystick EE jog (Dynamixel ID 4)
 
-In TCP_IK with arm focus, D-pad up/down (axis 7) adjusts the EE jog speed
-by 0.02 rad/s per press. Default is 0.06 rad/s, bounded to 0.02..0.12 rad/s;
+In TCP_IK with arm focus, holding L1+R1 and pressing D-pad up/down (axis 7)
+adjusts the EE jog speed
+by 1 rad/s per press. Default is 5 rad/s, bounded to 1..16.8 rad/s;
 holding up/down does not auto-repeat and restarting resets the selection.
-With L1 held and rearmed, D-pad left/right (axis 6) commands positive/negative
+With L1+R1 held and rearmed, D-pad left/right (axis 6) commands positive/negative
 ee_joint velocity (CCW/CW under the calibrated `raw_increases_ccw: true`
 convention). Release left/right to stop. Release L1 or lose fresh joystick
-input to stop through the manager. Diagonal presses change speed only.
-The arm sticks are suppressed while D-pad is active. R1 does not change this
-mapping; L2 path selection suppresses all D-pad EE commands. This applies to
+input to stop through the manager. Diagonal presses change speed only. The arm
+sticks are suppressed while D-pad is active. EE jog holds the current arm pose
+and does not require a new Cartesian IK/collision candidate or an available
+MoveIt state-validity service. Hardware faults, stale feedback, inactive TCP_IK,
+EE travel limits and L2 path selection still suppress it. This applies to
 `ik_manual.launch.py`; standalone manual retains its existing tool layer.
 EE feedback and calibrated gripper travel bounds gate rotation. The selected
 speed is published as `ee_speed_rad_s` on `/arm/tcp_joy/status`.
+The configured Dynamixel ID-4 Velocity Limit remains raw 400, equivalent to
+9.58764908 rad/s. Values above that are accepted by the TCP manager but cannot
+produce 16.8 rad/s until the independent motor register is deliberately changed
+to about raw 701 and read back. Launch does not write EEPROM limit registers.
 
 R2 (`axes[5]`, pressed below -0.5) requests the nearest TCP-entry candidate.
 The current joints are first projected into the required 0.10-rad margin. If

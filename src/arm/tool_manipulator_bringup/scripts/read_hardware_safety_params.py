@@ -228,7 +228,7 @@ def sample_rmd(config, duration, period):
     return observed, errors
 
 
-def print_rmd(observed, errors):
+def print_rmd(observed, errors, config):
     print("=== RMD 0x9C observations ===")
     print("# Measured peaks only; these are NOT safe limits.")
     print("rmd_observed:")
@@ -241,12 +241,13 @@ def print_rmd(observed, errors):
         print(f"    max_temperature_c: {item['max_temperature_c']}")
     for error in errors:
         print(f"ERROR: {error}", file=sys.stderr)
-    print("\n# RMD software protection policy: engineering decision required")
+    print("\n# Configured RMD software protection policy; not motor-register readback")
     print("joints:")
     for name in observed:
         print(f"  {name}:")
+        policy = config["joints"].get(name, {})
         for field in RMD_POLICY_FIELDS:
-            print(f"    {field}: null")
+            print(f"    {field}: {policy.get(field)!r}")
     print("\nRMD 관측 최대값을 그대로 리밋으로 사용하지 마십시오. 정격/피크 전류, 감속기·링크 허용 하중, 정상 궤적 로그와 안전 여유로 보호값을 결정해야 합니다.")
 
 
@@ -269,7 +270,7 @@ def main():
             failed = failed or bool(errors) or not values
         if use_rmd:
             observed, errors = sample_rmd(config, args.rmd_duration, args.rmd_period)
-            print_rmd(observed, errors)
+            print_rmd(observed, errors, config)
             failed = failed or bool(errors) or any(item["samples"] == 0 for item in observed.values())
         return 2 if failed else 0
     except (KeyError, TypeError, ValueError, ReadError) as exc:

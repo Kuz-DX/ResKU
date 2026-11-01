@@ -11,6 +11,10 @@ TCP_ENTRY_TOLERANCE = (.02, .001, .001, .001, .02, .02)
 # MX-106(2.0): one Goal Velocity count is 0.229 rpm (0.0239691227 rad/s).
 # Tool-specific commanded speeds remain separate from this manual safety ceiling.
 MANUAL_EE_MAX_VELOCITY_RAD_S = 400 * 0.0239691227
+# Requested TCP gripper jog ceiling.  The configured ID-4 Velocity Limit is
+# currently raw 400 (9.58764908 rad/s), so commands above that remain subject
+# to the motor's independently configured hardware register.
+TCP_EE_MAX_VELOCITY_RAD_S = 16.8
 
 
 def non_arm_feedback_changed(current, snapshot, arm_joints):
@@ -471,7 +475,8 @@ class ModeCore:
                 epoch != self.epoch or self.transitioning or not self.ready or
                 self.focus != 'arm' or not self.fresh(now)):
             return False
-        ee_speed_limit = MANUAL_EE_MAX_VELOCITY_RAD_S if source == 'manual' else .12
+        ee_speed_limit = (MANUAL_EE_MAX_VELOCITY_RAD_S if source == 'manual'
+                          else TCP_EE_MAX_VELOCITY_RAD_S)
         if not self.valid(positions) or not math.isfinite(ee) or abs(ee) > ee_speed_limit:
             raise ValueError('invalid command or limits exceeded')
         if max(abs(a-b) for a, b in zip(positions, self.position)) > .10:
