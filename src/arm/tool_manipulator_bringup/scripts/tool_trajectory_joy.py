@@ -57,7 +57,7 @@ def load_route_poses(robot_description_semantic):
 
 
 def load_pre_dock_targets(path):
-    """Load reviewed arm_world TCP pre-dock poses for MoveIt route entry."""
+    """Load reviewed joint or arm_world TCP goals for MoveIt route entry."""
     data = yaml.safe_load(Path(path).read_text())
     if not isinstance(data, dict) or not isinstance(data.get('targets'), dict):
         raise ValueError(f'{path}: targets must be a mapping')
@@ -69,6 +69,24 @@ def load_pre_dock_targets(path):
         if path_id not in TOOL_IDS or not isinstance(value, dict):
             continue
         if value.get('executable') is not True:
+            continue
+        retreat_distance = float(value.get('retreat_distance_m', .030))
+        retreat_axis = np.asarray(value.get('retreat_axis_tcp', [0., 0., -1.]), dtype=float)
+        axis_norm = float(np.linalg.norm(retreat_axis))
+        if (not math.isfinite(retreat_distance) or not .005 <= retreat_distance <= .100
+                or retreat_axis.shape != (3,) or not np.all(np.isfinite(retreat_axis))
+                or axis_norm < 1e-9):
+            raise ValueError(f'{path}: {key} has invalid Cartesian retreat settings')
+        retreat_axis /= axis_norm
+        retreat = dict(retreat_distance=retreat_distance, retreat_axis=retreat_axis)
+        joint_goal = value.get('joint_goal_rad')
+        if joint_goal is not None:
+            joint_goal = np.asarray(joint_goal, dtype=float)
+            if (value.get('joint_names') != list(ARM_JOINTS)
+                    or joint_goal.shape != (len(ARM_JOINTS),)
+                    or not np.all(np.isfinite(joint_goal))):
+                raise ValueError(f'{path}: {key} has an invalid reviewed joint goal')
+            targets[path_id] = dict(joint_goal=joint_goal, **retreat)
             continue
         position = np.asarray(value.get('position_m'), dtype=float)
         quaternion = np.asarray(value.get('orientation_xyzw'), dtype=float)
@@ -84,8 +102,25 @@ def load_pre_dock_targets(path):
         approach_axis = np.asarray([
             2.*(x*z+w*y), 2.*(y*z-w*x), 1.-2.*(x*x+y*y)], dtype=float)
         targets[path_id] = dict(position=position, quaternion=quaternion,
-                                approach_axis=approach_axis)
+                                approach_axis=approach_axis, **retreat)
     return targets
+
+
+def nearest_base_equivalent(goal, reference, limits, margin=.0):
+    """Choose the 2-pi-equivalent base goal nearest feedback within limits."""
+    goal, reference = np.asarray(goal, dtype=float), np.asarray(reference, dtype=float)
+    if (goal.shape != (len(ARM_JOINTS),) or reference.shape != goal.shape
+            or not np.all(np.isfinite(goal)) or not np.all(np.isfinite(reference))
+            or not math.isfinite(margin) or margin < 0):
+        raise ValueError('invalid joint goal equivalence input')
+    lower, upper = limits['base_joint'][0]+margin, limits['base_joint'][1]-margin
+    candidates = [goal[0]+2.*math.pi*k for k in range(-2, 3)
+                  if lower <= goal[0]+2.*math.pi*k <= upper]
+    if not candidates:
+        raise ValueError('reviewed base goal has no equivalent within joint limits')
+    result = goal.copy()
+    result[0] = min(candidates, key=lambda value: abs(value-reference[0]))
+    return result
 
 
 def load_path(path, model, margin=.02):
@@ -246,6 +281,58 @@ def execution_timeout(path, measured, speed_limits):
     return duration+5.*len(path['waypoints'])+30.
 
 
+def simplify_timed_waypoints(start, waypoints, durations, tolerance=.001,
+                             max_waypoints=500):
+    """Remove dense time samples without changing joint-path geometry.
+
+    RDP uses joint-space line deviation rather than timestamp fraction, so
+    acceleration samples on one geometric segment collapse correctly. Segment
+    durations are accumulated between retained points. The caller still runs
+    dense collision interpolation over every retained segment.
+    """
+    if (len(waypoints) != len(durations) or not 0 < tolerance <= .005
+            or max_waypoints < 1):
+        raise ValueError('invalid MoveIt waypoint simplification input')
+    if len(waypoints) <= max_waypoints:
+        return list(waypoints), list(durations)
+    points = [np.asarray(start, dtype=float)] + [
+        np.asarray(q, dtype=float) for q in waypoints]
+    keep = {0, len(points)-1}
+    stack = [(0, len(points)-1)]
+    while stack:
+        first, last = stack.pop()
+        if last <= first+1:
+            continue
+        a, b = points[first], points[last]
+        direction = b-a
+        norm2 = float(direction@direction)
+        worst_index, worst_error = None, -1.
+        for index in range(first+1, last):
+            if norm2 <= 1e-18:
+                error = float(np.max(np.abs(points[index]-a)))
+            else:
+                fraction = float(np.clip(
+                    (points[index]-a)@direction/norm2, 0., 1.))
+                error = float(np.max(np.abs(
+                    points[index]-(a+fraction*direction))))
+            if error > worst_error:
+                worst_index, worst_error = index, error
+        if worst_error > tolerance:
+            keep.add(worst_index)
+            stack.extend(((first, worst_index), (worst_index, last)))
+    indices = sorted(keep)
+    if len(indices)-1 > max_waypoints:
+        raise ValueError(
+            f'MoveIt leg needs {len(indices)-1} geometric waypoints after '
+            f'{tolerance:.4f}-rad simplification; limit is {max_waypoints}')
+    cumulative = np.concatenate(
+        ([0.], np.cumsum(np.asarray(durations, dtype=float))))
+    simplified_waypoints = [points[index] for index in indices[1:]]
+    simplified_durations = [float(cumulative[index]-cumulative[previous])
+                            for previous, index in zip(indices, indices[1:])]
+    return simplified_waypoints, simplified_durations
+
+
 def planned_leg(trajectory, start, goal, minimum_duration=.02):
     """Convert one MoveIt leg into manager waypoints and validate its endpoint."""
     names = list(trajectory.joint_names)
@@ -272,7 +359,7 @@ def planned_leg(trajectory, start, goal, minimum_duration=.02):
     if float(np.max(np.abs(waypoints[-1]-np.asarray(goal, dtype=float)))) > .01:
         raise ValueError('MoveIt plan did not reach the requested route goal')
     waypoints[-1] = np.asarray(goal, dtype=float)
-    return waypoints, durations
+    return simplify_timed_waypoints(start, waypoints, durations)
 
 
 def planned_entry(path, trajectory, measured, minimum_duration=.02):
@@ -506,12 +593,14 @@ class ToolTrajectoryJoy(Node):
             msg.axes, msg.buttons, self.combos, self.l2_axis,
             self.l2_threshold, self.first_button, self.third_button, self.second_button)
         back_request, self.back_combo = requested_back(
-            msg.axes, msg.buttons, self.back_combo, self.l2_axis,
-            self.l2_threshold, self.back_button)
+            msg.axes, msg.buttons, getattr(self, 'back_combo', False), self.l2_axis,
+            self.l2_threshold, getattr(self, 'back_button', 3))
         if back_request and request is None:
             self.request_back()
         elif request is not None and not self.back_combo:
-            self.request_path(request)
+            # A face-button tool request owns the complete autonomous sequence:
+            # approach, Arduino docking, Cartesian retreat, and direct BACK.
+            self.request_path(request, desired_docked=True)
 
     def request_back(self):
         if self.stage != 'idle':
@@ -573,7 +662,10 @@ class ToolTrajectoryJoy(Node):
             self.report('blocked', 'this path defines ee close and return, not tool release')
             self.reset()
             return
-        if desired_docked is not None and not close_and_return:
+        # UI desired-state requests may short-circuit against the known latch
+        # state. A joystick autonomous sequence must still visit its selected
+        # tool pose and obtain fresh post-command feedback.
+        if desired_docked is not None and not close_and_return and nearest_entry:
             if self.docked_state is None:
                 self.path_id = request
                 self.report('blocked', 'docking mechanism state is UNKNOWN; initialize it first')
@@ -690,28 +782,33 @@ class ToolTrajectoryJoy(Node):
             self.future = self.collision.call_async(self.requests[0])
             approach = ('; approaching taught start from %.4f rad' % path['start_error']
                         if path['start_error'] > self.start_tolerance else '')
+            label = ('BACK staging' if getattr(self, 'route_kind', None) == 'back'
+                     else tool_label(path_id))
             self.report('checking',
-                        f'checking {self.operation_label()} path ({len(self.requests)} samples, '
+                        f'checking {label} path '
+                        f'({len(self.requests)} samples, '
                         f'{budget:.1f}s budget){approach}')
         except (ValueError, RuntimeError, KeyError) as exc:
             self.path_id = path_id
             self.begin_failed(str(exc))
 
-    def operation_label(self):
-        return 'BACK staging' if self.route_kind == 'back' else tool_label(self.path_id)
+    def operation_label(self, path_id=None):
+        return ('BACK staging' if getattr(self, 'route_kind', None) == 'back'
+                else tool_label(self.path_id if path_id is None else path_id))
 
-    def begin_back(self):
+    def begin_back(self, via_home=True):
         now = time.monotonic()
         status = self.healthy_hold(now)
         if not self.planner.service_is_ready():
             raise RuntimeError('MoveIt route planner unavailable')
-        goals = [self.route_poses['home'].copy(), self.route_poses['back'].copy()]
-        for label, goal in zip(('home', 'back'), goals):
+        labels = ['home', 'back'] if via_home else ['back']
+        goals = [self.route_poses[label].copy() for label in labels]
+        for label, goal in zip(labels, goals):
             if not self.model.within_limits(goal):
                 raise ValueError(f'MoveIt route {label} violates joint limits')
         self.path_id = None
         self.route_kind = 'back'
-        self.route_labels = ['home', 'back']
+        self.route_labels = labels
         self.snapshot = dict(self.full_state)
         self.original_epoch = status['epoch']
         self.route_goals = goals
@@ -721,34 +818,105 @@ class ToolTrajectoryJoy(Node):
             [self.full_state[j] for j in ARM_JOINTS], dtype=float)
         self._request_route_leg()
 
+    def begin_docking_actuation(self, desired=True):
+        """Command Arduino only from stopped HOLD and wait for fresh feedback."""
+        self.healthy_hold(time.monotonic())
+        if (self.docking_command.get_subscription_count() == 0
+                or self.count_publishers('/arm/docked') == 0):
+            raise RuntimeError('Arduino command/status connection unavailable')
+        self.snapshot = dict(self.full_state)
+        self.command_feedback_sequence = self.docked_feedback_sequence
+        self.actuation_deadline = time.monotonic()+self.actuation_timeout
+        self.requested_docked_state = bool(desired)
+        self.send_docking_pulse(self.requested_docked_state)
+        self.stage = 'wait_docked'
+        action = 'dock' if self.requested_docked_state else 'release'
+        self.report('actuating', f'Arduino {action} pulse sent; waiting for /arm/docked')
+
+    def begin_docking_retreat(self):
+        """Build a checked straight TCP retreat before planning directly to BACK."""
+        self.healthy_hold(time.monotonic())
+        target = self.pre_dock_targets.get(self.path_id)
+        if target is None:
+            raise RuntimeError(f'{tool_label(self.path_id)} retreat configuration unavailable')
+        distance = float(target['retreat_distance'])
+        local_axis = np.asarray(target['retreat_axis'], dtype=float)
+        seed = np.asarray([self.full_state[j] for j in ARM_JOINTS], dtype=float)
+        origin = self.model.fk(seed)
+        direction = origin[:3, :3] @ local_axis
+        count = max(1, math.ceil(distance/.003))
+        waypoints, durations = [], []
+        previous = seed.copy()
+        for index in range(1, count+1):
+            pose = origin.copy()
+            pose[:3, 3] += direction*(distance*index/count)
+            try:
+                solved = self.model.solve(
+                    pose, previous, self.margin, max_iterations=100, max_time_s=.05)
+            except ValueError as exc:
+                raise RuntimeError(f'docking retreat IK point {index}/{count}: {exc}') from exc
+            solved = np.asarray(solved, dtype=float)
+            if (not self.model.within_limits(solved, self.margin)
+                    or np.max(np.abs(solved-previous)) > .03):
+                raise RuntimeError('docking retreat IK exceeds joint step/limits')
+            actual = self.model.fk(solved)
+            residual = self.model.pose_error(solved, pose)
+            if np.linalg.norm(residual[:3]) > 1e-4 or np.linalg.norm(residual[3:]) > 1e-3:
+                raise RuntimeError('docking retreat IK residual too large')
+            step_distance = float(np.linalg.norm(actual[:3, 3]-self.model.fk(previous)[:3, 3]))
+            durations.append(max(.05, float(np.max(np.abs(solved-previous)))/.025,
+                                 step_distance/.005))
+            waypoints.append(solved.copy())
+            previous = solved
+        self.route_kind = 'dock_retreat'
+        self.report('retreating', f'planning checked {distance*1000.:.1f} mm TCP retreat')
+        self.begin(self.path_id, dict(
+            start=seed, waypoints=waypoints, durations=durations,
+            total=sum(durations), start_error=0., cartesian_line=True,
+            stop_at_waypoints=[False]*(count-1)+[True]))
+
     def request_route_plan(self, path_id, measured, status):
-        """Plan verified BACK -> reviewed Cartesian pre-dock."""
+        """Plan verified BACK -> reviewed joint or Cartesian pre-dock."""
         if not self.planner.service_is_ready():
             raise RuntimeError('MoveIt route planner unavailable')
         if path_id not in self.pre_dock_targets:
             raise ValueError(f'{tool_label(path_id)} has no execution-enabled pre-dock pose')
         target = self.pre_dock_targets[path_id]
-        nominal_final = np.asarray(self.paths[path_id]['waypoints'][-1], dtype=float)
-        seeds = [('current feedback', np.asarray(measured, dtype=float)),
-                 ('nominal YAML final', nominal_final),
-                 ('SRDF back', self.route_poses['back'].copy())]
-        pre_dock, errors = None, []
-        for seed_name, seed in seeds:
-            if not self.model.within_limits(seed, self.margin):
-                errors.append(f'{seed_name}: seed violates soft limits')
-                continue
-            try:
-                pre_dock = self.model.solve_axis(
-                    target['position'], target['approach_axis'], np.asarray([0., 0., 1.]),
-                    seed, margin_rad=self.margin, max_iterations=500,
-                    max_time_s=.5, joint_step_rad=6.)
-                break
-            except ValueError as exc:
-                errors.append(f'{seed_name}: {exc}')
-        if pre_dock is None:
-            raise ValueError(f'{tool_label(path_id)} pre-dock axis IK failed: '
-                             + ' | '.join(errors))
-        pre_dock = np.asarray(pre_dock, dtype=float)
+        if 'joint_goal' in target:
+            pre_dock = nearest_base_equivalent(
+                target['joint_goal'], measured, self.model.limits, self.margin)
+            if not self.model.within_limits(pre_dock, self.margin):
+                violations = []
+                for name, value in zip(ARM_JOINTS, pre_dock):
+                    low, high = self.model.limits[name]
+                    if not low+self.margin <= value <= high-self.margin:
+                        violations.append(
+                            f'{name}={value:.6f} allowed=[{low+self.margin:.6f}, '
+                            f'{high-self.margin:.6f}]')
+                raise ValueError(f'{tool_label(path_id)} reviewed joint goal violates '
+                                 f'planning limits: {"; ".join(violations)}')
+        else:
+            nominal_final = np.asarray(self.paths[path_id]['waypoints'][-1], dtype=float)
+            seeds = [('current feedback', np.asarray(measured, dtype=float)),
+                     ('nominal YAML final', nominal_final),
+                     ('SRDF back', self.route_poses['back'].copy())]
+            pre_dock, errors = None, []
+            for seed_name, seed in seeds:
+                if not self.model.within_limits(seed, self.margin):
+                    errors.append(f'{seed_name}: seed violates soft limits')
+                    continue
+                try:
+                    pre_dock = self.model.solve_axis(
+                        target['position'], target['approach_axis'], np.asarray([0., 0., 1.]),
+                        seed, margin_rad=self.margin, max_iterations=500,
+                        max_time_s=.5, joint_step_rad=6.)
+                    break
+                except ValueError as exc:
+                    errors.append(f'{seed_name}: {exc}')
+            if pre_dock is None:
+                raise ValueError(f'{tool_label(path_id)} pre-dock axis IK failed: '
+                                 + ' | '.join(errors))
+            pre_dock = np.asarray(pre_dock, dtype=float)
         goals = [pre_dock]
         for label, goal in zip((f'{tool_label(path_id)} pre-dock',), goals):
             if not self.model.within_limits(goal):
@@ -823,7 +991,7 @@ class ToolTrajectoryJoy(Node):
         self.reset()
 
     def path_completed(self):
-        if self.route_kind == 'back':
+        if getattr(self, 'route_kind', None) == 'back':
             measured = np.asarray([self.full_state[j] for j in ARM_JOINTS], dtype=float)
             error = float(np.max(np.abs(measured-self.route_poses['back'])))
             if error > self.back_tolerance:
@@ -832,6 +1000,10 @@ class ToolTrajectoryJoy(Node):
             self.back_ready_epoch = self.status.get('epoch')
             self.report('completed', 'BACK reached and feedback verified; select tool0/1/2')
             self.reset()
+            return
+        if getattr(self, 'route_kind', None) == 'dock_retreat':
+            self.report('retreated', 'Cartesian docking retreat completed; planning direct BACK')
+            self.begin_back(via_home=False)
             return
         after = self.paths[self.path_id].get('after_path')
         if after is not None:
@@ -856,16 +1028,7 @@ class ToolTrajectoryJoy(Node):
                 self.reset()
             return
         if self.requested_docked_state is not None:
-            if (self.docking_command.get_subscription_count() == 0
-                    or self.count_publishers('/arm/docked') == 0):
-                raise RuntimeError('Arduino command/status connection unavailable')
-            self.snapshot = dict(self.full_state)
-            self.command_feedback_sequence = self.docked_feedback_sequence
-            self.actuation_deadline = time.monotonic()+self.actuation_timeout
-            self.send_docking_pulse(self.requested_docked_state)
-            self.stage = 'wait_docked'
-            action = 'dock' if self.requested_docked_state else 'release'
-            self.report('actuating', f'Arduino {action} pulse sent; waiting for /arm/docked')
+            self.begin_docking_actuation(self.requested_docked_state)
             return
         self.report('completed', f'{tool_label(self.path_id)} path completed; HOLD')
         self.reset()
@@ -945,8 +1108,8 @@ class ToolTrajectoryJoy(Node):
                 if (self.docked_feedback_sequence > self.command_feedback_sequence
                         and self.docked_state == self.requested_docked_state):
                     state = 'docked' if self.requested_docked_state else 'released'
-                    self.report(state, f'Arduino {state} state confirmed; remain HOLD')
-                    self.reset()
+                    self.report(state, f'Arduino {state} state confirmed; starting retreat')
+                    self.begin_docking_retreat()
                 return
             if self.stage == 'request_hold':
                 if not self.future.done():
@@ -960,7 +1123,7 @@ class ToolTrajectoryJoy(Node):
                 return
             if self.stage == 'wait_hold':
                 if (self.status.get('mode') == 'hold' and not self.status.get('transitioning')):
-                    if self.route_kind == 'back_pending':
+                    if getattr(self, 'route_kind', None) == 'back_pending':
                         self.begin_back()
                     else:
                         self.begin(self.path_id)
@@ -1080,7 +1243,7 @@ class ToolTrajectoryJoy(Node):
                 if not self.unchanged(validation=True):
                     raise RuntimeError('robot moved before path execution; '
                                        + self.snapshot_change_reason(validation=True))
-                if self.route_kind == 'tool':
+                if getattr(self, 'route_kind', None) == 'tool':
                     self.back_ready = False
                     self.back_ready_epoch = None
                 self.execution_id = 'tool-path-'+uuid.uuid4().hex
@@ -1101,7 +1264,9 @@ class ToolTrajectoryJoy(Node):
                 self.publisher.publish(String(data=json.dumps(command)))
                 self.stage = 'executing'
                 self.started = now
-                self.report('executing', f'executing {self.operation_label()} path')
+                label = ('BACK staging' if getattr(self, 'route_kind', None) == 'back'
+                         else tool_label(self.path_id))
+                self.report('executing', f'executing {label} path')
                 return
             if self.stage == 'executing':
                 s = self.status

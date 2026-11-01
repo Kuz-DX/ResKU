@@ -12,6 +12,12 @@ tools:
     actuation_enabled: false
     desired_docked: true           # true=attach pulse, false=release pulse
     actuation_timeout_s: null      # establish with actual Arduino firmware
+    # Measured tag-to-final-TCP translation, expressed in the confirmed
+    # tag/TCP-aligned axes: +X up, +Y left, +Z from TCP toward the box.
+    # Final TCP is therefore below and in front of the tag centre.
+    measured_tag_tcp_xyz_m: [-0.0457, 0.0, -0.0445]
+    measured_tag_tcp_xyzw: [0.0, 0.0, 0.0, 1.0]
+    measured_pre_dock_30mm_xyz_m: [-0.0457, 0.0, -0.0745]
     stages:
       - {name: coarse, xyz_m: null, xyzw: null}
       - {name: fine, xyz_m: null, xyzw: null}
@@ -60,10 +66,28 @@ tools:
     require_l2_hold: false
     alignment_mode: camera_normal_advance
     tag_family: tag36h11
-    tag_id: 1
+    tag_id: 0
     tag_size_m: 0.020             # measured outer black square, excluding white margin
     advance_distance_m: 0.030
-    actuation_enabled: false     # finish in HOLD, no attach/release command
+    # Confirmed tag/TCP-aligned measurement. The current camera-normal mode
+    # does not yet consume the lateral X offset; retain it explicitly so the
+    # next tag-relative staged approach cannot silently lose this geometry.
+    measured_tag_tcp_xyz_m: [-0.0457, 0.0, -0.0500]
+    measured_tag_tcp_xyzw: [0.0, 0.0, 0.0, 1.0]
+    measured_pre_dock_30mm_xyz_m: [-0.0457, 0.0, -0.0800]
+    # Hand-guided final docking capture. Diagnostic reference only: elbow
+    # 1.590693 rad exceeds the configured 1.5779521-rad endpoint, so this must
+    # not be submitted as an executable MoveIt/managed-path goal until the
+    # encoder zero/limit discrepancy is resolved from raw motor feedback.
+    measured_final_dock_joint_rad: [2.779573, 0.693943, 1.590693,
+      -1.389980, -0.085903, -1.805495]
+    measured_final_dock_executable: false
+    measured_final_dock_blocker: elbow exceeds configured soft limit by 0.0127409 rad
+    # The joystick request owns the complete sequence: final tag-normal
+    # approach, Arduino attach, checked TCP retreat, then direct MoveIt BACK.
+    actuation_enabled: true
+    desired_docked: true
+    actuation_timeout_s: 10.0
     tag_max_age_s: 0.25
     min_decision_margin: 40.0
     max_reprojection_px: 1.5

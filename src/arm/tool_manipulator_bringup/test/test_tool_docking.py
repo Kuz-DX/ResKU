@@ -45,6 +45,7 @@ def node(tmp_path):
         camera_reason='CameraInfo not received',
         tag_received=0, tag_accepted=0, tag_reason='no tag messages received',
         model=Mock(), report=Mock(), reset=Mock(), begin=Mock(), fail=Mock(),
+        begin_docking_retreat=Mock(),
         docking_command=Mock(), get_clock=Mock(), margin=.02,
         observation=(1, 0., np.eye(4)))
     result.get_clock.return_value.now.return_value.nanoseconds = 0
@@ -68,9 +69,13 @@ def test_shipped_config_only_enables_tool1_camera_alignment_and_relative_advance
     assert set(cfg) == {1}
     assert cfg[1]['alignment_mode'] == 'camera_normal_advance'
     assert cfg[1]['advance_distance_m'] == .030
+    assert cfg[1]['measured_final_dock_joint_rad'] == pytest.approx([
+        2.779573, .693943, 1.590693, -1.389980, -.085903, -1.805495])
+    assert cfg[1]['measured_final_dock_executable'] is False
     assert cfg[1]['tag_family'] == 'tag36h11'
-    assert cfg[1]['tag_id'] == 1
-    assert not cfg[1]['actuation_enabled']
+    assert cfg[1]['tag_id'] == 0
+    assert cfg[1]['actuation_enabled']
+    assert cfg[1]['desired_docked'] is True
     assert cfg[1]['require_l2_hold'] is False
     assert 'targets' not in cfg[1]
 
@@ -165,9 +170,9 @@ def test_three_stages_then_attach_command_and_fresh_docked_response(tmp_path):
     n.reset.assert_not_called()
     ToolDockingCoordinator.on_docked(n, SimpleNamespace(data=True))
     ToolDockingCoordinator.observe(n, 1.2)
-    n.reset.assert_called_once()
+    n.begin_docking_retreat.assert_called_once()
     assert n.docking_command.publish.call_count == 1
-    n.begin.assert_not_called()  # no speculative retreat
+    n.begin.assert_not_called()
 
 
 def test_release_uses_explicit_false_command_and_waits_for_false(tmp_path):
@@ -178,7 +183,7 @@ def test_release_uses_explicit_false_command_and_waits_for_false(tmp_path):
     assert [call.args[0].data for call in n.docking_command.publish.call_args_list] == [False]
     ToolDockingCoordinator.on_docked(n, SimpleNamespace(data=False))
     ToolDockingCoordinator.observe(n, 1.1)
-    n.reset.assert_called_once()
+    n.begin_docking_retreat.assert_called_once()
 
 
 def test_docking_only_never_sends_lock(tmp_path):
@@ -358,11 +363,12 @@ def test_legacy_executor_completion_enters_docking_only_after_confirmed_hold(tmp
     n.docking_command.publish.assert_not_called()
 
 
-@pytest.mark.parametrize('enabled,motion,script', [
-    (None, None, 'tool_docking_coordinator.py'),
-    ('false', None, 'tool_trajectory_joy.py'),
-    ('true', 'false', 'tool_docking_coordinator.py')])
-def test_launch_selects_exactly_one_path_input_owner(enabled, motion, script):
+@pytest.mark.parametrize('enabled,motion,place_test,script', [
+    (None, None, None, 'tool_docking_coordinator.py'),
+    ('false', None, None, 'tool_trajectory_joy.py'),
+    ('true', 'false', None, 'tool_docking_coordinator.py'),
+    ('true', 'false', 'true', 'tool2_pick_place_coordinator.py')])
+def test_launch_selects_exactly_one_path_input_owner(enabled, motion, place_test, script):
     from launch import LaunchContext
     from launch.actions import DeclareLaunchArgument
     from launch.utilities import perform_substitutions
@@ -380,6 +386,8 @@ def test_launch_selects_exactly_one_path_input_owner(enabled, motion, script):
         values['enable_tool_docking'] = enabled
     if motion is not None:
         values['enable_docking_motion'] = motion
+    if place_test is not None:
+        values['enable_tool2_place_test'] = place_test
     base = SimpleNamespace(hardware_file='hardware.yaml', description={}, spawner=Mock(),
                            moveit_config=Mock(), state_publisher=Mock(), control_node=Mock())
     common = SimpleNamespace(build_arm_base=Mock(return_value=base))
@@ -397,8 +405,10 @@ def test_launch_selects_exactly_one_path_input_owner(enabled, motion, script):
             patch.object(launch, 'RegisterEventHandler', return_value=Mock()), \
             patch.object(launch, 'OnProcessExit', return_value=Mock()):
         launch.bringup(None)
-    path_nodes = [n for n in nodes if any('tool_trajectory_joy.py' in a or
-                  'tool_docking_coordinator.py' in a for a in n.get('arguments', []))]
+    path_nodes = [n for n in nodes if any(
+        Path(a).name in ('tool_trajectory_joy.py', 'tool_docking_coordinator.py',
+                         'tool2_pick_place_coordinator.py')
+        for a in n.get('arguments', []))]
     assert len(path_nodes) == 1
     assert Path(path_nodes[0]['arguments'][0]).name == script
     if script == 'tool_docking_coordinator.py':
@@ -406,6 +416,9 @@ def test_launch_selects_exactly_one_path_input_owner(enabled, motion, script):
         assert parameters['docking_motion_enabled'] is (motion != 'false')
         assert parameters['docking_camera_frame'] == 'arm_camera_color_optical_frame'
         assert set(load_settings(parameters['docking_config'])) == {1}
+    if script == 'tool2_pick_place_coordinator.py':
+        parameters = path_nodes[0]['parameters'][-1]
+        assert parameters['tool2_place_test_enabled'] is True
 
 
 def camera_node(tmp_path):
@@ -642,7 +655,8 @@ def tag_input_node(tmp_path):
                               np.array([.01, .02, .3]), np.asarray(info.k).reshape(3, 3),
                               np.zeros(5))[0].reshape(4, 2)
     data = dict(stamp=dict(sec=1, nanosec=950_000_000), frame_id=n.camera_frame,
-                detections=[dict(id=1, family='tag36h11', hamming=0, decision_margin=70.62,
+                detections=[dict(id=n.cfg['tag_id'], family='tag36h11', hamming=0,
+                                 decision_margin=70.62,
                                  corners_px=[dict(u=u, v=v) for u, v in pixels])])
     return n, info, data
 
@@ -675,7 +689,7 @@ def test_tag_rejection_retains_exact_reason_and_previous_observation(tmp_path, f
         n.camera, n.camera_reason = None, 'CameraInfo not received'
     if failure == 'tag_frame': data['frame_id'] = 'wrong'
     if failure == 'age': data['stamp']['sec'] = 0
-    if failure == 'wrong_id': data['detections'][0]['id'] = 0
+    if failure == 'wrong_id': data['detections'][0]['id'] = n.cfg['tag_id']+1
     if failure == 'quality': data['detections'][0]['hamming'] = 1
     if failure == 'tf':
         n.tf_buffer.lookup_transform.side_effect = TransformException('image-time transform unavailable')
@@ -748,81 +762,24 @@ def test_main_spins_tf_concurrently_and_shuts_executor_down_before_node():
     n.fail.assert_not_called()
 
 
-@pytest.mark.parametrize('entry_offset', [0., .272])
-def test_l2_circle_from_tcp_mode_keeps_docking_through_entry_plan_and_execution(tmp_path, entry_offset):
+def test_tool_request_from_tcp_mode_is_blocked_until_verified_back(tmp_path):
     from sensor_msgs.msg import Joy
-    from tool_trajectory_joy import load_path
     n = camera_node(tmp_path)
-    del n.begin  # Use both real begin methods, rather than pre-arming the fixture.
-    n.paths = {1: load_path(ROOT/'config/tool1_trajectory.yaml', n.model)}
+    n.paths = {1: dict(after_path=None)}
     n.settings = load_settings(ROOT/'config/tool_docking.yaml')
     n.active, n.stage, n.docking_started = False, 'idle', None
     n.combos, n.l2_axis, n.l2_threshold, n.first_button, n.third_button = (
         [False]*3, 2, -.5, 2, 0)
     n.second_button = 1
     n.requested_docked_state, n.use_nearest_entry = None, False
-    measured = n.paths[1]['start'].copy()
-    measured[0] += entry_offset
-    n.full_state = dict(zip(ARM_JOINTS, measured))
+    n.full_state = dict(zip(ARM_JOINTS, np.zeros(6)))
     n.status_time = n.state_time = 1.
     n.status = dict(mode='tcp_ik', epoch='tcp', ready=True, startup_complete=True,
                     focus='arm', transitioning=False)
-    n.start_tolerance, n.max_start_delta, n.approach_speed = .03, .1, .05
-    n.shoulder_isolation_half_width = .08
-    n.collision_step, n.collision_timeout = .005, 10.
-    n.planning_timeout, n.planning_attempts = 8., 3
-    n.planning_velocity_scale, n.planning_acceleration_scale = .08, .4
-    n.publisher = Mock()
-    n.cancel, n.mode, n.collision, n.planner = Mock(), Mock(), Mock(), Mock()
-    for client in (n.cancel, n.mode, n.collision, n.planner):
-        client.service_is_ready.return_value = True
-        client.call_async.return_value.done.return_value = True
-    n.cancel.call_async.return_value.result.return_value = SimpleNamespace(success=True)
-    n.mode.call_async.return_value.result.return_value = SimpleNamespace(success=True)
-    n.collision.call_async.return_value.result.return_value = SimpleNamespace(valid=True)
-    trajectory = SimpleNamespace(joint_names=list(ARM_JOINTS), points=[SimpleNamespace(
-        positions=n.paths[1]['start'].tolist(),
-        time_from_start=SimpleNamespace(sec=4, nanosec=0))])
-    n.planner.call_async.return_value.result.return_value = SimpleNamespace(
-        motion_plan_response=SimpleNamespace(error_code=SimpleNamespace(val=1),
-                                            trajectory=SimpleNamespace(joint_trajectory=trajectory)))
     with patch('tool_docking_coordinator.time.monotonic', return_value=1.1):
-        n.tick()
-        assert n.stage == 'idle' and not n.active
-        n.publisher.publish.assert_not_called()
         n.on_joy(Joy(axes=[0., 0., -1.], buttons=[0, 1, 0, 0, 0]))
-        assert n.stage == 'request_hold'
-        n.tick()
-        n.status.update(mode='hold', epoch='hold')
-        n.tick()
-        assert n.active
-        if entry_offset:
-            assert n.stage == 'planning_entry'
-            n.tick()
-        assert n.stage == 'checking'
-        # Releasing both controls does not remove the docking continuation.
-        n.on_joy(Joy(axes=[0., 0., 1.], buttons=[0]*5))
-        for _ in n.requests:
-            n.tick()
-        assert n.stage == 'request_mode'
-        n.tick()
-        n.status.update(mode='tool_auto', epoch='tool')
-        n.tick()
-        assert n.stage == 'executing' and n.active
-        n.publisher.publish.assert_called_once()
-        # A separate manager confirms the path endpoint and returns HOLD.
-        n.full_state = dict(zip(ARM_JOINTS, n.paths[1]['waypoints'][-1]))
-        n.status.update(mode='hold', epoch='completed',
-                        last_execution_id=n.execution_id, last_execution_result='succeeded')
-        n.tick()
-        assert n.stage == 'dock_acquire' and n.active
-        for i in range(n.cfg['stable_samples']):
-            n.feedback_sequence += 1
-            n.observation = (i+1, 1.1, transform([0, 0, .2], [0, 0, 0, 1]))
-            n.tick()
-        assert n.stage == 'dock_advance_plan'
-    n.fail.assert_not_called()
-    n.reset.assert_not_called()
+    assert n.stage == 'idle' and not n.active
+    assert 'fresh stopped HOLD' in n.report.call_args.args[1]
 
 
 @pytest.mark.parametrize('failure', [None, 'feedback', 'focus', 'fault', 'epoch', 'tag', 'timeout'])
@@ -860,7 +817,7 @@ def test_operator_can_cancel_automatic_tool1(tmp_path):
 
 
 @pytest.mark.parametrize('endpoint_error', [0., .004])
-def test_advance_completion_checks_fk_endpoint_without_actuation(tmp_path, endpoint_error):
+def test_advance_completion_checks_fk_endpoint_before_actuation(tmp_path, endpoint_error):
     n = camera_node(tmp_path)
     n.advance_locked = True
     n.advance_local_axis = n.advance_direction = np.array([0., 0., 1.])
@@ -874,9 +831,10 @@ def test_advance_completion_checks_fk_endpoint_without_actuation(tmp_path, endpo
         n.reset.assert_not_called()
     else:
         n.path_completed()
-        n.reset.assert_called_once()
-        assert '30.0 mm completed' in n.report.call_args.args[1]
-    n.docking_command.publish.assert_not_called()
+        assert n.stage == 'dock_actuate'
+        assert [call.args[0].data for call in
+                n.docking_command.publish.call_args_list] == [True]
+        assert 'tag-normal advance completed' in n.report.call_args.args[1]
 
 
 def test_advance_completion_allows_axial_rotation_but_rejects_wrong_tilt(tmp_path):
@@ -890,7 +848,9 @@ def test_advance_completion_allows_axial_rotation_but_rejects_wrong_tilt(tmp_pat
         n.model.fk.return_value = actual
         if passes:
             n.path_completed()
-            n.reset.assert_called_once()
+            assert n.stage == 'dock_actuate'
+            assert [call.args[0].data for call in
+                    n.docking_command.publish.call_args_list] == [True]
         else:
             with pytest.raises(RuntimeError, match='endpoint feedback'):
                 n.path_completed()

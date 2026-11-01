@@ -2,18 +2,36 @@
 
 ## IK joystick EE jog (Dynamixel ID 4)
 
-In TCP_IK with arm focus, D-pad up/down (axis 7) adjusts the EE jog speed
-by 0.02 rad/s per press. Default is 0.06 rad/s, bounded to 0.02..0.12 rad/s;
+In TCP_IK with arm focus, holding L1+R1 and pressing D-pad up/down (axis 7)
+adjusts the EE jog speed
+by 1 rad/s per press. Default is 5 rad/s, bounded to 1..16.8 rad/s;
 holding up/down does not auto-repeat and restarting resets the selection.
-With L1 held and rearmed, D-pad left/right (axis 6) commands positive/negative
+With L1+R1 held and rearmed, D-pad left/right (axis 6) commands positive/negative
 ee_joint velocity (CCW/CW under the calibrated `raw_increases_ccw: true`
 convention). Release left/right to stop. Release L1 or lose fresh joystick
-input to stop through the manager. Diagonal presses change speed only.
-The arm sticks are suppressed while D-pad is active. R1 does not change this
-mapping; L2 path selection suppresses all D-pad EE commands. This applies to
-`ik_manual.launch.py`; standalone manual retains its existing tool layer.
-EE feedback and calibrated gripper travel bounds gate rotation. The selected
-speed is published as `ee_speed_rad_s` on `/arm/tcp_joy/status`.
+input to stop through the manager. Diagonal presses change speed only. The arm
+sticks are suppressed while D-pad is active. EE jog holds the current arm pose
+and does not require a new Cartesian IK/collision candidate or an available
+MoveIt state-validity service. Stale EE feedback, an inactive EE controller,
+Dynamixel communication failure and L2 path selection still suppress it. RMD
+arm faults do not. Velocity-mode jog does not interpret the accumulated
+`ee_joint` position as a software travel limit. This applies to
+`ik_manual.launch.py`; standalone manual retains its existing tool layer. The
+selected speed is published as `ee_speed_rad_s` on `/arm/tcp_joy/status`.
+The configured Dynamixel ID-4 Velocity Limit remains raw 400, equivalent to
+9.58764908 rad/s. Values above that are accepted by the TCP manager but cannot
+produce 16.8 rad/s until the independent motor register is deliberately changed
+to about raw 701 and read back. Launch does not write EEPROM limit registers.
+
+The independently controlled EE jog is available in `manual`, `tcp_ik`,
+`tool_auto`, `hold` and `fault`. L1+R1+D-pad left/right goes through the same
+manager-owned output while arm focus, controllers and fresh EE feedback remain
+healthy. In HOLD, this explicit EE layer suppresses the L1 TCP-ready request.
+In fault it never clears the arm fault or sends new arm-joint targets. Releasing
+the buttons, stale Joy (250 ms), stale EE feedback (300 ms), or inactive controllers
+commands zero. A Dynamixel `COMM_ERROR` still blocks the
+command in the hardware interface because ID 4 shares that U2D2 bus; RMD-only
+CAN faults do not.
 
 R2 (`axes[5]`, pressed below -0.5) requests the nearest TCP-entry candidate.
 The current joints are first projected into the required 0.10-rad margin. If
@@ -98,6 +116,72 @@ After configuration and simulation review, use `enable_tool2_pick_place:=true`
 with `ik_manual.launch.py`; one L2+X request then selects the full continuation.
 Robot startup alone never initiates this sequence. ROS packages were not built
 as part of this change.
+
+### Tool-2 HOME-to-preplace service test
+
+`enable_tool2_place_test:=true` is a separate development mode. It accepts no
+L2+X full tool-2 sequence and does not require the unmeasured gripper close/open
+calibration. The operator must first call `/arm/go_home` and wait for the
+dynamic startup HOME to complete in HOLD. `/arm/tool2/start_place_test` then
+requires fresh feedback, arm focus, completed startup, HOLD ownership, and a
+maximum per-joint HOME error of 0.10 rad. HOME uses `startup_goal_rad` for
+shoulder/elbow/wrist-pitch and zero for base/wrist-roll/wrist-yaw.
+
+The test uses only bbox horizontal centre `(x1+x2)/2`; clipped head or feet and
+person distance are irrelevant. The calibrated optical ray at camera principal
+Y is transformed to a horizontal world bearing. After five stable bearing
+observations, the test turns only `base_joint` toward the person and targets the
+chassis footprint boundary with zero added edge clearance. It does not claim or
+check human stand-off distance in this development mode.
+
+It then plans and executes the full-arm transit to floor preplace. If that IK
+has no solution, it preserves the post-alignment HOME TCP height and orientation
+and instead extends 0.20 m along the person bearing. Either outcome stops in
+HOLD. The test never creates the descent path and never commands the gripper.
+The normal `enabled: false` guard continues to protect the complete pick/place
+sequence. Full pick/place and place-test launch options are mutually exclusive.
+
+Use separate terminals (replace `<ARM_D435I_SERIAL>` with the measured arm
+camera serial):
+
+```bash
+# Terminal 1: arm camera
+source /opt/ros/humble/setup.bash
+source ~/ResKU/install/setup.bash
+ros2 launch vision arm_camera.launch.py serial_no:=<ARM_D435I_SERIAL>
+
+# Terminal 2: arm-camera person inference only
+source /opt/ros/humble/setup.bash
+source ~/ResKU/install/setup.bash
+ros2 launch vision person_detection.launch.py \
+  enable_side_cameras:=false enable_arm_camera:=true
+
+# Terminal 3: source-tree launch, so this test does not require a package build
+source /opt/ros/humble/setup.bash
+source ~/ResKU/install/setup.bash
+ros2 launch ~/ResKU/src/arm/tool_manipulator_bringup/launch/ik_manual.launch.py \
+  tool_id:=2 enable_tool2_place_test:=true \
+  launch_docking_bridge:=false enable_docking_motion:=false
+
+# Terminal 4: inspect inputs/status
+source /opt/ros/humble/setup.bash
+source ~/ResKU/install/setup.bash
+ros2 topic echo /arm/person/detections
+# In another tab when needed:
+ros2 topic echo /arm/control_status
+
+# Terminal 5: operator-controlled HOME, then wait for HOLD/HOME completion
+source /opt/ros/humble/setup.bash
+source ~/ResKU/install/setup.bash
+ros2 service call /arm/go_home std_srvs/srv/Trigger '{}'
+
+# Only after Terminal 4 shows fresh HOLD and HOME completion:
+ros2 service call /arm/tool2/start_place_test std_srvs/srv/Trigger '{}'
+```
+
+A successful `/arm/go_home` response means accepted, not arrived. Likewise, a
+successful start response means person acquisition started; completion is the
+`tool2 place test reached preplace; remain HOLD` coordinator report.
 
 `ik_manual.launch.py` starts the mode-managed IK/manual stack, initially in
 HOLD, using real hardware and an externally published `/joy` topic by default.

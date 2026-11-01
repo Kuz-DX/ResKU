@@ -1,5 +1,6 @@
 """Offline validation of captured path loading and joystick request edges."""
 import json
+import math
 from pathlib import Path
 import sys
 from unittest.mock import Mock
@@ -15,7 +16,8 @@ sys.path.insert(0, str(SCRIPTS))
 from tool_trajectory_joy import (collision_check_budget, execution_plan, load_path,
                                  isolate_shoulder_zero_crossings, nearest_path_suffix,
                                  load_pre_dock_targets, load_route_poses,
-                                 planned_entry, planned_leg,
+                                 nearest_base_equivalent, planned_entry, planned_leg,
+                                 simplify_timed_waypoints,
                                  requested_back, requested_path, ARM_JOINTS,
                                  ToolTrajectoryJoy)
 from tool_trajectory_joy import reverse_path
@@ -536,6 +538,28 @@ def test_planned_leg_uses_only_moveit_points_and_reaches_requested_goal():
     assert durations == [1., 1.]
 
 
+def test_dense_linear_moveit_samples_collapse_and_preserve_total_duration():
+    start = np.zeros(6)
+    waypoints = [np.full(6, index/1200.) for index in range(1, 1201)]
+    durations = [.02]*1200
+    reduced, timing = simplify_timed_waypoints(start, waypoints, durations)
+    assert len(reduced) == 1
+    np.testing.assert_allclose(reduced[-1], np.ones(6))
+    assert timing == pytest.approx([24.])
+
+
+def test_moveit_simplification_retains_joint_space_corner():
+    start = np.zeros(6)
+    waypoints = [np.array([.1, 0, 0, 0, 0, 0]),
+                 np.array([.2, 0, 0, 0, 0, 0]),
+                 np.array([.2, .1, 0, 0, 0, 0])]
+    reduced, timing = simplify_timed_waypoints(
+        start, waypoints, [.5, .5, 1.], max_waypoints=2)
+    assert len(reduced) == 2
+    np.testing.assert_allclose(reduced[0], waypoints[1])
+    assert sum(timing) == pytest.approx(2.)
+
+
 def test_pre_dock_targets_load_reviewed_arm_world_tcp_poses(tmp_path):
     target_file = tmp_path/'targets.yaml'
     target_file.write_text(yaml.safe_dump({'targets': {
@@ -549,6 +573,54 @@ def test_pre_dock_targets_load_reviewed_arm_world_tcp_poses(tmp_path):
     assert set(targets) == {0}
     np.testing.assert_allclose(targets[0]['position'], [-.4, 0., .2])
     np.testing.assert_allclose(targets[0]['approach_axis'], [0., 0., -1.])
+
+
+def test_pre_dock_targets_prefer_reviewed_joint_goal(tmp_path):
+    target_file = tmp_path/'targets.yaml'
+    goal = [.1, .2, .3, -.4, .5, -.6]
+    target_file.write_text(yaml.safe_dump({'targets': {
+        'tool0': dict(joint_names=list(ARM_JOINTS), joint_goal_rad=goal,
+                      executable=True)}}))
+    targets = load_pre_dock_targets(target_file)
+    np.testing.assert_allclose(targets[0]['joint_goal'], goal)
+    assert set(targets[0]) == {'joint_goal', 'retreat_distance', 'retreat_axis'}
+    assert targets[0]['retreat_distance'] == pytest.approx(.030)
+    np.testing.assert_allclose(targets[0]['retreat_axis'], [0., 0., -1.])
+
+
+def test_nearest_base_equivalent_avoids_full_turn_from_back():
+    limits = {'base_joint': (-3.503, 3.614)}
+    goal = np.array([3.123184884, .1, .2, -.3, 0., 0.])
+    result = nearest_base_equivalent(
+        goal, np.array([-math.pi, .1, .2, -.3, 0., 0.]), limits, .02)
+    assert result[0] == pytest.approx(3.123184884-2.*math.pi)
+    np.testing.assert_array_equal(result[1:], goal[1:])
+
+
+def test_face_button_requests_complete_autonomous_docking_sequence():
+    node = SimpleNamespace(
+        combos=[False]*3, back_combo=False, l2_axis=2, l2_threshold=-.5,
+        first_button=2, second_button=1, third_button=0, back_button=3,
+        request_path=Mock(), request_back=Mock())
+    ToolTrajectoryJoy.on_joy(
+        node, SimpleNamespace(axes=[0., 0., -1.], buttons=[0, 0, 1, 0]))
+    node.request_path.assert_called_once_with(0, desired_docked=True)
+    node.request_back.assert_not_called()
+
+
+def test_automatic_return_plans_directly_to_back_without_home():
+    node = SimpleNamespace(
+        healthy_hold=Mock(return_value={'epoch': 'hold'}),
+        planner=Mock(), model=Mock(), route_poses={
+            'home': np.ones(6)*.1, 'back': np.ones(6)*.2},
+        full_state=dict(zip(ARM_JOINTS, np.zeros(6))),
+        _request_route_leg=Mock())
+    node.planner.service_is_ready.return_value = True
+    node.model.within_limits.return_value = True
+    ToolTrajectoryJoy.begin_back(node, via_home=False)
+    assert node.route_labels == ['back']
+    np.testing.assert_allclose(node.route_goals, [np.ones(6)*.2])
+    node._request_route_leg.assert_called_once()
 
 
 def test_verified_back_tool_request_plans_only_pre_dock_leg():
@@ -576,6 +648,46 @@ def test_verified_back_tool_request_plans_only_pre_dock_leg():
     assert [constraint.position for constraint in
             request.goal_constraints[0].joint_constraints] == pytest.approx(pre_dock)
     node.report.assert_called_once()
+
+
+def test_reviewed_joint_goal_is_moveit_goal_with_nearest_base_equivalent():
+    goal = np.array([3.123184884, .1, .2, -.3, 0., 0.])
+    limits = {name: (-4., 4.) for name in ARM_JOINTS}
+    limits['base_joint'] = (-3.503, 3.614)
+    node = SimpleNamespace(
+        planner=Mock(), model=Mock(limits=limits), margin=.02,
+        pre_dock_targets={0: {'joint_goal': goal}},
+        full_state=dict(zip(ARM_JOINTS, np.zeros(6))),
+        planning_attempts=3, planning_timeout=8., planning_velocity_scale=.08,
+        planning_acceleration_scale=.4, report=Mock())
+    node._request_route_leg = lambda: ToolTrajectoryJoy._request_route_leg(node)
+    node.planner.service_is_ready.return_value = True
+    node.model.within_limits.return_value = True
+    measured = np.array([-math.pi, 0., 0., 0., 0., 0.])
+    ToolTrajectoryJoy.request_route_plan(node, 0, measured, {'epoch': 'hold'})
+    assert node.route_goals[0][0] == pytest.approx(goal[0]-2.*math.pi)
+    node.model.solve_axis.assert_not_called()
+    request = node.planner.call_async.call_args.args[0].motion_plan_request
+    assert [constraint.position for constraint in
+            request.goal_constraints[0].joint_constraints] == pytest.approx(
+                node.route_goals[0])
+
+
+def test_reviewed_joint_goal_outside_margin_is_blocked_before_moveit():
+    goal = np.array([2.85, .67, 1.581792, -1.4, 0., 0.])
+    limits = {name: (-4., 4.) for name in ARM_JOINTS}
+    limits['base_joint'] = (-3.503, 3.614)
+    limits['elbow_joint'] = (-1.4960962, 1.5779521)
+    node = SimpleNamespace(
+        planner=Mock(), model=Mock(limits=limits), margin=.02,
+        pre_dock_targets={1: {'joint_goal': goal}}, paths={},
+        full_state=dict(zip(ARM_JOINTS, np.zeros(6))))
+    node.planner.service_is_ready.return_value = True
+    node.model.within_limits.return_value = False
+    with pytest.raises(ValueError, match='elbow_joint=.*allowed='):
+        ToolTrajectoryJoy.request_route_plan(
+            node, 1, np.array([-math.pi, 0., 0., 0., 0., 0.]), {'epoch': 'hold'})
+    node.planner.call_async.assert_not_called()
 
 
 def test_shoulder_zero_crossing_is_staged_and_other_joints_hold():

@@ -20,11 +20,11 @@ def axes(horizontal=0., vertical=0.):
 def test_speed_changes_once_per_press_and_stays_within_manager_limit():
     dpad = EeDpad()
     dpad.update(axes(vertical=1.))
-    assert dpad.speed == .08
+    assert dpad.speed == 6.
     for _ in range(100):
         dpad.update(axes(vertical=1.))
-    assert dpad.speed == .08
-    for direction, limit in [(1., .12), (-1., .02)]:
+    assert dpad.speed == 6.
+    for direction, limit in [(1., 16.8), (-1., 1.)]:
         for _ in range(20):
             dpad.update(axes())
             dpad.update(axes(vertical=direction))
@@ -38,21 +38,31 @@ def test_direction_release_diagonal_and_disabled_input():
         assert dpad.direction == expected
     dpad.update(axes(1., 1.))
     assert dpad.direction == 0
+
+
+def test_ee_dpad_speed_edges_require_reenable_after_modifier_release():
+    dpad = EeDpad()
+    dpad.update(axes(vertical=1.))
+    assert dpad.speed == 6.
+    dpad.update(axes(vertical=1.), enabled=False)
+    assert dpad.vertical == 0
+    dpad.update(axes(vertical=1.))
+    assert dpad.speed == 7.
     dpad.update(axes(1.), enabled=False)
     assert dpad.direction == 0
 
 
 @pytest.mark.parametrize('deadman,rearmed,age,position,direction,expected', [
-    (True, True, 0., 0., 1, .06), (True, True, 0., 0., -1, -.06),
+    (True, True, 0., 0., 1, 5.), (True, True, 0., 0., -1, -5.),
     (False, True, 0., 0., 1, 0.), (True, False, 0., 0., 1, 0.),
     (True, True, 1., 0., 1, 0.), (True, True, 0., None, 1, 0.),
-    (True, True, 0., 2.839, 1, 0.), (True, True, 0., -2.351, -1, 0.),
+    (True, True, 0., 3.183, 1, 5.), (True, True, 0., -3.183, -1, -5.),
 ])
 def test_publish_ee_only_when_authorized(deadman, rearmed, age, position, direction, expected):
     dpad = EeDpad()
     dpad.direction = direction
     node = SimpleNamespace(blocked=False, epoch='test', deadman=deadman, rearmed=rearmed,
-                           ee_dpad=dpad, ee_limits=(-2.351592547829, 2.839398438376),
+                           ee_dpad=dpad,
                            joy_time=10.-age, state_time=10., full_state={'ee_joint': position},
                            stepper=SimpleNamespace(q=np.zeros(6)), pub=Mock())
     with patch('tcp_joy.time.monotonic', return_value=10.):

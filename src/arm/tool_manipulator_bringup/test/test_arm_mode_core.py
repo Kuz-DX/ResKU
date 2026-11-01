@@ -1,10 +1,12 @@
 """Ownership, cancellation and watchdog tests without ROS or hardware."""
+import math
 import sys
 from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts'))
-from arm_mode_core import MANUAL_EE_MAX_VELOCITY_RAD_S, ModeCore
+from arm_mode_core import (MANUAL_EE_MAX_VELOCITY_RAD_S,
+                           TCP_EE_MAX_VELOCITY_RAD_S, ModeCore)
 
 
 def ready(mode='manual'):
@@ -37,11 +39,11 @@ def test_manual_ee_accepts_decimal_400_but_rejects_higher_speed():
         c.command('manual', c.epoch, [0.]*6, 401 * 0.0239691227, .14)
 
 
-def test_tcp_ee_keeps_012_speed_limit():
+def test_tcp_ee_accepts_requested_168_speed_limit():
     c = ready('tcp_ik')
-    assert c.command('tcp_ik', c.epoch, [0.]*6, .12, .1)
+    assert c.command('tcp_ik', c.epoch, [0.]*6, TCP_EE_MAX_VELOCITY_RAD_S, .1)
     with pytest.raises(ValueError, match='limits exceeded'):
-        c.command('tcp_ik', c.epoch, [0.]*6, .121, .12)
+        c.command('tcp_ik', c.epoch, [0.]*6, TCP_EE_MAX_VELOCITY_RAD_S+.001, .12)
 
 
 def test_managed_ee_reaches_feedback_goal_then_holds_arm():
@@ -266,13 +268,26 @@ def test_loaded_shoulder_can_use_tighter_path_limits():
     assert c.path_feedback_leads[1] == .015
 
 
-def test_outward_motion_near_soft_limit_faults_before_crossing_limit():
+def test_outward_motion_near_soft_limit_faults_after_persistent_motion():
     c = ModeCore([(-2., 2.)]*6, [.12]*6,
                  joint_names=['base', 'shoulder', 'elbow', 'pitch', 'roll', 'yaw'])
     c.feedback([0., 1.96, 0., 0., 0., 0.], [0., .03, 0., 0., 0., 0.], 0.)
+    assert c.mode != 'fault'
+    c.feedback([0., 1.962, 0., 0., 0., 0.], [0., .03, 0., 0., 0., 0.], .05)
+    assert c.mode != 'fault'
+    c.feedback([0., 1.964, 0., 0., 0., 0.], [0., .03, 0., 0., 0., 0.], .101)
     assert c.mode == 'fault'
     assert 'shoulder' in c.reason
     assert 'moving outward near soft limit' in c.reason
+
+
+def test_single_outward_velocity_sample_near_limit_does_not_fault():
+    c = ModeCore([(-2., 2.)]*6, [.12]*6,
+                 joint_names=['base', 'shoulder', 'elbow', 'pitch', 'roll', 'yaw'])
+    c.feedback([0., 0., 0., -1.955, 0., 0.], [0., 0., 0., -.0254, 0., 0.], 0.)
+    c.feedback([0., 0., 0., -1.950, 0., 0.], [0.]*6, .02)
+    assert c.mode != 'fault'
+    assert c.outward_limit_since[3] is None
 
 
 def test_path_continues_through_intermediate_waypoint_without_stopping():
@@ -425,6 +440,36 @@ def test_reported_hardware_pose_recovers_inward_without_joystick():
     # Startup allowance must not apply again during normal operation.
     c.feedback(initial, [0.]*6, now+.02)
     assert c.mode == 'fault'
+
+
+def test_recoverable_startup_outward_velocity_does_not_preempt_inward_recovery():
+    limits = [(-3.503, 3.614), (-1.6139059, 1.4622368),
+              (-1.4960962, 1.5779521), (-1.5964526, 1.5168655),
+              (-.75, .63), (-5.76, 6.5)]
+    c = ModeCore(limits, [.12]*6, startup_recovery_enabled=True)
+    measured = [-.001534, 1.4629349737, 1.6020377364,
+                -1.5613715329, .0536893, -.0644272]
+    # Initial estimates point outward at shoulder/elbow but remain inside the
+    # explicit five-degree RMD recovery envelope.
+    c.feedback(measured, [0., .03, .03, 0., 0., 0.], 0.)
+    assert c.mode == 'hold'
+    c.begin_startup(0.)
+    assert c.startup_recovering
+    assert c.startup_goal[1:4] == pytest.approx([
+        limits[1][1]-math.radians(2),
+        limits[2][1]-math.radians(2),
+        measured[3]])
+
+
+def test_outward_velocity_guard_returns_after_startup_completion():
+    c = ModeCore([(-2., 2.)]*6, [.12]*6, startup_recovery_enabled=True)
+    c.feedback([0.]*6, [0.]*6, 0.)
+    c.begin_startup(0.)
+    assert c.startup_complete
+    c.feedback([0., 1.96, 0., 0., 0., 0.], [0., .03, 0., 0., 0., 0.], .01)
+    c.feedback([0., 1.962, 0., 0., 0., 0.], [0., .03, 0., 0., 0., 0.], .12)
+    assert c.mode == 'fault'
+    assert 'moving outward near soft limit' in c.reason
 
 
 @pytest.mark.parametrize('index,value', [(0, 3.7), (4, .7), (5, 6.6),

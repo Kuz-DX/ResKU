@@ -22,14 +22,26 @@ from tool_docking_coordinator_test import ToolDockingCoordinator
 from tool_docking_core import transform
 from tool_trajectory_joy_test import ARM_JOINTS, reverse_path, execution_plan
 from tool2_sequence import PickPlaceSequence, checked_config
-from person_place_geometry import person_on_floor, placement_targets, aligned_base
+from person_place_geometry import (person_on_floor, person_direction_on_floor,
+                                   placement_targets, placement_targets_for_direction,
+                                   aligned_base)
 
 
 class Tool2PickPlaceCoordinator(ToolDockingCoordinator):
     def __init__(self):
         super().__init__()
+        self.place_test_enabled = bool(self.declare_parameter(
+            'tool2_place_test_enabled', False).value)
         self.pick_config = checked_config(yaml.safe_load(Path(self.declare_parameter(
-            'pick_place_config', '').value).read_text()))
+            'pick_place_config', '').value).read_text()), self.place_test_enabled)
+        self.place_test_home_tolerance = float(
+            self.pick_config.get('place_test_home_tolerance_rad', .10))
+        self.place_test_fallback_extension = float(
+            self.pick_config.get('place_test_fallback_extension_m', .20))
+        if not 0. < self.place_test_home_tolerance <= .10:
+            raise ValueError('place_test_home_tolerance_rad must be in (0, 0.10]')
+        if not 0. < self.place_test_fallback_extension <= .50:
+            raise ValueError('place_test_fallback_extension_m must be in (0, 0.50]')
         if self.pick_config['placement_mode'] == 'chassis_edge':
             robot = ET.fromstring(self.get_parameter('robot_description').value)
             link = next((link for link in robot.findall('link')
@@ -56,6 +68,9 @@ class Tool2PickPlaceCoordinator(ToolDockingCoordinator):
                                  self.on_person_camera, qos_profile_sensor_data)
         self.create_subscription(String, self.pick_config['person_topic'],
                                  self.on_person, qos_profile_sensor_data)
+        if self.place_test_enabled:
+            self.create_service(Trigger, '/arm/tool2/start_place_test',
+                                self.start_place_test)
 
     def reset(self):
         super().reset()
@@ -65,7 +80,46 @@ class Tool2PickPlaceCoordinator(ToolDockingCoordinator):
         self.person_last_received = -math.inf
         self.person_sample = None
 
+    def start_place_test(self, _request, response):
+        """Start person alignment from operator-confirmed dynamic HOME."""
+        try:
+            if not self.place_test_enabled:
+                raise RuntimeError('tool2 place test is not enabled')
+            if self.pick_sequence is not None or self.stage != 'idle':
+                raise RuntimeError('tool2 coordinator is busy')
+            status = self.healthy_hold(time.monotonic())
+            home = np.asarray(status.get('startup_goal_rad'), dtype=float)
+            if home.shape != (6,) or not np.all(np.isfinite(home)):
+                raise RuntimeError('dynamic HOME target is unavailable')
+            home = home.copy()
+            home[[0, 4, 5]] = 0.
+            error = float(np.max(np.abs(self.current_q()-home)))
+            if error > self.place_test_home_tolerance:
+                raise RuntimeError(
+                    f'HOME error {error:.6f} rad exceeds '
+                    f'{self.place_test_home_tolerance:.6f} rad')
+            self.pick_sequence = PickPlaceSequence()
+            self.pick_sequence.stage = 'person'
+            self.pick_started = time.monotonic()
+            self.pick_hold_epoch = status['epoch']
+            self.pick_wait_started = self.pick_started
+            self.person_stamp = -1
+            self.person_count = 0
+            self.person_sample = None
+            self.stage = 'pick_person'
+            self.report('place_test', 'waiting for stable person observation from HOME')
+            response.success = True
+            response.message = 'tool2 place test started; waiting for person'
+        except (ValueError, RuntimeError, KeyError) as exc:
+            response.success = False
+            response.message = str(exc)
+        return response
+
     def begin(self, path_id, planned_path=None):
+        if path_id == 2 and self.place_test_enabled and self.pick_sequence is None:
+            self.report('rejected',
+                        'full tool2 sequence disabled in place-test mode; call start_place_test')
+            return
         if path_id == 2 and self.pick_sequence is None:
             self.pick_sequence = PickPlaceSequence()
             self.pick_started = time.monotonic()
@@ -127,10 +181,19 @@ class Tool2PickPlaceCoordinator(ToolDockingCoordinator):
             if (self.pick_sequence.stage != 'person'
                     and not np.allclose(floor_base, self.pick_floor_base, atol=.002, rtol=0.)):
                 raise ValueError('robot base moved after placement target was locked')
-            person_ground = person_on_floor(payload, matrix, distortion, ground_camera,
-                                            self.pick_config['min_confidence'])
-            person = (floor_ground @ np.r_[person_ground, 1.])[:3]
-            direction = person[:2]-floor_base[:2, 3]
+            if self.place_test_enabled:
+                direction_ground = person_direction_on_floor(
+                    payload, matrix, distortion, ground_camera,
+                    self.pick_config['min_confidence'])
+                direction = (floor_ground[:3, :3] @ np.r_[direction_ground, 0.])[:2]
+                direction /= np.linalg.norm(direction)
+                person = floor_base[:3, 3].copy()
+                person[:2] += direction
+            else:
+                person_ground = person_on_floor(payload, matrix, distortion, ground_camera,
+                                                self.pick_config['min_confidence'])
+                person = (floor_ground @ np.r_[person_ground, 1.])[:3]
+                direction = person[:2]-floor_base[:2, 3]
             bearing = math.atan2(direction[1], direction[0])
             if time.monotonic()-self.person_last_received > self.pick_config['max_detection_age_s']:
                 self.person_count = 0
@@ -139,7 +202,11 @@ class Tool2PickPlaceCoordinator(ToolDockingCoordinator):
                 if abs(math.atan2(math.sin(difference), math.cos(difference))) > self.pick_config['stable_angle_rad']:
                     self.person_count = 0
             # Validate stand-off before accepting the observation.
-            placement_targets(person, floor_base, self.pick_config, floor_chassis)
+            if self.place_test_enabled:
+                placement_targets_for_direction(direction, floor_base,
+                                                self.pick_config, floor_chassis)
+            else:
+                placement_targets(person, floor_base, self.pick_config, floor_chassis)
             self.person_sample = (person, floor_base, bearing, floor_chassis)
             self.person_count += 1
             self.person_last_received = time.monotonic()
@@ -160,6 +227,10 @@ class Tool2PickPlaceCoordinator(ToolDockingCoordinator):
     def path_completed(self):
         if self.pick_sequence is None:
             super().path_completed()
+            return
+        if self.place_test_enabled and self.pick_sequence.stage == 'preplace':
+            self.report('completed', 'tool2 place test reached preplace; remain HOLD')
+            self.reset()
             return
         stage = self.pick_sequence.complete(self.pick_sequence.stage)
         self.report('pick_place', stage)
@@ -186,7 +257,21 @@ class Tool2PickPlaceCoordinator(ToolDockingCoordinator):
             self.person_count = 0
             self.person_sample = None
         elif stage == 'preplace':
-            goal = self.model.solve(self.pick_preplace, self.current_q(), self.margin, max_time_s=.03)
+            try:
+                goal = self.model.solve(self.pick_preplace, self.current_q(), self.margin,
+                                        max_time_s=.03)
+                self.pick_place_test_fallback = False
+            except (ValueError, RuntimeError, np.linalg.LinAlgError) as floor_error:
+                if not self.place_test_enabled:
+                    raise
+                fallback = self.model.fk(self.current_q())
+                fallback[:3, 3] += self.pick_direction_base*self.place_test_fallback_extension
+                goal = self.model.solve(fallback, self.current_q(), self.margin, max_time_s=.03)
+                self.pick_preplace = fallback
+                self.pick_place_test_fallback = True
+                self.report('place_test_fallback',
+                            f'floor preplace IK failed ({floor_error}); extending '
+                            f'{self.place_test_fallback_extension:.3f} m at HOME height')
             # MoveIt plans the transit to preplace; descent is a separate line.
             path = dict(start=goal, waypoints=[goal], durations=[.5], total=.5)
             self.entry_path = path
@@ -229,11 +314,21 @@ class Tool2PickPlaceCoordinator(ToolDockingCoordinator):
                             or now-self.person_last_received > self.pick_config['max_detection_age_s']):
                         return
                     person, floor_base, _, floor_chassis = self.person_sample
-                    preplace, final = placement_targets(person, floor_base, self.pick_config, floor_chassis)
+                    direction = person[:2]-floor_base[:2, 3]
+                    direction /= np.linalg.norm(direction)
+                    if self.place_test_enabled:
+                        preplace, final = placement_targets_for_direction(
+                            direction, floor_base, self.pick_config, floor_chassis)
+                    else:
+                        preplace, final = placement_targets(
+                            person, floor_base, self.pick_config, floor_chassis)
                     base_floor = np.linalg.inv(floor_base)
                     self.pick_floor_base = floor_base.copy()
                     self.pick_preplace, self.pick_final = base_floor @ preplace, base_floor @ final
                     person_base = (base_floor @ np.r_[person, 1.])[:3]
+                    direction_base = base_floor[:3, :3] @ np.r_[direction, 0.]
+                    direction_base[2] = 0.
+                    self.pick_direction_base = direction_base/np.linalg.norm(direction_base)
                     self.pick_sequence.complete('person')
                     self.joint_move(aligned_base(self.model, self.current_q(), person_base, self.margin))
                 else:

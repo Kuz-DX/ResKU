@@ -34,6 +34,30 @@ def person_on_floor(payload, camera_matrix, distortion, floor_camera, min_confid
     return target
 
 
+def person_direction_on_floor(payload, camera_matrix, distortion, floor_camera,
+                              min_confidence):
+    """Horizontal bearing from bbox centre X; distance and visible feet are unnecessary."""
+    people = [d for d in payload['detections']
+              if d.get('class_name') == 'person' and float(d['confidence']) >= min_confidence]
+    if len(people) != 1:
+        raise ValueError('exactly one confident person required')
+    box = np.asarray(people[0]['xyxy'], dtype=float)
+    width = payload['image_size']['width']
+    if (box.shape != (4,) or not np.isfinite(box).all()
+            or not box[0] < box[2] or box[2] < 0 or box[0] > width):
+        raise ValueError('person box has no valid horizontal extent')
+    # Only horizontal image position is requested. Use the calibrated optical
+    # centre vertically so clipped head/feet do not bias the bearing.
+    pixel = np.array([[(box[0]+box[2])/2, camera_matrix[1, 2]]], dtype=float)
+    xy = cv2.undistortPoints(pixel.reshape(1, 1, 2), camera_matrix, distortion).reshape(2)
+    ray = floor_camera[:3, :3] @ np.r_[xy, 1.]
+    direction = ray[:2]
+    length = float(np.linalg.norm(direction))
+    if not np.isfinite(direction).all() or length < 1e-6:
+        raise ValueError('person horizontal bearing is undefined')
+    return direction/length
+
+
 def placement_targets(person_floor, floor_base, config, floor_chassis=None):
     """Object bottom reaches floor z=0; TCP height follows calibrated offset."""
     robot = floor_base[:3, 3]
@@ -66,6 +90,26 @@ def placement_targets(person_floor, floor_base, config, floor_chassis=None):
     preplace = target.copy()
     preplace[2, 3] += config['preplace_height_m']
     return preplace, target
+
+
+def placement_targets_for_direction(direction_floor, floor_base, config,
+                                    floor_chassis=None):
+    """Place at the chassis boundary using bearing only, with no distance claim."""
+    direction = np.asarray(direction_floor, dtype=float)
+    if direction.shape != (2,) or not np.isfinite(direction).all():
+        raise ValueError('invalid person direction')
+    length = float(np.linalg.norm(direction))
+    if length < 1e-6:
+        raise ValueError('undefined person bearing')
+    direction /= length
+    # Reuse the reviewed chassis/radius and TCP-offset geometry. The synthetic
+    # point is deliberately beyond every configured radius; human clearance is
+    # not evaluated because this mode does not estimate distance.
+    robot = floor_base[:3, 3]
+    synthetic_distance = 10.0
+    local = dict(config, person_clearance_m=0.)
+    return placement_targets(np.r_[robot[:2]+direction*synthetic_distance, 0.],
+                             floor_base, local, floor_chassis)
 
 
 def aligned_base(model, measured, person_base, margin):

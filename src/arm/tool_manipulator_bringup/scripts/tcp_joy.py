@@ -44,8 +44,7 @@ class TcpJoy(TcpMotionWorkflow, Node):
         self.model = ArmKinematics('', hardware, base, tip, description=description)
         config = yaml.safe_load(Path(hardware).read_text())
         self.ee_dpad = EeDpad()
-        # Same calibrated rack travel as ModeCore.close_ee and the gripper URDF.
-        self.ee_limits = (-2.351592547829, 2.839398438376)
+        self.independent_ee_active = False
         self.stepper = TcpStepper(self.model,
             [float(config['joints'][j]['velocity_limit_rad_s'])/2 for j in ARM_JOINTS],
             linear=float(param('linear_speed_mps', .02)), angular=float(param('angular_speed_rad_s', .15)),
@@ -271,9 +270,14 @@ class TcpJoy(TcpMotionWorkflow, Node):
         nearest = valid and len(msg.axes) > 5 and msg.axes[5] < -.5
         if hasattr(self, 'ee_dpad'):
             previous_direction = self.ee_dpad.direction
-            self.ee_dpad.update(msg.axes, enabled=bool(valid and msg.axes[2] >= -.5
+            # EE jog is an explicit L1+R1 layer independent of the current arm
+            # control mode. The manager remains the sole output owner and still
+            # requires healthy controller/EE feedback and arm focus.
+            self.ee_dpad.update(msg.axes, enabled=bool(valid and msg.buttons[4]
+                                and msg.buttons[5] and msg.axes[2] >= -.5
                                 and self.status.get('focus') == 'arm'
-                                and self.status.get('mode') == 'tcp_ik'))
+                                and self.status.get('mode') in (
+                                    'manual', 'tcp_ik', 'tool_auto', 'hold', 'fault')))
             if previous_direction != self.ee_dpad.direction:
                 self.discard()
                 self.stepper.q = self.stepper.pose = None
@@ -349,7 +353,10 @@ class TcpJoy(TcpMotionWorkflow, Node):
                 and self.status.get('mode') != 'fault'):
             _, self.reason = self.request_named_pose(True, self.joy_time)
         self.previous_home = home
-        TcpMotionWorkflow.retry_ready(self, valid, was_pressed, home, self.joy_time)
+        ee_layer_active = (hasattr(self, 'ee_dpad') and
+                           (self.ee_dpad.direction or self.ee_dpad.vertical))
+        if not ee_layer_active:
+            TcpMotionWorkflow.retry_ready(self, valid, was_pressed, home, self.joy_time)
         if valid and self.deadman and not was_pressed and self.rearmed and not self.blocked:
             self.discard()
             self.stepper.q = self.stepper.pose = None
@@ -417,10 +424,7 @@ class TcpJoy(TcpMotionWorkflow, Node):
                     and time.monotonic()-self.state_time < .3):
                 position = (self.full_state or {}).get('ee_joint')
                 if position is not None and math.isfinite(position):
-                    lo, hi = self.ee_limits
-                    if ((control.direction > 0 and lo <= position < hi-.01)
-                            or (control.direction < 0 and lo+.01 < position <= hi)):
-                        ee = control.direction*control.speed
+                    ee = control.direction*control.speed
             self.pub.publish(String(data=json.dumps(dict(epoch=self.epoch,
                 positions=self.stepper.q.tolist(), ee_velocity=ee))))
 
@@ -466,12 +470,32 @@ class TcpJoy(TcpMotionWorkflow, Node):
             self.discard()
             self.epoch = None
             self.rearmed = False
+            if s.get('mode') in ('manual', 'tool_auto', 'hold', 'fault'):
+                control = vars(self).get('ee_dpad')
+                velocity = 0.
+                layer_active = bool(control is not None and self.deadman
+                                    and (control.direction or control.vertical)
+                        and now-self.status_time < .3
+                        and now-self.joy_time < .25 and now-self.state_time < .3
+                        and s.get('focus') == 'arm')
+                if layer_active and control.direction:
+                    position = (self.full_state or {}).get('ee_joint')
+                    if position is not None and math.isfinite(position):
+                        velocity = control.direction*control.speed
+                if layer_active or vars(self).get('independent_ee_active', False):
+                    self.pub.publish(String(data=json.dumps(
+                        dict(independent_ee_velocity=velocity))))
+                self.independent_ee_active = layer_active
+                if layer_active:
+                    self.reason = ('independent EE jog active' if velocity
+                                   else 'independent EE jog speed/feedback hold')
             ready_state = vars(self).get('ready_state', 'idle')
             auto_entry_armed = vars(self).get('auto_entry_armed', False)
             if (not self.blocked and ready_state == 'idle'
                     and not auto_entry_armed):
                 self.reason = 'waiting for active TCP_IK mode'
         else:
+            self.independent_ee_active = False
             if self.epoch != s.get('epoch'):
                 self.discard()
                 self.epoch = s.get('epoch')
@@ -494,6 +518,16 @@ class TcpJoy(TcpMotionWorkflow, Node):
                         self.safety_stop('feedback lead exceeded', fault=False)
                     elif now-self.joy_time >= .25:
                         self.deadman_stop('joystick timeout')
+                    elif (hasattr(self, 'ee_dpad') and
+                          (self.ee_dpad.direction or self.ee_dpad.vertical)):
+                        # The arm target is the measured/last accepted pose, so
+                        # gripper jogging does not depend on MoveIt availability
+                        # or on whether a new Cartesian arm candidate is valid.
+                        # Manager feedback/fault/epoch and EE travel checks still
+                        # gate the command in publish().
+                        self.discard()
+                        self.reason = ('EE jog active' if self.ee_dpad.direction
+                                       else 'EE jog speed adjusted')
                     elif not self.check.service_is_ready():
                         self.discard()
                         self.rearmed = False

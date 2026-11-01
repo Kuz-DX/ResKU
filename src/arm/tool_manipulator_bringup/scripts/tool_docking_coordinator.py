@@ -183,8 +183,7 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             self.tag_reason = str(exc)
 
     def begin(self, path_id, planned_path=None):
-        if (planned_path is None and self.requested_docked_state is None
-                and path_id in self.settings):
+        if planned_path is None and path_id in self.settings:
             self.active = True
             self.cfg = self.settings[path_id]
             self.docking_started = None
@@ -236,9 +235,22 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                     or angle > self.cfg['angle_tolerance_rad']
                     or np.max(np.abs(self.velocity)) > self.cfg['stopped_speed_rad_s']):
                 raise RuntimeError('advance endpoint feedback outside tolerance; remain HOLD')
-            self.report('completed', 'tag-normal advance %.1f mm completed; HOLD; no actuation' %
-                        (self.cfg['advance_distance_m']*1000.))
-            self.reset()
+            if self.cfg['actuation_enabled']:
+                self.lock_goal = q.copy()
+                self.expected_docked = self.cfg['desired_docked']
+                self.command_feedback_sequence = self.docked_feedback_sequence
+                self.actuation_deadline = time.monotonic()+self.cfg['actuation_timeout_s']
+                self.snapshot = dict(self.full_state)
+                self.send_docking_pulse(self.expected_docked)
+                self.stage = 'dock_actuate'
+                action = 'dock' if self.expected_docked else 'release'
+                self.report('actuating',
+                            'tag-normal advance completed; Arduino %s pulse sent; '
+                            'waiting for /arm/docked' % action)
+            else:
+                self.report('completed', 'tag-normal advance %.1f mm completed; HOLD; no actuation' %
+                            (self.cfg['advance_distance_m']*1000.))
+                self.reset()
             return
         if self.docking_started is None:
             # Do not let a noisy pose observed during approach permanently
@@ -437,8 +449,10 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             if (self.docked_feedback_sequence > self.command_feedback_sequence
                     and self.docked_state == self.expected_docked):
                 state = 'docked' if self.expected_docked else 'released'
-                self.report(state, f'Arduino {state} state confirmed; remain HOLD')
-                self.reset()
+                self.report(state, f'Arduino {state} state confirmed; starting retreat')
+                self.active = False
+                self.advance_locked = False
+                self.begin_docking_retreat()
             return
         if (stamp <= self.observe_after_ns or stamp == self.observed_image
                 or self.feedback_sequence == self.observed_feedback):

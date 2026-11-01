@@ -10,6 +10,7 @@ from std_msgs.msg import String
 
 from test_tcp_safety import node, tick, messages
 from tcp_joy import TcpJoy
+from tcp_joy_core import EeDpad
 from arm_mode_core import ModeCore
 from arm_control_mode_manager import ControlModeManager
 
@@ -149,15 +150,51 @@ def test_held_neutral_preserves_target_without_ik():
     assert not n.blocked
 
 
-@pytest.mark.parametrize('mode', ['hold', 'fault'])
-def test_hold_or_fault_never_produces_new_joint_command(mode):
+def test_hold_never_produces_new_joint_command():
     n = node()
-    n.status['mode'] = mode
+    n.status['mode'] = 'hold'
     tick(n)
     send(n, joy(True, 1.))
     tick(n, 10.04)
     n.pub.publish.assert_not_called()
     n.model.solve.assert_not_called()
+
+
+@pytest.mark.parametrize('mode', ['manual', 'tool_auto', 'hold', 'fault'])
+def test_non_tcp_modes_publish_only_explicit_l1_r1_dpad_ee_jog(mode):
+    n = node()
+    n.ee_dpad = EeDpad()
+    n.full_state['ee_joint'] = 0.
+    n.status['mode'] = mode
+    tick(n)
+    n.pub.publish.assert_not_called()
+    n.pub.reset_mock()
+    msg = joy(True)
+    msg.buttons[5] = 1
+    msg.axes[6] = 1.
+    send(n, msg, 10.02)
+    tick(n, 10.04)
+    assert messages(n)[-1] == dict(independent_ee_velocity=5.)
+    n.model.solve.assert_not_called()
+
+
+@pytest.mark.parametrize('mode', ['manual', 'tcp_ik', 'tool_auto', 'hold', 'fault'])
+def test_gateway_accepts_independent_ee_in_every_mode_with_fresh_ready_ee(mode):
+    core = SimpleNamespace(mode=mode, focus='arm', ready=True, ee_state_time=10.)
+    gateway = SimpleNamespace(
+        core=core, controllers={'ee_velocity_controller': 'active'}, last_error='',
+        independent_ee_velocity=0., independent_ee_command_time=-float('inf'))
+    with patch('arm_control_mode_manager.time.monotonic', return_value=10.1):
+        ControlModeManager.on_command(gateway, 'tcp_ik', String(data=json.dumps(
+            dict(independent_ee_velocity=5.))))
+    assert gateway.independent_ee_velocity == 5.
+    assert gateway.independent_ee_command_time == pytest.approx(10.1)
+    core.ready = False
+    with patch('arm_control_mode_manager.time.monotonic', return_value=10.2):
+        ControlModeManager.on_command(gateway, 'tcp_ik', String(data=json.dumps(
+            dict(independent_ee_velocity=6.))))
+    assert gateway.independent_ee_velocity == 5.
+    assert 'controller or feedback unavailable' in gateway.last_error
 
 
 def test_gateway_stop_captures_measurement_and_invalidates_queued_targets():

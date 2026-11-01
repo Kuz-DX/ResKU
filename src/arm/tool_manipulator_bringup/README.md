@@ -75,15 +75,30 @@ L2 + □       → MoveIt 현재→home→back, BACK 피드백 확인
 L2 + △/○/×  → 각각 tool0/tool1/tool2 pre-dock (확인된 BACK에서만 허용)
 ```
 
-tool 요청은 `cartesian_targets.yaml`의 tool별 `arm_world`
-pre-dock pose까지 별도로 계획한다. pre-dock pose는 BACK을 seed로 bounded axis IK를
-통과해야 하며, 기존 tool YAML의 마지막 관절점은 실행 목표로 사용하지 않는다.
+tool 요청은 `cartesian_targets.yaml`의 검토된 tool별 목표까지 별도로 계획한다.
+실측 joint goal이 있으면 이를 우선 사용하고, 없는 경우에만 BACK seed의 bounded
+axis IK로 Cartesian TCP 목표를 계산한다. 기존 tool YAML의 마지막 관절점은 실행
+목표로 사용하지 않는다.
 BACK 경로와 tool 경로는 각각 전체 샘플의 충돌 검사가 끝난 뒤 manager가 실행한다.
 tool IK나 계획이 실패해도 로봇이 BACK에 머물면 다른 tool을 다시 선택할 수 있다.
 마지막 도킹 준비 자세에서 docking은 `/arm/docking`에 `true -> false`,
 release는 `false -> true`를 즉시 발행하고, 이후 새 `/arm/docked` 피드백이 각각
 `true` 또는 `false`가 될 때까지 HOLD를 유지한다. 같은 계약을 tool1/tool2에도
 적용한다.
+
+2026-11-01 이후 실측 joint goal이 있는 tool은 Cartesian axis IK를 다시 풀지 않는다.
+BACK 피드백을 시작 상태로 하여 MoveIt이 실측 joint goal까지 전역 경로를 계획한다.
+base 목표는 soft limit 안에서 현재 BACK에 가장 가까운 `2π` 동치각을 선택하므로
+`-π → +π`의 불필요한 한 바퀴 회전을 만들지 않는다. 저장 YAML waypoint는 테스트와
+fallback 자료로만 남고 production 경로로 직접 재생하지 않는다. tool1 실측값은
+elbow planning limit을 넘으므로 수정 측정 전까지 fail-closed로 차단된다.
+
+AprilTag와 TCP 축은 `+X=위`, `+Y=왼쪽`, `+Z=TCP에서 박스를 보는 방향`으로 일치한다.
+실측 최종 `T_tag_tcp` translation은 tool0 `[-0.0457, 0, -0.0445] m`, tool1
+`[-0.0457, 0, -0.0500] m`이며 회전은 identity다. 최종점에서 30 mm 물러난
+pre-dock은 각각 `[-0.0457, 0, -0.0745] m`, `[-0.0457, 0, -0.0800] m`다.
+현재 tool1 `camera_normal_advance`는 X 오프셋을 사용하지 않으므로 이 측정값을
+기록만 하며, tag-relative staged approach로 전환하기 전에는 최종 도킹에 사용하지 않는다.
 
 `enable_docking_motion:=false`를 명시하면 활성 경로의 저장 궤적 이후 태그와 목표 오차를
 `preview` 상태로 출력하며 보정 이동이나 Arduino 구동은 실행하지 않는다.
@@ -95,7 +110,9 @@ L2+□ → MoveIt 현재→home→back 계획/검증/실행 → BACK 피드백 �
   → L2+△/○/× → MoveIt back→tool pre-dock 계획/검증/실행 → 실제 완료 및 HOLD
   → 태그 획득 → coarse 목표 → fine 목표 → dock 목표
   → 서로 다른 영상/관절 피드백에서 정렬·정지 연속 확인
-  → `/arm/docking` Bool 펄스 → 새 `/arm/docked` 완료 상태 확인 → HOLD 유지
+  → `/arm/docking=true` → 새 `/arm/docked=true` 완료 상태 확인
+  → TCP 로컬 -Z로 30 mm 직선 후퇴(전체 IK/충돌 검사)
+  → MoveIt 현재→back 직행 계획/검증/실행 → BACK 피드백 확인
 ```
 
 정렬은 매번 `검출 → 제한된 TCP 보정 → IK → 관절 경로 충돌 검사 → 실행 → 재검출`로
@@ -144,7 +161,9 @@ Arduino 명령과 완료 상태는 `std_msgs/Bool`을 사용한다. 체결은 `/
 `true` 후 즉시 `false`, 해지는 `false` 후 즉시 `true`를 발행하는 트리거 펄스다.
 `/arm/docked`의 명령 이후 새 피드백이 체결 시 `true`, 해지 시 `false`가 되어야 완료로
 인정한다. 명령 전에 남아 있던 동일 상태나 반대 상태는 완료로 인정하지 않는다. 대기 중
-위치 이탈·timeout·취소는 팔을 정지시키며 자동 재시도나 반대 펄스, 자동 후퇴를 하지 않는다.
+위치 이탈·timeout·취소는 팔을 정지시키며 자동 재시도나 반대 펄스를 보내지 않는다.
+성공 피드백 뒤에만 설정된 TCP 직선 후퇴와 MoveIt BACK 복귀를 자동 실행한다. 후퇴 IK,
+충돌 검사 또는 BACK 계획이 실패하면 현재 자세에서 HOLD하고 HOME 우회로를 임의 실행하지 않는다.
 Bool 계약에는 STOP 명령이 없으므로 통신 단절과 비상 정지는 Arduino 자체 watchdog이
 담당해야 한다. 시각적 도킹 판정은 물리적인 접촉/삽입 센서 확인을 대신하지 않으며,
 실제 완료는 `/arm/docked` 피드백으로 구분한다.
@@ -156,7 +175,7 @@ ros2 topic echo /arm/tool_trajectory/status
 
 도킹 노드는 전용 취소 서비스와 기존 `/arm/cancel`에 의한 모드/epoch 변경을 감시한다.
 도킹 노드 종료 시 launch도 종료한다. 프로세스 강제 종료/통신 단절에서 Arduino의 동작을
-정지시키는 자체 watchdog은 펌웨어에 필요하다. 성공 시에도 자동 후퇴하지 않고 HOLD를 유지한다.
+정지시키는 자체 watchdog은 펌웨어에 필요하다. 성공 시에는 직선 후퇴 후 BACK으로 복귀한다.
 툴 1은 `require_l2_hold: false`로 설정되어 한 번 요청하면 저장 경로부터 태그 확인·전진까지
 자동으로 이어진다. 시작 후 L2 해제나 `/joy` 수신 중단으로 취소되지 않는다.
 다른 도킹 설정은 기본값 `require_l2_hold: true`일 때 L2를 계속 눌러야 하며,
@@ -167,7 +186,7 @@ L2 해제 또는 `/joy` 0.3초 이상 수신 중단 시 취소한다.
 
 ### 툴 1: 저장 경로 종료 후 태그 방향으로 상대 30 mm 전진
 
-툴 1은 `tag36h11` ID 1, 검은 사각형 20 mm를 사용한다. 저장 경로의 마지막 하강
+툴 1은 `tag36h11` ID 0, 검은 사각형 20 mm를 사용한다. 저장 경로의 마지막 하강
 지점은 주석으로만 남아 있으며, 해당 관절값이나 FK 좌표를 목표 생성에 사용하지 않는다.
 툴 1의 `timing_mode: joint_limits`는 측정 시각을 기록용으로만 사용한다.
 저장점 사이 이동 시간은 관절 이동량과 모드 관리자의 속도 제한으로 정하며,

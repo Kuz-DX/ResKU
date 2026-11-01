@@ -11,6 +11,11 @@ TCP_ENTRY_TOLERANCE = (.02, .001, .001, .001, .02, .02)
 # MX-106(2.0): one Goal Velocity count is 0.229 rpm (0.0239691227 rad/s).
 # Tool-specific commanded speeds remain separate from this manual safety ceiling.
 MANUAL_EE_MAX_VELOCITY_RAD_S = 400 * 0.0239691227
+# Requested TCP gripper jog ceiling.  The configured ID-4 Velocity Limit is
+# currently raw 400 (9.58764908 rad/s), so commands above that remain subject
+# to the motor's independently configured hardware register.
+TCP_EE_MAX_VELOCITY_RAD_S = 16.8
+OUTWARD_LIMIT_GUARD_DURATION_SEC = .1
 
 
 def non_arm_feedback_changed(current, snapshot, arm_joints):
@@ -51,6 +56,10 @@ class ModeCore:
                 or not all(math.isfinite(a) and 0 < a <= 2. for a in self.tcp_accelerations)):
             raise ValueError('invalid TCP acceleration limits')
         self.tcp_velocity = [0.]*len(speeds)
+        # Joint-state velocity estimates can contain a single outward spike
+        # while a loaded joint settles.  Keep the near-limit guard, but require
+        # persistence before latching a system-wide fault.
+        self.outward_limit_since = [None]*len(speeds)
         self.mode = 'hold'
         self.requested = 'hold'
         self.transitioning = False
@@ -289,12 +298,28 @@ class ModeCore:
             return
         for index, (value, speed, (lower, upper)) in enumerate(
                 zip(position, velocity, self.limits)):
-            if ((value > upper-.05 and speed > .02)
-                    or (value < lower+.05 and speed < -.02)):
+            # During the one-shot startup recovery, RMD feedback may begin a
+            # few hundredths of a radian outside the recalibrated endpoint and
+            # its first velocity estimate can still point outward.  The
+            # recovery envelope, feedback lead, following-error and stall
+            # guards own this bounded case.  Applying the normal-operation
+            # outward guard here would latch fault before begin_startup() can
+            # command the reviewed inward recovery target.
+            startup_rmd = (self.startup_enabled and not self.startup_complete
+                           and 1 <= index <= 3)
+            moving_outward = (not startup_rmd and
+                              ((value > upper-.05 and speed > .02)
+                               or (value < lower+.05 and speed < -.02)))
+            if not moving_outward:
+                self.outward_limit_since[index] = None
+            elif self.outward_limit_since[index] is None:
+                self.outward_limit_since[index] = now
+            elif now-self.outward_limit_since[index] >= OUTWARD_LIMIT_GUARD_DURATION_SEC:
                 self.fault(
                     'joint moving outward near soft limit: %s position=%.6f '
-                    'velocity=%.6f allowed=[%.6f, %.6f]' %
-                    (self.joint_names[index], value, speed, lower, upper))
+                    'velocity=%.6f allowed=[%.6f, %.6f] sustained=%.3fs' %
+                    (self.joint_names[index], value, speed, lower, upper,
+                     OUTWARD_LIMIT_GUARD_DURATION_SEC))
                 return
         if (not self.fresh(now) or self.entry_anchor is None
                 or max(map(abs, velocity)) > .02
@@ -461,7 +486,8 @@ class ModeCore:
                 epoch != self.epoch or self.transitioning or not self.ready or
                 self.focus != 'arm' or not self.fresh(now)):
             return False
-        ee_speed_limit = MANUAL_EE_MAX_VELOCITY_RAD_S if source == 'manual' else .12
+        ee_speed_limit = (MANUAL_EE_MAX_VELOCITY_RAD_S if source == 'manual'
+                          else TCP_EE_MAX_VELOCITY_RAD_S)
         if not self.valid(positions) or not math.isfinite(ee) or abs(ee) > ee_speed_limit:
             raise ValueError('invalid command or limits exceeded')
         if max(abs(a-b) for a, b in zip(positions, self.position)) > .10:
