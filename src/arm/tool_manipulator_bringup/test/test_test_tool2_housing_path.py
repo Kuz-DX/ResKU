@@ -91,9 +91,12 @@ def test_entire_stored_tool2_path_passes_with_housing_collision_checks(collision
         count = max(1, int(np.ceil(np.max(np.abs(goal-start))/.005)))
         points.extend(np.linspace(start, goal, count+1))
     assert 'wrist_link_yaw' not in TEST_TOOL2_GRIPPER_LINKS
-    for i, result in enumerate(collision_probe(points)):
-        assert collision_result_accepted(result, ignored_links=TEST_TOOL2_GRIPPER_LINKS), (
-            i, [(c.contact_body_1, c.contact_body_2) for c in result.contacts])
+    # Check both the fully open reference and the closed edge of the measured
+    # opening-completion tolerance, with no per-link collision exclusions.
+    for ee in (-.076699, -.066699):
+        for i, result in enumerate(collision_probe(points, ee)):
+            assert result.valid, (i, ee,
+                [(c.contact_body_1, c.contact_body_2) for c in result.contacts])
 
 
 def test_terminal_fingers_clear_when_open_and_pinch_opposite_box_faces_when_closed(collision_probe):

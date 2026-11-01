@@ -5,8 +5,13 @@
 # Shoulder/elbow/wrist pitch signs reversed again at user request.
 # First wrist pitch retains the adjusted magnitude: -1.45 rad.
 # Points 3 through 15 hold the point-5 posture; only base rotates.
-# Points 16 through 18 move only RMD joints; base/roll/yaw remain fixed.
+# Points 16 through 17 move only RMD joints; base/roll/yaw remain fixed.
 mid_path_ee_open: {after_point: 15, velocity_rad_s: -1.0, duration_sec: 3.2}
+# Point17 is a non-contact observation pose, before live tag confirmation.
+pre_dock_reference:
+  center_frame: tool_case_1_center
+  outward_standoff_m: 0.080
+  tcp_plane_tilt_deg: 55.0
 execution_enabled: true
 timing_mode: joint_limits
 joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
@@ -59,9 +64,17 @@ points:
   # Original point 3, captured at 288.505001 s.
   - time_from_start_sec: 15.0
     positions_rad: [3.141592653589793, 0.326, 1.19642312234728, -1.250004725057184, 0.0, 0.0]
-  # Original point 2, captured at 286.413181 s.
+  # Point 17: TCP is 80 mm from the blue centre along the docking normal.
+  # This is a centre-to-centre distance, not a physical surface gap.
+  # base_actuator XYZ [m]: [-0.328973836457, 0, 0.264081660493].
+  # TCP XY plane matches the docking face: 55 deg to the circuit-box top;
+  # TCP +Z points toward the centre, 35 deg below that top plane.
+  # The 25.4 mm square tag pocket is 45.7 mm up the docking plane from
+  # the blue centre, with its rim 47.5 mm behind the circle-centre plane.
+  # Retain camera stand-off before acquiring the tag. Normal collision checks
+  # apply to both the stored approach and the subsequent tag-guided advance.
   - time_from_start_sec: 16.0
-    positions_rad: [3.141592653589793, 0.12042771172970601, 1.13376586611655, -1.2023573110462493, 0.0, 0.0]
+    positions_rad: [3.141592653589793, 0.14069604434880043, 1.093928748382147, -1.228428860959566, 0.0, 0.0]
 
 # Temporarily excluded point 18 (not executed):
 # Original point 1, captured at 269.625310 s.

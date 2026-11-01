@@ -11,7 +11,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'scripts'))
 sys.path.insert(0, str(ROOT.parent/'tool_change_min'))
-from resample_tool_paths import resample
+from resample_tool2_test import resample_vertical_tool2
 from tool_change_min.kinematics import ArmKinematics, _origin
 from tool_trajectory_joy_test import load_path
 
@@ -60,21 +60,23 @@ def test_tool2_first_three_points_are_preserved_with_matching_bases(endpoint):
          -1.2552407660763887, 0., 0.]])
 
 
-def test_tool2_replanned_tail_has_no_joint_reversals_or_upward_tcp_motion(endpoint):
+def test_tool2_high_approach_and_vertical_descent_preserve_the_exact_final_pose(endpoint):
     model, source, _, _, normal = endpoint
-    points = np.array([p['positions_rad'] for p in source['points'][2:]])
-    delta = np.diff(points, axis=0)
-    assert np.all(delta*(points[-1]-points[0]) >= -1e-12)
+    points = np.array([p['positions_rad'] for p in source['points']])
+    np.testing.assert_array_equal(points[-1], [-2.2033386283130203, .8645308595938803,
+        1.5445981470142933, -1.5664526, -.46336192491914385, -.3197226468906116])
     assert all(model.within_limits(q, .02) for q in points)
-    heights = np.array([model.fk(q)[:3, 3] @ normal for q in points])
-    assert np.all(np.diff(heights) < 0.)
+    pre = model.fk(points[-2])[:3, 3]
+    final = model.fk(points[-1])[:3, 3]
+    np.testing.assert_allclose(pre, final+.095*normal, atol=1e-8, rtol=0.)
 
 
 def test_tool2_test_path_resampling_preserves_vertices_limits_and_speed_caps(endpoint):
     model, source, _, _, _ = endpoint
     generated_path = ROOT/'config/test/resampled/tool2_trajectory.yaml'
     generated = yaml.safe_load(generated_path.read_text())
-    assert generated == resample(source)
+    descent = yaml.safe_load((ROOT/'config/test/tool2_vertical_descent.yaml').read_text())
+    assert generated == resample_vertical_tool2(source, descent, model)
     assert len(source['points']) == 17
     points = np.array([p['positions_rad'] for p in generated['points']])
     vertices = np.array([p['positions_rad'] for p in source['points']])
@@ -85,3 +87,11 @@ def test_tool2_test_path_resampling_preserves_vertices_limits_and_speed_caps(end
     assert np.all(speeds <= np.array(source['joint_speed_limits_rad_s'])+1e-12)
     assert 'after_path' not in source
     assert load_path(generated_path, model) is not None
+    start = generated['source_point_indices'][15]
+    tail = points[start:]
+    xyz = np.array([model.fk(q)[:3, 3] for q in tail])
+    assert np.max(np.abs(xyz[:, :2]-xyz[-1, :2])) < .00005
+    assert np.all(np.diff(xyz[:, 2]) < 0.)
+    midpoints = (tail[:-1]+tail[1:])/2
+    midpoint_xyz = np.array([model.fk(q)[:3, 3] for q in midpoints])
+    assert np.max(np.abs(midpoint_xyz[:, :2]-xyz[-1, :2])) < .00005

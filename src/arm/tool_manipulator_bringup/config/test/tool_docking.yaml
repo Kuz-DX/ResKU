@@ -12,7 +12,8 @@ tools:
     tag_family: tag36h11
     tag_id: 0
     tag_size_m: 0.020
-    advance_distance_m: 0.002  # Test tool0: total tag-normal advance 2 mm.
+    advance_distance_m: 0.025  # After tag confirmation, translate 25 mm.
+    maintain_entry_orientation: true  # Hold the taught 55-deg entry pose throughout.
     actuation_enabled: true
     desired_docked: true           # true=attach pulse, false=release pulse
     actuation_timeout_s: 10.0

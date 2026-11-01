@@ -3,6 +3,7 @@
 import json
 import math
 import time
+import xml.etree.ElementTree as ET
 
 import cv2
 import numpy as np
@@ -23,9 +24,43 @@ from tool_docking_core import (load_settings, transform, pose_errors, bounded_ta
                                direction_angle, interpolate_direction)
 
 
+def mock_optical_extrinsic(description):
+    """Nominal wrist camera for assumed detections; reject real hardware."""
+    robot = ET.fromstring(description)
+    plugins = [item.text for item in robot.findall('ros2_control/hardware/plugin')]
+    if not plugins or any(item != 'mock_components/GenericSystem' for item in plugins):
+        raise ValueError('assumed tag success requires exclusively mock hardware')
+    mount = robot.find("joint[@name='cam_link_mount']")
+    if mount is None or mount.find('parent').get('link') != 'tcp_link':
+        raise ValueError('mock tag camera requires the fixed tcp_link camera mount')
+    origin = mount.find('origin')
+    xyz = np.asarray([float(v) for v in origin.get('xyz', '0 0 0').split()])
+    roll, pitch, yaw = [float(v) for v in origin.get('rpy', '0 0 0').split()]
+    result = np.eye(4)
+    result[:3, 3] = xyz
+    result[:3, :3] = (cv2.Rodrigues(np.array([0., 0., yaw]))[0]
+                      @ cv2.Rodrigues(np.array([0., pitch, 0.]))[0]
+                      @ cv2.Rodrigues(np.array([roll, 0., 0.]))[0]
+                      @ np.array([[0., 0., 1.], [-1., 0., 0.], [0., -1., 0.]]))
+    return result
+
+
+def advance_endpoint_errors(current, target, local_axis, normal, maintain_orientation=False):
+    distance = float(np.linalg.norm(current[:3, 3]-target[:3, 3]))
+    angle = (pose_errors(current, target)[1] if maintain_orientation else
+             direction_angle(current[:3, :3] @ local_axis, normal))
+    return distance, angle
+
+
 class ToolDockingCoordinator(ToolTrajectoryJoy):
     def __init__(self):
         super().__init__()
+        self.mock_tag_success = bool(self.declare_parameter('mock_tag_success', False).value)
+        self.mock_tcp_camera = (mock_optical_extrinsic(
+            self.get_parameter('robot_description').value) if self.mock_tag_success else None)
+        if self.mock_tag_success:
+            self.get_logger().warning(
+                'MOCK ONLY: assume tag success after approach; normal IK/collision/feedback checks remain active')
         self.settings = load_settings(self.declare_parameter('docking_config', '').value)
         # Must match the inherited ArmKinematics root, not an arbitrary TF frame.
         self.base_frame = 'base_actuator'
@@ -81,6 +116,7 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
     def reset_tag_acquisition(self):
         """Acquire a fresh anchor after the taught approach has stopped."""
         self.observation = None
+        self.mock_base_tag = None
         self.last_image_stamp = -1
         self.last_base_tag = None
         self.tag_received = self.tag_accepted = 0
@@ -126,7 +162,8 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             self.camera_reason = f'ready ({self.camera_frame})'
 
     def on_tag(self, msg):
-        if not self.active or getattr(self, 'advance_locked', False):
+        if (getattr(self, 'mock_tag_success', False)
+                or not self.active or getattr(self, 'advance_locked', False)):
             return
         self.tag_received += 1
         try:
@@ -231,9 +268,9 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         if getattr(self, 'advance_locked', False):
             q = np.asarray([self.full_state[j] for j in ARM_JOINTS])
             actual = self.model.fk(q)
-            distance = np.linalg.norm(actual[:3, 3]-self.advance_target[:3, 3])
-            angle = direction_angle(actual[:3, :3] @ self.advance_local_axis,
-                                    self.advance_direction)
+            distance, angle = advance_endpoint_errors(
+                actual, self.advance_target, self.advance_local_axis, self.advance_direction,
+                self.cfg.get('maintain_entry_orientation', False))
             if (distance > self.cfg['position_tolerance_m']
                     or angle > self.cfg['angle_tolerance_rad']
                     or np.max(np.abs(self.velocity)) > self.cfg['stopped_speed_rad_s']):
@@ -311,6 +348,26 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             if s.get('epoch') != self.hold_epoch:
                 raise RuntimeError('docking HOLD ownership changed/cancelled')
 
+    def update_mock_tag_observation(self, now):
+        if (not getattr(self, 'mock_tag_success', False)
+                or getattr(self, 'advance_locked', False)):
+            return
+        if self.cfg.get('alignment_mode') != 'camera_normal_advance':
+            raise ValueError('assumed tag success supports camera-normal advance only')
+        if self.mock_base_tag is None:
+            q = np.asarray([self.full_state[j] for j in ARM_JOINTS])
+            self.tcp_camera = self.mock_tcp_camera.copy()
+            camera = self.model.fk(q) @ self.tcp_camera
+            self.mock_base_tag = camera.copy()
+            self.mock_base_tag[:3, 3] += .2*camera[:3, 2]
+            self.report('mock_tag_success',
+                        'approach reached; assuming successful tag confirmation in mock replay')
+        stamp = self.get_clock().now().nanoseconds
+        self.observation = (stamp, now, self.mock_base_tag.copy())
+        self.tag_accepted += 1
+        self.tag_reason = 'mock replay assumes tag success'
+        self.camera_reason = 'nominal mock optical extrinsic; no camera image used'
+
     def tick(self):
         try:
             if self.active and self.docking_started is None:
@@ -318,6 +375,7 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             if self.active and self.docking_started is not None:
                 now = time.monotonic()
                 self.guard(now)
+                self.update_mock_tag_observation(now)
                 if self.stage == 'dock_acquire':
                     if now-self.docking_started > self.cfg['acquire_timeout_s']:
                         raise RuntimeError('target tag acquisition timed out: '+self.tag_diagnostic())
@@ -369,20 +427,22 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         self.advance_target = current.copy()
         self.advance_target[:3, 3] += tag_normal*self.cfg['advance_distance_m']
         self.advance_seed = q.copy()
+        maintain = self.cfg.get('maintain_entry_orientation', False)
         self.advance_count = max(math.ceil(self.cfg['advance_distance_m']/self.cfg['step_m']),
-                                 math.ceil(tilt/self.cfg['step_rad']))
+                                 1 if maintain else math.ceil(tilt/self.cfg['step_rad']))
         self.advance_plan = dict(start=q.copy(), waypoints=[], durations=[], total=0., start_error=0.,
                                  cartesian_line=True)
         self.advance_snapshot = dict(self.full_state)
         self.stage = 'dock_advance_plan'
         self.report('advance_planning',
-                    'tag confirmed at stopped tool-1 endpoint; planning fixed %.1f mm tag-normal advance; '
-                    'normal=[%.4f, %.4f, %.4f] seed=%s; axial rotation free; '
+                    'tag confirmed at stopped endpoint; planning fixed %.1f mm tag-normal advance; '
+                    'normal=[%.4f, %.4f, %.4f] seed=%s; %s; '
                     'tilt changes gradually by %.2f deg; tag visibility no longer required; %s' %
                     (self.cfg['advance_distance_m']*1000.,
                      *map(float, tag_normal),
                      '['+', '.join(f'{value:.4f}' for value in q)+']',
-                     math.degrees(tilt),
+                     'entry orientation fixed' if maintain else 'axial rotation free',
+                     0. if maintain else math.degrees(tilt),
                      'L2 remains required' if self.cfg.get('require_l2_hold', True)
                      else 'continuing automatic tool sequence'))
 
@@ -399,12 +459,17 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         target = self.advance_origin.copy()
         target[:3, 3] += ((self.advance_target[:3, 3]-self.advance_origin[:3, 3])
                          * index/self.advance_count)
-        direction = interpolate_direction(self.advance_start_direction, self.advance_direction,
-                                          index/self.advance_count)
+        maintain = self.cfg.get('maintain_entry_orientation', False)
+        direction = (self.advance_start_direction if maintain else interpolate_direction(
+            self.advance_start_direction, self.advance_direction, index/self.advance_count))
         try:
-            solved = self.model.solve_axis(
-                target[:3, 3], direction, self.advance_local_axis, self.advance_seed, self.margin,
-                max_iterations=100, max_time_s=.03, joint_step_rad=self.cfg['joint_step_rad'])
+            if maintain:
+                solved = self.model.solve(target, self.advance_seed, self.margin,
+                                          max_iterations=100, max_time_s=.03)
+            else:
+                solved = self.model.solve_axis(
+                    target[:3, 3], direction, self.advance_local_axis, self.advance_seed, self.margin,
+                    max_iterations=100, max_time_s=.03, joint_step_rad=self.cfg['joint_step_rad'])
         except ValueError as exc:
             raise ValueError(f'advance IK point {index}/{self.advance_count}: {exc}') from exc
         delta = np.abs(solved-self.advance_seed)
@@ -412,8 +477,9 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                 or np.max(delta) > self.cfg['joint_step_rad']):
             raise RuntimeError('advance IK exceeds joint step/limits')
         actual = self.model.fk(solved)
-        if (np.linalg.norm(actual[:3, 3]-target[:3, 3]) > 1e-4
-                or direction_angle(actual[:3, :3] @ self.advance_local_axis, direction) > 1e-3):
+        angle_error = (pose_errors(actual, target)[1] if maintain else
+                       direction_angle(actual[:3, :3] @ self.advance_local_axis, direction))
+        if (np.linalg.norm(actual[:3, 3]-target[:3, 3]) > 1e-4 or angle_error > 1e-3):
             raise RuntimeError('advance IK residual too large')
         duration = max(.02, float(np.max(delta))/self.cfg['joint_speed_rad_s'],
                        self.cfg['advance_distance_m']/self.advance_count
@@ -440,10 +506,11 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         current = self.model.fk(q)
         camera_mode = self.cfg.get('alignment_mode') == 'camera_normal_advance'
         if locked_actuation:
-            aligned = (np.linalg.norm(current[:3, 3]-self.advance_target[:3, 3])
-                       <= self.cfg['position_tolerance_m']
-                       and direction_angle(current[:3, :3] @ self.advance_local_axis,
-                                           self.advance_direction) <= self.cfg['angle_tolerance_rad'])
+            distance, angle = advance_endpoint_errors(
+                current, self.advance_target, self.advance_local_axis, self.advance_direction,
+                self.cfg.get('maintain_entry_orientation', False))
+            aligned = (distance <= self.cfg['position_tolerance_m']
+                       and angle <= self.cfg['angle_tolerance_rad'])
         elif camera_mode:
             tag_normal, tag_distance = self.camera_advance_direction(base_tag, current)
             aligned = True  # Tool 1 uses the taught endpoint; no visual correction.

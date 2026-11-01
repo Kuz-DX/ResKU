@@ -113,6 +113,22 @@ def load_path(path, model, margin=.02):
                 frozenset(excluded) != TEST_TOOL2_GRIPPER_LINKS):
             raise ValueError('invalid test tool2 temporary gripper collision exclusions')
         result['temporary_ignored_collision_links'] = TEST_TOOL2_GRIPPER_LINKS
+    descent = data.get('vertical_descent')
+    if descent is not None:
+        indices = data.get('source_point_indices', [])
+        if (not isinstance(descent, dict) or not isinstance(indices, list) or
+                Path(path).name != 'tool2_trajectory.yaml' or excluded is not None or
+                timing_mode != 'recorded' or len(indices) != 17 or
+                any(type(i) is not int for i in indices) or indices[0] != 0 or
+                indices[-1] != len(points)-1 or
+                any(a >= b for a, b in zip(indices, indices[1:])) or
+                descent.get('start_point') != 16 or descent.get('distance_m') != .095 or
+                descent.get('ee_open_rad') != -.076699 or
+                descent.get('ee_open_tolerance_rad') != .01 or
+                descent.get('start_index') != indices[15]):
+            raise ValueError('invalid test tool2 vertical descent; use resample_tool2_test.py')
+        result['vertical_descent'] = descent
+        result['cartesian_line'] = True
     if data.get('mid_path_ee_open'):
         action = data['mid_path_ee_open']
         if action != dict(after_point=15, velocity_rad_s=-1., duration_sec=3.2):
@@ -442,6 +458,8 @@ class ToolTrajectoryJoy(Node):
         self.sequence_phase = 'approach'
         self.ee_tail = None
         self.ee_mid_phase = None
+        self.tool2_opening = False
+        self.tool2_open_ready = False
 
     def report(self, state, reason):
         self.diagnostics.publish(String(data=json.dumps(dict(
@@ -566,6 +584,18 @@ class ToolTrajectoryJoy(Node):
         try:
             s = self.healthy_hold(now)
             measured = np.asarray([self.full_state[j] for j in ARM_JOINTS])
+            descent = self.paths.get(2, {}).get('vertical_descent') if path_id == 2 else None
+            if descent is not None and not self.tool2_opening:
+                if not self.tool2_open_ready and not self.tool2_open_verified():
+                    # Opening is validated at the stopped current arm pose first.
+                    self.tool2_opening = True
+                    self.report('opening', 'tool2: opening fingers before the collision-checked approach')
+                    self.begin(2, dict(start=measured, waypoints=[measured], durations=[1.],
+                        total=1., start_error=0., ee_target_rad=descent['ee_open_rad'],
+                        ee_speed_rad_s=.08))
+                    return
+                self.require_tool2_open()
+                self.tool2_open_ready = True
             if planned_path is None and path_id == 0 and self.ee_mid_phase is None:
                 full = self.paths[path_id]
                 split = full.get('ee_split_index')
@@ -679,6 +709,26 @@ class ToolTrajectoryJoy(Node):
         self.report('blocked', reason)
         self.reset()
 
+    def tool2_open_verified(self):
+        policy = self.paths[2]['vertical_descent']
+        position = self.full_state.get('ee_joint', math.nan)
+        target = policy['ee_open_rad']
+        return target-1e-8 <= position <= target+policy['ee_open_tolerance_rad']+1e-8
+
+    def require_tool2_open(self):
+        if not self.tool2_open_verified():
+            raise ValueError('tool2 vertical approach requires confirmed open fingers')
+
+    def finish_tool2_opening(self):
+        if not getattr(self, 'tool2_opening', False):
+            return False
+        self.require_tool2_open()
+        self.tool2_opening = False
+        self.tool2_open_ready = True
+        self.report('resuming', 'tool2 fingers open; checking the high approach and vertical descent')
+        self.begin(2)
+        return True
+
     def handle_mid_path_ee(self):
         if self.ee_mid_phase == 'approach':
             ee_start = self.full_state['ee_joint']
@@ -700,6 +750,8 @@ class ToolTrajectoryJoy(Node):
         return False
 
     def path_completed(self):
+        if self.finish_tool2_opening():
+            return
         if self.handle_mid_path_ee():
             return
         after = self.paths[self.path_id].get('after_path')
@@ -857,6 +909,9 @@ class ToolTrajectoryJoy(Node):
                 return
             if self.stage == 'checking':
                 s = self.healthy_hold(now)
+                if (self.path_id == 2 and self.paths[2].get('vertical_descent') is not None
+                        and 'ee_target_rad' not in self.path):
+                    self.require_tool2_open()
                 if s.get('epoch') != self.original_epoch:
                     raise RuntimeError('arm ownership changed during path validation')
                 if not self.unchanged(validation=True):
@@ -904,6 +959,9 @@ class ToolTrajectoryJoy(Node):
                 if not self.unchanged(validation=True):
                     raise RuntimeError('robot moved before path execution; '
                                        + self.snapshot_change_reason(validation=True))
+                if (self.path_id == 2 and self.paths[2].get('vertical_descent') is not None
+                        and 'ee_target_rad' not in self.path):
+                    self.require_tool2_open()
                 self.execution_id = 'tool-path-'+uuid.uuid4().hex
                 command = dict(epoch=s['epoch'], execution_id=self.execution_id)
                 if 'ee_target_rad' in self.path:
@@ -928,6 +986,9 @@ class ToolTrajectoryJoy(Node):
                 self.report('executing', f'executing tool path {self.path_id}')
                 return
             if self.stage == 'executing':
+                if (self.path_id == 2 and self.paths[2].get('vertical_descent') is not None
+                        and 'ee_target_rad' not in self.path):
+                    self.require_tool2_open()
                 s = self.status
                 if now-self.status_time >= .3 or now-self.state_time >= .3:
                     raise RuntimeError('feedback became stale during path execution')

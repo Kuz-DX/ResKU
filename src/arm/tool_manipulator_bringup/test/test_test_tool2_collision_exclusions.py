@@ -35,14 +35,15 @@ def test_exclusions_do_not_accept_missing_results_or_invalid_states_without_cont
 
 
 @pytest.mark.parametrize('sampled', [False, True])
-def test_exclusion_is_explicit_in_both_test_tool2_configs(sampled):
+def test_vertical_tool2_restores_finger_collision_checks_in_both_configs(sampled):
     directory = ROOT/'config/test'
     if sampled:
         directory /= 'resampled'
     model = Mock()
     model.within_limits.return_value = True
-    loaded = load_path(directory/'tool2_trajectory.yaml', model)
-    assert loaded['temporary_ignored_collision_links'] == TEST_TOOL2_GRIPPER_LINKS
+    data = yaml.safe_load((directory/'tool2_trajectory.yaml').read_text())
+    assert 'temporary_ignored_collision_links' not in data
+    assert data['vertical_descent']['distance_m'] == .095
     for tool in (0, 1):
         assert not load_path(directory/f'tool{tool}_trajectory.yaml', model).get(
             'temporary_ignored_collision_links')
@@ -50,6 +51,8 @@ def test_exclusion_is_explicit_in_both_test_tool2_configs(sampled):
 
 def test_exclusion_cannot_be_extended_or_enabled_on_another_tool(tmp_path):
     source = yaml.safe_load((ROOT/'config/test/tool2_trajectory.yaml').read_text())
+    source.pop('vertical_descent')
+    source['temporary_ignored_collision_links'] = sorted(TEST_TOOL2_GRIPPER_LINKS)
     model = Mock()
     model.within_limits.return_value = True
     for name in ('tool0_trajectory.yaml', 'tool1_trajectory.yaml'):

@@ -275,6 +275,8 @@ class Tool2PickPlaceCoordinator(ToolDockingCoordinator):
                            total=duration, start_error=0.))
 
     def path_completed(self):
+        if self.finish_tool2_opening():
+            return
         if self.pick_sequence is None:
             super().path_completed()
             return

@@ -36,6 +36,9 @@ def bringup(context):
         source_config.parent,
         Path(get_package_share_directory('tool_manipulator_bringup'))/'config')
     real = LaunchConfiguration('real_hardware').perform(context) == 'true'
+    mock_tag = LaunchConfiguration('mock_tag_success').perform(context) == 'true'
+    if real and mock_tag:
+        raise ValueError('assumed tag success requires real_hardware:=false')
     tcp_enabled = LaunchConfiguration('launch_tcp_joy').perform(context) == 'true'
     initial = LaunchConfiguration('mock_initial_positions_file').perform(context)
     if tcp_enabled and not real and not initial:
@@ -107,6 +110,7 @@ def bringup(context):
                                       base.moveit_config.robot_description_semantic,
                                       {'hardware_config': base.hardware_file,
                                                         'trajectory_dir': str(trajectory_dir),
+                                                        'mock_tag_success': mock_tag,
                                                         'shoulder_isolation_enabled': True,
                                                         'shoulder_isolation_half_width_rad': 0.08,
                                                         'shoulder_isolation_speed_rad_s': 0.015,
@@ -140,6 +144,8 @@ def generate_launch_description():
         'hardware_config.py')))['default_hardware_config']()
     return LaunchDescription([
         DeclareLaunchArgument('real_hardware', default_value='true', choices=['true', 'false']),
+        DeclareLaunchArgument('mock_tag_success', default_value='false', choices=['true', 'false'],
+                              description='Mock replay only: assume tag success after the taught approach'),
         DeclareLaunchArgument('hardware_config', default_value=str(hardware_default)),
         DeclareLaunchArgument('launch_joy', default_value='false', choices=['true', 'false']),
         DeclareLaunchArgument('mock_initial_positions_file', default_value=''),

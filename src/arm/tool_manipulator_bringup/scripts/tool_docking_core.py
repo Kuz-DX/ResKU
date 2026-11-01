@@ -163,6 +163,9 @@ def load_settings(filename):
         mode = item.setdefault('alignment_mode', 'tag_tcp_stages')
         if mode not in ('tag_tcp_stages', 'camera_normal_advance'):
             raise ValueError('unknown docking alignment_mode')
+        if ('maintain_entry_orientation' in item
+                and type(item['maintain_entry_orientation']) is not bool):
+            raise ValueError('maintain_entry_orientation must be a boolean')
         if 'tag_family' in item and (not isinstance(item['tag_family'], str)
                                      or not item['tag_family'].strip()):
             raise ValueError('tag_family must be a nonempty string')
