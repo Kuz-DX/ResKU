@@ -22,6 +22,15 @@ The configured Dynamixel ID-4 Velocity Limit remains raw 400, equivalent to
 produce 16.8 rad/s until the independent motor register is deliberately changed
 to about raw 701 and read back. Launch does not write EEPROM limit registers.
 
+An arm `fault` does not automatically remove the independently controlled EE
+jog. L1+R1+D-pad left/right may continue through the manager while arm focus,
+controllers and fresh EE feedback remain healthy. This is a degraded EE-only
+path: it never clears the arm fault or sends new arm-joint targets. Releasing the
+buttons, stale Joy (250 ms), stale EE feedback (300 ms), inactive controllers or
+an EE travel limit commands zero. A Dynamixel `COMM_ERROR` still blocks the
+command in the hardware interface because ID 4 shares that U2D2 bus; RMD-only
+CAN faults do not.
+
 R2 (`axes[5]`, pressed below -0.5) requests the nearest TCP-entry candidate.
 The current joints are first projected into the required 0.10-rad margin. If
 that pose has scaled Jacobian condition above 20, the search moves only as far

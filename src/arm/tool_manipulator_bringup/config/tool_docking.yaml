@@ -75,6 +75,14 @@ tools:
     measured_tag_tcp_xyz_m: [-0.0457, 0.0, -0.0500]
     measured_tag_tcp_xyzw: [0.0, 0.0, 0.0, 1.0]
     measured_pre_dock_30mm_xyz_m: [-0.0457, 0.0, -0.0800]
+    # Hand-guided final docking capture. Diagnostic reference only: elbow
+    # 1.590693 rad exceeds the configured 1.5779521-rad endpoint, so this must
+    # not be submitted as an executable MoveIt/managed-path goal until the
+    # encoder zero/limit discrepancy is resolved from raw motor feedback.
+    measured_final_dock_joint_rad: [2.779573, 0.693943, 1.590693,
+      -1.389980, -0.085903, -1.805495]
+    measured_final_dock_executable: false
+    measured_final_dock_blocker: elbow exceeds configured soft limit by 0.0127409 rad
     actuation_enabled: false     # finish in HOLD, no attach/release command
     tag_max_age_s: 0.25
     min_decision_margin: 40.0

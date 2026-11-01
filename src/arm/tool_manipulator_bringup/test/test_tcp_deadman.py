@@ -10,6 +10,7 @@ from std_msgs.msg import String
 
 from test_tcp_safety import node, tick, messages
 from tcp_joy import TcpJoy
+from tcp_joy_core import EeDpad
 from arm_mode_core import ModeCore
 from arm_control_mode_manager import ControlModeManager
 
@@ -149,15 +150,50 @@ def test_held_neutral_preserves_target_without_ik():
     assert not n.blocked
 
 
-@pytest.mark.parametrize('mode', ['hold', 'fault'])
-def test_hold_or_fault_never_produces_new_joint_command(mode):
+def test_hold_never_produces_new_joint_command():
     n = node()
-    n.status['mode'] = mode
+    n.status['mode'] = 'hold'
     tick(n)
     send(n, joy(True, 1.))
     tick(n, 10.04)
     n.pub.publish.assert_not_called()
     n.model.solve.assert_not_called()
+
+
+def test_fault_publishes_only_explicit_l1_r1_dpad_ee_jog():
+    n = node()
+    n.ee_dpad = EeDpad()
+    n.ee_limits = (-2.351592547829, 2.839398438376)
+    n.full_state['ee_joint'] = 0.
+    n.status['mode'] = 'fault'
+    tick(n)
+    assert messages(n)[-1] == dict(degraded_ee_velocity=0.)
+    n.pub.reset_mock()
+    msg = joy(True)
+    msg.buttons[5] = 1
+    msg.axes[6] = 1.
+    send(n, msg, 10.02)
+    tick(n, 10.04)
+    assert messages(n)[-1] == dict(degraded_ee_velocity=5.)
+    n.model.solve.assert_not_called()
+
+
+def test_gateway_accepts_degraded_ee_only_with_fault_and_fresh_ready_ee():
+    core = SimpleNamespace(mode='fault', focus='arm', ready=True, ee_state_time=10.)
+    gateway = SimpleNamespace(
+        core=core, controllers={'ee_velocity_controller': 'active'}, last_error='',
+        degraded_ee_velocity=0., degraded_ee_command_time=-float('inf'))
+    with patch('arm_control_mode_manager.time.monotonic', return_value=10.1):
+        ControlModeManager.on_command(gateway, 'tcp_ik', String(data=json.dumps(
+            dict(degraded_ee_velocity=5.))))
+    assert gateway.degraded_ee_velocity == 5.
+    assert gateway.degraded_ee_command_time == pytest.approx(10.1)
+    core.ready = False
+    with patch('arm_control_mode_manager.time.monotonic', return_value=10.2):
+        ControlModeManager.on_command(gateway, 'tcp_ik', String(data=json.dumps(
+            dict(degraded_ee_velocity=6.))))
+    assert gateway.degraded_ee_velocity == 5.
+    assert 'controller or feedback unavailable' in gateway.last_error
 
 
 def test_gateway_stop_captures_measurement_and_invalidates_queued_targets():

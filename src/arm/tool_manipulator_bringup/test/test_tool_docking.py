@@ -68,6 +68,9 @@ def test_shipped_config_only_enables_tool1_camera_alignment_and_relative_advance
     assert set(cfg) == {1}
     assert cfg[1]['alignment_mode'] == 'camera_normal_advance'
     assert cfg[1]['advance_distance_m'] == .030
+    assert cfg[1]['measured_final_dock_joint_rad'] == pytest.approx([
+        2.779573, .693943, 1.590693, -1.389980, -.085903, -1.805495])
+    assert cfg[1]['measured_final_dock_executable'] is False
     assert cfg[1]['tag_family'] == 'tag36h11'
     assert cfg[1]['tag_id'] == 1
     assert not cfg[1]['actuation_enabled']

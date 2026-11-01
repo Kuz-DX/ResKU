@@ -277,7 +277,7 @@ class TcpJoy(TcpMotionWorkflow, Node):
             self.ee_dpad.update(msg.axes, enabled=bool(valid and msg.buttons[4]
                                 and msg.buttons[5] and msg.axes[2] >= -.5
                                 and self.status.get('focus') == 'arm'
-                                and self.status.get('mode') == 'tcp_ik'))
+                                and self.status.get('mode') in ('tcp_ik', 'fault')))
             if previous_direction != self.ee_dpad.direction:
                 self.discard()
                 self.stepper.q = self.stepper.pose = None
@@ -470,6 +470,23 @@ class TcpJoy(TcpMotionWorkflow, Node):
             self.discard()
             self.epoch = None
             self.rearmed = False
+            if s.get('mode') == 'fault':
+                control = vars(self).get('ee_dpad')
+                velocity = 0.
+                if (control is not None and self.deadman and control.direction
+                        and now-self.status_time < .3
+                        and now-self.joy_time < .25 and now-self.state_time < .3
+                        and s.get('focus') == 'arm'):
+                    position = (self.full_state or {}).get('ee_joint')
+                    if position is not None and math.isfinite(position):
+                        lo, hi = self.ee_limits
+                        if ((control.direction > 0 and lo <= position < hi-.01)
+                                or (control.direction < 0 and lo+.01 < position <= hi)):
+                            velocity = control.direction*control.speed
+                self.pub.publish(String(data=json.dumps(
+                    dict(degraded_ee_velocity=velocity))))
+                self.reason = ('fault-state EE jog active' if velocity
+                               else 'fault-state EE jog stopped')
             ready_state = vars(self).get('ready_state', 'idle')
             auto_entry_armed = vars(self).get('auto_entry_armed', False)
             if (not self.blocked and ready_state == 'idle'
