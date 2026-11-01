@@ -18,6 +18,9 @@ def test_mating_pitch_and_wrist_interfaces_are_excluded():
                  ("wrist_link_roll", "wrist_link_yaw")):
         assert frozenset((a, b)) in pairs()
 
+def test_fixed_drill_mount_contact_is_excluded():
+    assert frozenset(("tool_2_link", "ee_actuator")) in pairs()
+
 def test_nonadjacent_and_fixture_checks_remain_enabled():
     for a, b in (("base_link", "wrist_link_yaw"),
                  ("elbow_link", "wrist_link_roll"),

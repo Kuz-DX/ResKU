@@ -6,12 +6,16 @@
 # Never substitute camera pixel centre or raw camera depth for a calibrated 6D pose.
 tools:
   0:
-    enabled: false
-    tag_id: null                   # physical tag ID; not necessarily path ID
-    tag_size_m: null               # measured black square edge length
-    actuation_enabled: false
+    enabled: true
+    require_l2_hold: false
+    alignment_mode: camera_normal_advance
+    tag_family: tag36h11
+    tag_id: 0
+    tag_size_m: 0.020
+    advance_distance_m: 0.030
+    actuation_enabled: true
     desired_docked: true           # true=attach pulse, false=release pulse
-    actuation_timeout_s: null      # establish with actual Arduino firmware
+    actuation_timeout_s: 10.0
     # Measured tag-to-final-TCP translation, expressed in the confirmed
     # tag/TCP-aligned axes: +X up, +Y left, +Z from TCP toward the box.
     # Final TCP is therefore below and in front of the tag centre.
@@ -66,7 +70,7 @@ tools:
     require_l2_hold: false
     alignment_mode: camera_normal_advance
     tag_family: tag36h11
-    tag_id: 0
+    tag_id: 1
     tag_size_m: 0.020             # measured outer black square, excluding white margin
     advance_distance_m: 0.030
     # Confirmed tag/TCP-aligned measurement. The current camera-normal mode

@@ -71,6 +71,12 @@
 ### 시뮬레이션/실측으로 확인된 제약
 
 - [x] HOME 상태는 `/check_state_validity`: `valid=true`, `contacts=[]`로 확인했다.
+- [x] tool1 장착 모델의 HOME 자세를 유지한 base 직선 스윕을 0.01 rad 이하 간격으로
+  비교했다. `+pi`는 316개 중 60개가 invalid이고 circuit/supply box 양쪽과
+  충돌했으며, `-pi`도 60개가 invalid이지만 circuit box 접촉만 발생했다. 따라서
+  BACK은 `-pi`를 유지하되, 어느 방향도 base 단독 직선 회전 경로로 실행하지 않고
+  MoveIt 회피 계획과 전체 경로 collision 검사를 계속 요구한다. tool1 고정 장착면의
+  `tool_2_link <-> ee_actuator` 접촉은 SRDF `ToolMating`으로 제외했다.
 - [x] 사용자가 tool0 `[-0.394506, 0, 0.212964]`, 표면 35도와 tool1
   `[-0.317806, 0.090, 0.163912]`, 표면 55도를 `arm_world` 실제 pre-dock으로
   확정했다. L2 경로는 YAML 마지막 관절점 대신 이 pose의 bounded axis IK를 거쳐
