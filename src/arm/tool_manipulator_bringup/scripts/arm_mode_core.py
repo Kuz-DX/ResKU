@@ -765,7 +765,8 @@ class ModeCore:
         if not self.ready:
             return None
         if dt <= 0 or dt > .2:
-            self.fault('control timer discontinuity')
+            self.fault(
+                f'control timer discontinuity: dt={dt:.6f} sec; expected 0 < dt <= 0.200000 sec')
         if self.mode in ('manual', 'tcp_ik') and now-self.command_time > .3:
             self.request('hold', now)
             self.reason = 'command timeout'

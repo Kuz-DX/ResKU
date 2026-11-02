@@ -29,6 +29,26 @@ def test_only_owner_and_current_epoch_can_command():
     assert max(c.tick(.12, .02)) <= .12*.02
 
 
+@pytest.mark.parametrize('dt', [-.01, 0., .200001, .43])
+def test_control_timer_fault_reports_interval_and_aborts_path(dt):
+    c = ready('tool_auto')
+    assert c.path(c.epoch, 'timer-path', [[.05]*6], .1, durations=[1.])
+    c.feedback([0.]*6, [0.]*6, 1.)
+    c.tick(1., dt)
+    assert c.mode == 'fault' and c.ee == 0.
+    assert c.last_execution_id == 'timer-path' and c.last_execution_result == 'aborted'
+    assert f'dt={dt:.6f} sec' in c.reason
+    assert 'expected 0 < dt <= 0.200000 sec' in c.reason
+
+
+@pytest.mark.parametrize('dt', [.01, .2])
+def test_valid_control_interval_does_not_fault(dt):
+    c = ready('tool_auto')
+    c.feedback([0.]*6, [0.]*6, 1.)
+    c.tick(1., dt)
+    assert c.mode == 'tool_auto'
+
+
 def test_manual_ee_accepts_decimal_400_but_rejects_higher_speed():
     c = ready()
     assert c.command('manual', c.epoch, [0.]*6, MANUAL_EE_MAX_VELOCITY_RAD_S, .1)
