@@ -4,8 +4,8 @@
 targets:
   tool0:
     joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
-    # Latest capture 3 is the measured pre-dock; then capture 2 -> capture 1.
-    pre_joint_goal_rad: [-3.196816, 0.371406, 1.322959, -1.156979, 0.041417, 0.027612]
+    # Entry is 60 mm behind the latest final pose along its TCP Z axis.
+    pre_joint_goal_rad: [-3.1983777628, 0.1289563051, 0.9180173772, -1.4899725529, 0.0461591551, 0.0570932368]
     # BACK -> this pre-dock directly crossed the fixed tool case. Route via
     # the previously collision-free approach before planning the second leg.
     transit_joint_goal_rad: [3.1001751723166735, 0.6403612785882697,
@@ -13,9 +13,9 @@ targets:
       -0.021475731030191625]
     executable: true
     role: measured_tagless_pre_dock
-    final_capture_label: latest_three_pose_capture_1
+    final_capture_label: axial_final_capture
     # Diagnostic copy; executable final target lives in tool_docking.yaml.
-    final_joint_goal_rad: [-3.196816, 0.134216, 1.260477, -1.088562, 0.049087, 0.016874]
+    final_joint_goal_rad: [-3.1860780000, 0.0474730000, 1.0911800000, -1.2349950000, 0.0368160000, 0.0490870000]
     # Legacy final mating capture retained for comparison only.
     joint_goal_rad: [3.1231848841349588, 0.13823006976715305, 1.2369147556672264,
       -1.093099662587149, -0.00766990393963507, -0.013805827090765277]
@@ -26,8 +26,8 @@ targets:
     orientation_xyzw: [0.0, 0.9537169507482269, 0.0, 0.30070579950427306]
     # Exact latest final capture: retain all six measured joints and TCP orientation.
     final_role: measured_final_mating
-    required_final_motion: measured_joint_waypoints
-    # true once -> 3 s -> reverse executed capture path (1 -> 2 -> 3)
+    required_final_motion: axial_sampled_path
+    # true once -> 3 s -> reverse executed 60 mm axial path
     # -> return waypoint -> BACK -> HOME; no EE rotation or extra straight retreat.
     retreat_mode: reverse_docking_path
     # Operator-captured return waypoint; still requires live collision validation.

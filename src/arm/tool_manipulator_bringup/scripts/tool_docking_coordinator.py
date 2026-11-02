@@ -527,7 +527,10 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             final_pose = self.model.fk(goal)
             entry_pose = self.model.fk(q)
             expected_entry = final_pose.copy()
-            expected_entry[:3, 3] -= final_pose[:3, 2] * .030
+            entry_distance = float(self.cfg.get('axial_entry_distance_m', .030))
+            if not math.isfinite(entry_distance) or entry_distance <= 0:
+                raise RuntimeError('invalid axial entry distance')
+            expected_entry[:3, 3] -= final_pose[:3, 2] * entry_distance
             position_error, angle_error = pose_errors(entry_pose, expected_entry)
             if position_error > .008 or angle_error > math.radians(5.):
                 raise RuntimeError('axial docking entry mismatch: '

@@ -71,7 +71,7 @@ def test_shipped_config_enables_tool0_and_tool1_camera_normal_docking():
     assert set(cfg) == {0, 1}
     assert cfg[0]['alignment_mode'] == 'fixed_joint_goal'
     np.testing.assert_allclose(cfg[0]['final_joint_goal'], [
-        -3.196816, .134216, 1.260477, -1.088562, .049087, .016874])
+        -3.186078, .047473, 1.091180, -1.234995, .036816, .049087])
     assert cfg[0]['tag_family'] == 'tag36h11'
     assert cfg[0]['tag_id'] == 0
     assert cfg[0]['tag_size_m'] == .020
@@ -359,16 +359,22 @@ def test_fixed_joint_tail_ends_at_measured_docking_pose(tmp_path):
     hits = [i for i, point in enumerate(n.advance_plan['waypoints'])
             if np.allclose(point, intermediate)]
     assert len(hits) == 1
-    assert n.advance_plan['stop_at_waypoints'][hits[0]] is True
-    assert not n.advance_plan['cartesian_line']
-    final_capture = np.array([-3.196816, .134216, 1.260477, -1.088562, .049087, .016874])
+    assert n.advance_plan['stop_at_waypoints'][hits[0]] is False
+    assert n.advance_plan['cartesian_line']
+    final_capture = np.array([-3.186078, .047473, 1.091180, -1.234995, .036816, .049087])
     np.testing.assert_array_equal(n.cfg['final_joint_goal'], final_capture)
-    np.testing.assert_array_equal(intermediate, [-3.196816, .289899, 1.315455, -1.094321, .041417, .078233])
-    np.testing.assert_array_equal(q, [-3.196816, .371406, 1.322959, -1.156979, .041417, .027612])
+    final_pose = n.model.fk(final_capture)
+    axis = final_pose[:3, 2]
+    np.testing.assert_allclose(n.model.fk(q)[:3, 3],
+                               final_pose[:3, 3] - .060 * axis, atol=1e-5)
     previous = q
     for point, duration in zip(n.advance_plan['waypoints'], n.advance_plan['durations']):
         for sample in np.linspace(previous, point, 11):
             assert n.model.within_limits(sample, n.margin)
+            pose = n.model.fk(sample)
+            delta = pose[:3, 3] - final_pose[:3, 3]
+            assert np.linalg.norm(delta - axis * np.dot(delta, axis)) < 1e-5
+            np.testing.assert_allclose(pose[:3, :3], final_pose[:3, :3], atol=1e-4)
         assert np.max(np.abs(point-previous))/duration <= n.cfg['joint_speed_rad_s']+1e-12
         distance = np.linalg.norm(n.model.fk(point)[:3, 3]-n.model.fk(previous)[:3, 3])
         assert distance/duration <= n.cfg['linear_speed_m_s']+1e-12
