@@ -4,8 +4,8 @@
 targets:
   tool0:
     joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
-    # Measured approach capture 1; then 2 -> 3 -> near-dock capture -> unchanged final.
-    pre_joint_goal_rad: [-3.215224, 0.129329, 0.917694, -1.492082, 0.038350, 0.056757]
+    # Entry is 70 mm behind the unchanged final pose along its TCP Z axis.
+    pre_joint_goal_rad: [-3.2010609083, 0.1329587479, 0.8744011184, -1.5376735580, 0.0481969563, 0.0588406346]
     # BACK -> this pre-dock directly crossed the fixed tool case. Route via
     # the previously collision-free approach before planning the second leg.
     transit_joint_goal_rad: [3.1001751723166735, 0.6403612785882697,
@@ -26,8 +26,8 @@ targets:
     orientation_xyzw: [0.0, 0.9537169507482269, 0.0, 0.30070579950427306]
     # Exact latest final capture: retain all six measured joints and TCP orientation.
     final_role: measured_final_mating
-    required_final_motion: measured_joint_waypoints
-    # true once -> 3 s -> reverse executed measured approach path
+    required_final_motion: axial_sampled_path
+    # true once -> 3 s -> reverse executed 70 mm axial path
     # -> return waypoint -> BACK -> HOME; no EE rotation or extra straight retreat.
     retreat_mode: reverse_docking_path
     # Operator-captured return waypoint; still requires live collision validation.

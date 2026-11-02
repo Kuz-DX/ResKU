@@ -359,27 +359,27 @@ def test_fixed_joint_tail_ends_at_measured_docking_pose(tmp_path):
     hits = [i for i, point in enumerate(n.advance_plan['waypoints'])
             if np.allclose(point, intermediate)]
     assert len(hits) == 1
-    assert n.advance_plan['stop_at_waypoints'][hits[0]] is True
-    assert not n.advance_plan['cartesian_line']
+    assert n.advance_plan['stop_at_waypoints'][hits[0]] is False
+    assert n.advance_plan['cartesian_line']
     final_capture = np.array([-3.186078, .047473, 1.091180, -1.234995, .036816, .049087])
     np.testing.assert_array_equal(n.cfg['final_joint_goal'], final_capture)
-    captures = [
-        [-3.215224, .127060, .914029, -1.466426, .039884, .072097],
-        [-3.202952, .071908, .926944, -1.406910, .032214, .061359],
-        [-3.183010, .132296, 1.070934, -1.287878, .046019, -.004602]]
-    np.testing.assert_allclose(n.cfg['intermediate_joint_goals'], captures)
-    hit_indices = []
-    for capture in captures:
-        indices = [i for i, point in enumerate(n.advance_plan['waypoints'])
-                   if np.allclose(point, capture)]
-        assert len(indices) == 1
-        assert n.advance_plan['stop_at_waypoints'][indices[0]]
-        hit_indices.append(indices[0])
-    assert all(a < b for a, b in zip(hit_indices, hit_indices[1:]))
+    final_pose = n.model.fk(final_capture)
+    axis = final_pose[:3, 2]
+    np.testing.assert_allclose(n.model.fk(q)[:3, 3],
+                               final_pose[:3, 3] - .070 * axis, atol=1e-5)
+    assert sum(n.advance_plan['stop_at_waypoints']) == 1
+    previous_remaining = .07001
     previous = q
     for point, duration in zip(n.advance_plan['waypoints'], n.advance_plan['durations']):
         for sample in np.linspace(previous, point, 11):
             assert n.model.within_limits(sample, n.margin)
+            pose = n.model.fk(sample)
+            delta = pose[:3, 3] - final_pose[:3, 3]
+            remaining = -float(delta @ axis)
+            assert remaining <= previous_remaining + 1e-6
+            previous_remaining = remaining
+            assert np.linalg.norm(delta - axis * (delta @ axis)) < 1e-5
+            np.testing.assert_allclose(pose[:3, :3], final_pose[:3, :3], atol=1e-4)
         assert np.max(np.abs(point-previous))/duration <= n.cfg['joint_speed_rad_s']+1e-12
         distance = np.linalg.norm(n.model.fk(point)[:3, 3]-n.model.fk(previous)[:3, 3])
         assert distance/duration <= n.cfg['linear_speed_m_s']+1e-12

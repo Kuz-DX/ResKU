@@ -628,8 +628,8 @@ def test_source_pre_targets_enable_reviewed_tool0_tool1_and_tool2_goals():
     targets = load_pre_dock_targets(source)
     assert set(targets) == {0, 1, 2}
     np.testing.assert_allclose(targets[0]['joint_goal'], [
-        -3.215224, .129329, .917694,
-        -1.492082, .038350, .056757])
+        -3.2010609083, .1329587479, .8744011184,
+        -1.5376735580, .0481969563, .0588406346])
     np.testing.assert_allclose(targets[0]['transit_joint_goal'], [
         3.1001751723166735, 0.6403612785882697, 1.209862232156147,
         -1.427330240975674, -0.0030679615759781065, -0.021475731030191625])
@@ -647,7 +647,7 @@ def test_source_pre_targets_enable_reviewed_tool0_tool1_and_tool2_goals():
     assert model.within_limits(data['tool1']['pre_joint_goal_rad'], .02)
     assert model.within_limits(data['tool2']['pre_joint_goal_rad'], .02)
     assert targets[0]['retreat_mode'] == 'reverse_docking_path'
-    assert data['tool0']['required_final_motion'] == 'measured_joint_waypoints'
+    assert data['tool0']['required_final_motion'] == 'axial_sampled_path'
     assert 'rack_removal_ee_command' not in data['tool0']
     assert data['tool2']['grasp_stage_allowed_contacts'] == [
         ['rack_left', 'supply_box'], ['rack_right', 'supply_box']]
