@@ -5,7 +5,7 @@ targets:
   tool0:
     joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
     # 30 mm before final docking along the final TCP -Z axis.
-    pre_joint_goal_rad: [-3.14513855391229, 0.223936758598596, 1.20802677853757, -1.18395885392964, 0.00346288173303517, -0.00279943544420115]
+    pre_joint_goal_rad: [-3.18418082232478, 0.126184851524633, 1.06220057350553, -1.3410922638918, 0.0427420273559114, 0.012953492704219]
     # BACK -> this pre-dock directly crossed the fixed tool case. Route via
     # the previously collision-free approach before planning the second leg.
     transit_joint_goal_rad: [3.1001751723166735, 0.6403612785882697,
@@ -13,9 +13,9 @@ targets:
       -0.021475731030191625]
     executable: true
     role: measured_tagless_pre_dock
-    final_capture_label: first_capture_axial_docking
+    final_capture_label: latest_final_axial_docking
     # Diagnostic copy; executable final target lives in tool_docking.yaml.
-    final_joint_goal_rad: [-3.144661, 0.148004, 1.244594, -1.071458, 0.003068, -0.003068]
+    final_joint_goal_rad: [-3.178408, 0.072606, 1.130275, -1.219287, 0.03835, 0.009204]
     # Legacy final mating capture retained for comparison only.
     joint_goal_rad: [3.1231848841349588, 0.13823006976715305, 1.2369147556672264,
       -1.093099662587149, -0.00766990393963507, -0.013805827090765277]
@@ -24,7 +24,7 @@ targets:
     surface_plane_tilt_from_world_xy_deg: 35.0
     approach_z_tilt_from_world_xy_deg: -55.0
     orientation_xyzw: [0.0, 0.9537169507482269, 0.0, 0.30070579950427306]
-    # Exact first capture: retain all six measured joints and TCP orientation.
+    # Exact latest final capture: retain all six measured joints and TCP orientation.
     final_role: measured_final_mating
     required_final_motion: straight_tcp_approach
     pre_dock_offset_tcp_m: [0.0, 0.0, -0.030]
