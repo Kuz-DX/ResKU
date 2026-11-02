@@ -71,7 +71,7 @@ def test_shipped_config_enables_tool0_and_tool1_camera_normal_docking():
     assert set(cfg) == {0, 1}
     assert cfg[0]['alignment_mode'] == 'fixed_joint_goal'
     np.testing.assert_allclose(cfg[0]['final_joint_goal'], [
-        -3.178408, .072606, 1.130275, -1.219287, .038350, .009204])
+        -3.193748, .119381, 1.224523, -1.145460, .055223, .047553])
     assert cfg[0]['tag_family'] == 'tag36h11'
     assert cfg[0]['tag_id'] == 0
     assert cfg[0]['tag_size_m'] == .020
@@ -359,36 +359,39 @@ def test_fixed_joint_tail_ends_at_measured_docking_pose(tmp_path):
     hits = [i for i, point in enumerate(n.advance_plan['waypoints'])
             if np.allclose(point, intermediate)]
     assert len(hits) == 1
-    assert n.advance_plan['stop_at_waypoints'][hits[0]] is False
-    assert n.advance_plan['cartesian_line']
-    assert len(n.advance_plan['waypoints']) == 17
-    final = n.model.fk(expected)
-    final_capture = np.array([-3.178408, .072606, 1.130275, -1.219287, .038350, .009204])
+    assert n.advance_plan['stop_at_waypoints'][hits[0]] is True
+    assert not n.advance_plan['cartesian_line']
+    final_capture = np.array([-3.193748, .119381, 1.224523, -1.145460, .055223, .047553])
     np.testing.assert_array_equal(n.cfg['final_joint_goal'], final_capture)
-    np.testing.assert_allclose(final, n.model.fk(final_capture), atol=1e-12)
-    checkpoints = load_pre_dock_targets(ROOT/'config/cartesian_targets.yaml')[0]['retreat_checkpoints']
-    offsets = [float(np.dot(final[:3, 3]-n.model.fk(point)[:3, 3], final[:3, 2]))
-               for point in n.advance_plan['waypoints']]
-    for checkpoint in checkpoints:
-        assert any(abs(offset-checkpoint) < 1e-10 for offset in offsets)
-    assert np.all(np.diff(offsets) < 0.)
+    np.testing.assert_array_equal(intermediate, [-3.193748, .149400, 1.169894, -1.171639, .047553, .047553])
+    np.testing.assert_array_equal(q, [-3.193748, .261101, 1.203230, -1.200263, .047553, .085903])
     previous = q
     for point, duration in zip(n.advance_plan['waypoints'], n.advance_plan['durations']):
         for sample in np.linspace(previous, point, 11):
-            pose = n.model.fk(sample)
-            delta = pose[:3, 3]-final[:3, 3]
-            lateral = delta-np.dot(delta, final[:3, 2])*final[:3, 2]
-            assert np.linalg.norm(lateral) < 3e-6
-            # Allow numerical IK/interpolation residual far below the runtime 1e-3-rad bound.
-            np.testing.assert_allclose(pose[:3, :3], final[:3, :3], atol=1e-7, rtol=0.)
             assert n.model.within_limits(sample, n.margin)
+        assert np.max(np.abs(point-previous))/duration <= n.cfg['joint_speed_rad_s']+1e-12
         distance = np.linalg.norm(n.model.fk(point)[:3, 3]-n.model.fk(previous)[:3, 3])
-        assert 0. < distance <= .002+1e-10
         assert distance/duration <= n.cfg['linear_speed_m_s']+1e-12
         previous = point
     assert n.advance_plan['allowed_collision_pairs'] == frozenset((
         ('tool_case_1', 'wrist_link_yaw'),))
     n.begin.assert_called_once_with(0, n.advance_plan)
+    # Reverse the executed samples from live feedback, allowing docking displacement.
+    forward = n.advance_plan
+    current = final_capture.copy()
+    current[1] += .02
+    n.full_state = dict(zip(ARM_JOINTS, current))
+    n.begin.reset_mock()
+    ToolTrajectoryJoy.begin_reverse_docking_retreat(n)
+    reverse = n.begin.call_args.args[1]
+    np.testing.assert_array_equal(reverse['start'], current)
+    np.testing.assert_allclose(reverse['waypoints'],
+                               list(reversed([q, *forward['waypoints'][:-1]])))
+    assert reverse['stop_at_waypoints'] == list(reversed([True, *forward['stop_at_waypoints'][:-1]]))
+    assert n.return_home_after_back
+    assert n.route_kind == 'dock_retreat'
+    # Keep regression coverage for the optional axial-mode entry envelope.
+    n.cfg['axial_sampled_path'] = True
     with pytest.raises(RuntimeError, match='entry mismatch'):
         n.start_final_joint_goal(expected)
     for position, angle, accepted in [

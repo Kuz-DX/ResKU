@@ -83,6 +83,12 @@ def load_pre_dock_targets(path):
             raise ValueError(f'{path}: {key} has invalid Cartesian retreat settings')
         retreat_axis /= axis_norm
         retreat = dict(retreat_distance=retreat_distance, retreat_axis=retreat_axis)
+        if 'retreat_mode' in value:
+            mode = value['retreat_mode']
+            if mode not in ('current_tcp_axis', 'reverse_docking_path'):
+                raise ValueError(f'{path}: {key} has invalid retreat mode')
+            retreat['retreat_mode'] = mode
+
         if 'retreat_checkpoints_m' in value:
             checkpoints = np.asarray(value['retreat_checkpoints_m'], dtype=float)
             if (checkpoints.ndim != 1 or not np.all(np.isfinite(checkpoints))
@@ -980,6 +986,9 @@ class ToolTrajectoryJoy(Node):
         target = self.pre_dock_targets.get(self.path_id)
         if target is None:
             raise RuntimeError(f'{tool_label(self.path_id)} retreat configuration unavailable')
+        if tool0 and target.get('retreat_mode') == 'reverse_docking_path':
+            self.begin_reverse_docking_retreat()
+            return
         distance = float(target['retreat_distance'])
         local_axis = np.array([0., 0., -1.]) if tool0 else np.asarray(target['retreat_axis'], dtype=float)
         if tool0:
@@ -1026,6 +1035,33 @@ class ToolTrajectoryJoy(Node):
             allowed_collision_pairs=(frozenset((('tool_case_1', 'wrist_link_yaw'),))
                 if self.path_id == 0 and getattr(self, 'tool0_retreat_authorized', False)
                 else frozenset())))
+
+    def begin_reverse_docking_retreat(self):
+        """Reverse the completed approach, anchored to current stopped feedback."""
+        advance = getattr(self, 'advance_plan', None)
+        if not advance or not advance.get('waypoints'):
+            raise RuntimeError('completed docking path unavailable for reverse retreat')
+        seed = np.asarray([self.full_state[j] for j in ARM_JOINTS], dtype=float)
+        waypoints = [np.asarray(q, dtype=float).copy() for q in
+                     reversed([advance['start'], *advance['waypoints'][:-1]])]
+        stops = list(reversed([True, *advance['stop_at_waypoints'][:-1]]))
+        durations, previous = [], seed
+        for goal in waypoints:
+            if not self.model.within_limits(goal, self.margin):
+                raise RuntimeError('reverse docking waypoint violates planning joint limits')
+            distance = np.linalg.norm(self.model.fk(goal)[:3, 3]-self.model.fk(previous)[:3, 3])
+            durations.append(max(.02,
+                float(np.max(np.abs(goal-previous)))/self.cfg['joint_speed_rad_s'],
+                distance/self.cfg['linear_speed_m_s']))
+            previous = goal
+        self.return_home_after_back = True
+        self.route_kind = 'dock_retreat'
+        self.report('retreating', 'checking reversed measured docking path: capture 1 -> 2 -> 3')
+        self.begin(self.path_id, dict(
+            start=seed, waypoints=waypoints, durations=durations,
+            total=sum(durations), start_error=0., cartesian_line=False,
+            stop_at_waypoints=stops,
+            allowed_collision_pairs=advance.get('allowed_collision_pairs', frozenset())))
 
     def request_route_plan(self, path_id, measured, status):
         """Plan verified BACK -> reviewed joint or Cartesian pre-dock."""

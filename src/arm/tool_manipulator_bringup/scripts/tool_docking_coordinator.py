@@ -449,7 +449,7 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         self.active = False
         self.advance_locked = False
         self.tool0_retreat_authorized = True
-        self.report('retreating', '3-second Arduino delay elapsed; planning configured TCP -Z retreat from current feedback')
+        self.report('retreating', '3-second Arduino delay elapsed; planning configured retreat from current feedback')
         self.begin_docking_retreat()
 
     def camera_advance_direction(self, base_tag, current):
@@ -538,7 +538,7 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         for point in waypoints:
             durations.append(max(.02, float(np.max(np.abs(point-previous)))
                                  / self.cfg['joint_speed_rad_s']))
-            if axial:
+            if self.cfg.get('linear_speed_m_s'):
                 distance = np.linalg.norm(self.model.fk(point)[:3, 3] -
                                           self.model.fk(previous)[:3, 3])
                 durations[-1] = max(durations[-1], distance/self.cfg['linear_speed_m_s'])

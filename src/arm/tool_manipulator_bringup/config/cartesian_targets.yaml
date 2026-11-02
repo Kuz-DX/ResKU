@@ -4,8 +4,8 @@
 targets:
   tool0:
     joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
-    # 30 mm before final docking along the final TCP -Z axis.
-    pre_joint_goal_rad: [-3.18418082232478, 0.126184851524633, 1.06220057350553, -1.3410922638918, 0.0427420273559114, 0.012953492704219]
+    # Capture 3 is the measured pre-dock; then capture 2 -> capture 1.
+    pre_joint_goal_rad: [-3.193748, 0.261101, 1.20323, -1.200263, 0.047553, 0.085903]
     # BACK -> this pre-dock directly crossed the fixed tool case. Route via
     # the previously collision-free approach before planning the second leg.
     transit_joint_goal_rad: [3.1001751723166735, 0.6403612785882697,
@@ -13,9 +13,9 @@ targets:
       -0.021475731030191625]
     executable: true
     role: measured_tagless_pre_dock
-    final_capture_label: latest_final_axial_docking
+    final_capture_label: three_pose_capture_1
     # Diagnostic copy; executable final target lives in tool_docking.yaml.
-    final_joint_goal_rad: [-3.178408, 0.072606, 1.130275, -1.219287, 0.03835, 0.009204]
+    final_joint_goal_rad: [-3.193748, 0.119381, 1.224523, -1.14546, 0.055223, 0.047553]
     # Legacy final mating capture retained for comparison only.
     joint_goal_rad: [3.1231848841349588, 0.13823006976715305, 1.2369147556672264,
       -1.093099662587149, -0.00766990393963507, -0.013805827090765277]
@@ -26,14 +26,13 @@ targets:
     orientation_xyzw: [0.0, 0.9537169507482269, 0.0, 0.30070579950427306]
     # Exact latest final capture: retain all six measured joints and TCP orientation.
     final_role: measured_final_mating
-    required_final_motion: straight_tcp_approach
-    pre_dock_offset_tcp_m: [0.0, 0.0, -0.030]
-    # Runtime sequence: /arm/docking=true once, wait 3 s, then checked
-    # current-feedback TCP -Z 50 mm retreat -> captured waypoint -> BACK -> HOME.
+    required_final_motion: measured_joint_waypoints
+    # true once -> 3 s -> reverse executed capture path (1 -> 2 -> 3)
+    # -> return waypoint -> BACK -> HOME; no EE rotation or extra straight retreat.
+    retreat_mode: reverse_docking_path
     # Operator-captured return waypoint; still requires live collision validation.
     return_joint_goal_rad: [-3.143127, 0.747175, 1.300096, -1.363102, 0.003068, -0.004602]
-    # Capture 1 then capture 2 distances along the final TCP -Z axis.
-    retreat_checkpoints_m: [0.0129035032851267, 0.0266983032300609]
+    # Used only when retreat_mode is current_tcp_axis.
     retreat_distance_m: 0.050
     retreat_axis_tcp: [0.0, 0.0, -1.0]
   tool1:

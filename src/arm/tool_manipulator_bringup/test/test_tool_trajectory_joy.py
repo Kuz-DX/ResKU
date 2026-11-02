@@ -628,8 +628,8 @@ def test_source_pre_targets_enable_reviewed_tool0_tool1_and_tool2_goals():
     targets = load_pre_dock_targets(source)
     assert set(targets) == {0, 1, 2}
     np.testing.assert_allclose(targets[0]['joint_goal'], [
-        -3.184180822324782, .1261848515246333, 1.0622005735055293,
-        -1.3410922638918028, .042742027355911406, .012953492704219033])
+        -3.193748, .261101, 1.203230,
+        -1.200263, .047553, .085903])
     np.testing.assert_allclose(targets[0]['transit_joint_goal'], [
         3.1001751723166735, 0.6403612785882697, 1.209862232156147,
         -1.427330240975674, -0.0030679615759781065, -0.021475731030191625])
@@ -646,7 +646,8 @@ def test_source_pre_targets_enable_reviewed_tool0_tool1_and_tool2_goals():
     assert model.within_limits(data['tool0']['pre_joint_goal_rad'], .02)
     assert model.within_limits(data['tool1']['pre_joint_goal_rad'], .02)
     assert model.within_limits(data['tool2']['pre_joint_goal_rad'], .02)
-    assert data['tool0']['pre_dock_offset_tcp_m'] == [0., 0., -.030]
+    assert targets[0]['retreat_mode'] == 'reverse_docking_path'
+    assert data['tool0']['required_final_motion'] == 'measured_joint_waypoints'
     assert 'rack_removal_ee_command' not in data['tool0']
     assert data['tool2']['grasp_stage_allowed_contacts'] == [
         ['rack_left', 'supply_box'], ['rack_right', 'supply_box']]
@@ -1003,6 +1004,9 @@ def test_tool0_retreat_uses_displaced_current_pose_and_orientation():
         pre_dock_targets=load_pre_dock_targets(SCRIPTS.parent/'config/cartesian_targets.yaml'),
         full_state=dict(zip(ARM_JOINTS, seed)), model=model, margin=.02,
         report=Mock(), begin=Mock(), return_home_after_back=True)
+    # Exercise the optional current-axis mode independently of the taught-path default.
+    n.pre_dock_targets[0]['retreat_mode'] = 'current_tcp_axis'
+    n.pre_dock_targets[0]['retreat_checkpoints'] = [.0129035032851267, .0266983032300609]
     ToolTrajectoryJoy.begin_docking_retreat(n)
     plan = n.begin.call_args.args[1]
     origin = model.fk(seed)
@@ -1107,3 +1111,20 @@ def test_invalid_retreat_checkpoints_rejected(tmp_path, checkpoints):
         'retreat_checkpoints_m': checkpoints}}}))
     with pytest.raises(ValueError, match='invalid retreat checkpoints'):
         load_pre_dock_targets(path)
+
+
+
+def test_tool0_reverse_mode_dispatches_without_using_cartesian_distance():
+    targets = load_pre_dock_targets(SCRIPTS.parent/'config/cartesian_targets.yaml')
+    n = SimpleNamespace(healthy_hold=Mock(), path_id=0, tool0_retreat_authorized=True,
+                        pre_dock_targets=targets, begin_reverse_docking_retreat=Mock())
+    ToolTrajectoryJoy.begin_docking_retreat(n)
+    n.healthy_hold.assert_called_once()
+    n.begin_reverse_docking_retreat.assert_called_once()
+
+
+def test_missing_executed_approach_blocks_reverse_retreat():
+    n = SimpleNamespace(advance_plan=None, begin=Mock())
+    with pytest.raises(RuntimeError, match='completed docking path unavailable'):
+        ToolTrajectoryJoy.begin_reverse_docking_retreat(n)
+    n.begin.assert_not_called()
