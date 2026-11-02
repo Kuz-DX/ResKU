@@ -234,6 +234,8 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             self.path_id = path_id
             mode = self.cfg.get('alignment_mode')
             continuation = (
+                'checked final docking joint goal'
+                if mode == 'fixed_joint_goal' else
                 'checked tagless TCP-axis advance'
                 if mode == 'fixed_tcp_axis_advance' else
                 'stopped tag confirmation and fixed advance'
@@ -309,6 +311,14 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                 self.report('completed', 'tag-normal advance %.1f mm completed; HOLD; no actuation' %
                             (self.cfg['advance_distance_m']*1000.))
                 self.reset()
+            return
+        if (self.docking_started is None
+                and self.cfg.get('alignment_mode') == 'fixed_joint_goal'):
+            q = np.asarray([self.full_state[j] for j in ARM_JOINTS])
+            self.execution_id = None
+            self.hold_epoch = self.status['epoch']
+            self.docking_started = time.monotonic()
+            self.start_final_joint_goal(q)
             return
         if (self.docking_started is None
                 and self.cfg.get('alignment_mode') == 'fixed_tcp_axis_advance'):
@@ -499,6 +509,34 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                      0. if maintain else math.degrees(tilt),
                      'L2 remains required' if self.cfg.get('require_l2_hold', True)
                      else 'continuing automatic tool sequence'))
+
+    def start_final_joint_goal(self, q):
+        goal = np.asarray(self.cfg['final_joint_goal'], dtype=float).copy()
+        goal[0] += 2.*math.pi*round((q[0]-goal[0])/(2.*math.pi))
+        if not self.model.within_limits(goal, self.margin):
+            raise RuntimeError('final docking joint goal violates planning limits')
+        count = max(1, math.ceil(float(np.max(np.abs(goal-q)))
+                                 / self.cfg['joint_step_rad']))
+        waypoints = [q+(goal-q)*(i/count) for i in range(1, count+1)]
+        durations, previous = [], q.copy()
+        for point in waypoints:
+            durations.append(max(.02, float(np.max(np.abs(point-previous)))
+                                 / self.cfg['joint_speed_rad_s']))
+            previous = point
+        self.advance_locked = True
+        self.advance_origin = self.model.fk(q)
+        self.advance_target = self.model.fk(goal)
+        self.advance_local_axis = np.array([0., 0., 1.])
+        self.advance_direction = self.advance_target[:3, 2].copy()
+        self.advance_plan = dict(
+            start=q.copy(), waypoints=waypoints, durations=durations,
+            total=sum(durations), start_error=0., cartesian_line=False,
+            stop_at_waypoints=[False]*(count-1)+[True])
+        self.report('advance_planning',
+                    'stopped pre-dock; checking measured final joint goal; '
+                    'joint_delta_max=%.4f rad, samples=%d; tag not required' %
+                    (float(np.max(np.abs(goal-q))), count))
+        self.begin(self.path_id, self.advance_plan)
 
     def plan_advance_step(self):
         # One bounded IK solve per timer tick keeps feedback/cancel callbacks live.

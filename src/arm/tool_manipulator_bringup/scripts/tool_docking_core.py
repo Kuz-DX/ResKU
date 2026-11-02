@@ -176,7 +176,7 @@ def load_settings(filename):
             raise ValueError('require_l2_hold must be a boolean')
         mode = item.setdefault('alignment_mode', 'tag_tcp_stages')
         if mode not in ('tag_tcp_stages', 'camera_normal_advance',
-                        'fixed_tcp_axis_advance'):
+                        'fixed_tcp_axis_advance', 'fixed_joint_goal'):
             raise ValueError('unknown docking alignment_mode')
         if ('maintain_entry_orientation' in item
                 and type(item['maintain_entry_orientation']) is not bool):
@@ -225,6 +225,17 @@ def load_settings(filename):
             if (item['actuation_enabled']
                     and type(item.get('desired_docked')) is not bool):
                 raise ValueError('fixed-axis actuation requires desired_docked state')
+            result[tool_id] = item
+            continue
+        if mode == 'fixed_joint_goal':
+            goal = np.asarray(item.get('final_joint_goal_rad'), dtype=float)
+            if goal.shape != (6,) or not np.all(np.isfinite(goal)):
+                raise ValueError(
+                    f'{tool_label(tool_id)}: six finite final_joint_goal_rad values required')
+            item['final_joint_goal'] = goal
+            if (item['actuation_enabled']
+                    and type(item.get('desired_docked')) is not bool):
+                raise ValueError('fixed-joint actuation requires desired_docked state')
             result[tool_id] = item
             continue
         if mode == 'camera_normal_advance':

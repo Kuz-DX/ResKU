@@ -69,9 +69,10 @@ def sample(n):
 def test_shipped_config_enables_tool0_and_tool1_camera_normal_docking():
     cfg = load_settings(ROOT/'config/tool_docking.yaml')
     assert set(cfg) == {0, 1}
-    assert cfg[0]['alignment_mode'] == 'fixed_tcp_axis_advance'
-    assert cfg[0]['advance_distance_m'] == .050
-    np.testing.assert_allclose(cfg[0]['advance_axis_tcp'], [0., 0., 1.])
+    assert cfg[0]['alignment_mode'] == 'fixed_joint_goal'
+    np.testing.assert_allclose(cfg[0]['final_joint_goal'], [
+        -3.1446606151657712, .12932889490961874, 1.2365657484063717,
+        -1.0850711640069417, -2.0694557179012918e-13, .0015339807880909717])
     assert cfg[0]['tag_family'] == 'tag36h11'
     assert cfg[0]['tag_id'] == 0
     assert cfg[0]['tag_size_m'] == .020
@@ -319,27 +320,42 @@ def test_non_docking_path_completion_keeps_old_behavior(tmp_path):
     n.docking_command.publish.assert_not_called()
 
 
-def test_fixed_tcp_axis_completion_starts_checked_line_without_tag(tmp_path):
+def test_fixed_joint_completion_starts_checked_goal_without_tag(tmp_path):
     n = node(tmp_path)
     n.cfg = load_settings(ROOT/'config/tool_docking.yaml')[0]
     n.path_id = 0
     n.docking_started = None
-    n.status = {'epoch': 'fixed-axis-hold'}
+    n.status = {'epoch': 'fixed-joint-hold'}
     n.execution_id = 'tool0-path'
-    n.model.fk.return_value = np.eye(4)
-    n.start_advance = Mock()
+    n.start_final_joint_goal = Mock()
 
     with patch('tool_docking_coordinator.time.monotonic', return_value=10.):
         n.path_completed()
 
-    n.start_advance.assert_called_once()
-    q, current, direction = n.start_advance.call_args.args
+    n.start_final_joint_goal.assert_called_once()
+    q, = n.start_final_joint_goal.call_args.args
     np.testing.assert_allclose(q, np.zeros(6))
-    np.testing.assert_allclose(current, np.eye(4))
-    np.testing.assert_allclose(direction, [0., 0., 1.])
     assert n.docking_started == 10.
-    assert n.hold_epoch == 'fixed-axis-hold'
+    assert n.hold_epoch == 'fixed-joint-hold'
     assert n.execution_id is None
+
+
+def test_fixed_joint_tail_ends_at_measured_docking_pose(tmp_path):
+    n = node(tmp_path)
+    n.cfg = load_settings(ROOT/'config/tool_docking.yaml')[0]
+    n.path_id = 0
+    n.model.within_limits.return_value = True
+    n.model.fk.return_value = np.eye(4)
+    q = np.array([-math.pi, .331263, 1.488591, -.842994, -.041417, -.032214])
+
+    n.start_final_joint_goal(q)
+
+    expected = n.cfg['final_joint_goal'].copy()
+    expected[0] += 2.*math.pi*round((q[0]-expected[0])/(2.*math.pi))
+    np.testing.assert_allclose(n.advance_plan['waypoints'][-1], expected)
+    assert n.advance_plan['stop_at_waypoints'][-1] is True
+    assert not n.advance_plan['cartesian_line']
+    n.begin.assert_called_once_with(0, n.advance_plan)
 
 
 def test_missing_tag_cancels_in_flight_correction_before_parent_tick(tmp_path):
