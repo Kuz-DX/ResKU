@@ -175,7 +175,8 @@ def load_settings(filename):
         if type(item.setdefault('require_l2_hold', True)) is not bool:
             raise ValueError('require_l2_hold must be a boolean')
         mode = item.setdefault('alignment_mode', 'tag_tcp_stages')
-        if mode not in ('tag_tcp_stages', 'camera_normal_advance'):
+        if mode not in ('tag_tcp_stages', 'camera_normal_advance',
+                        'fixed_tcp_axis_advance'):
             raise ValueError('unknown docking alignment_mode')
         if ('maintain_entry_orientation' in item
                 and type(item['maintain_entry_orientation']) is not bool):
@@ -201,7 +202,7 @@ def load_settings(filename):
                       linear_speed_m_s=(0, .02), angular_speed_rad_s=(0, .1),
                       stopped_speed_rad_s=(0, .02), joint_tolerance_rad=(0, .02),
                       acquire_timeout_s=(0, 30), sequence_timeout_s=(0, 600))
-        if mode == 'camera_normal_advance':
+        if mode in ('camera_normal_advance', 'fixed_tcp_axis_advance'):
             limits['advance_distance_m'] = (0, .10)
         if mode == 'tag_tcp_stages' or item.get('actuation_enabled') is True:
             limits['actuation_timeout_s'] = (0, 120)
@@ -214,6 +215,18 @@ def load_settings(filename):
             raise ValueError('stable_samples must be 3..100 distinct observations')
         if type(item.get('actuation_enabled')) is not bool:
             raise ValueError('explicit actuation_enabled required')
+        if mode == 'fixed_tcp_axis_advance':
+            axis = np.asarray(item.get('advance_axis_tcp'), dtype=float)
+            if (axis.shape != (3,) or not np.all(np.isfinite(axis))
+                    or float(np.linalg.norm(axis)) < 1e-9):
+                raise ValueError(
+                    f'{tool_label(tool_id)}: finite nonzero advance_axis_tcp required')
+            item['advance_axis_tcp'] = axis/np.linalg.norm(axis)
+            if (item['actuation_enabled']
+                    and type(item.get('desired_docked')) is not bool):
+                raise ValueError('fixed-axis actuation requires desired_docked state')
+            result[tool_id] = item
+            continue
         if mode == 'camera_normal_advance':
             if (item['actuation_enabled']
                     and type(item.get('desired_docked')) is not bool):

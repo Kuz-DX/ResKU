@@ -69,8 +69,9 @@ def sample(n):
 def test_shipped_config_enables_tool0_and_tool1_camera_normal_docking():
     cfg = load_settings(ROOT/'config/tool_docking.yaml')
     assert set(cfg) == {0, 1}
-    assert cfg[0]['alignment_mode'] == 'camera_normal_advance'
-    assert cfg[0]['advance_distance_m'] == .030
+    assert cfg[0]['alignment_mode'] == 'fixed_tcp_axis_advance'
+    assert cfg[0]['advance_distance_m'] == .050
+    np.testing.assert_allclose(cfg[0]['advance_axis_tcp'], [0., 0., 1.])
     assert cfg[0]['tag_family'] == 'tag36h11'
     assert cfg[0]['tag_id'] == 0
     assert cfg[0]['tag_size_m'] == .020
@@ -78,9 +79,7 @@ def test_shipped_config_enables_tool0_and_tool1_camera_normal_docking():
     assert cfg[0]['desired_docked'] is True
     assert cfg[0]['require_l2_hold'] is False
     assert cfg[0]['maintain_entry_orientation'] is True
-    assert cfg[0]['measured_pre_dock_alignment_enabled'] is True
-    np.testing.assert_allclose(cfg[0]['measured_tag_tcp_target'][:3, 3],
-                               [-.0457, 0., -.05157])
+    assert cfg[0]['measured_pre_dock_alignment_enabled'] is False
     assert cfg[0]['max_position_error_m'] == .25
     assert cfg[0]['max_angle_error_rad'] == .35
     assert cfg[1]['alignment_mode'] == 'camera_normal_advance'
@@ -318,6 +317,29 @@ def test_non_docking_path_completion_keeps_old_behavior(tmp_path):
         ToolDockingCoordinator.path_completed(n)
         parent.assert_called_once()
     n.docking_command.publish.assert_not_called()
+
+
+def test_fixed_tcp_axis_completion_starts_checked_line_without_tag(tmp_path):
+    n = node(tmp_path)
+    n.cfg = load_settings(ROOT/'config/tool_docking.yaml')[0]
+    n.path_id = 0
+    n.docking_started = None
+    n.status = {'epoch': 'fixed-axis-hold'}
+    n.execution_id = 'tool0-path'
+    n.model.fk.return_value = np.eye(4)
+    n.start_advance = Mock()
+
+    with patch('tool_docking_coordinator.time.monotonic', return_value=10.):
+        n.path_completed()
+
+    n.start_advance.assert_called_once()
+    q, current, direction = n.start_advance.call_args.args
+    np.testing.assert_allclose(q, np.zeros(6))
+    np.testing.assert_allclose(current, np.eye(4))
+    np.testing.assert_allclose(direction, [0., 0., 1.])
+    assert n.docking_started == 10.
+    assert n.hold_epoch == 'fixed-axis-hold'
+    assert n.execution_id is None
 
 
 def test_missing_tag_cancels_in_flight_correction_before_parent_tick(tmp_path):

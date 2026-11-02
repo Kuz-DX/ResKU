@@ -8,19 +8,19 @@ tools:
   0:
     enabled: true
     require_l2_hold: false
-    alignment_mode: camera_normal_advance
+    alignment_mode: fixed_tcp_axis_advance
     # The taught pre-dock endpoint is the completed alignment pose. After a
     # fresh tag confirms the approach normal, preserve this full TCP
     # orientation and translate on one straight line.
     maintain_entry_orientation: true
-    # Resolve the remaining travel from the live tag pose and the measured
-    # tag-to-docking-point offset.  The coordinator first approaches the
-    # derived point 30 mm before contact, then performs the checked final line.
-    measured_pre_dock_alignment_enabled: true
+    # This confirmed pre-dock is outside the tag FOV. Do not reacquire a tag;
+    # preserve the reached TCP orientation and insert along its local +Z.
+    measured_pre_dock_alignment_enabled: false
     tag_family: tag36h11
     tag_id: 0
     tag_size_m: 0.020
-    advance_distance_m: 0.030
+    advance_axis_tcp: [0.0, 0.0, 1.0]
+    advance_distance_m: 0.050
     actuation_enabled: true
     desired_docked: true           # true=attach pulse, false=release pulse
     actuation_timeout_s: 10.0

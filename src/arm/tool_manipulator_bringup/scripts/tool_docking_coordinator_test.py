@@ -232,9 +232,12 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             self.cfg = self.settings[path_id]
             self.docking_started = None
             self.path_id = path_id
-            continuation = ('stopped tag confirmation and fixed advance'
-                            if self.cfg.get('alignment_mode') == 'camera_normal_advance'
-                            else 'tag alignment')
+            mode = self.cfg.get('alignment_mode')
+            continuation = (
+                'checked tagless TCP-axis advance'
+                if mode == 'fixed_tcp_axis_advance' else
+                'stopped tag confirmation and fixed advance'
+                if mode == 'camera_normal_advance' else 'tag alignment')
             self.report('docking_armed',
                         f'tool path {path_id} includes {continuation} after approach completion; '
                         f'motion_enabled={self.motion_enabled}')
@@ -300,12 +303,23 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                 self.stage = 'dock_actuate'
                 action = 'dock' if self.expected_docked else 'release'
                 self.report('actuating',
-                            'tag-normal advance completed; Arduino %s pulse sent; '
+                            'fixed advance completed; Arduino %s pulse sent; '
                             'waiting for /arm/docked' % action)
             else:
                 self.report('completed', 'tag-normal advance %.1f mm completed; HOLD; no actuation' %
                             (self.cfg['advance_distance_m']*1000.))
                 self.reset()
+            return
+        if (self.docking_started is None
+                and self.cfg.get('alignment_mode') == 'fixed_tcp_axis_advance'):
+            q = np.asarray([self.full_state[j] for j in ARM_JOINTS])
+            current = self.model.fk(q)
+            local_axis = np.asarray(self.cfg['advance_axis_tcp'], dtype=float)
+            direction = current[:3, :3] @ local_axis
+            self.execution_id = None
+            self.hold_epoch = self.status['epoch']
+            self.docking_started = time.monotonic()
+            self.start_advance(q, current, direction)
             return
         if self.docking_started is None:
             # Do not let a noisy pose observed during approach permanently
@@ -450,7 +464,10 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
 
     def start_advance(self, q, current, tag_normal):
         """Latch one relative line after stopped tag confirmation."""
-        self.advance_local_axis = self.tcp_camera[:3, 2].copy()
+        if self.cfg.get('alignment_mode') == 'fixed_tcp_axis_advance':
+            self.advance_local_axis = np.asarray(self.cfg['advance_axis_tcp'], dtype=float)
+        else:
+            self.advance_local_axis = self.tcp_camera[:3, 2].copy()
         self.advance_start_direction = current[:3, :3] @ self.advance_local_axis
         self.advance_direction = tag_normal.copy()
         tilt = direction_angle(self.advance_start_direction, tag_normal)
@@ -468,11 +485,14 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                                  cartesian_line=True)
         self.advance_snapshot = dict(self.full_state)
         self.stage = 'dock_advance_plan'
+        source = ('confirmed TCP local axis'
+                  if self.cfg.get('alignment_mode') == 'fixed_tcp_axis_advance'
+                  else 'confirmed tag normal')
         self.report('advance_planning',
-                    'tag confirmed at stopped endpoint; planning fixed %.1f mm tag-normal advance; '
+                    'stopped endpoint; planning fixed %.1f mm advance along %s; '
                     'normal=[%.4f, %.4f, %.4f] seed=%s; %s; '
                     'tilt changes gradually by %.2f deg; tag visibility no longer required; %s' %
-                    (self.cfg['advance_distance_m']*1000.,
+                    (self.cfg['advance_distance_m']*1000., source,
                      *map(float, tag_normal),
                      '['+', '.join(f'{value:.4f}' for value in q)+']',
                      'entry orientation fixed' if maintain else 'axial rotation free',
