@@ -736,15 +736,22 @@ DynamixelHardware::export_command_interfaces()
 hardware_interface::CallbackReturn DynamixelHardware::on_activate(
   [[maybe_unused]] const rclcpp_lifecycle::State & previous_state)
 {
-  // The c154f66 Dynamixel fault latch is temporarily disabled below.  Retain
-  // these resets so re-enabling the preserved blocks remains lifecycle-safe.
+  // A lifecycle activation explicitly starts a new communication attempt.
   hardware_fault_latched_ = false;
   hardware_fault_published_ = false;
   is_read_in_error_ = false;
   is_write_in_error_ = false;
   read_error_duration_ = rclcpp::Duration(0, 0);
   write_error_duration_ = rclcpp::Duration(0, 0);
-  return start();
+  const auto result = start();
+  if (result == hardware_interface::CallbackReturn::SUCCESS) {
+    std_msgs::msg::String message;
+    message.data = "dynamixel_system: ok";
+    hardware_fault_pub_->publish(message);
+  } else {
+    latchHardwareFault("activation failed");
+  }
+  return result;
 }
 
 hardware_interface::CallbackReturn DynamixelHardware::on_deactivate(
@@ -895,10 +902,7 @@ hardware_interface::CallbackReturn DynamixelHardware::stop()
 hardware_interface::return_type DynamixelHardware::read(
   [[maybe_unused]] const rclcpp::Time & time, const rclcpp::Duration & period)
 {
-  // TEMPORARILY DISABLED (2026-08-28, c154f66): do not latch the Dynamixel bus
-  // or continuously report its latched state.  RMD and the shared upper safety
-  // manager remain unchanged.
-#if 0
+  // Keep the component observable while preventing further bus transactions.
   if (hardware_fault_latched_) {
     RCLCPP_ERROR_STREAM_THROTTLE(
       logger_, clock_, 1000,
@@ -909,7 +913,6 @@ hardware_interface::return_type DynamixelHardware::read(
     }
     return hardware_interface::return_type::OK;
   }
-#endif
   double period_ms = period.seconds() * 1000;
 
   if (dxl_status_ == REBOOTING) {
@@ -936,15 +939,9 @@ hardware_interface::return_type DynamixelHardware::read(
           "Dynamixel feedback/communication watchdog expired after " << err_timeout_ms_ <<
             "ms; bus retries stopped. Cause: " <<
             Dynamixel::DxlErrorToString(dxl_comm_err_));
-        // TEMPORARILY DISABLED (2026-08-28, c154f66): preserve the previous
-        // ros2_control error path instead of publishing a global arm fault.
-#if 0
         latchHardwareFault(
           "feedback watchdog expired: " + Dynamixel::DxlErrorToString(dxl_comm_err_));
         return hardware_interface::return_type::OK;
-#else
-        return hardware_interface::return_type::ERROR;
-#endif
       }
       return hardware_interface::return_type::OK;
     }
@@ -1004,15 +1001,8 @@ hardware_interface::return_type DynamixelHardware::read(
     // torque was off, which could cause a sudden jump.
     // Communication is still alive. Keep the shared bus running so the other
     // Dynamixel can receive the coordinated-hold target.
-    // TEMPORARILY DISABLED (2026-08-28, c154f66): retain the torque detection
-    // added in 2bd2f71, but use its original ros2_control error response rather
-    // than escalating it through /control/hardware_fault.
-#if 0
     latchHardwareFault("motor torque unexpectedly disabled", false);
     return hardware_interface::return_type::OK;
-#else
-    return hardware_interface::return_type::ERROR;
-#endif
   }
   return hardware_interface::return_type::OK;
 }
@@ -1020,13 +1010,9 @@ hardware_interface::return_type DynamixelHardware::write(
   [[maybe_unused]] const rclcpp::Time & time, const rclcpp::Duration & period)
 {
   LogWriteEntryDiagnostics();  // Capture controller commands before any guard, sync or clamp.
-  // TEMPORARILY DISABLED (2026-08-28, c154f66): paired with the read-side
-  // latch block above.
-#if 0
   if (hardware_fault_latched_) {
     return hardware_interface::return_type::OK;
   }
-#endif
   // A reported motor hardware error does not necessarily mean that the shared
   // serial bus is unavailable. Continue transmitting so any healthy sibling
   // motor can receive the coordinated-hold target. Communication failures are
@@ -1120,14 +1106,8 @@ hardware_interface::return_type DynamixelHardware::write(
         logger_,
         "Dynamixel write watchdog expired while status remained " << blocked_status <<
           "; bus retries stopped.");
-      // TEMPORARILY DISABLED (2026-08-28, c154f66): do not publish a global
-      // arm fault from the Dynamixel-only write status.
-#if 0
       latchHardwareFault(std::string("write blocked in status ") + blocked_status);
       return hardware_interface::return_type::OK;
-#else
-      return hardware_interface::return_type::ERROR;
-#endif
     }
     return hardware_interface::return_type::OK;
   }
