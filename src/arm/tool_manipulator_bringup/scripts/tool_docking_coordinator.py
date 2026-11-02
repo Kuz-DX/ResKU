@@ -374,7 +374,7 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
 
     def tick(self):
         try:
-            if self.active and self.stage in ('dock_release_wait', 'dock_attach_wait',
+            if self.active and self.stage in ('dock_attach_wait',
                                               'ee_mode_wait', 'ee_removal_running'):
                 self.tick_tool0_finish(time.monotonic())
                 return
@@ -451,32 +451,25 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             self.execution_id = 'tool0-ee-'+uuid.uuid4().hex
             self.publisher.publish(String(data=json.dumps(dict(
                 epoch=self.status['epoch'], execution_id=self.execution_id,
-                ee_velocity_rad_s=5.0, ee_duration_sec=2.0))))
+                ee_velocity_rad_s=-5.0, ee_duration_sec=2.0))))
             self.stage = 'ee_removal_running'
             self.ee_mode_started = now
-            self.report('ee_removal', 'CCW +5 rad/s for 2 seconds; waiting for stopped feedback')
+            self.report('ee_removal', 'CW -5 rad/s for 2 seconds; waiting for stopped feedback')
             return
-        if self.stage in ('dock_release_wait', 'dock_attach_wait'):
+        if self.stage == 'dock_attach_wait':
             if getattr(self, 'docking_status', None) in ('ERROR', 'UNKNOWN'):
                 raise RuntimeError('Arduino unavailable: '+self.docking_status)
             if np.max(np.abs(self.velocity)) > self.cfg['stopped_speed_rad_s']:
                 raise RuntimeError('arm not stopped during Arduino completion')
             if now >= self.actuation_deadline:
                 raise RuntimeError('Arduino completion timeout; EE not started')
-            expected = self.stage == 'dock_attach_wait'
+            expected = True
             if (self.docked_feedback_sequence <= self.command_feedback_sequence
                     or self.docked_state != expected):
                 return
-            if expected:
-                self.command_feedback_sequence = self.docked_feedback_sequence
-                self.send_docking_pulse(False)
-                self.actuation_deadline = now+self.cfg['actuation_timeout_s']
-                self.stage = 'dock_release_wait'
-                self.report('actuating', '/arm/docking=false; waiting for Arduino completion')
-            else:
-                self.future = self.mode.call_async(Trigger.Request())
-                self.stage = 'ee_mode_wait'
-                self.ee_mode_started = now
+            self.future = self.mode.call_async(Trigger.Request())
+            self.stage = 'ee_mode_wait'
+            self.ee_mode_started = now
             return
         if self.stage == 'ee_removal_running':
             if now-self.ee_mode_started > 10.:

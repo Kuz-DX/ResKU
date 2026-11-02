@@ -648,11 +648,11 @@ def test_source_pre_targets_enable_reviewed_tool0_tool1_and_tool2_goals():
     assert model.within_limits(data['tool2']['pre_joint_goal_rad'], .02)
     assert data['tool0']['pre_dock_offset_tcp_m'] == [0., 0., -.030]
     assert data['tool0']['rack_removal_ee_command'] == {
-        'duration_s': 2., 'velocity_rad_s': 5.,
-        'joint_direction': 'positive', 'physical_direction': 'ccw',
+        'duration_s': 2., 'velocity_rad_s': -5.,
+        'joint_direction': 'negative', 'physical_direction': 'cw',
         'physical_viewpoint': 'gripper_toward_motor',
         'completion_feedback':
-            'ee_joint_accumulated_positive_displacement',
+            'ee_joint_accumulated_cw_displacement',
         'minimum_displacement_rad': 9.0,
         'expected_displacement_rad': 10.}
     assert data['tool2']['grasp_stage_allowed_contacts'] == [

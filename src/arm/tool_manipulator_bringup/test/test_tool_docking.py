@@ -422,7 +422,7 @@ def test_fixed_joint_completion_uses_measured_joint_tolerance(
         n.docking_command.publish.assert_not_called()
 
 
-def test_tool0_finish_orders_true_false_ee_and_retreat(tmp_path):
+def test_tool0_finish_orders_true_only_cw_ee_and_retreat(tmp_path):
     n = node(tmp_path)
     n.cfg = load_settings(ROOT/'config/tool_docking.yaml')[0]
     n.guard = Mock()
@@ -434,22 +434,19 @@ def test_tool0_finish_orders_true_false_ee_and_retreat(tmp_path):
     n.docked_state = True
     n.mode = Mock()
     n.publisher = Mock()
-    n.tick_tool0_finish(1.)
-    assert n.stage == 'dock_release_wait'
-    assert n.docking_command.publish.call_args.args[0].data is False
-    n.mode.call_async.assert_not_called()
-    n.tick_tool0_finish(1.1)
-    n.mode.call_async.assert_not_called()
     n.docked_state = False
-    n.docked_feedback_sequence = 2
-    n.tick_tool0_finish(1.2)
+    n.tick_tool0_finish(.9)
+    n.mode.call_async.assert_not_called()
+    n.docked_state = True
+    n.tick_tool0_finish(1.)
+    n.docking_command.publish.assert_not_called()  # no false/reset pulse
     assert n.stage == 'ee_mode_wait'
     n.future.done.return_value = True
     n.future.result.return_value = SimpleNamespace(success=True)
     n.status = dict(mode='tool_auto', transitioning=False, epoch='ee-mode')
     n.tick_tool0_finish(1.3)
     command = json.loads(n.publisher.publish.call_args.args[0].data)
-    assert command['ee_velocity_rad_s'] == 5.
+    assert command['ee_velocity_rad_s'] == -5.
     assert command['ee_duration_sec'] == 2.
     n.begin_docking_retreat.assert_not_called()
     n.status.update(mode='hold', last_execution_id=n.execution_id,

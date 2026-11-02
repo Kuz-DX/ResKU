@@ -356,7 +356,7 @@ class ModeCore:
                 and getattr(self, 'docking_ee_id', None) == self.execution_id
                 and self.ee_position is not None):
             delta = (position-self.ee_position+math.pi) % (2.*math.pi)-math.pi
-            self.docking_ee_travel += delta
+            self.docking_ee_travel -= delta
         self.ee_position, self.ee_velocity, self.ee_state_time = position, velocity, now
 
     def close_ee(self, epoch, execution_id, target, now, speed=.12):
@@ -384,8 +384,8 @@ class ModeCore:
         return True
 
     def timed_docking_ee(self, epoch, execution_id, velocity, duration, now):
-        if velocity != 5.0 or duration != 2.0:
-            raise ValueError('docking removal requires +5 rad/s for 2 seconds')
+        if velocity != -5.0 or duration != 2.0:
+            raise ValueError('docking fastening requires -5 rad/s for 2 seconds')
         if not self.close_ee(epoch, execution_id, self.ee_position, now):
             return False
         self.docking_ee_id = execution_id
@@ -404,7 +404,7 @@ class ModeCore:
                     self.position, self.goal, (.02,.005,.005,.005,.02,.02))):
                 self.abort_path_to_hold('arm moved during docking EE', now)
             elif now < self.docking_ee_end:
-                self.ee = 5.0
+                self.ee = -5.0
             elif now-self.docking_ee_end > 3.:
                 self.abort_path_to_hold('docking EE stop timeout', now)
             elif abs(self.ee_velocity) > .02:
@@ -414,7 +414,7 @@ class ModeCore:
             elif now-self.docking_ee_stopped_since >= .3:
                 if self.docking_ee_travel < 9.:
                     self.abort_path_to_hold(
-                        'docking EE insufficient CCW travel: %.3f rad < 9 rad' %
+                        'docking EE insufficient CW travel: %.3f rad < 9 rad' %
                         self.docking_ee_travel, now)
                     return
                 completed = self.execution_id

@@ -32,18 +32,18 @@ def test_only_owner_and_current_epoch_can_command():
 def test_docking_ee_runs_two_seconds_then_waits_for_stop():
     c = ready('tool_auto')
     c.ee_feedback(0., 0., .1)
-    assert c.timed_docking_ee(c.epoch, 'removal', 5., 2., .1)
+    assert c.timed_docking_ee(c.epoch, 'removal', -5., 2., .1)
     for i in range(1, 18):
-        c.ee_feedback(i*.5, 5., .1+i*.1)
-    c.ee_feedback(9., 5., 2.)
+        c.ee_feedback(-i*.5, -5., .1+i*.1)
+    c.ee_feedback(-9., -5., 2.)
     c.run_ee(2.)
-    assert c.ee == 5.
-    c.ee_feedback(10., .1, 2.11)
+    assert c.ee == -5.
+    c.ee_feedback(-10., .1, 2.11)
     c.run_ee(2.11)
     assert c.ee == 0. and c.execution_id == 'removal'
-    c.ee_feedback(10., 0., 2.2)
+    c.ee_feedback(-10., 0., 2.2)
     c.run_ee(2.2)
-    c.ee_feedback(10., 0., 2.51)
+    c.ee_feedback(-10., 0., 2.51)
     c.run_ee(2.51)
     assert c.last_execution_result == 'succeeded'
 
@@ -51,7 +51,7 @@ def test_docking_ee_runs_two_seconds_then_waits_for_stop():
 def test_docking_ee_feedback_loss_aborts():
     c = ready('tool_auto')
     c.ee_feedback(0., 0., .1)
-    assert c.timed_docking_ee(c.epoch, 'removal', 5., 2., .1)
+    assert c.timed_docking_ee(c.epoch, 'removal', -5., 2., .1)
     c.run_ee(.5)
     assert c.ee == 0. and c.last_execution_result == 'aborted'
 
@@ -59,21 +59,21 @@ def test_docking_ee_feedback_loss_aborts():
 def test_docking_ee_stalled_motor_cannot_authorize_retreat():
     c = ready('tool_auto')
     c.ee_feedback(0., 0., .1)
-    assert c.timed_docking_ee(c.epoch, 'stalled', 5., 2., .1)
+    assert c.timed_docking_ee(c.epoch, 'stalled', -5., 2., .1)
     for now in (2.11, 2.5):
         c.ee_feedback(0., 0., now)
         c.run_ee(now)
     assert c.last_execution_result == 'aborted'
-    assert 'insufficient CCW travel' in c.reason
+    assert 'insufficient CW travel' in c.reason
 
 
 def test_docking_ee_unwraps_encoder_across_pi():
     c = ready('tool_auto')
     c.ee_feedback(3., 0., .1)
-    assert c.timed_docking_ee(c.epoch, 'wrapped', 5., 2., .1)
+    assert c.timed_docking_ee(c.epoch, 'wrapped', -5., 2., .1)
     for i in range(1, 21):
-        position = (3.+i*.5+math.pi) % (2.*math.pi)-math.pi
-        c.ee_feedback(position, 5., .1+i*.1)
+        position = (3.-i*.5+math.pi) % (2.*math.pi)-math.pi
+        c.ee_feedback(position, -5., .1+i*.1)
     assert c.docking_ee_travel == pytest.approx(10.)
 
 

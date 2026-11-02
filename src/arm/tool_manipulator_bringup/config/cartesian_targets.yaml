@@ -36,13 +36,13 @@ targets:
     pre_dock_offset_tcp_m: [0.0, 0.0, -0.030]
     rack_removal_ee_command:
       duration_s: 2.0
-      velocity_rad_s: 5.0
-      joint_direction: positive
-      physical_direction: ccw
+      velocity_rad_s: -5.0
+      joint_direction: negative
+      physical_direction: cw
       physical_viewpoint: gripper_toward_motor
       # Do not declare success from the two-second command alone.  Accumulate
-      # positive, unwrapped ee_joint feedback from the command start.
-      completion_feedback: ee_joint_accumulated_positive_displacement
+      # CW-directed, unwrapped ee_joint feedback from the command start.
+      completion_feedback: ee_joint_accumulated_cw_displacement
       # 10% completion tolerance around the nominal 5 rad/s * 2 s travel.
       minimum_displacement_rad: 9.0
       expected_displacement_rad: 10.0
