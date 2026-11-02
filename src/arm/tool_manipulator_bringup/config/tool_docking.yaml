@@ -9,7 +9,7 @@ tools:
     enabled: true
     require_l2_hold: false
     alignment_mode: fixed_joint_goal
-    # Follow the three measured poses: capture 3 -> 2 -> 1.
+    # Follow the latest three measured poses: capture 3 -> 2 -> 1.
     axial_sampled_path: false
     maintain_entry_orientation: true
     # Captured orientations vary along this joint-space path.
@@ -18,8 +18,8 @@ tools:
     tag_id: 0
     tag_size_m: 0.020
     intermediate_joint_goals_rad:
-      - [-3.193748, 0.1494, 1.169894, -1.171639, 0.047553, 0.047553]
-    final_joint_goal_rad: [-3.193748, 0.119381, 1.224523, -1.14546, 0.055223, 0.047553]
+      - [-3.196816, 0.289899, 1.315455, -1.094321, 0.041417, 0.078233]
+    final_joint_goal_rad: [-3.196816, 0.134216, 1.260477, -1.088562, 0.049087, 0.016874]
     actuation_enabled: true
     desired_docked: true           # true=attach pulse, false=release pulse
     actuation_timeout_s: 10.0
