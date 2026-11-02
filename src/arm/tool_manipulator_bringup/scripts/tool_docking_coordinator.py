@@ -332,7 +332,20 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                             self.report('dock_acquire', 'waiting for valid tag: '+self.tag_diagnostic())
                             self.last_acquire_report = now
                         return
-                    self.fresh_observation(now)
+                    try:
+                        self.fresh_observation(now)
+                    except RuntimeError as exc:
+                        if not str(exc).startswith('target tag stale:'):
+                            raise
+                        # A frame accepted close to the age boundary can turn
+                        # stale between its callback and this timer tick. During
+                        # acquisition, discard it and wait for the next image;
+                        # the acquisition timeout remains the hard deadline.
+                        self.observation = None
+                        self.last_base_tag = None
+                        self.stable = 0
+                        self.tag_reason = 'stale acquisition sample discarded; waiting for fresh tag'
+                        return
                     self.stage = 'dock_observe'
                 elif not getattr(self, 'advance_locked', False):
                     # Tag loss also cancels a correction while it is being checked/executed.
