@@ -356,7 +356,7 @@ private:
   /**
    * @brief Changes the torque state of the Dynamixel.
    */
-  void ChangeDxlTorqueState();
+  bool ChangeDxlTorqueState();
 
   using DynamixelStateMsg = dynamixel_interfaces::msg::DynamixelState;
   using StatePublisher = realtime_tools::RealtimePublisher<DynamixelStateMsg>;

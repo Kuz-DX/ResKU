@@ -1072,9 +1072,18 @@ hardware_interface::return_type DynamixelHardware::write(
         }
       }
     }
-    dxl_comm_->WriteItemBuf();
-
-    ChangeDxlTorqueState();
+    const auto buffered_result = dxl_comm_->WriteItemBuf();
+    if (buffered_result != DxlError::OK) {
+      dxl_status_ = COMM_ERROR;
+      latchHardwareFault("buffered register write failed: " +
+        Dynamixel::DxlErrorToString(buffered_result));
+      return hardware_interface::return_type::OK;
+    }
+    if (!ChangeDxlTorqueState()) {
+      dxl_status_ = COMM_ERROR;
+      latchHardwareFault("torque transition failed; goal write suppressed");
+      return hardware_interface::return_type::OK;
+    }
 
     CalcJointToTransmission();
 
@@ -2095,24 +2104,24 @@ void DynamixelHardware::LogPositionDiagnostics(
   if (++position_diagnostic_stage_ == 18) {position_diagnostic_cycle_active_ = false;}
 }
 
-void DynamixelHardware::ChangeDxlTorqueState()
+bool DynamixelHardware::ChangeDxlTorqueState()
 {
   if (torque_enabled_comm_id_id_.size() == 0) {
-    return;
+    return true;
   }
 
   if (dxl_torque_status_ == REQUESTED_TO_ENABLE) {
     RCLCPP_WARN_STREAM(logger_, "Requested to enable torque, Enabling torque for all Dynamixels");
     if (dxl_comm_->DynamixelEnable(torque_enabled_comm_id_id_) != DxlError::OK) {
       RCLCPP_ERROR(logger_, "Torque enable failed; preserving pending request and controller commands.");
-      return;
+      return false;
     }
     SyncJointCommandWithStates();
   } else if (dxl_torque_status_ == REQUESTED_TO_DISABLE) {
     RCLCPP_WARN_STREAM(logger_, "Requested to disable torque, Disabling torque for all Dynamixels");
     if (dxl_comm_->DynamixelDisable(torque_enabled_comm_id_id_) != DxlError::OK) {
       RCLCPP_ERROR(logger_, "Torque disable failed; preserving pending request and controller commands.");
-      return;
+      return false;
     }
     SyncJointCommandWithStates();
   }
@@ -2122,10 +2131,11 @@ void DynamixelHardware::ChangeDxlTorqueState()
   for (const auto & single_torque_state : torque_state_map) {
     if (single_torque_state.second == TORQUE_OFF) {
       dxl_torque_status_ = TORQUE_DISABLED;
-      return;
+      return true;
     }
   }
   dxl_torque_status_ = TORQUE_ENABLED;
+  return true;
 }
 
 void DynamixelHardware::get_dxl_data_srv_callback(

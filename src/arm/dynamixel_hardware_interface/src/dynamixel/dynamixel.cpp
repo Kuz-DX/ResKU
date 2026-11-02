@@ -953,19 +953,19 @@ DxlError Dynamixel::ReadItem(uint8_t comm_id, uint8_t id, std::string item_name,
     uint8_t dxl_error = 0;
 
     if (ITEM_SIZE == 1) {
-      uint8_t read_data;
+      uint8_t read_data = 0;
       dxl_comm_result = packet_handler_->read1ByteTxRx(
         port_handler_, comm_id, ITEM_ADDR,
         &read_data, &dxl_error);
       data = read_data;
     } else if (ITEM_SIZE == 2) {
-      uint16_t read_data;
+      uint16_t read_data = 0;
       dxl_comm_result = packet_handler_->read2ByteTxRx(
         port_handler_, comm_id, ITEM_ADDR,
         &read_data, &dxl_error);
       data = read_data;
     } else if (ITEM_SIZE == 4) {
-      uint32_t read_data;
+      uint32_t read_data = 0;
       dxl_comm_result = packet_handler_->read4ByteTxRx(
         port_handler_, comm_id, ITEM_ADDR,
         &read_data, &dxl_error);
@@ -975,9 +975,9 @@ DxlError Dynamixel::ReadItem(uint8_t comm_id, uint8_t id, std::string item_name,
     if (dxl_comm_result != COMM_SUCCESS) {
       fprintf(
         stderr,
-        "[ReadItem][ID:%03d][comm_id:%03d] COMM_ERROR : %s (retry %d/%d)\n",
+        "[ReadItem][ID:%03d][comm_id:%03d][item:%s][addr:%u][size:%u] COMM_ERROR : %s (retry %d/%d)\n",
         id,
-        comm_id,
+        comm_id, item_name.c_str(), ITEM_ADDR, ITEM_SIZE,
         packet_handler_->getTxRxResult(dxl_comm_result),
         i + 1,
         MAX_COMM_RETRIES);
@@ -1053,19 +1053,19 @@ DxlError Dynamixel::ReadItemBuf()
       uint8_t dxl_error = 0;
 
       if (size == 1) {
-        uint8_t read_data;
+        uint8_t read_data = 0;
         dxl_comm_result = packet_handler_->read1ByteTxRx(
           port_handler_, id, addr,
           &read_data, &dxl_error);
         it_read_item->data = read_data;
       } else if (size == 2) {
-        uint16_t read_data;
+        uint16_t read_data = 0;
         dxl_comm_result = packet_handler_->read2ByteTxRx(
           port_handler_, id, addr,
           &read_data, &dxl_error);
         it_read_item->data = read_data;
       } else if (size == 4) {
-        uint32_t read_data;
+        uint32_t read_data = 0;
         dxl_comm_result = packet_handler_->read4ByteTxRx(
           port_handler_, id, addr,
           &read_data, &dxl_error);
