@@ -218,8 +218,8 @@
   <xacro:property name="tool_case_1_z_lift" value="0.005231545585"/>
 
   <!-- Toolbox 2: the highlighted collar midpoint in STL coordinates is
-       (25, 21.939120, 68.385120) mm. Its arm_world X/Y is offset from
-       the toolbox 1 centre by (+139, +80.6) mm.
+       (25, 21.939120, 68.385120) mm. The original arm_world placement is
+       shifted in XY below to align tool1's complete 80 -> 55 mm TCP line.
        Rotating the STL +55 degrees about world X makes the broad underside
        horizontal. Its collar centre is 37.728826 mm above that contact plane.
        Set Z from the circuit-box top (372 mm above the wheel axle).
@@ -227,6 +227,10 @@
        the case yaw matches the long base boundary horizontal:vertical ratio
        33.7:70.2 in plan view (64.356341 degrees from +X). -->
   <xacro:property name="toolbox2_yaw" value="${atan2(70.2, 33.7)}"/>
+  <!-- User-authorized toolbox2 translation only: preserve its support height
+       and original 55-degree face tilt; all mesh and marker children move. -->
+  <xacro:property name="toolbox2_shift_x" value="-0.021925292172065"/>
+  <xacro:property name="toolbox2_shift_y" value="0.021109250843959"/>
   <xacro:property name="toolbox2_collar_height" value="0.037728826"/>
   <xacro:property name="toolbox2_arm_world_z" value="$(arg arm_world_z)"/>
   <link name="tool_case_y_plus">
@@ -248,7 +252,7 @@
     <parent link="arm_world"/><child link="tool_case_y_plus"/>
     <!-- World-Z yaw sets the base edge ratio without changing contact height.
          Rotate about the collar centre; keep the underside on the box top. -->
-    <origin xyz="-0.255506 0.0806 ${float(wheel_axle_z) + 0.372 - float(imu_z) - float(toolbox2_arm_world_z) + toolbox2_collar_height}" rpy="0 ${-pi/4} ${toolbox2_yaw}"/>
+    <origin xyz="${-0.255506 + toolbox2_shift_x} ${0.0806 + toolbox2_shift_y} ${float(wheel_axle_z) + 0.372 - float(imu_z) - float(toolbox2_arm_world_z) + toolbox2_collar_height}" rpy="0 ${-pi/4} ${toolbox2_yaw}"/>
   </joint>
   <xacro:tool_case_center_marker case_link="tool_case_y_plus" marker_link="tool_case_y_plus_center"/>
   <!-- 툴박스2 도킹: centre of the topmost circular face (radius 8.5 mm)

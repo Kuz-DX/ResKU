@@ -1881,19 +1881,28 @@ void DynamixelHardware::CalcJointToTransmission()
     std::bind(&DynamixelHardware::prismaticToRevolute, this, std::placeholders::_1)) :
     std::function<double(double)>();
   // MapInterfaces operates on the Dynamixel model coordinate. Temporarily
-  // inverse-transform position commands, then restore the ROS-facing values.
-  std::vector<std::pair<std::shared_ptr<double>, double>> calibrated_positions;
+  // inverse-transform joint commands, then restore the ROS-facing values.
+  // Velocity uses the same coordinate direction as position feedback, without
+  // a zero offset. This is essential for the velocity-controlled gripper.
+  std::vector<std::pair<std::shared_ptr<double>, double>> calibrated_commands;
   for (auto & joint : hdl_joint_commands_) {
     const auto calibration = joint_position_calibrations_.find(joint.name);
     if (calibration == joint_position_calibrations_.end()) {
       continue;
     }
     for (size_t i = 0; i < joint.interface_name_vec.size(); ++i) {
-      if (joint.interface_name_vec.at(i) != hardware_interface::HW_IF_POSITION) {
+      const auto & interface_name = joint.interface_name_vec.at(i);
+      if (interface_name != hardware_interface::HW_IF_POSITION &&
+        interface_name != hardware_interface::HW_IF_VELOCITY)
+      {
         continue;
       }
       const auto & value_ptr = joint.value_ptr_vec.at(i);
-      calibrated_positions.emplace_back(value_ptr, *value_ptr);
+      calibrated_commands.emplace_back(value_ptr, *value_ptr);
+      if (interface_name == hardware_interface::HW_IF_VELOCITY) {
+        *value_ptr *= calibration->second.direction;
+        continue;
+      }
       *value_ptr = calibration->second.zero_offset +
         calibration->second.direction * (*value_ptr);
       const auto model_position = last_model_positions_.find(joint.name);
@@ -1921,7 +1930,7 @@ void DynamixelHardware::CalcJointToTransmission()
     conv
   );
 
-  for (const auto & saved : calibrated_positions) {
+  for (const auto & saved : calibrated_commands) {
     *saved.first = saved.second;
   }
 }

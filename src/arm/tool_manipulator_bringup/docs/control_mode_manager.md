@@ -7,8 +7,11 @@ adjusts the EE jog speed
 by 1 rad/s per press. Default is 5 rad/s, bounded to 1..16.8 rad/s;
 holding up/down does not auto-repeat and restarting resets the selection.
 With L1+R1 held and rearmed, D-pad left/right (axis 6) commands positive/negative
-ee_joint velocity (CCW/CW under the calibrated `raw_increases_ccw: true`
-convention). Release left/right to stop. Release L1 or lose fresh joystick
+ee_joint velocity (positive closes, negative opens in the URDF convention).
+The physical EE mapping uses `raw_increases_ccw: true`: negative ROS velocity
+is sent as negative motor velocity, matching the operator's Wizard 2.0 opening
+check. Position/velocity feedback uses the same direction. Release left/right
+to stop. Release L1 or lose fresh joystick
 input to stop through the manager. Diagonal presses change speed only. The arm
 sticks are suppressed while D-pad is active. EE jog holds the current arm pose
 and does not require a new Cartesian IK/collision candidate or an available

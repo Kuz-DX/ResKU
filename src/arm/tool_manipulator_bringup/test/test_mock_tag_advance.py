@@ -54,11 +54,12 @@ def test_mock_confirmation_is_fresh_but_base_anchor_stays_stationary():
     assert n.tag_accepted == 2
 
 
-def test_tool0_25mm_line_holds_entry_orientation_even_if_tag_normal_differs(tmp_path):
+@pytest.mark.parametrize('tool', [0, 1])
+def test_25mm_line_holds_entry_orientation_even_if_tag_normal_differs(tmp_path, tool):
     n = camera_node(tmp_path)
-    n.cfg = load_settings(ROOT/'config/test/tool_docking.yaml')[0]
+    n.cfg = load_settings(ROOT/'config/test/tool_docking.yaml')[tool]
     assert n.cfg['advance_distance_m'] == .025 and n.cfg['maintain_entry_orientation']
-    n.path_id = 0
+    n.path_id = tool
     start = np.eye(4)
     start[:3, :3] = cv2.Rodrigues(np.array([0., .15, 0.]))[0]
     q = np.zeros(6)

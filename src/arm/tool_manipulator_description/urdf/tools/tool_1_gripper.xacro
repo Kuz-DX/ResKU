@@ -4,7 +4,8 @@
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
   <xacro:macro name="tool_1_gripper" params="prefix parent drive_parent use_mesh:=false">
     <xacro:property name="tool_1_tcp_offset" value="0.0256"/>
-    <!-- MX-106 raw reference: raw 1992 = 0 rad; raw increment = CCW/closing; 4096 tick/rev. -->
+    <!-- MX-106 raw reference: raw 1992 = 0 rad, 4096 tick/rev.
+         Negative ROS/motor velocity opens, matching the Wizard 2.0 check. -->
     <xacro:property name="tool_1_gripper_limit_lower" value="-2.351592547829"/> <!-- raw 459 -->
     <xacro:property name="tool_1_gripper_open" value="-0.076699"/> <!-- measured raw 1941..1942 -->
     <xacro:property name="tool_1_gripper_close" value="1.251728"/> <!-- measured raw 2808 -->

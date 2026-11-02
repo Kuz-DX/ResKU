@@ -154,6 +154,8 @@ joints:
     transport_channel: ttl
     id: 4
     operating_mode: 1
+    # Wizard 2.0 check: negative Goal Velocity opens the physical gripper.
+    # Preserve that sign: ROS negative -> motor negative -> opening.
     raw_increases_ccw: true
     # Gripper pinion zero: measured raw 1992 = q 0 rad. Keep this aligned
     # with tool_1_gripper.xacro; changing it displaces both mimic racks.
