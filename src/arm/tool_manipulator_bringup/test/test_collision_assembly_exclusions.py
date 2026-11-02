@@ -21,11 +21,13 @@ def test_mating_pitch_and_wrist_interfaces_are_excluded():
 def test_fixed_drill_mount_contact_is_excluded():
     assert frozenset(("tool_2_link", "ee_actuator")) in pairs()
 
+def test_approved_tool0_overlap_is_allowed_for_home_back_planning():
+    assert frozenset(("tool_case_1", "wrist_link_yaw")) in pairs()
+
 def test_nonadjacent_and_fixture_checks_remain_enabled():
     for a, b in (("base_link", "wrist_link_yaw"),
                  ("elbow_link", "wrist_link_roll"),
                  ("wrist_link_yaw", "circuit_box"),
-                 ("wrist_link_yaw", "tool_case_1"),
                  ("base_link", "chassis")):
         assert frozenset((a, b)) not in pairs()
 
