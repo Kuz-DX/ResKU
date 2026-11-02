@@ -1,6 +1,10 @@
+import json
+import threading
 from pathlib import Path
+from time import perf_counter
 
 from ament_index_python.packages import get_package_share_directory
+import cv2
 import numpy as np
 import rclpy
 from rclpy.duration import Duration
@@ -8,38 +12,27 @@ from rclpy.node import Node
 from rclpy.time import Time
 from sensor_msgs.msg import CompressedImage, CameraInfo
 from geometry_msgs.msg import PointStamped
-from std_msgs.msg import Empty, Float64
+from std_msgs.msg import Empty, Float64, String
 from tf2_geometry_msgs import do_transform_point
 import tf2_ros
 from cv_bridge import CvBridge
 import message_filters
 
-from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
+from rclpy.qos import (
+    DurabilityPolicy,
+    HistoryPolicy,
+    QoSProfile,
+    ReliabilityPolicy,
+    qos_profile_sensor_data,
+)
 from vision.compressed_image import decode_compressed_depth
+from vision.ov_supply_detector import OpenVINOSupplyDetector
 
 SENSOR_DATA_QOS_DEPTH1 = QoSProfile(
     history=HistoryPolicy.KEEP_LAST, depth=1,
     reliability=ReliabilityPolicy.BEST_EFFORT,
     durability=DurabilityPolicy.VOLATILE,
 )
-
-try:
-    from ultralytics import YOLO
-    _YOLO_OK = True
-except ImportError:
-    _YOLO_OK = False
-
-try:
-    from vision_msgs.msg import Detection2D, Detection2DArray, ObjectHypothesisWithPose
-    _VISION_MSGS_OK = True
-except ImportError:
-    # package.xml에는 의존성을 선언해도 실제 apt install(ros-humble-vision-msgs)이
-    # 안 된 워크스페이스에서는 여전히 여기로 빠진다 — spring_ifof.py/
-    # traffic detector와 동일한 취지로 안전하게 no-op(경고만 내고 detections
-    # 토픽만 미발행)한다. /arm/target_point, /arm/debug_image/compressed
-    # 발행은 이 값과 무관하게 항상 정상 동작.
-    _VISION_MSGS_OK = False
-
 
 _DEFAULT_MODEL_FILE = 'supplyboxv3_int8_openvino_model'
 # _DEFAULT_MODEL_FILE = 'supplyboxv3.pt'
@@ -90,9 +83,9 @@ class SupplyNode(Node):
     RealSense 뎁스 카메라로 서플라이 박스를 탐지하고 ``base_actuator`` 기준
     3D 좌표(m)를 로봇팔 제어용으로 퍼블리시한다.
 
-    검출기는 ultralytics YOLO(supplyboxv3.pt, 단일 클래스 {0: 'supplybox'})
-    하나로 확정했다(RF-DETR와 비교 후 2026-08-30 결정 - army_manipulator_bringup의
-    구 target_detector_node.py와 동일 관례로 cv2 BGR 배열을 그대로 넘긴다).
+    검출기는 OpenVINO Runtime으로 supplyboxv3 INT8 IR(단일 클래스
+    {0: 'supplybox'})을 직접 실행한다. 모델 계열은 RF-DETR와 비교 후
+    2026-08-30 YOLO로 확정했다.
 
     시작부터 박스가 팔 가동범위 안에 있는 정지 파지 흐름이다.
     |X| <= stop_base_x_m인 검출을 연속 확인하면 목표를 발행한다.
@@ -108,28 +101,28 @@ class SupplyNode(Node):
       안 그려짐, 아래 /arm/supply/detections와 대조해서 "컬러 검출은
       됐는데 depth가 무효라 못 그려진 건지" 구분 가능. 그런 경우엔 로그로도
       경고를 낸다).
-      /arm/supply/detections (vision_msgs/Detection2DArray) — [2026-08-30
-      구현] depth 필터/best 선정 전, conf_threshold 이상 원시 검출 전부
+      /arm/supply/detections (std_msgs/String JSON) — person detection과 같은
+      스키마로 depth 필터/best 선정 전, conf_threshold 이상 원시 검출 전부
       (target_point/오버레이보다 먼저, 항상 발행). 좌/우 사이드캠 미션들과
       달리 팔 카메라는 하나뿐이라 left/right 구분 없이 하나만 둔다. 이
       노드(supply 미션)만의 검출 결과라는 걸 구분하려고 미션 이름을
-      넣은 /arm/<미션이름>/detections 형태로 지었다. vision_msgs 미설치 시
-      이 토픽만 조용히 미발행(spring_ifof.py/traffic detector와 동일한
-      방어 패턴, target_point/debug_image 발행에는 영향 없음).
+      넣은 /arm/<미션이름>/detections 형태로 지었다.
 
     [2026-09-02 신규] 파지 완료("/arm/picking_command", maru_ik_node.py
-    picking_command_pub이 1회성 발행) 수신 시 YOLO 모델을 영구 종료한다
+    picking_command_pub이 1회성 발행) 수신 시 OpenVINO 모델을 영구 종료한다
     (_on_picking_command) - 이번 미션은 서플라이박스가 하나뿐이라 이후
     재탐지가 불필요해서다. 여러 박스를 다시 지원해야 하면 이 종료를
     없애거나 재시작 트리거를 추가할 것(drive_supply_detector.py도 동일).
 
     파라미터:
-      model_path         : YOLO 가중치 경로. 비우면 models/supplyboxv3_int8_openvino_model 사용
+      model_path         : OpenVINO IR 경로. 비우면 models/supplyboxv3_int8_openvino_model 사용
       target_class       : 결과에 붙일 클래스 이름(로그/오버레이 표시용) — 단일 클래스로
                             학습돼 실제 필터링에는 안 쓰임, confidence 임계값을 넘는
                             탐지는 전부 이 이름으로 취급. 기본 'supplybox'
       conf_threshold     : 최소 confidence (기본 0.5)
-      infer_size         : YOLO 추론 해상도(기본 320, GPU 없는 환경 속도용)
+      infer_size         : 추론 해상도(기본 320, 정적 IR 크기가 우선)
+      perf_hint          : OpenVINO 성능 힌트(LATENCY 또는 THROUGHPUT)
+      stats_period_s     : 단계별 처리시간 로그 주기(초, 0이면 비활성)
       depth_roi_radius   : 깊이 샘플링 반경 픽셀 (기본 5)
       max_depth_m        : 좌표 계산에 쓸 카메라 depth 상한 m (기본 1.0)
       stop_base_x_m      : base_actuator 기준 |X| 파지 목표 상한(기본 0.32m)
@@ -147,6 +140,8 @@ class SupplyNode(Node):
         self.declare_parameter('target_class', 'supplybox')
         self.declare_parameter('conf_threshold', 0.5)
         self.declare_parameter('infer_size', 320)
+        self.declare_parameter('perf_hint', 'LATENCY')
+        self.declare_parameter('stats_period_s', 5.0)
         self.declare_parameter('depth_roi_radius', 5)
         self.declare_parameter('max_depth_m', 1.0)
         self.declare_parameter('planning_frame', 'base_actuator')
@@ -168,6 +163,10 @@ class SupplyNode(Node):
         self.target  = str(self.get_parameter('target_class').value)
         self.conf_th = float(self.get_parameter('conf_threshold').value)
         self.infer_size = int(self.get_parameter('infer_size').value)
+        self.perf_hint = str(
+            self.get_parameter('perf_hint').value).strip().upper()
+        self.stats_period_s = float(
+            self.get_parameter('stats_period_s').value)
         self.depth_r = int(self.get_parameter('depth_roi_radius').value)
         self.max_d   = float(self.get_parameter('max_depth_m').value)
         self.planning_frame = str(self.get_parameter('planning_frame').value)
@@ -181,10 +180,13 @@ class SupplyNode(Node):
         depth_topic  = str(self.get_parameter('depth_topic').value)
         info_topic   = str(self.get_parameter('camera_info_topic').value)
 
+        self._inference_lock = threading.Lock()
         self.model = self._load_model(model_path)
+        self._infer_request = (
+            self.model.create_request() if self.model is not None else None)
         # [2026-09-02 신규] 이번 미션은 서플라이박스가 하나뿐이라, 파지가
         # 끝나면(_on_picking_command) 이후 재탐지가 필요 없다 - 모델을 영구
-        # 종료해서 CPU/GPU 낭비를 막는다. _on_frames가 model=None을 원래도
+        # 종료해서 CPU 낭비를 막는다. worker가 model=None을
         # "로드 실패"로 취급해 에러 로그를 5초마다 찍으므로, 의도된 종료와
         # 구분하려고 플래그를 따로 둔다.
         self._model_terminated = False
@@ -195,6 +197,24 @@ class SupplyNode(Node):
         self.fx = self.fy = self.cx = self.cy = None
         self._diag_frame_count = 0
         self._camera_info_logged = False
+        self._pending_lock = threading.Lock()
+        self._pending_event = threading.Event()
+        self._stop_event = threading.Event()
+        self._pending_frames = None
+        self._stats_lock = threading.Lock()
+        self._stats_started = perf_counter()
+        self._stats_processed = 0
+        self._stats_errors = 0
+        self._stats_overwritten = 0
+        self._stats_totals = {
+            'decode': 0.0,
+            'preprocess': 0.0,
+            'inference': 0.0,
+            'postprocess': 0.0,
+            'spatial': 0.0,
+            'jpeg': 0.0,
+            'total': 0.0,
+        }
 
         self.create_subscription(
             CameraInfo, info_topic, self._on_info, SENSOR_DATA_QOS_DEPTH1)
@@ -232,21 +252,26 @@ class SupplyNode(Node):
             QoSProfile(history=HistoryPolicy.KEEP_LAST, depth=1,
                        reliability=ReliabilityPolicy.RELIABLE,
                        durability=DurabilityPolicy.VOLATILE))
-        self.pub_detections = None
-        if _VISION_MSGS_OK:
-            self.pub_detections = self.create_publisher(
-                Detection2DArray, '/arm/supply/detections', 10)
-        else:
-            self.get_logger().warn(
-                'vision_msgs 미설치 — /arm/supply/detections 미발행'
-                '(target_point/debug_image 발행에는 영향 없음). '
-                'ros-humble-vision-msgs 설치 후 재기동하면 발행됨.')
+        self.pub_detections = self.create_publisher(
+            String, '/arm/supply/detections', qos_profile_sensor_data)
+
+        self._stats_timer = None
+        if self.stats_period_s > 0.0:
+            self._stats_timer = self.create_timer(
+                self.stats_period_s, self._report_stats)
+
+        self._worker = threading.Thread(
+            target=self._worker_loop,
+            name='supply-inference',
+        )
+        self._worker.start()
 
         self.get_logger().info(
             f'SupplyNode ready  |  target={self.target}  '
             f'conf>={self.conf_th}  max_depth={self.max_d}m  '
             f'target when |base X|<={self.stop_base_x_m:.3f}m '
-            f'for {self.target_confirm_frames} frames; stationary pickup')
+            f'for {self.target_confirm_frames} frames; stationary pickup | '
+            f'backend=openvino hint={self.perf_hint} requests=1')
 
     # ------------------------------------------------------------------
     def _load_model(self, path: str):
@@ -254,24 +279,41 @@ class SupplyNode(Node):
             self.get_logger().warn(
                 'model_path 미설정 — 학습파일 경로를 파라미터로 전달하세요')
             return None
-        if not _YOLO_OK:
-            self.get_logger().error('ultralytics 미설치 — pip install ultralytics')
-            return None
-        model = YOLO(path)
-        self.get_logger().info(f'YOLO 모델 로드 완료: {path}')
+        if self.perf_hint not in {'LATENCY', 'THROUGHPUT'}:
+            raise ValueError("perf_hint must be 'LATENCY' or 'THROUGHPUT'.")
+        if self.stats_period_s < 0.0:
+            raise ValueError('stats_period_s must not be negative.')
+        model = OpenVINOSupplyDetector(
+            model_path=path,
+            confidence_threshold=self.conf_th,
+            infer_size=self.infer_size,
+            device='CPU',
+            perf_hint=self.perf_hint,
+            num_requests=1,
+        )
+        warmup_ms = model.warmup(3)
+        self.get_logger().info(
+            f'OpenVINO 모델 로드 완료: {model.model_path} | '
+            f'precision={model.precision} input={model.model_input_shape} '
+            f'streams={model.num_streams} warmup_avg={warmup_ms:.1f}ms')
         return model
 
     def _on_picking_command(self, _msg: Empty) -> None:
-        """[2026-09-02 신규] 파지 완료 신호 수신 시 YOLO 모델을 영구
+        """[2026-09-02 신규] 파지 완료 신호 수신 시 OpenVINO 모델을 영구
         종료한다. 이번 미션은 서플라이박스가 하나뿐이라 재시작 로직은 없다
         - 다음 미션에서 여러 박스를 다시 지원해야 하면 이 종료 대신
         모델을 유지한 채 추론만 멈췄다 재개하는 방식으로 바꿀 것."""
-        if self.model is None:
-            return
-        self.model = None
+        with self._inference_lock:
+            if self.model is None:
+                return
+            self.model = None
+            self._infer_request = None
+        with self._pending_lock:
+            self._pending_frames = None
+            self._pending_event.clear()
         self._model_terminated = True
         self.get_logger().info(
-            'picking_command 수신 - supplybox YOLO 모델 종료(추론 중단).')
+            'picking_command 수신 - supplybox OpenVINO 모델 종료(추론 중단).')
 
     def _on_info(self, msg: CameraInfo):
         self.fx, self.fy = msg.k[0], msg.k[4]
@@ -303,48 +345,80 @@ class SupplyNode(Node):
         valid = patch[(patch > 0.05) & (patch < SENSOR_MAX_DEPTH_M)]
         return float(np.median(valid)) if valid.size >= 3 else 0.0
 
-    def _publish_detections(self, header, detections) -> None:
-        """detections((conf, x1, y1, x2, y2) 리스트, _infer()의 원본 그대로 —
-        뎁스 필터/best 선정 전) 전체를 Detection2DArray로 발행한다.
-        pub_detections이 None이면(vision_msgs 미설치) 조용히 넘어간다 —
-        spring_ifof.py/traffic detector와 동일 패턴. 뎁스 필터 통과 여부와
-        무관하게 conf_threshold 이상 검출 전부를 낸다(컬러 검출 자체는
-        성공했는지 확인하는 용도)."""
-        if self.pub_detections is None:
-            return
-        array = Detection2DArray()
-        array.header = header
-        for conf, x1, y1, x2, y2 in detections:
-            detection = Detection2D()
-            detection.header = header
-            detection.bbox.center.position.x = (x1 + x2) / 2.0
-            detection.bbox.center.position.y = (y1 + y2) / 2.0
-            detection.bbox.center.theta = 0.0
-            detection.bbox.size_x = max(0.0, x2 - x1)
-            detection.bbox.size_y = max(0.0, y2 - y1)
-            hypothesis = ObjectHypothesisWithPose()
-            hypothesis.hypothesis.class_id = self.target
-            hypothesis.hypothesis.score = conf
-            detection.results.append(hypothesis)
-            array.detections.append(detection)
-        self.pub_detections.publish(array)
+    def _publish_detections(self, header, image: np.ndarray, detections) -> None:
+        """Publish raw color detections using the person-detection JSON schema."""
+        payload = {
+            'camera': 'arm',
+            'stamp': {
+                'sec': int(header.stamp.sec),
+                'nanosec': int(header.stamp.nanosec),
+            },
+            'frame_id': header.frame_id,
+            'image_size': {
+                'width': int(image.shape[1]),
+                'height': int(image.shape[0]),
+            },
+            'detections': [
+                {
+                    'class_id': detection.class_id,
+                    'class_name': detection.class_name or self.target,
+                    'confidence': detection.confidence,
+                    'xyxy': list(detection.xyxy),
+                }
+                for detection in detections
+            ],
+        }
+        output = String()
+        output.data = json.dumps(
+            payload, ensure_ascii=False, separators=(',', ':'))
+        self.pub_detections.publish(output)
 
-    def _infer(self, color_bgr: np.ndarray) -> list[tuple[float, float, float, float, float]]:
-        """YOLO 추론해서 (conf, x1, y1, x2, y2) 리스트로 반환."""
-        # ultralytics는 cv2 BGR 배열을 그대로 받는다.
-        results = self.model(
-            color_bgr, imgsz=self.infer_size, conf=self.conf_th, verbose=False)
-        out = []
-        for r in results:
-            if r.boxes is None:
-                continue
-            for box in r.boxes:
-                conf = float(box.conf[0])
-                x1, y1, x2, y2 = box.xyxy[0].tolist()
-                out.append((conf, x1, y1, x2, y2))
-        return out
+    def _infer(self, color_bgr: np.ndarray):
+        """Run one direct OpenVINO request and return its timed prediction."""
+        with self._inference_lock:
+            if self.model is None or self._infer_request is None:
+                return None
+            return self.model.predict_timed(
+                color_bgr, request=self._infer_request)
 
     def _on_frames(self, color_msg: CompressedImage, depth_msg: CompressedImage):
+        """Keep only the newest synchronized color/depth pair for the worker."""
+        if self._model_terminated:
+            return
+        with self._pending_lock:
+            if self._pending_frames is not None:
+                with self._stats_lock:
+                    self._stats_overwritten += 1
+            self._pending_frames = (color_msg, depth_msg)
+            self._pending_event.set()
+
+    def _worker_loop(self) -> None:
+        """Process synchronized pairs without blocking ROS subscription callbacks."""
+        while not self._stop_event.is_set():
+            self._pending_event.wait(0.1)
+            if self._stop_event.is_set():
+                break
+            with self._pending_lock:
+                frames = self._pending_frames
+                self._pending_frames = None
+                self._pending_event.clear()
+            if frames is None:
+                continue
+            try:
+                self._process_frames(*frames)
+            except Exception as exc:
+                with self._stats_lock:
+                    self._stats_errors += 1
+                if not self._stop_event.is_set() and rclpy.ok():
+                    self.get_logger().error(
+                        f'Supply frame processing failed: {exc}',
+                        throttle_duration_sec=2.0)
+
+    def _process_frames(
+        self, color_msg: CompressedImage, depth_msg: CompressedImage
+    ) -> None:
+        """Decode, infer, fuse depth/TF, and publish one synchronized pair."""
+        total_started = perf_counter()
         self._diag_frame_count += 1
         if self._diag_frame_count == 1:
             color_t = (
@@ -372,12 +446,10 @@ class SupplyNode(Node):
         if self.model is None:
             if not self._model_terminated:
                 self.get_logger().error(
-                    'YOLO model이 None이어서 프레임 처리를 중단합니다.',
+                    'OpenVINO model이 None이어서 프레임 처리를 중단합니다.',
                     throttle_duration_sec=5.0
                 )
             return
-
-        import cv2
 
         try:
             color = self.bridge.compressed_imgmsg_to_cv2(
@@ -391,16 +463,25 @@ class SupplyNode(Node):
             return
 
         if self._diag_frame_count == 1:
-            self.get_logger().warn('YOLO 추론 시작')
-        detections = self._infer(color)
+            self.get_logger().warn('OpenVINO 추론 시작')
+        decode_done = perf_counter()
+        prediction = self._infer(color)
+        if prediction is None:
+            return
+        raw_detections = prediction.detections
+        detections = [
+            (detection.confidence, *detection.xyxy)
+            for detection in raw_detections
+        ]
+        inference_done = perf_counter()
         if self._diag_frame_count == 1:
-            self.get_logger().warn('YOLO 추론 완료')
+            self.get_logger().warn('OpenVINO 추론 완료')
 
         # detections(전체 (conf, x1, y1, x2, y2) 리스트, "채택된 하나(best)"로
         # 좁혀지기 전 원본)를 depth 필터 통과 여부와 무관하게 그대로
-        # Detection2DArray로 발행 — 컬러 검출 자체가 됐는지 확인하는 용도라,
+        # person 호환 JSON으로 발행 — 컬러 검출 자체가 됐는지 확인하는 용도라,
         # 아래에서 depth 무효로 전부 버려지는 경우와 구분해서 디버깅할 수 있다.
-        self._publish_detections(color_msg.header, detections)
+        self._publish_detections(color_msg.header, color, raw_detections)
 
         best = None  # (conf, X, Y, Z, bbox, cls_name)
         best_too_far = None  # (conf, z, bbox) - 팔 반경 밖(2단계 필터, 모듈 docstring 참고)
@@ -530,18 +611,74 @@ class SupplyNode(Node):
         if best is None:
             self._target_confirm_count = 0
 
+        spatial_done = perf_counter()
+
         # 탐지 성공 여부와 무관하게 매 프레임 RGB를 그대로 퍼블리시
+        jpeg_started = perf_counter()
         dbg = self.bridge.cv2_to_compressed_imgmsg(color, dst_format='jpg')
         dbg.header = color_msg.header
         self.pub_debug.publish(dbg)
+        done = perf_counter()
+
+        self._record_timings(
+            decode_ms=(decode_done - total_started) * 1000.0,
+            preprocess_ms=prediction.preprocess_ms,
+            inference_ms=prediction.inference_ms,
+            postprocess_ms=prediction.postprocess_ms,
+            spatial_ms=(spatial_done - inference_done) * 1000.0,
+            jpeg_ms=(done - jpeg_started) * 1000.0,
+            total_ms=(done - total_started) * 1000.0,
+        )
+
+    def _record_timings(self, **timings_ms: float) -> None:
+        with self._stats_lock:
+            self._stats_processed += 1
+            for name, value in timings_ms.items():
+                self._stats_totals[name] += float(value)
+
+    def _report_stats(self) -> None:
+        now = perf_counter()
+        with self._stats_lock:
+            period = max(now - self._stats_started, 1e-9)
+            processed = self._stats_processed
+            errors = self._stats_errors
+            overwritten = self._stats_overwritten
+            totals = dict(self._stats_totals)
+            self._stats_started = now
+            self._stats_processed = 0
+            self._stats_errors = 0
+            self._stats_overwritten = 0
+            self._stats_totals = {name: 0.0 for name in self._stats_totals}
+
+        if processed:
+            averages = ' '.join(
+                f'{name}={total / processed:.1f}ms'
+                for name, total in totals.items()
+            )
+        else:
+            averages = 'no completed frames'
+        self.get_logger().info(
+            f'supply stats ({period:.1f}s): proc={processed / period:.1f}fps '
+            f'overwritten={overwritten} errors={errors} | {averages}')
+
+    def shutdown_worker(self) -> None:
+        """Stop the inference worker before ROS publishers are destroyed."""
+        self._stop_event.set()
+        self._pending_event.set()
+        if self._worker.is_alive():
+            self._worker.join()
 
 
 def main(args=None):
     rclpy.init(args=args)
     node = SupplyNode()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
+    try:
+        rclpy.spin(node)
+    finally:
+        node.shutdown_worker()
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':

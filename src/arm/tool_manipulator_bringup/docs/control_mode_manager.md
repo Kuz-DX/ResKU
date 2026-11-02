@@ -100,7 +100,8 @@ the rotated, measured `tcp_to_object_bottom_m` offset. A calibrated placement
 orientation is also required; moving tcp_link itself to z=0 is not substituted.
 YOLO provides only 2D boxes. The estimator uses the bottom-centre foot ray,
 CameraInfo and timestamped TF, assumes visible feet on level ground, and rejects
-clipped/multiple persons. It requires stable distinct observations, keeps the
+clipped boxes. When multiple people exceed the confidence threshold, it selects
+the highest-confidence person. It requires stable distinct observations, keeps the
 placement target fixed after acquisition, and stops placement when observations
 become stale, invalid or too close. This is an estimate, not depth measurement
 or a safety-rated human detector. A proper environment/payload collision scene

@@ -100,9 +100,15 @@ def test_foot_ray_uses_full_box_and_calibrated_floor():
     payload['detections'][0]['xyxy'][3] = 480.
     with pytest.raises(ValueError, match='clipped'):
         person_on_floor(payload, matrix, np.zeros(5), camera, .8)
-    payload['detections'] *= 2
-    with pytest.raises(ValueError, match='exactly one'):
-        person_on_floor(payload, matrix, np.zeros(5), camera, .8)
+    payload['detections'] = [
+        dict(class_name='person', confidence=.9,
+             xyxy=[300., 100., 340., 340.]),
+        dict(class_name='person', confidence=.95,
+             xyxy=[400., 100., 440., 340.]),
+    ]
+    np.testing.assert_allclose(
+        person_on_floor(payload, matrix, np.zeros(5), camera, .8),
+        [.2, -.2, 0.])
 
 
 def test_direction_only_accepts_clipped_person_and_uses_bbox_centre_x():
@@ -112,6 +118,21 @@ def test_direction_only_accepts_clipped_person_and_uses_bbox_centre_x():
     payload = dict(image_size=dict(width=640, height=480), detections=[dict(
         class_name='person', confidence=.9, xyxy=[400., 0., 500., 480.])])
     direction = person_direction_on_floor(payload, matrix, np.zeros(5), camera, .8)
+    expected = np.array([1., -.26])
+    expected /= np.linalg.norm(expected)
+    np.testing.assert_allclose(direction, expected)
+
+
+def test_direction_only_uses_highest_confidence_person():
+    camera = np.eye(4)
+    camera[:3, :3] = [[0., 0., 1.], [-1., 0., 0.], [0., -1., 0.]]
+    matrix = np.array([[500., 0., 320.], [0., 500., 240.], [0., 0., 1.]])
+    payload = dict(image_size=dict(width=640, height=480), detections=[
+        dict(class_name='person', confidence=.81, xyxy=[100., 0., 200., 480.]),
+        dict(class_name='person', confidence=.96, xyxy=[400., 0., 500., 480.]),
+    ])
+    direction = person_direction_on_floor(
+        payload, matrix, np.zeros(5), camera, .8)
     expected = np.array([1., -.26])
     expected /= np.linalg.norm(expected)
     np.testing.assert_allclose(direction, expected)

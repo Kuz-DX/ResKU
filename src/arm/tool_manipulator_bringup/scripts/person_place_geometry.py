@@ -11,12 +11,23 @@ import numpy as np
 from tool_docking_core import transform
 
 
+def highest_confidence_person(payload, min_confidence):
+    """Select the highest-confidence person above the configured threshold."""
+    people = [
+        (float(d['confidence']), d)
+        for d in payload['detections']
+        if d.get('class_name') == 'person'
+        and float(d['confidence']) >= min_confidence
+    ]
+    if not people:
+        raise ValueError('at least one confident person required')
+    # max() preserves the first detection when confidence values are equal.
+    return max(people, key=lambda item: item[0])[1]
+
+
 def person_on_floor(payload, camera_matrix, distortion, floor_camera, min_confidence):
-    people = [d for d in payload['detections']
-              if d.get('class_name') == 'person' and float(d['confidence']) >= min_confidence]
-    if len(people) != 1:
-        raise ValueError('exactly one confident person required')
-    box = np.asarray(people[0]['xyxy'], dtype=float)
+    person = highest_confidence_person(payload, min_confidence)
+    box = np.asarray(person['xyxy'], dtype=float)
     width, height = payload['image_size']['width'], payload['image_size']['height']
     if (box.shape != (4,) or not np.isfinite(box).all()
             or not 1 < box[0] < box[2] < width-2
@@ -37,11 +48,8 @@ def person_on_floor(payload, camera_matrix, distortion, floor_camera, min_confid
 def person_direction_on_floor(payload, camera_matrix, distortion, floor_camera,
                               min_confidence):
     """Horizontal bearing from bbox centre X; distance and visible feet are unnecessary."""
-    people = [d for d in payload['detections']
-              if d.get('class_name') == 'person' and float(d['confidence']) >= min_confidence]
-    if len(people) != 1:
-        raise ValueError('exactly one confident person required')
-    box = np.asarray(people[0]['xyxy'], dtype=float)
+    person = highest_confidence_person(payload, min_confidence)
+    box = np.asarray(person['xyxy'], dtype=float)
     width = payload['image_size']['width']
     if (box.shape != (4,) or not np.isfinite(box).all()
             or not box[0] < box[2] or box[2] < 0 or box[0] > width):

@@ -16,6 +16,8 @@ def generate_launch_description():
         'target_class': ('supplybox', str),
         'conf_threshold': ('0.5', float),
         'infer_size': ('320', int),
+        'perf_hint': ('LATENCY', str),
+        'stats_period_s': ('5.0', float),
         'depth_roi_radius': ('5', int),
         'max_depth_m': ('1.0', float),
         'planning_frame': ('base_actuator', str),
