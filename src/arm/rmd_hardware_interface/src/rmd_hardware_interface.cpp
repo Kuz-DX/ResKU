@@ -346,6 +346,11 @@ namespace rmd_hardware_interface {
   }
 
   CallbackReturn MyActuatorRmdHardwareInterface::on_init(hardware_interface::HardwareInfo const& info) {
+    // A previous component may have been interrupted during initialization.
+    // Do not create ROS nodes or touch CAN after context shutdown.
+    if (!rclcpp::ok()) {
+      return CallbackReturn::ERROR;
+    }
     if (hardware_interface::ActuatorInterface::on_init(info) != CallbackReturn::SUCCESS) {
       return CallbackReturn::ERROR;
     }

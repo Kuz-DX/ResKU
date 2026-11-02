@@ -325,11 +325,17 @@ hardware_interface::CallbackReturn DynamixelHardware::on_init(
     if (requires_ping) {
       bool success = false;
       for (int attempt = 0; attempt < 10; ++attempt) {
+        if (!rclcpp::ok()) {
+          return hardware_interface::CallbackReturn::ERROR;
+        }
         if (dxl_comm_->InitDxlComm(comm_id, id) == DxlError::OK) {
           success = true;
           break;
         }
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+        // Preserve the retry interval, but stop waiting promptly on SIGINT.
+        for (int tick = 0; tick < 20 && rclcpp::ok(); ++tick) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
       }
       if (!success) {
         RCLCPP_ERROR_STREAM(

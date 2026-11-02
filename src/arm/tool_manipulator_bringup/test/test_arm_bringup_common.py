@@ -60,7 +60,7 @@ def test_real_mode_runs_shared_preflight_and_passes_tool_mapping():
             patch.object(common, "Node", side_effect=lambda **kwargs: kwargs), \
             patch.object(common, "get_package_share_directory", return_value=str(ROOT)), \
             patch.object(common, "validate_hardware") as validate:
-        common.build_arm_base(
+        result = common.build_arm_base(
             real_hardware=True,
             hardware_file=hardware,
             tool_id="1",
@@ -68,6 +68,8 @@ def test_real_mode_runs_shared_preflight_and_passes_tool_mapping():
         )
 
     validate.assert_called_once_with(str(Path(hardware).resolve()), "real control blocked")
+    assert result.control_node["package"] == "tool_manipulator_bringup"
+    assert result.control_node["executable"] == "arm_ros2_control_node"
     mappings = builder.robot_description.call_args.kwargs["mappings"]
     assert mappings["use_mock_hardware"] == "false"
     assert mappings["tool_id"] == "1"

@@ -2,6 +2,13 @@ cmake_minimum_required(VERSION 3.8)
 project(tool_manipulator_bringup LANGUAGES C CXX)
 
 find_package(ament_cmake REQUIRED)
+find_package(controller_manager REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(realtime_tools REQUIRED)
+add_executable(arm_ros2_control_node src/arm_ros2_control_node.cpp)
+target_compile_features(arm_ros2_control_node PRIVATE cxx_std_14)
+ament_target_dependencies(arm_ros2_control_node controller_manager rclcpp realtime_tools)
+install(TARGETS arm_ros2_control_node DESTINATION lib/${PROJECT_NAME})
 
 install(DIRECTORY launch DESTINATION share/${PROJECT_NAME}
   PATTERN "__pycache__" EXCLUDE)

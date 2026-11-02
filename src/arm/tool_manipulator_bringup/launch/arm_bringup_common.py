@@ -105,8 +105,8 @@ def build_arm_base(
         manual_controller_file or str(bringup_share / "config/manual_controllers.yaml"),
     ]
     control_node = Node(
-        package="controller_manager",
-        executable="ros2_control_node",
+        package="tool_manipulator_bringup" if real_hardware else "controller_manager",
+        executable="arm_ros2_control_node" if real_hardware else "ros2_control_node",
         parameters=[description, *controller_files],
         output="screen",
     )
