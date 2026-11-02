@@ -71,7 +71,7 @@ def test_shipped_config_enables_tool0_and_tool1_camera_normal_docking():
     assert set(cfg) == {0, 1}
     assert cfg[0]['alignment_mode'] == 'fixed_joint_goal'
     np.testing.assert_allclose(cfg[0]['final_joint_goal'], [
-        -np.pi, .21151712949834325, 1.1755009219319108, -1.1885271125779613, 0., 0.])
+        -np.pi, .14821550205607423, 1.2462314095052063, -1.0696692990469152, 0., 0.])
     assert cfg[0]['tag_family'] == 'tag36h11'
     assert cfg[0]['tag_id'] == 0
     assert cfg[0]['tag_size_m'] == .020
@@ -363,11 +363,11 @@ def test_fixed_joint_tail_ends_at_measured_docking_pose(tmp_path):
     assert n.advance_plan['cartesian_line']
     assert len(n.advance_plan['waypoints']) == 15
     final = n.model.fk(expected)
-    capture4 = np.array([-2.997398, .189194, 1.152266, -1.194329, -.007670, .019942])
-    measured_final = n.model.fk(capture4)
+    last_capture = np.array([-3.141593, .126711, 1.208641, -1.103397, -.006136, -.001534])
+    measured_final = n.model.fk(last_capture)
     np.testing.assert_allclose(final[[0, 2], 3], measured_final[[0, 2], 3], atol=1e-10)
     assert final[1, 3] == pytest.approx(0., abs=1e-12)
-    approach_capture = np.array([-3.176874, .311018, .922057, -1.541475, -.003068, -.019942])
+    approach_capture = np.array([-3.141593, .243648, 1.223650, -1.187696, -.006136, -.001534])
     approach_pose = n.model.fk(approach_capture)
     assert final[2, 2] == pytest.approx(approach_pose[2, 2], abs=1e-10)
     previous = q
