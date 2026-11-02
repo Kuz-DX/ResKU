@@ -64,6 +64,7 @@ class Manual(ManualController):
 
     def __init__(self):
         # The base constructor calls the overridden hold() while loading URDF.
+        self.docking = None
         self.controller_ready = False
         self.phase = 'waiting'
         self.status = 'waiting for controller and feedback'
@@ -129,6 +130,15 @@ class Manual(ManualController):
                                       'No automatic home or grasp.')
         else:
             self.get_logger().warning(collision_notice + 'Automatic startup recovery is disabled.')
+        enabled = self.declare_parameter('docking_assist_enabled', True).value
+        if enabled and self.local_tool_paths and not self.collision_guarded:
+            from ament_index_python.packages import get_package_share_directory
+            from manual_docking import ManualDocking
+            default_config = str(Path(get_package_share_directory(
+                'tool_manipulator_bringup'))/'config/manual_docking_assist.yaml')
+            self.docking = ManualDocking(self,
+                self.declare_parameter('docking_assist_config', default_config).value,
+                self.declare_parameter('docking_mock_input', False).value)
 
     def now_seconds(self):
         # Watchdogs must continue to expire if ROS /clock stalls or jumps.
@@ -183,6 +193,8 @@ class Manual(ManualController):
 
     def on_focus(self, message):
         if message.data != self.focus:
+            if getattr(self, 'docking', None) is not None:
+                self.docking.cancel('focus changed')
             self.publish_ee_velocity(0.)
             self.stop_pose_active = False
             self.stop_target = None
@@ -200,12 +212,15 @@ class Manual(ManualController):
         buttons = ('base_ccw_button', 'base_cw_button', 'ee_enable_button', 'focus_button', 'stop_pose_button')
         if (len(message.axes) <= max(self.params[n] for n in axes) or
                 len(message.buttons) <= max(self.params[n] for n in buttons) or
-                not all(math.isfinite(v) for v in message.axes)):
+                not all(math.isfinite(v) for v in message.axes) or
+                not all(v in (0, 1) for v in message.buttons)):
             self.joy, self.joy_time = None, None
             self.path_points = None
             self.path_l2_held = False
             self.path_combos = [False, False, False]
             self.neutral_required = True
+            if getattr(self, 'docking', None) is not None:
+                self.docking.cancel('invalid joystick')
             return
         super().on_joy(message)
         l2 = len(message.axes) > 2 and message.axes[2] < -.5
@@ -218,6 +233,10 @@ class Manual(ManualController):
         if self.path_points is not None and not l2:
             self.path_points = None
             self.neutral_required = True
+        if (getattr(self, 'docking', None) is not None and
+                self.docking.handle_joy(request, message, l2)):
+            self.previous_stop_pose = bool(message.buttons[3])
+            return
         if (self.local_tool_paths and request is not None and
                 self.path_points is None and not self.stop_pose_active):
             self.start_tool_path(request)
@@ -267,6 +286,9 @@ class Manual(ManualController):
 
     def start_tool_path(self, path_id):
         if not self.local_tool_paths:
+            return
+        if path_id in (0, 1) and getattr(self, 'docking', None) is not None:
+            self.docking.select(path_id)
             return
         if (not self.controller_ready or self.focus != 'arm' or self.neutral_required or
                 self.hardware_fault or self.fault or self.startup_recovering or
@@ -388,6 +410,8 @@ class Manual(ManualController):
         return velocity
 
     def fail_controller(self, reason):
+        if getattr(self, 'docking', None) is not None:
+            self.docking.cancel(reason)
         self.phase, self.status = 'failed', reason
         self.controller_ready = False
         self.fault = True
@@ -632,6 +656,8 @@ class Manual(ManualController):
             self.publisher.publish(Float64MultiArray(data=self.target.tolist()))
 
     def stop(self, reason, dt):
+        if getattr(self, 'docking', None) is not None and self.docking.selected:
+            self.docking.cancel(reason)
         self.stop_pose_active = False
         self.path_points = None
         self.publish_ee_velocity(0.)
@@ -650,6 +676,7 @@ class Manual(ManualController):
         measured = [self.positions.get(n) for n in JOINTS]
         target = None if self.target is None else self.target.tolist()
         data = dict(monotonic_sec=self.now_seconds(), dt_sec=dt, joints=JOINTS,
+                    docking_assist=(self.docking.snapshot() if getattr(self, 'docking', None) is not None else None),
                     collision=getattr(self, 'collision_status', None),
                     status=self.status, phase=self.phase, focus=self.focus, fault=self.fault,
                     activation_blockers=getattr(self, 'activation_blockers', []),
@@ -723,6 +750,8 @@ class Manual(ManualController):
         elif not fresh_joy or self.focus != 'arm' or self.chain is None:
             self.path_points = None
             self.stop('input timeout' if not fresh_joy else 'input disabled', dt)
+        elif getattr(self, 'docking', None) is not None and self.docking.selected:
+            self.docking.run(now, dt)
         elif self.path_points is not None and self.path_l2_held:
             self.run_tool_path(dt)
         elif self.path_l2_held:
@@ -735,31 +764,37 @@ class Manual(ManualController):
         elif getattr(self, 'stop_pose_active', False):
             self.run_stop_pose(dt)
         else:
-            self.status = 'operator control'
-            self.stop_target = None
-            measured = self.measured()
-            velocity = self.command_velocity(measured)
-            candidate = self.target.copy()
-            groups = ((slice(1, 4), slice(0, 1), slice(4, 5), slice(5, 6))
-                      if self.pitch_vertical_active else self.limit_groups)
-            for indexes in groups:
-                step = bounded_step(self.target[indexes], velocity[indexes], self.lower[indexes],
-                                    self.upper[indexes], dt, self.params['limit_margin_rad'])
-                index = indexes.start
-                if index in (1, 2, 3) and not np.allclose(
-                        step-self.target[indexes], velocity[indexes]*dt, atol=1e-12, rtol=0.):
-                    if JOINTS[index] not in self.rmd_limit_blocked_joints:
-                        self.rmd_limit_blocked_joints.extend(JOINTS[indexes] if self.pitch_vertical_active else [JOINTS[index]])
-                # Vertical motion shares limits and lead budget across all RMDs
-                # to preserve pitch. Legacy bending retains per-joint gates.
-                if np.max(np.abs(step-measured[indexes])) <= self.params['max_target_lead_rad']:
-                    candidate[indexes] = step
-                elif index in (1, 2, 3) and abs(velocity[index]) > 1e-12:
-                    self.rmd_lead_blocked_joints.extend(JOINTS[indexes] if self.pitch_vertical_active else [JOINTS[index]])
-            if dt > 0:
-                self.rmd_applied_velocity = (candidate[1:4]-self.target[1:4])/dt
-            self.apply_motion(candidate, self.ee_velocity(), 'operator', dt)
+            self.run_operator(now, dt)
         self.emit_diagnostics(elapsed)
+
+    def run_operator(self, now, dt):
+        """Original manual mapping/integration, with optional AprilTag correction."""
+        self.status = 'operator control'
+        self.stop_target = None
+        measured = self.measured()
+        velocity = self.command_velocity(measured)
+        candidate = self.target.copy()
+        groups = ((slice(1, 4), slice(0, 1), slice(4, 5), slice(5, 6))
+                  if self.pitch_vertical_active else self.limit_groups)
+        for indexes in groups:
+            step = bounded_step(self.target[indexes], velocity[indexes], self.lower[indexes],
+                                self.upper[indexes], dt, self.params['limit_margin_rad'])
+            index = indexes.start
+            if index in (1, 2, 3) and not np.allclose(
+                    step-self.target[indexes], velocity[indexes]*dt, atol=1e-12, rtol=0.):
+                if JOINTS[index] not in self.rmd_limit_blocked_joints:
+                    self.rmd_limit_blocked_joints.extend(JOINTS[indexes] if self.pitch_vertical_active else [JOINTS[index]])
+            # Vertical motion shares limits and lead budget across all RMDs
+            # to preserve pitch. Legacy bending retains per-joint gates.
+            if np.max(np.abs(step-measured[indexes])) <= self.params['max_target_lead_rad']:
+                candidate[indexes] = step
+            elif index in (1, 2, 3) and abs(velocity[index]) > 1e-12:
+                self.rmd_lead_blocked_joints.extend(JOINTS[indexes] if self.pitch_vertical_active else [JOINTS[index]])
+        if getattr(self, 'docking', None) is not None and self.docking.selected:
+            candidate = self.docking.adjust(candidate, measured, now, dt)
+        if dt > 0:
+            self.rmd_applied_velocity = (candidate[1:4]-self.target[1:4])/dt
+        self.apply_motion(candidate, self.ee_velocity(), 'operator', dt)
 
     def shutdown_controller(self):
         self.publish_ee_velocity(0.)

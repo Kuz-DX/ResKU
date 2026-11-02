@@ -50,6 +50,7 @@ install(FILES scripts/zero_calibration.py DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY config/ DESTINATION share/${PROJECT_NAME}/config
   PATTERN "*.bak-*" EXCLUDE)
 install(FILES scripts/manual_control_common.py DESTINATION lib/${PROJECT_NAME})
+install(FILES scripts/manual_docking.py scripts/manual_docking_core.py DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY docs/ DESTINATION share/${PROJECT_NAME}/docs)
 install(FILES README.md DESTINATION share/${PROJECT_NAME})
 # Separate experimental entry points; production scripts remain unchanged.

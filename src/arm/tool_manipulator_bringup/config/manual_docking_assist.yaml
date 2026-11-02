@@ -1,0 +1,51 @@
+# Only manual.launch.py consumes this file. Units: metres, seconds, radians.
+# ASSUMED / 임의값: all tuning below is a simulation starting point, NOT measured
+# performance or calibrated docking geometry. Replace after physical calibration.
+control:
+  # Correction reaches full strength at this existing manual approach speed.
+  # This does NOT set a new joystick/TCP movement speed or input mapping.
+  assist_full_speed_m_s: 0.010
+  lateral_gain_s_inv: 0.8
+  angular_gain_s_inv: 0.8
+  max_lateral_correction_m_s: 0.003
+  max_angular_correction_rad_s: 0.030
+  joint_speed_rad_s: 0.060
+  damping: 0.020
+  rotation_weight_m: 0.20
+  max_target_distance_m: 0.15
+  max_target_angle_rad: 0.60
+  lateral_tolerance_m: 0.005
+  angle_tolerance_rad: 0.08
+  axial_tolerance_m: 0.001
+  slowdown_distance_m: 0.030
+  tag_max_age_s: 0.25
+  acquire_timeout_s: 5.0
+  stable_samples: 3
+  max_tag_position_jump_m: 0.010
+  max_tag_angle_jump_rad: 0.10
+# ASSUMED / 임의값: input-quality thresholds, reused from existing docking
+# settings as initial values; no camera recognition performance was evaluated.
+vision:
+  min_decision_margin: 40.0
+  max_reprojection_px: 1.5
+  min_tag_edge_px: 30.0
+  min_pnp_solution_gap_px: 0.05
+  position_tolerance_m: 0.002
+  angle_tolerance_rad: 0.02
+tools:
+  0:
+    tag_id: 0                  # Existing repository tag assignment.
+    tag_family: tag36h11
+    tag_size_m: 0.020          # Existing repository black-square size.
+    # ASSUMED / 임의 적용값: copied from tool_docking.yaml, not measured here.
+    # T_tag_tcp is expressed in the RAW PnP tag frame. In particular identity
+    # assumes its axes match the desired TCP axes; verify printed-tag rotation.
+    tag_to_tcp_xyz_m: [-0.0457, 0.0, -0.05157]
+    tag_to_tcp_xyzw: [0.0, 0.0, 0.0, 1.0]
+  1:
+    tag_id: 1
+    tag_family: tag36h11
+    tag_size_m: 0.020
+    # ASSUMED / 임의 적용값: existing reference, not verified for this mode.
+    tag_to_tcp_xyz_m: [-0.0457, 0.0, -0.0500]
+    tag_to_tcp_xyzw: [0.0, 0.0, 0.0, 1.0]
