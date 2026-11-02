@@ -71,8 +71,7 @@ def test_shipped_config_enables_tool0_and_tool1_camera_normal_docking():
     assert set(cfg) == {0, 1}
     assert cfg[0]['alignment_mode'] == 'fixed_joint_goal'
     np.testing.assert_allclose(cfg[0]['final_joint_goal'], [
-        -3.146194595953657, .20978856743444488, 1.3679890197762559,
-        -.9571385644568514, -.0828349625460314, -.015339807878650191])
+        -3.242835, .173660, 1.256986, -1.100256, .039884, -.010738])
     assert cfg[0]['tag_family'] == 'tag36h11'
     assert cfg[0]['tag_id'] == 0
     assert cfg[0]['tag_size_m'] == .020
@@ -355,6 +354,11 @@ def test_fixed_joint_tail_ends_at_measured_docking_pose(tmp_path):
     expected[0] += 2.*math.pi*round((q[0]-expected[0])/(2.*math.pi))
     np.testing.assert_allclose(n.advance_plan['waypoints'][-1], expected)
     assert n.advance_plan['stop_at_waypoints'][-1] is True
+    intermediate = n.cfg['intermediate_joint_goals'][0]
+    hits = [i for i, point in enumerate(n.advance_plan['waypoints'])
+            if np.allclose(point, intermediate)]
+    assert len(hits) == 1
+    assert n.advance_plan['stop_at_waypoints'][hits[0]] is True
     assert not n.advance_plan['cartesian_line']
     assert n.advance_plan['allowed_collision_pairs'] == frozenset((
         ('tool_case_1', 'wrist_link_yaw'),))

@@ -18,9 +18,11 @@ tools:
     tag_family: tag36h11
     tag_id: 0
     tag_size_m: 0.020
-    final_joint_goal_rad: [-3.146194595953657, 0.20978856743444488,
-      1.3679890197762559, -0.9571385644568514,
-      -0.0828349625460314, -0.015339807878650191]
+    # Visit the second measured pose before the final docking pose.
+    intermediate_joint_goals_rad:
+      - [-3.242835, 0.232652, 1.263444, -1.143714, 0.038350, -0.010738]
+    final_joint_goal_rad: [-3.242835, 0.173660, 1.256986, -1.100256,
+      0.039884, -0.010738]
     actuation_enabled: true
     desired_docked: true           # true=attach pulse, false=release pulse
     actuation_timeout_s: 10.0

@@ -233,6 +233,12 @@ def load_settings(filename):
                 raise ValueError(
                     f'{tool_label(tool_id)}: six finite final_joint_goal_rad values required')
             item['final_joint_goal'] = goal
+            intermediate = np.asarray(item.get('intermediate_joint_goals_rad', []), dtype=float)
+            if intermediate.size == 0:
+                intermediate = np.empty((0, 6))
+            if intermediate.ndim != 2 or intermediate.shape[1] != 6 or not np.all(np.isfinite(intermediate)):
+                raise ValueError('intermediate_joint_goals_rad requires finite six-joint rows')
+            item['intermediate_joint_goals'] = intermediate
             if (item['actuation_enabled']
                     and type(item.get('desired_docked')) is not bool):
                 raise ValueError('fixed-joint actuation requires desired_docked state')

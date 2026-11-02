@@ -548,13 +548,19 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
 
     def start_final_joint_goal(self, q):
         """Build one fully checked joint-space tail to the measured dock pose."""
-        goal = np.asarray(self.cfg['final_joint_goal'], dtype=float).copy()
-        goal[0] += 2.*math.pi*round((q[0]-goal[0])/(2.*math.pi))
-        if not self.model.within_limits(goal, self.margin):
-            raise RuntimeError('final docking joint goal violates planning limits')
-        count = max(1, math.ceil(float(np.max(np.abs(goal-q)))
-                                 / self.cfg['joint_step_rad']))
-        waypoints = [q+(goal-q)*(i/count) for i in range(1, count+1)]
+        goals = list(self.cfg.get('intermediate_joint_goals', [])) + [self.cfg['final_joint_goal']]
+        waypoints, stops, seed = [], [], q.copy()
+        for captured in goals:
+            goal = np.asarray(captured, dtype=float).copy()
+            goal[0] += 2.*math.pi*round((seed[0]-goal[0])/(2.*math.pi))
+            if not self.model.within_limits(goal, self.margin):
+                raise RuntimeError('docking joint waypoint violates planning limits')
+            count = max(1, math.ceil(float(np.max(np.abs(goal-seed)))
+                                     / self.cfg['joint_step_rad']))
+            waypoints.extend(seed+(goal-seed)*(i/count) for i in range(1, count+1))
+            stops.extend([False]*(count-1)+[True])
+            seed = goal
+        count = len(waypoints)
         durations, previous = [], q.copy()
         for point in waypoints:
             durations.append(max(.02, float(np.max(np.abs(point-previous)))
@@ -568,7 +574,7 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         self.advance_plan = dict(
             start=q.copy(), waypoints=waypoints, durations=durations,
             total=sum(durations), start_error=0., cartesian_line=False,
-            stop_at_waypoints=[False]*(count-1)+[True],
+            stop_at_waypoints=stops,
             allowed_collision_pairs=frozenset((
                 tuple(sorted(('tool_case_1', 'wrist_link_yaw'))),)))
         self.report('advance_planning',
