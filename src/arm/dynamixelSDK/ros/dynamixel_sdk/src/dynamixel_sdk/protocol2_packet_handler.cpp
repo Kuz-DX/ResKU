@@ -319,6 +319,15 @@ int Protocol2PacketHandler::rxPacket(PortHandler *port, uint8_t *rxpacket, bool 
       result = COMM_RX_FAIL;
       break;
     }
+    // Opt-in raw transport diagnostics; disabled during normal operation.
+    // Print chunks before parsing so invalid headers/lengths are observable.
+    if (received > 0 && getenv("DXL_PACKET_TRACE") != NULL) {
+      fprintf(stderr, "[DXL RX] offset=%u count=%d bytes=", rx_length, received);
+      for (int i = 0; i < received && i < 32; ++i)
+        fprintf(stderr, "%02X ", rxpacket[rx_length + i]);
+      if (received > 32) fprintf(stderr, "...");
+      fprintf(stderr, "\n");
+    }
     rx_length += received;
     if (rx_length >= wait_length)
     {

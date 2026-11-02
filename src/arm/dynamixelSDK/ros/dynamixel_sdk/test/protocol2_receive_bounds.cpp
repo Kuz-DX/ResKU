@@ -22,4 +22,9 @@ int main(){auto h=Protocol2PacketHandler::getInstance();uint8_t error=0;
  for(int len:{4,40,1017,1018,1024}){Fake p;p.bytes=packet(len);int r=h->write1ByteTxRx(&p,4,64,0,&error);assert(r==(len==4?COMM_SUCCESS:COMM_RX_CORRUPT));}
  for(int len:{0,1,2,3}){Fake p;p.bytes=packet(4);p.bytes[5]=len;assert(h->write1ByteTxRx(&p,4,64,0,&error)!=COMM_SUCCESS);}
  Fake p;p.fail=true;assert(h->write1ByteTxRx(&p,4,64,0,&error)==COMM_RX_FAIL);
- puts("10 packet/error cases passed");}
+ // Normal startup ping and feedback read must remain compatible.
+ Fake ping;ping.bytes=packet(7);uint16_t model=65535;
+ assert(h->ping(&ping,4,&model,&error)==COMM_SUCCESS);assert(model==0);
+ Fake read;read.bytes=packet(8);uint32_t value=123;
+ assert(h->read4ByteTxRx(&read,4,132,&value,&error)==COMM_SUCCESS);assert(value==0);
+ puts("12 packet/error cases passed (including normal ping/read)");}
