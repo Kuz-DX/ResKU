@@ -570,6 +570,7 @@ class ToolTrajectoryJoy(Node):
         self.actuation_deadline = None
         self.collision_deadline = None
         self.sequence_phase = 'approach'
+        self.return_home_after_back = False
 
     def report(self, state, reason):
         self.diagnostics.publish(String(data=json.dumps(dict(
@@ -898,6 +899,9 @@ class ToolTrajectoryJoy(Node):
         if error <= self.back_tolerance:
             self.back_ready = True
             self.back_ready_epoch = status.get('epoch')
+            if getattr(self, 'return_home_after_back', False):
+                self.begin_named_route('home')
+                return
             self.report('completed',
                         'already at BACK; no motion planned, select tool0/1/2')
             self.reset()
@@ -938,6 +942,37 @@ class ToolTrajectoryJoy(Node):
     def begin_docking_retreat(self):
         """Build a checked straight TCP retreat before planning directly to BACK."""
         self.healthy_hold(time.monotonic())
+        if self.path_id == 0 and getattr(self, 'tool0_removal_complete', False):
+            advance = getattr(self, 'advance_plan', None)
+            if not advance or not advance.get('waypoints'):
+                raise RuntimeError('completed docking path unavailable for reverse retreat')
+            seed = np.asarray([self.full_state[j] for j in ARM_JOINTS], dtype=float)
+            if np.max(np.abs(seed-advance['waypoints'][-1])) > self.cfg['joint_tolerance_rad']:
+                raise RuntimeError('reverse retreat start differs from final docking goal')
+            waypoints = [np.asarray(q, dtype=float).copy() for q in
+                         reversed([advance['start'], *advance['waypoints'][:-1]])]
+            forward_stops = [True, *advance['stop_at_waypoints'][:-1]]
+            durations, previous = [], seed
+            for goal in waypoints:
+                if not self.model.within_limits(goal, self.margin):
+                    raise RuntimeError('reverse docking waypoint violates limits')
+                durations.append(max(.02, float(np.max(np.abs(goal-previous))) /
+                                     self.cfg['joint_speed_rad_s']))
+                if advance.get('cartesian_line', False):
+                    distance = np.linalg.norm(self.model.fk(goal)[:3, 3] -
+                                              self.model.fk(previous)[:3, 3])
+                    durations[-1] = max(durations[-1], distance/self.cfg['linear_speed_m_s'])
+                previous = goal
+            self.return_home_after_back = True
+            self.route_kind = 'dock_retreat'
+            self.report('retreating', 'checking reversed docking path; then BACK -> HOME')
+            self.begin(self.path_id, dict(
+                start=seed, waypoints=waypoints, durations=durations,
+                total=sum(durations), start_error=0.,
+                cartesian_line=advance.get('cartesian_line', False),
+                stop_at_waypoints=list(reversed(forward_stops)),
+                allowed_collision_pairs=advance.get('allowed_collision_pairs', frozenset())))
+            return
         target = self.pre_dock_targets.get(self.path_id)
         if target is None:
             raise RuntimeError(f'{tool_label(self.path_id)} retreat configuration unavailable')
@@ -1136,11 +1171,15 @@ class ToolTrajectoryJoy(Node):
                 raise RuntimeError(f'BACK completion feedback mismatch ({error:.4f} rad)')
             self.back_ready = True
             self.back_ready_epoch = self.status.get('epoch')
+            if getattr(self, 'return_home_after_back', False):
+                self.report('returning', 'BACK feedback verified; automatically planning HOME')
+                self.begin_named_route('home')
+                return
             self.report('completed', 'BACK reached and feedback verified; select tool0/1/2')
             self.reset()
             return
         if getattr(self, 'route_kind', None) == 'dock_retreat':
-            self.report('retreated', 'Cartesian docking retreat completed; planning direct BACK')
+            self.report('retreated', 'Docking retreat completed; planning direct BACK')
             self.begin_back(via_home=False)
             return
         after = self.paths[self.path_id].get('after_path')

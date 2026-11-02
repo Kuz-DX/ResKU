@@ -4,9 +4,8 @@
 targets:
   tool0:
     joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
-    # Lower approach: first of three operator-measured docking poses.
-    pre_joint_goal_rad: [-3.242835, 0.284140, 1.267633, -1.145809,
-      0.038350, -0.010738]
+    # 30 mm before final docking along the final TCP -Z axis.
+    pre_joint_goal_rad: [-3.14159265358979, 0.13573901179137, 1.05724657574179, -1.33028056396925, 0, 0]
     # BACK -> this pre-dock directly crossed the fixed tool case. Route via
     # the previously collision-free approach before planning the second leg.
     transit_joint_goal_rad: [3.1001751723166735, 0.6403612785882697,
@@ -14,10 +13,9 @@ targets:
       -0.021475731030191625]
     executable: true
     role: measured_tagless_pre_dock
-    final_capture_label: lower_docking_capture_3
+    final_capture_label: planar_axial_docking
     # Diagnostic copy; executable final target lives in tool_docking.yaml.
-    final_joint_goal_rad: [-3.242835, 0.173660, 1.256986, -1.100256,
-      0.039884, -0.010738]
+    final_joint_goal_rad: [-3.14159265358979, 0.0800592386984226, 1.12171732060792, -1.21013004601018, 0, 0]
     # Legacy final mating capture retained for comparison only.
     joint_goal_rad: [3.1231848841349588, 0.13823006976715305, 1.2369147556672264,
       -1.093099662587149, -0.00766990393963507, -0.013805827090765277]

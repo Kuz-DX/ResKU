@@ -628,8 +628,8 @@ def test_source_pre_targets_enable_reviewed_tool0_tool1_and_tool2_goals():
     targets = load_pre_dock_targets(source)
     assert set(targets) == {0, 1, 2}
     np.testing.assert_allclose(targets[0]['joint_goal'], [
-        -3.146194595953657, 0.3558726238289994, 1.4789919708557395,
-        -0.970577607686691, -0.0843689433339172, -0.04141748127270617])
+        -np.pi, .13573901179137043, 1.0572465757417897,
+        -1.3302805639692503, 0., 0.])
     np.testing.assert_allclose(targets[0]['transit_joint_goal'], [
         3.1001751723166735, 0.6403612785882697, 1.209862232156147,
         -1.427330240975674, -0.0030679615759781065, -0.021475731030191625])
@@ -995,3 +995,42 @@ def test_path_snapshot_ignores_ee_position_change(module, validation):
         assert ToolTrajectoryJoy.unchanged(node, validation=validation)
     node.full_state['shoulder_joint'] = .006
     assert not ToolTrajectoryJoy.unchanged(node, validation=validation)
+
+
+def test_tool0_reverse_retreat_preserves_waypoints_and_stops():
+    points = [np.full(6, value) for value in (0., .01, .02, .03)]
+    n = SimpleNamespace(
+        healthy_hold=Mock(), path_id=0, tool0_removal_complete=True,
+        advance_plan=dict(start=points[0], waypoints=points[1:],
+                          stop_at_waypoints=[False, True, True],
+                          allowed_collision_pairs=frozenset({('tool_case_1', 'wrist_link_yaw')})),
+        full_state=dict(zip(ARM_JOINTS, points[-1])),
+        cfg=dict(joint_tolerance_rad=.005, joint_speed_rad_s=.025),
+        model=SimpleNamespace(within_limits=lambda q, margin: True), margin=.02,
+        report=Mock(), begin=Mock())
+    ToolTrajectoryJoy.begin_docking_retreat(n)
+    plan = n.begin.call_args.args[1]
+    np.testing.assert_allclose(plan['waypoints'], points[-2::-1])
+    assert plan['stop_at_waypoints'] == [True, False, True]
+    assert n.return_home_after_back
+    assert n.route_kind == 'dock_retreat'
+    n.full_state[ARM_JOINTS[0]] += .02
+    n.begin.reset_mock()
+    with pytest.raises(RuntimeError, match='start differs'):
+        ToolTrajectoryJoy.begin_docking_retreat(n)
+    n.begin.assert_not_called()
+
+
+@pytest.mark.parametrize('automatic', [False, True])
+def test_back_completion_only_continues_home_for_automatic_return(automatic):
+    n = SimpleNamespace(route_kind='back', full_state=dict.fromkeys(ARM_JOINTS, 0.),
+                        route_poses={'back': np.zeros(6)}, back_tolerance=.01,
+                        status={'epoch': 'test'}, return_home_after_back=automatic,
+                        report=Mock(), reset=Mock(), begin_named_route=Mock())
+    ToolTrajectoryJoy.path_completed(n)
+    if automatic:
+        n.begin_named_route.assert_called_once_with('home')
+        n.reset.assert_not_called()
+    else:
+        n.begin_named_route.assert_not_called()
+        n.reset.assert_called_once()

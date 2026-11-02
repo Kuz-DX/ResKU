@@ -560,11 +560,28 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             waypoints.extend(seed+(goal-seed)*(i/count) for i in range(1, count+1))
             stops.extend([False]*(count-1)+[True])
             seed = goal
+        axial = self.cfg.get('axial_sampled_path', False)
+        if axial:
+            # Reject an off-axis measured entry rather than silently dragging it
+            # into the insertion line. All samples still go through collision checks.
+            final_pose = self.model.fk(goal)
+            entry_pose = self.model.fk(q)
+            expected_entry = final_pose.copy()
+            expected_entry[:3, 3] -= final_pose[:3, 2] * .030
+            position_error, angle_error = pose_errors(entry_pose, expected_entry)
+            if position_error > .002 or angle_error > .02:
+                raise RuntimeError('axial docking entry mismatch: '
+                                   f'{position_error:.6f}m, {angle_error:.6f}rad')
+            stops = [False] * (len(waypoints)-1) + [True]
         count = len(waypoints)
         durations, previous = [], q.copy()
         for point in waypoints:
             durations.append(max(.02, float(np.max(np.abs(point-previous)))
                                  / self.cfg['joint_speed_rad_s']))
+            if axial:
+                distance = np.linalg.norm(self.model.fk(point)[:3, 3] -
+                                          self.model.fk(previous)[:3, 3])
+                durations[-1] = max(durations[-1], distance/self.cfg['linear_speed_m_s'])
             previous = point
         self.advance_locked = True
         self.advance_origin = self.model.fk(q)
@@ -573,7 +590,7 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         self.advance_direction = self.advance_target[:3, 2].copy()
         self.advance_plan = dict(
             start=q.copy(), waypoints=waypoints, durations=durations,
-            total=sum(durations), start_error=0., cartesian_line=False,
+            total=sum(durations), start_error=0., cartesian_line=axial,
             stop_at_waypoints=stops,
             allowed_collision_pairs=frozenset((
                 tuple(sorted(('tool_case_1', 'wrist_link_yaw'))),)))

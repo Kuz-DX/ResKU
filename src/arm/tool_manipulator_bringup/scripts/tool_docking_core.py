@@ -174,6 +174,8 @@ def load_settings(filename):
         item = dict(raw)
         if type(item.setdefault('require_l2_hold', True)) is not bool:
             raise ValueError('require_l2_hold must be a boolean')
+        if type(item.get('axial_sampled_path', False)) is not bool:
+            raise ValueError('axial_sampled_path must be a boolean')
         mode = item.setdefault('alignment_mode', 'tag_tcp_stages')
         if mode not in ('tag_tcp_stages', 'camera_normal_advance',
                         'fixed_tcp_axis_advance', 'fixed_joint_goal'):

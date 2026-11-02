@@ -71,7 +71,7 @@ def test_shipped_config_enables_tool0_and_tool1_camera_normal_docking():
     assert set(cfg) == {0, 1}
     assert cfg[0]['alignment_mode'] == 'fixed_joint_goal'
     np.testing.assert_allclose(cfg[0]['final_joint_goal'], [
-        -3.242835, .173660, 1.256986, -1.100256, .039884, -.010738])
+        -np.pi, .08005923869842259, 1.1217173206079156, -1.2101300460101767, 0., 0.])
     assert cfg[0]['tag_family'] == 'tag36h11'
     assert cfg[0]['tag_id'] == 0
     assert cfg[0]['tag_size_m'] == .020
@@ -343,10 +343,11 @@ def test_fixed_joint_tail_ends_at_measured_docking_pose(tmp_path):
     n = node(tmp_path)
     n.cfg = load_settings(ROOT/'config/tool_docking.yaml')[0]
     n.path_id = 0
-    n.model.within_limits.return_value = True
-    n.model.fk.return_value = np.eye(4)
-    q = np.array([-3.146194595953657, .3558726238289994, 1.4789919708557395,
-                  -.970577607686691, -.0843689433339172, -.04141748127270617])
+    from tool_trajectory_joy import ArmKinematics, load_pre_dock_targets
+    n.model = ArmKinematics(
+        ROOT.parent/'tool_manipulator_description/urdf/tool_manipulator.urdf.xacro',
+        ROOT/'config/hardware.yaml')
+    q = load_pre_dock_targets(ROOT/'config/cartesian_targets.yaml')[0]['joint_goal']
 
     n.start_final_joint_goal(q)
 
@@ -358,11 +359,27 @@ def test_fixed_joint_tail_ends_at_measured_docking_pose(tmp_path):
     hits = [i for i, point in enumerate(n.advance_plan['waypoints'])
             if np.allclose(point, intermediate)]
     assert len(hits) == 1
-    assert n.advance_plan['stop_at_waypoints'][hits[0]] is True
-    assert not n.advance_plan['cartesian_line']
+    assert n.advance_plan['stop_at_waypoints'][hits[0]] is False
+    assert n.advance_plan['cartesian_line']
+    final = n.model.fk(expected)
+    previous = q
+    for point, duration in zip(n.advance_plan['waypoints'], n.advance_plan['durations']):
+        for sample in np.linspace(previous, point, 11):
+            pose = n.model.fk(sample)
+            delta = pose[:3, 3]-final[:3, 3]
+            lateral = delta-np.dot(delta, final[:3, 2])*final[:3, 2]
+            assert np.linalg.norm(lateral) < 1e-6
+            assert abs(pose[1, 3]) < 1e-12
+            np.testing.assert_allclose(pose[:3, :3], final[:3, :3], atol=1e-10)
+            assert n.model.within_limits(sample, n.margin)
+        distance = np.linalg.norm(n.model.fk(point)[:3, 3]-n.model.fk(previous)[:3, 3])
+        assert distance/duration <= n.cfg['linear_speed_m_s']+1e-12
+        previous = point
     assert n.advance_plan['allowed_collision_pairs'] == frozenset((
         ('tool_case_1', 'wrist_link_yaw'),))
     n.begin.assert_called_once_with(0, n.advance_plan)
+    with pytest.raises(RuntimeError, match='entry mismatch'):
+        n.start_final_joint_goal(expected)
 
 
 @pytest.mark.parametrize('joint_error,accepted', [(.004, True), (.006, False)])

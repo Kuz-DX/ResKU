@@ -1,0 +1,546 @@
+[INFO] [launch]: All log files can be found below /home/jecs/.ros/log/2026-11-02-19-40-28-074901-jecs-Default-string-292698
+[INFO] [launch]: Default logging verbosity is set to INFO
+Arm hardware config: /home/jecs/ResKU/src/arm/tool_manipulator_bringup/config/hardware.yaml; base_joint zero_raw=1561
+[INFO] [python3-1]: process started with pid [292704]
+[INFO] [python3-1]: process has finished cleanly [pid 292704]
+[INFO] [robot_state_publisher-2]: process started with pid [292738]
+[INFO] [arm_ros2_control_node-3]: process started with pid [292740]
+[INFO] [spawner-4]: process started with pid [292742]
+[robot_state_publisher-2] [INFO] [1793616030.473690375] [robot_state_publisher]: got segment arm_camera_cam_link
+[robot_state_publisher-2] [INFO] [1793616030.473782535] [robot_state_publisher]: got segment arm_world
+[robot_state_publisher-2] [INFO] [1793616030.473789492] [robot_state_publisher]: got segment base_actuator
+[robot_state_publisher-2] [INFO] [1793616030.473794074] [robot_state_publisher]: got segment base_link
+[robot_state_publisher-2] [INFO] [1793616030.473797919] [robot_state_publisher]: got segment cam_link
+[robot_state_publisher-2] [INFO] [1793616030.473801893] [robot_state_publisher]: got segment chassis
+[robot_state_publisher-2] [INFO] [1793616030.473805662] [robot_state_publisher]: got segment circuit_box
+[robot_state_publisher-2] [INFO] [1793616030.473809331] [robot_state_publisher]: got segment ee_actuator
+[robot_state_publisher-2] [INFO] [1793616030.473814976] [robot_state_publisher]: got segment ee_output_link
+[robot_state_publisher-2] [INFO] [1793616030.473820923] [robot_state_publisher]: got segment elbow_actuator
+[robot_state_publisher-2] [INFO] [1793616030.473824856] [robot_state_publisher]: got segment elbow_link
+[robot_state_publisher-2] [INFO] [1793616030.473828539] [robot_state_publisher]: got segment ground
+[robot_state_publisher-2] [INFO] [1793616030.473832605] [robot_state_publisher]: got segment shoulder_actuator
+[robot_state_publisher-2] [INFO] [1793616030.473839096] [robot_state_publisher]: got segment shoulder_link
+[robot_state_publisher-2] [INFO] [1793616030.473845884] [robot_state_publisher]: got segment supply_box
+[robot_state_publisher-2] [INFO] [1793616030.473852526] [robot_state_publisher]: got segment supplybox_pickup_area
+[robot_state_publisher-2] [INFO] [1793616030.473857001] [robot_state_publisher]: got segment tcp_link
+[robot_state_publisher-2] [INFO] [1793616030.473860705] [robot_state_publisher]: got segment tool_case_1
+[robot_state_publisher-2] [INFO] [1793616030.473864392] [robot_state_publisher]: got segment tool_case_1_center
+[robot_state_publisher-2] [INFO] [1793616030.473868127] [robot_state_publisher]: got segment tool_case_1_x_negative_face
+[robot_state_publisher-2] [INFO] [1793616030.473871793] [robot_state_publisher]: got segment tool_case_1_x_positive_face
+[robot_state_publisher-2] [INFO] [1793616030.473875464] [robot_state_publisher]: got segment tool_case_y_plus
+[robot_state_publisher-2] [INFO] [1793616030.473879229] [robot_state_publisher]: got segment tool_case_y_plus_center
+[robot_state_publisher-2] [INFO] [1793616030.473883637] [robot_state_publisher]: got segment tool_case_y_plus_docking
+[robot_state_publisher-2] [INFO] [1793616030.473890113] [robot_state_publisher]: got segment tool_case_y_plus_x_negative_face
+[robot_state_publisher-2] [INFO] [1793616030.473894505] [robot_state_publisher]: got segment tool_case_y_plus_x_positive_face
+[robot_state_publisher-2] [INFO] [1793616030.473899497] [robot_state_publisher]: got segment world
+[robot_state_publisher-2] [INFO] [1793616030.473906167] [robot_state_publisher]: got segment wrist_actuator_pitch
+[robot_state_publisher-2] [INFO] [1793616030.473913012] [robot_state_publisher]: got segment wrist_actuator_roll
+[robot_state_publisher-2] [INFO] [1793616030.473918088] [robot_state_publisher]: got segment wrist_actuator_yaw
+[robot_state_publisher-2] [INFO] [1793616030.473921776] [robot_state_publisher]: got segment wrist_link_pitch
+[robot_state_publisher-2] [INFO] [1793616030.473925370] [robot_state_publisher]: got segment wrist_link_roll
+[robot_state_publisher-2] [INFO] [1793616030.473929096] [robot_state_publisher]: got segment wrist_link_yaw
+[arm_ros2_control_node-3] [WARN] [1793616030.477311581] [controller_manager]: [Deprecated] Passing the robot description parameter directly to the control_manager node is deprecated. Use '~/robot_description' topic from 'robot_state_publisher' instead.
+[arm_ros2_control_node-3] [INFO] [1793616030.477712709] [resource_manager]: Loading hardware 'dynamixel_u2d2' 
+[arm_ros2_control_node-3] [INFO] [1793616030.480595188] [resource_manager]: Initialize hardware 'dynamixel_u2d2' 
+[arm_ros2_control_node-3] transmission_to_joint_matrix_ 
+[arm_ros2_control_node-3] [0][0] 1.000000, [0][1] 0.000000, [0][2] 0.000000, [0][3] 0.000000, 
+[arm_ros2_control_node-3] [1][0] 0.000000, [1][1] 1.000000, [1][2] 0.000000, [1][3] 0.000000, 
+[arm_ros2_control_node-3] [2][0] 0.000000, [2][1] 0.000000, [2][2] 1.000000, [2][3] 0.000000, 
+[arm_ros2_control_node-3] [3][0] 0.000000, [3][1] 0.000000, [3][2] 0.000000, [3][3] 1.000000, 
+[arm_ros2_control_node-3] joint_to_transmission_matrix_ 
+[arm_ros2_control_node-3] [0][0] 1.000000, [0][1] 0.000000, [0][2] 0.000000, [0][3] 0.000000, 
+[arm_ros2_control_node-3] [1][0] 0.000000, [1][1] 1.000000, [1][2] 0.000000, [1][3] 0.000000, 
+[arm_ros2_control_node-3] [2][0] 0.000000, [2][1] 0.000000, [2][2] 1.000000, [2][3] 0.000000, 
+[arm_ros2_control_node-3] [3][0] 0.000000, [3][1] 0.000000, [3][2] 0.000000, [3][3] 1.000000, 
+[arm_ros2_control_node-3] [INFO] [1793616030.480672376] [dynamixel_hardware_interface]: U2D2: TTL Sync Read then RS-485 Read; position Sync Write IDs 1,2,3 and velocity Sync Write ID 4.
+[arm_ros2_control_node-3] [INFO] [1793616030.480684672] [dynamixel_hardware_interface]: Torque will be disabled during initialization if it is enabled at initialization.
+[arm_ros2_control_node-3] [INFO] [1793616030.480694180] [dynamixel_hardware_interface]: port_name /dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FTAAML39-if00-port0 / baudrate 1000000
+[arm_ros2_control_node-3] Dynamixel Information File List.
+[arm_ros2_control_node-3] num: 30, name: mx_28.model
+[arm_ros2_control_node-3] num: 220, name: omy_hat.model
+[arm_ros2_control_node-3] num: 230, name: omy_end.model
+[arm_ros2_control_node-3] num: 231, name: omy_end_rh_p12_rn.model
+[arm_ros2_control_node-3] num: 260, name: hx5_d20_rr.model
+[arm_ros2_control_node-3] num: 261, name: hx5_d20_rl.model
+[arm_ros2_control_node-3] num: 6001, name: hx5_d20_r_synctable_1_device_1.model
+[arm_ros2_control_node-3] num: 6002, name: hx5_d20_r_synctable_1_device_2.model
+[arm_ros2_control_node-3] num: 6003, name: hx5_d20_r_synctable_1_device_3.model
+[arm_ros2_control_node-3] num: 6004, name: hx5_d20_r_synctable_1_device_4.model
+[arm_ros2_control_node-3] num: 6005, name: hx5_d20_r_synctable_1_device_5.model
+[arm_ros2_control_node-3] num: 6006, name: hx5_d20_r_synctable_2_device_1.model
+[arm_ros2_control_node-3] num: 6007, name: hx5_d20_r_synctable_2_device_2.model
+[arm_ros2_control_node-3] num: 6008, name: hx5_d20_r_synctable_2_device_3.model
+[arm_ros2_control_node-3] num: 6009, name: hx5_d20_r_synctable_2_device_4.model
+[arm_ros2_control_node-3] num: 6010, name: hx5_d20_r_synctable_2_device_5.model
+[arm_ros2_control_node-3] num: 6011, name: hx5_d20_r_synctable_3_device_1.model
+[arm_ros2_control_node-3] num: 6012, name: hx5_d20_r_synctable_3_device_2.model
+[arm_ros2_control_node-3] num: 6013, name: hx5_d20_r_synctable_3_device_3.model
+[arm_ros2_control_node-3] num: 6014, name: hx5_d20_r_synctable_3_device_4.model
+[arm_ros2_control_node-3] num: 6015, name: hx5_d20_r_synctable_3_device_5.model
+[arm_ros2_control_node-3] num: 6016, name: hx5_d20_r_synctable_4_device_1.model
+[arm_ros2_control_node-3] num: 6017, name: hx5_d20_r_synctable_4_device_2.model
+[arm_ros2_control_node-3] num: 6018, name: hx5_d20_r_synctable_4_device_3.model
+[arm_ros2_control_node-3] num: 6019, name: hx5_d20_r_synctable_4_device_4.model
+[arm_ros2_control_node-3] num: 6020, name: hx5_d20_r_synctable_4_device_5.model
+[arm_ros2_control_node-3] num: 6021, name: hx5_d20_r_synctable_5_device_1.model
+[arm_ros2_control_node-3] num: 6022, name: hx5_d20_r_synctable_5_device_2.model
+[arm_ros2_control_node-3] num: 6023, name: hx5_d20_r_synctable_5_device_3.model
+[arm_ros2_control_node-3] num: 6024, name: hx5_d20_r_synctable_5_device_4.model
+[arm_ros2_control_node-3] num: 6025, name: hx5_d20_r_synctable_5_device_5.model
+[arm_ros2_control_node-3] num: 311, name: mx_64.model
+[arm_ros2_control_node-3] num: 321, name: mx_106.model
+[arm_ros2_control_node-3] num: 350, name: xl320.model
+[arm_ros2_control_node-3] num: 536, name: sensorxel_joy.model
+[arm_ros2_control_node-3] num: 537, name: ffw_g40_imu.model
+[arm_ros2_control_node-3] num: 600, name: sensorxel_joy.model
+[arm_ros2_control_node-3] num: 601, name: ffw_g10_led.model
+[arm_ros2_control_node-3] num: 602, name: ffw_g10_rcu.model
+[arm_ros2_control_node-3] num: 620, name: ffw_sg2_steer_1.model
+[arm_ros2_control_node-3] num: 621, name: ffw_sg2_steer_2.model
+[arm_ros2_control_node-3] num: 622, name: ffw_sg2_steer_3.model
+[arm_ros2_control_node-3] num: 623, name: ffw_sg2_drive_1.model
+[arm_ros2_control_node-3] num: 624, name: ffw_sg2_drive_2.model
+[arm_ros2_control_node-3] num: 625, name: ffw_sg2_drive_3.model
+[arm_ros2_control_node-3] num: 1000, name: xh430_w350.model
+[arm_ros2_control_node-3] num: 1001, name: xd430_t350.model
+[arm_ros2_control_node-3] num: 1010, name: xh430_w210.model
+[arm_ros2_control_node-3] num: 1011, name: xd430_t210.model
+[arm_ros2_control_node-3] num: 1020, name: xm430_w350.model
+[arm_ros2_control_node-3] num: 1030, name: xm430_w210.model
+[arm_ros2_control_node-3] num: 1040, name: xh430_v350.model
+[arm_ros2_control_node-3] num: 1050, name: xh430_v210.model
+[arm_ros2_control_node-3] num: 1060, name: xl430_w250.model
+[arm_ros2_control_node-3] num: 1070, name: xc430_w150.model
+[arm_ros2_control_node-3] num: 1070, name: xc430_w150.model
+[arm_ros2_control_node-3] num: 1080, name: xc430_w240.model
+[arm_ros2_control_node-3] num: 1080, name: xc430_w240.model
+[arm_ros2_control_node-3] num: 1090, name: 2xl430_w250.model
+[arm_ros2_control_node-3] num: 1100, name: xh540_w270.model
+[arm_ros2_control_node-3] num: 1101, name: xd540_t270.model
+[arm_ros2_control_node-3] num: 1110, name: xh540_w150.model
+[arm_ros2_control_node-3] num: 1111, name: xd540_t150.model
+[arm_ros2_control_node-3] num: 1120, name: xm540_w270.model
+[arm_ros2_control_node-3] num: 1130, name: xm540_w150.model
+[arm_ros2_control_node-3] num: 1140, name: xh540_v270.model
+[arm_ros2_control_node-3] num: 1150, name: xh540_v150.model
+[arm_ros2_control_node-3] num: 1160, name: 2xc430_w250.model
+[arm_ros2_control_node-3] num: 1170, name: xw540_t260.model
+[arm_ros2_control_node-3] num: 1180, name: xw540_t140.model
+[arm_ros2_control_node-3] num: 1190, name: xl330_m077.model
+[arm_ros2_control_node-3] num: 1200, name: xl330_m288.model
+[arm_ros2_control_node-3] num: 1210, name: xc330_t181.model
+[arm_ros2_control_node-3] num: 1220, name: xc330_t288.model
+[arm_ros2_control_node-3] num: 1230, name: xc330_m181.model
+[arm_ros2_control_node-3] num: 1240, name: xc330_m288.model
+[arm_ros2_control_node-3] num: 1270, name: xw430_t333.model
+[arm_ros2_control_node-3] num: 1310, name: xw540_h260.model
+[arm_ros2_control_node-3] num: 1700, name: xc335_t332.model
+[arm_ros2_control_node-3] num: 2000, name: ph42_020_s300.model
+[arm_ros2_control_node-3] num: 2010, name: ph54_100_s500.model
+[arm_ros2_control_node-3] num: 2020, name: ph54_200_s500.model
+[arm_ros2_control_node-3] num: 2100, name: pm42_010_s260.model
+[arm_ros2_control_node-3] num: 2110, name: pm54_040_s250.model
+[arm_ros2_control_node-3] num: 2120, name: pm54_060_s250.model
+[arm_ros2_control_node-3] num: 4000, name: ym070_210_m001.model
+[arm_ros2_control_node-3] num: 4010, name: ym070_210_b001.model
+[arm_ros2_control_node-3] num: 4020, name: ym070_210_r051.model
+[arm_ros2_control_node-3] num: 4030, name: ym070_210_r099.model
+[arm_ros2_control_node-3] num: 4040, name: ym070_210_a051.model
+[arm_ros2_control_node-3] num: 4050, name: ym070_210_a099.model
+[arm_ros2_control_node-3] num: 4120, name: ym080_230_m001.model
+[arm_ros2_control_node-3] num: 4130, name: ym080_230_b001.model
+[arm_ros2_control_node-3] num: 4140, name: ym080_230_r051.model
+[arm_ros2_control_node-3] num: 4150, name: ym080_230_r099.model
+[arm_ros2_control_node-3] num: 4160, name: ym080_230_a051.model
+[arm_ros2_control_node-3] num: 4170, name: ym080_230_a099.model
+[arm_ros2_control_node-3] num: 35074, name: rh_p12_rn.model
+[arm_ros2_control_node-3] num: 43289, name: m42_10_s260_ra.model
+[arm_ros2_control_node-3] num: 46097, name: m54_40_s250_ra.model
+[arm_ros2_control_node-3] num: 46353, name: m54_60_s250_ra.model
+[arm_ros2_control_node-3] num: 51201, name: h42_20_s300_ra.model
+[arm_ros2_control_node-3] num: 53769, name: h54_100_s500_ra.model
+[arm_ros2_control_node-3] num: 54025, name: h54_200_s500_ra.model
+[arm_ros2_control_node-3] [INFO] [1793616030.480880597] [dynamixel_hardware_interface]: $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+[arm_ros2_control_node-3] [INFO] [1793616030.480888608] [dynamixel_hardware_interface]: $$$$$ Init Dxl Comm Port
+[arm_ros2_control_node-3] Succeeded to open the port [/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FTAAML39-if00-port0]! (attempt 1/5)
+[arm_ros2_control_node-3] Succeeded to change the baudrate [1000000]!
+[arm_ros2_control_node-3] [comm_id:001][ID:001] Request ping	 - Ping succeeded. Dynamixel model number : 1100 (xh540_w270.model)
+[arm_ros2_control_node-3] [InitTorqueStates][comm_id:001][ID:001] Current torque state: OFF
+[arm_ros2_control_node-3] [INFO] [1793616030.529015028] [dynamixel_hardware_interface]: [InitItem][comm_id:1][ID:1] item_name: Operating Mode	data: 4
+[arm_ros2_control_node-3] [Init Write][ID:001][addr:11] value=4 dxl_comm_result=0 dxl_error=0
+[arm_ros2_control_node-3] [INFO] [1793616030.544997175] [dynamixel_hardware_interface]: [InitItem][comm_id:1][ID:1] item_name: Current Limit	data: 2047
+[arm_ros2_control_node-3] [INFO] [1793616030.561012560] [dynamixel_hardware_interface]: [InitItem][comm_id:1][ID:1] item_name: Velocity Limit	data: 200
+[arm_ros2_control_node-3] [INFO] [1793616030.576993472] [dynamixel_hardware_interface]: [InitItem][comm_id:1][ID:1] item_name: Position I Gain	data: 20
+[arm_ros2_control_node-3] [INFO] [1793616030.593049122] [dynamixel_hardware_interface]: [InitItem][comm_id:1][ID:1] item_name: Profile Velocity	data: 0
+[arm_ros2_control_node-3] [INFO] [1793616030.609001319] [dynamixel_hardware_interface]: [InitItem][comm_id:1][ID:1] item_name: Profile Acceleration	data: 0
+[arm_ros2_control_node-3] [DXL_PROFILE][ID:1] Operating Mode expected=4 actual=4 result=OK
+[arm_ros2_control_node-3] [DXL_PROFILE][ID:1] Velocity Limit expected=200 actual=200 result=OK
+[arm_ros2_control_node-3] [DXL_PROFILE][ID:1] Profile Velocity expected=0 actual=0 result=OK
+[arm_ros2_control_node-3] [DXL_PROFILE][ID:1] Profile Acceleration expected=0 actual=0 result=OK
+[arm_ros2_control_node-3] [INFO] [1793616030.705008594] [dynamixel_hardware_interface]: DXL_GAIN ID=1 Position_I_Gain=20 verified
+[spawner-4] [INFO] [1793616030.716363892] [spawner_joint_state_broadcaster]: waiting for service /controller_manager/list_controllers to become available...
+[arm_ros2_control_node-3] [comm_id:002][ID:002] Request ping	 - Ping succeeded. Dynamixel model number : 321 (mx_106.model)
+[arm_ros2_control_node-3] [InitTorqueStates][comm_id:002][ID:002] Current torque state: OFF
+[arm_ros2_control_node-3] [INFO] [1793616030.753157732] [dynamixel_hardware_interface]: [InitItem][comm_id:2][ID:2] item_name: Operating Mode	data: 4
+[arm_ros2_control_node-3] [Init Write][ID:002][addr:11] value=4 dxl_comm_result=0 dxl_error=0
+[arm_ros2_control_node-3] [INFO] [1793616030.769148024] [dynamixel_hardware_interface]: [InitItem][comm_id:2][ID:2] item_name: Current Limit	data: 2047
+[arm_ros2_control_node-3] [INFO] [1793616030.785140346] [dynamixel_hardware_interface]: [InitItem][comm_id:2][ID:2] item_name: Velocity Limit	data: 200
+[arm_ros2_control_node-3] [INFO] [1793616030.801069486] [dynamixel_hardware_interface]: [InitItem][comm_id:2][ID:2] item_name: Position I Gain	data: 20
+[arm_ros2_control_node-3] [INFO] [1793616030.817141111] [dynamixel_hardware_interface]: [InitItem][comm_id:2][ID:2] item_name: Profile Velocity	data: 0
+[arm_ros2_control_node-3] [INFO] [1793616030.833166844] [dynamixel_hardware_interface]: [InitItem][comm_id:2][ID:2] item_name: Profile Acceleration	data: 0
+[arm_ros2_control_node-3] [DXL_PROFILE][ID:2] Operating Mode expected=4 actual=4 result=OK
+[arm_ros2_control_node-3] [DXL_PROFILE][ID:2] Velocity Limit expected=200 actual=200 result=OK
+[arm_ros2_control_node-3] [DXL_PROFILE][ID:2] Profile Velocity expected=0 actual=0 result=OK
+[arm_ros2_control_node-3] [DXL_PROFILE][ID:2] Profile Acceleration expected=0 actual=0 result=OK
+[arm_ros2_control_node-3] [INFO] [1793616030.929133629] [dynamixel_hardware_interface]: DXL_GAIN ID=2 Position_I_Gain=20 verified
+[arm_ros2_control_node-3] [comm_id:003][ID:003] Request ping	 - Ping succeeded. Dynamixel model number : 321 (mx_106.model)
+[arm_ros2_control_node-3] [InitTorqueStates][comm_id:003][ID:003] Current torque state: OFF
+[arm_ros2_control_node-3] [INFO] [1793616030.977134532] [dynamixel_hardware_interface]: [InitItem][comm_id:3][ID:3] item_name: Operating Mode	data: 4
+[arm_ros2_control_node-3] [Init Write][ID:003][addr:11] value=4 dxl_comm_result=0 dxl_error=0
+[arm_ros2_control_node-3] [INFO] [1793616030.993115040] [dynamixel_hardware_interface]: [InitItem][comm_id:3][ID:3] item_name: Current Limit	data: 2047
+[arm_ros2_control_node-3] [INFO] [1793616031.009129734] [dynamixel_hardware_interface]: [InitItem][comm_id:3][ID:3] item_name: Velocity Limit	data: 200
+[arm_ros2_control_node-3] [INFO] [1793616031.025130014] [dynamixel_hardware_interface]: [InitItem][comm_id:3][ID:3] item_name: Position I Gain	data: 20
+[arm_ros2_control_node-3] [INFO] [1793616031.041126748] [dynamixel_hardware_interface]: [InitItem][comm_id:3][ID:3] item_name: Profile Velocity	data: 0
+[arm_ros2_control_node-3] [INFO] [1793616031.057110100] [dynamixel_hardware_interface]: [InitItem][comm_id:3][ID:3] item_name: Profile Acceleration	data: 0
+[arm_ros2_control_node-3] [DXL_PROFILE][ID:3] Operating Mode expected=4 actual=4 result=OK
+[arm_ros2_control_node-3] [DXL_PROFILE][ID:3] Velocity Limit expected=200 actual=200 result=OK
+[arm_ros2_control_node-3] [DXL_PROFILE][ID:3] Profile Velocity expected=0 actual=0 result=OK
+[arm_ros2_control_node-3] [DXL_PROFILE][ID:3] Profile Acceleration expected=0 actual=0 result=OK
+[arm_ros2_control_node-3] [INFO] [1793616031.152953157] [dynamixel_hardware_interface]: DXL_GAIN ID=3 Position_I_Gain=20 verified
+[arm_ros2_control_node-3] [comm_id:004][ID:004] Request ping	 - Ping succeeded. Dynamixel model number : 321 (mx_106.model)
+[arm_ros2_control_node-3] [InitTorqueStates][comm_id:004][ID:004] Current torque state: OFF
+[arm_ros2_control_node-3] [INFO] [1793616031.201062514] [dynamixel_hardware_interface]: [InitItem][comm_id:4][ID:4] item_name: Operating Mode	data: 1
+[arm_ros2_control_node-3] [Init Write][ID:004][addr:11] value=1 dxl_comm_result=0 dxl_error=0
+[arm_ros2_control_node-3] [INFO] [1793616031.217053583] [dynamixel_hardware_interface]: [InitItem][comm_id:4][ID:4] item_name: Current Limit	data: 2047
+[arm_ros2_control_node-3] [INFO] [1793616031.233043698] [dynamixel_hardware_interface]: [InitItem][comm_id:4][ID:4] item_name: Velocity Limit	data: 701
+[arm_ros2_control_node-3] [INFO] [1793616031.249034385] [dynamixel_hardware_interface]: [InitItem][comm_id:4][ID:4] item_name: Profile Velocity	data: 10
+[arm_ros2_control_node-3] [INFO] [1793616031.265028610] [dynamixel_hardware_interface]: [InitItem][comm_id:4][ID:4] item_name: Profile Acceleration	data: 5
+[arm_ros2_control_node-3] [INFO] [1793616031.296303860] [dynamixel_hardware_interface]: $$$$$ Init Dxl Read Items
+[arm_ros2_control_node-3] [INFO] [1793616031.296422057] [dynamixel_hardware_interface]: $$$$$ Init Dxl Write Items
+[arm_ros2_control_node-3] [INFO] [1793616031.296444708] [dynamixel_hardware_interface]: Joint 'base_joint' position calibration: zero_offset=-0.747048643700 rad, direction=+1, state_wraparound=false, command_wraparound=false, command_nearest_turn=false.
+[arm_ros2_control_node-3] [INFO] [1793616031.296461942] [dynamixel_hardware_interface]: Joint 'wrist_roll_joint' position calibration: zero_offset=-3.143126634378 rad, direction=+1, state_wraparound=false, command_wraparound=false, command_nearest_turn=false.
+[arm_ros2_control_node-3] [INFO] [1793616031.296468270] [dynamixel_hardware_interface]: Joint 'wrist_yaw_joint' position calibration: zero_offset=-9.386428441072 rad, direction=-1, state_wraparound=true, command_wraparound=false, command_nearest_turn=true.
+[arm_ros2_control_node-3] [INFO] [1793616031.296474488] [dynamixel_hardware_interface]: Joint 'ee_joint' position calibration: zero_offset=-0.085902924122 rad, direction=+1, state_wraparound=false, command_wraparound=false, command_nearest_turn=false.
+[arm_ros2_control_node-3] [INFO] [1793616031.297935603] [resource_manager]: Successful initialization of hardware 'dynamixel_u2d2'
+[arm_ros2_control_node-3] [INFO] [1793616031.297985039] [resource_manager]: Loading hardware 'rmd_shoulder_joint' 
+[arm_ros2_control_node-3] [INFO] [1793616031.298526306] [resource_manager]: Initialize hardware 'rmd_shoulder_joint' 
+[arm_ros2_control_node-3] [INFO] [1793616031.300224709] [rmd_hardware_interface.shoulder_joint]: Joint 'shoulder_joint' encoder correction: sign=-1, q_offset=0.000000000 rad (0.000000 deg).
+[arm_ros2_control_node-3] [INFO] [1793616031.300240283] [resource_manager]: Successful initialization of hardware 'rmd_shoulder_joint'
+[arm_ros2_control_node-3] [INFO] [1793616031.300250956] [resource_manager]: Loading hardware 'rmd_elbow_joint' 
+[arm_ros2_control_node-3] [INFO] [1793616031.300259635] [resource_manager]: Initialize hardware 'rmd_elbow_joint' 
+[arm_ros2_control_node-3] [INFO] [1793616031.301807385] [rmd_hardware_interface.elbow_joint]: Joint 'elbow_joint' encoder correction: sign=-1, q_offset=0.000000000 rad (0.000000 deg).
+[arm_ros2_control_node-3] [INFO] [1793616031.301822251] [resource_manager]: Successful initialization of hardware 'rmd_elbow_joint'
+[arm_ros2_control_node-3] [INFO] [1793616031.301829529] [resource_manager]: Loading hardware 'rmd_wrist_pitch_joint' 
+[arm_ros2_control_node-3] [INFO] [1793616031.301838338] [resource_manager]: Initialize hardware 'rmd_wrist_pitch_joint' 
+[arm_ros2_control_node-3] [INFO] [1793616031.303459068] [rmd_hardware_interface.wrist_pitch_joint]: Joint 'wrist_pitch_joint' encoder correction: sign=+1, q_offset=0.000000000 rad (0.000000 deg).
+[arm_ros2_control_node-3] [INFO] [1793616031.303472369] [resource_manager]: Successful initialization of hardware 'rmd_wrist_pitch_joint'
+[arm_ros2_control_node-3] [INFO] [1793616031.303523821] [resource_manager]: 'configure' hardware 'rmd_wrist_pitch_joint' 
+[arm_ros2_control_node-3] [ERROR] [1793616031.303530827] [rmd_hardware_interface.wrist_pitch_joint]: Could not parse torque constant, won't be able to use torque interface!
+[arm_ros2_control_node-3] [INFO] [1793616031.303536194] [rmd_hardware_interface.wrist_pitch_joint]: Position current protection: limit 2.500 A, release 1.800 A, trigger 100 ms, retreat 0.100 rad/s.
+[arm_ros2_control_node-3] [INFO] [1793616031.303540994] [rmd_hardware_interface.wrist_pitch_joint]: Using velocity low-pass filter with filter constant '0.100000'.
+[arm_ros2_control_node-3] [INFO] [1793616031.303543989] [rmd_hardware_interface.wrist_pitch_joint]: Using effort low-pass filter with filter constant '0.100000'.
+[arm_ros2_control_node-3] [INFO] [1793616031.303546798] [rmd_hardware_interface.wrist_pitch_joint]: Timeout not set, defaulting to '0' ms
+[arm_ros2_control_node-3] [INFO] [1793616031.303549346] [rmd_hardware_interface.wrist_pitch_joint]: Timeout set to 0ms, it will not be used!
+[arm_ros2_control_node-3] [INFO] [1793616031.304017342] [rmd_hardware_interface.wrist_pitch_joint]: Started actuator interface for actuator model ''!
+[arm_ros2_control_node-3] [INFO] [1793616031.304023626] [resource_manager]: Successful 'configure' of hardware 'rmd_wrist_pitch_joint'
+[arm_ros2_control_node-3] [INFO] [1793616031.304027365] [resource_manager]: 'activate' hardware 'rmd_wrist_pitch_joint' 
+[arm_ros2_control_node-3] [INFO] [1793616031.304108697] [rmd_hardware_interface.wrist_pitch_joint]: Set thread priority '0' and policy '0' to async thread!
+[arm_ros2_control_node-3] [INFO] [1793616031.314237955] [rmd_hardware_interface.wrist_pitch_joint]: Actuator started with fresh initial position feedback.
+[arm_ros2_control_node-3] [INFO] [1793616031.314247037] [resource_manager]: Successful 'activate' of hardware 'rmd_wrist_pitch_joint'
+[arm_ros2_control_node-3] [INFO] [1793616031.314251678] [resource_manager]: 'configure' hardware 'rmd_elbow_joint' 
+[arm_ros2_control_node-3] [ERROR] [1793616031.314256473] [rmd_hardware_interface.elbow_joint]: Could not parse torque constant, won't be able to use torque interface!
+[arm_ros2_control_node-3] [INFO] [1793616031.314260977] [rmd_hardware_interface.elbow_joint]: Position current protection: limit 5.000 A, release 2.200 A, trigger 100 ms, retreat 0.100 rad/s.
+[arm_ros2_control_node-3] [INFO] [1793616031.314265178] [rmd_hardware_interface.elbow_joint]: Using velocity low-pass filter with filter constant '0.100000'.
+[arm_ros2_control_node-3] [INFO] [1793616031.314267949] [rmd_hardware_interface.elbow_joint]: Using effort low-pass filter with filter constant '0.100000'.
+[arm_ros2_control_node-3] [INFO] [1793616031.314270473] [rmd_hardware_interface.elbow_joint]: Timeout not set, defaulting to '0' ms
+[arm_ros2_control_node-3] [INFO] [1793616031.314272664] [rmd_hardware_interface.elbow_joint]: Timeout set to 0ms, it will not be used!
+[arm_ros2_control_node-3] [INFO] [1793616031.314693897] [rmd_hardware_interface.elbow_joint]: Started actuator interface for actuator model ''!
+[arm_ros2_control_node-3] [INFO] [1793616031.314698996] [resource_manager]: Successful 'configure' of hardware 'rmd_elbow_joint'
+[arm_ros2_control_node-3] [INFO] [1793616031.314702248] [resource_manager]: 'activate' hardware 'rmd_elbow_joint' 
+[arm_ros2_control_node-3] [INFO] [1793616031.314739992] [rmd_hardware_interface.elbow_joint]: Set thread priority '0' and policy '0' to async thread!
+[arm_ros2_control_node-3] [INFO] [1793616031.324802867] [rmd_hardware_interface.elbow_joint]: Actuator started with fresh initial position feedback.
+[arm_ros2_control_node-3] [INFO] [1793616031.324808821] [resource_manager]: Successful 'activate' of hardware 'rmd_elbow_joint'
+[arm_ros2_control_node-3] [INFO] [1793616031.324813034] [resource_manager]: 'configure' hardware 'rmd_shoulder_joint' 
+[arm_ros2_control_node-3] [ERROR] [1793616031.324817784] [rmd_hardware_interface.shoulder_joint]: Could not parse torque constant, won't be able to use torque interface!
+[arm_ros2_control_node-3] [INFO] [1793616031.324821448] [rmd_hardware_interface.shoulder_joint]: Position current protection: limit 9.000 A, release 3.000 A, trigger 100 ms, retreat 0.100 rad/s.
+[arm_ros2_control_node-3] [INFO] [1793616031.324836579] [rmd_hardware_interface.shoulder_joint]: Using velocity low-pass filter with filter constant '0.100000'.
+[arm_ros2_control_node-3] [INFO] [1793616031.324839143] [rmd_hardware_interface.shoulder_joint]: Using effort low-pass filter with filter constant '0.100000'.
+[arm_ros2_control_node-3] [INFO] [1793616031.324841661] [rmd_hardware_interface.shoulder_joint]: Timeout not set, defaulting to '0' ms
+[arm_ros2_control_node-3] [INFO] [1793616031.324843793] [rmd_hardware_interface.shoulder_joint]: Timeout set to 0ms, it will not be used!
+[arm_ros2_control_node-3] [INFO] [1793616031.325368732] [rmd_hardware_interface.shoulder_joint]: Started actuator interface for actuator model ''!
+[arm_ros2_control_node-3] [INFO] [1793616031.325373962] [resource_manager]: Successful 'configure' of hardware 'rmd_shoulder_joint'
+[arm_ros2_control_node-3] [INFO] [1793616031.325377100] [resource_manager]: 'activate' hardware 'rmd_shoulder_joint' 
+[arm_ros2_control_node-3] [INFO] [1793616031.325422856] [rmd_hardware_interface.shoulder_joint]: Set thread priority '0' and policy '0' to async thread!
+[arm_ros2_control_node-3] [INFO] [1793616031.335483196] [rmd_hardware_interface.shoulder_joint]: Actuator started with fresh initial position feedback.
+[arm_ros2_control_node-3] [INFO] [1793616031.335488451] [resource_manager]: Successful 'activate' of hardware 'rmd_shoulder_joint'
+[arm_ros2_control_node-3] [INFO] [1793616031.335495130] [resource_manager]: 'configure' hardware 'dynamixel_u2d2' 
+[arm_ros2_control_node-3] [INFO] [1793616031.335500558] [resource_manager]: Successful 'configure' of hardware 'dynamixel_u2d2'
+[arm_ros2_control_node-3] [INFO] [1793616031.335509284] [resource_manager]: 'activate' hardware 'dynamixel_u2d2' 
+[arm_ros2_control_node-3] [INFO] [1793616031.648960830] [dynamixel_hardware_interface]: Dynamixel startup feedback verified with 5 consecutive group reads.
+[arm_ros2_control_node-3] [INFO] [1793616031.649063470] [dynamixel_hardware_interface]: Sync joint state to command (joint: base_joint, position, 0.00920388 <- position, 0.00920388
+[arm_ros2_control_node-3] [INFO] [1793616031.649072285] [dynamixel_hardware_interface]: Sync joint state to command (joint: wrist_roll_joint, position, 0.0414175 <- position, 0.0414175
+[arm_ros2_control_node-3] [INFO] [1793616031.649077876] [dynamixel_hardware_interface]: Sync joint state to command (joint: wrist_yaw_joint, position, -0.00920388 <- position, -0.00920388
+[arm_ros2_control_node-3] [INFO] [1793616031.649109446] [dynamixel_hardware_interface]: Sync velocity command to zero (joint: ee_joint)
+[arm_ros2_control_node-3] [INFO] [1793616031.777019406] [dynamixel_hardware_interface]: Dynamixel initial position hold verified; enabling torque is now safe.
+[arm_ros2_control_node-3] [INFO] [1793616031.777055067] [dynamixel_hardware_interface]: Enabling torque for Dynamixels
+[arm_ros2_control_node-3] [Init Write][ID:001][addr:64] value=1 dxl_comm_result=0 dxl_error=0
+[arm_ros2_control_node-3] [comm_id:001][ID:001] Torque ON
+[arm_ros2_control_node-3] [Torque Enable][ID:001] verified ON
+[arm_ros2_control_node-3] [Init Write][ID:002][addr:64] value=1 dxl_comm_result=0 dxl_error=0
+[arm_ros2_control_node-3] [comm_id:002][ID:002] Torque ON
+[arm_ros2_control_node-3] [Torque Enable][ID:002] verified ON
+[arm_ros2_control_node-3] [Init Write][ID:003][addr:64] value=1 dxl_comm_result=0 dxl_error=0
+[arm_ros2_control_node-3] [comm_id:003][ID:003] Torque ON
+[arm_ros2_control_node-3] [Torque Enable][ID:003] verified ON
+[arm_ros2_control_node-3] [Init Write][ID:004][addr:64] value=1 dxl_comm_result=0 dxl_error=0
+[arm_ros2_control_node-3] [comm_id:004][ID:004] Torque ON
+[arm_ros2_control_node-3] [Torque Enable][ID:004] verified ON
+[arm_ros2_control_node-3] [INFO] [1793616031.984045704] [dynamixel_hardware_interface]: Dynamixel Hardware Start!
+[arm_ros2_control_node-3] [INFO] [1793616031.984086410] [resource_manager]: Successful 'activate' of hardware 'dynamixel_u2d2'
+[arm_ros2_control_node-3] [INFO] [1793616031.985904851] [controller_manager]: update rate is 100 Hz
+[arm_ros2_control_node-3] [INFO] [1793616031.985922657] [controller_manager]: Spawning controller_manager RT thread with scheduler priority: 50
+[arm_ros2_control_node-3] [WARN] [1793616031.985985948] [controller_manager]: Could not enable FIFO RT scheduling policy: with error number <1>(Operation not permitted). See [https://control.ros.org/master/doc/ros2_control/controller_manager/doc/userdoc.html] for details on how to enable realtime scheduling.
+[arm_ros2_control_node-3] [INFO] [1793616032.219511059] [controller_manager]: Loading controller 'joint_state_broadcaster'
+[spawner-4] [INFO] [1793616032.241823264] [spawner_joint_state_broadcaster]: [94mLoaded [1mjoint_state_broadcaster[0m
+[arm_ros2_control_node-3] [INFO] [1793616032.242333034] [controller_manager]: Configuring controller 'joint_state_broadcaster'
+[arm_ros2_control_node-3] [INFO] [1793616032.242400538] [joint_state_broadcaster]: 'joints' or 'interfaces' parameter is empty. All available state interfaces will be published
+[spawner-4] [INFO] [1793616032.433660332] [spawner_joint_state_broadcaster]: [92mConfigured and activated [1mjoint_state_broadcaster[0m
+[INFO] [spawner-4]: process has finished cleanly [pid 292742]
+[INFO] [spawner-5]: process started with pid [292808]
+[arm_ros2_control_node-3] [INFO] [1793616032.896413790] [controller_manager]: Loading controller 'ee_velocity_controller'
+[spawner-5] [INFO] [1793616032.956083332] [spawner_ee_velocity_controller]: [94mLoaded [1mee_velocity_controller[0m
+[arm_ros2_control_node-3] [INFO] [1793616032.956607934] [controller_manager]: Configuring controller 'ee_velocity_controller'
+[arm_ros2_control_node-3] [INFO] [1793616032.956862153] [ee_velocity_controller]: configure successful
+[arm_ros2_control_node-3] [WARN] [1793616033.072986272] [rmd_hardware_interface.shoulder_joint]: All command interfaces stopped: queued motor release; feedback remains active.
+[arm_ros2_control_node-3] [WARN] [1793616033.073009997] [rmd_hardware_interface.elbow_joint]: All command interfaces stopped: queued motor release; feedback remains active.
+[arm_ros2_control_node-3] [WARN] [1793616033.073013803] [rmd_hardware_interface.wrist_pitch_joint]: All command interfaces stopped: queued motor release; feedback remains active.
+[arm_ros2_control_node-3] [INFO] [1793616033.073050179] [ee_velocity_controller]: activate successful
+[arm_ros2_control_node-3] [WARN] [1793616033.079455184] [rmd_hardware_interface.wrist_pitch_joint]: Motor output shut down; entering feedback-only teaching mode.
+[arm_ros2_control_node-3] [WARN] [1793616033.080697249] [rmd_hardware_interface.shoulder_joint]: Motor output shut down; entering feedback-only teaching mode.
+[arm_ros2_control_node-3] [WARN] [1793616033.081385660] [rmd_hardware_interface.elbow_joint]: Motor output shut down; entering feedback-only teaching mode.
+[spawner-5] [INFO] [1793616033.137596923] [spawner_ee_velocity_controller]: [92mConfigured and activated [1mee_velocity_controller[0m
+[INFO] [spawner-5]: process has finished cleanly [pid 292808]
+[INFO] [spawner-6]: process started with pid [292834]
+[arm_ros2_control_node-3] [INFO] [1793616033.543108686] [controller_manager]: Loading controller 'manual_position_controller'
+[spawner-6] [INFO] [1793616033.595768661] [spawner_manual_position_controller]: [94mLoaded [1mmanual_position_controller[0m
+[arm_ros2_control_node-3] [INFO] [1793616033.596276972] [controller_manager]: Configuring controller 'manual_position_controller'
+[arm_ros2_control_node-3] [INFO] [1793616033.596473194] [manual_position_controller]: configure successful
+[INFO] [spawner-6]: process has finished cleanly [pid 292834]
+[INFO] [python3-7]: process started with pid [292856]
+[INFO] [python3-8]: process started with pid [292858]
+[INFO] [python3-9]: process started with pid [292860]
+[INFO] [python3-10]: process started with pid [292862]
+[INFO] [python3-11]: process started with pid [292864]
+[INFO] [move_group-12]: process started with pid [292866]
+[move_group-12] Warning: Link 'rack_left' is not known to URDF. Cannot disable/enable collisons.
+[move_group-12]          at line 589 in ./src/model.cpp
+[move_group-12] Warning: Link 'tool_spurgear' is not known to URDF. Cannot disable/enable collisons.
+[move_group-12]          at line 589 in ./src/model.cpp
+[move_group-12] Warning: Link 'tool_2_link' is not known to URDF. Cannot disable/enable collisons.
+[move_group-12]          at line 589 in ./src/model.cpp
+[move_group-12] Warning: Link 'tool_spurgear' is not known to URDF. Cannot disable/enable collisons.
+[move_group-12]          at line 589 in ./src/model.cpp
+[move_group-12] Warning: Link 'rack_right' is not known to URDF. Cannot disable/enable collisons.
+[move_group-12]          at line 589 in ./src/model.cpp
+[move_group-12] Warning: Link 'rack_left' is not known to URDF. Cannot disable/enable collisons.
+[move_group-12]          at line 589 in ./src/model.cpp
+[move_group-12] Warning: Link 'rack_right' is not known to URDF. Cannot disable/enable collisons.
+[move_group-12]          at line 589 in ./src/model.cpp
+[move_group-12] Warning: Link 'rack_left' is not known to URDF. Cannot disable/enable collisons.
+[move_group-12]          at line 589 in ./src/model.cpp
+[move_group-12] [INFO] [1793616034.186302634] [moveit_rdf_loader.rdf_loader]: Loaded robot model in 0.00469761 seconds
+[move_group-12] [INFO] [1793616034.186367491] [moveit_robot_model.robot_model]: Loading robot model 'tool_manipulator'...
+[move_group-12] [INFO] [1793616034.186375749] [moveit_robot_model.robot_model]: No root/virtual joint specified in SRDF. Assuming fixed joint
+[python3-8] [INFO] [1793616034.553455356] [manual]: ready to activate: press Options to switch drive -> arm
+[python3-8] [WARN] [1793616034.561821971] [manual]: No collision checking. Automatic startup recovery is disabled.
+[python3-7] [INFO] [1793616034.647374653] [arm_control_mode_manager]: mode=hold ready=False startup_complete=False: waiting for complete fresh joint feedback
+[python3-7] [INFO] [1793616034.676928190] [arm_control_mode_manager]: mode=hold ready=False startup_complete=False: waiting for controller activation confirmation
+[arm_ros2_control_node-3] [INFO] [1793616034.737443360] [rmd_hardware_interface.shoulder_joint]: Starting position interface at measured position 1.469044 rad.
+[arm_ros2_control_node-3] [INFO] [1793616034.737481881] [rmd_hardware_interface.elbow_joint]: Starting position interface at measured position 1.573240 rad.
+[arm_ros2_control_node-3] [INFO] [1793616034.737488254] [rmd_hardware_interface.wrist_pitch_joint]: Starting position interface at measured position -1.597674 rad.
+[arm_ros2_control_node-3] [INFO] [1793616034.737530946] [manual_position_controller]: activate successful
+[python3-10] [INFO] [1793616034.780040870] [tcp_joy]: reason=waiting for active TCP_IK mode failures=0 deadman=False rearmed=False mode=hold focus=drive tcp_ready_state=idle tcp_ready_auto_armed=False
+[arm_ros2_control_node-3] [TTL Sync Read] [TxRxResult] Incorrect status packet!; clearing port and retrying once
+[arm_ros2_control_node-3] [TTL Sync Read] retry failed: [TxRxResult] Incorrect status packet!
+[arm_ros2_control_node-3] [ERROR] [1793616034.854645841] [dynamixel_hardware_interface]: Communication Fail --> SYNC_READ_FAIL
+[arm_ros2_control_node-3] [ERROR] [1793616034.854698042] [dynamixel_hardware_interface]: Dynamixel feedback read failed
+[arm_ros2_control_node-3] [ERROR] [1793616034.854736483] [dynamixel_hardware_interface]: Dynamixel Read Fail (Duration: 63.518ms/500ms, cause: SYNC_READ_FAIL)
+[arm_ros2_control_node-3] [ERROR] [1793616034.854854704] [dynamixel_hardware_interface]: Dynamixel command blocked because hardware status is COMM_ERROR (Duration: 63.518ms/500ms). === All Dynamixel Error Summaries ===
+[arm_ros2_control_node-3] Dynamixel ID 1 Error Summary:
+[arm_ros2_control_node-3]   No errors detected
+[arm_ros2_control_node-3] 
+[arm_ros2_control_node-3] Dynamixel ID 2 Error Summary:
+[arm_ros2_control_node-3]   No errors detected
+[arm_ros2_control_node-3] 
+[arm_ros2_control_node-3] Dynamixel ID 3 Error Summary:
+[arm_ros2_control_node-3]   No errors detected
+[arm_ros2_control_node-3] 
+[arm_ros2_control_node-3] Dynamixel ID 4 Error Summary:
+[arm_ros2_control_node-3]   No errors detected
+[arm_ros2_control_node-3] 
+[arm_ros2_control_node-3] =====================================
+[arm_ros2_control_node-3] 
+[python3-7] [INFO] [1793616034.866427941] [arm_control_mode_manager]: mode=hold ready=True startup_complete=False: startup RMD recovery: inward to 2-degree inset
+[arm_ros2_control_node-3] [TTL Sync Read] [TxRxResult] Incorrect status packet!; clearing port and retrying once
+[arm_ros2_control_node-3] [TTL Sync Read] retry failed: [TxRxResult] Incorrect status packet!
+[arm_ros2_control_node-3] [ERROR] [1793616034.926369197] [dynamixel_hardware_interface]: Dynamixel Read Fail (Duration: 116.879ms/500ms, cause: SYNC_READ_FAIL)
+[arm_ros2_control_node-3] [TTL Sync Read] [TxRxResult] Incorrect status packet!; clearing port and retrying once
+[arm_ros2_control_node-3] [TTL Sync Read] retry failed: [TxRxResult] Incorrect status packet!
+[arm_ros2_control_node-3] [ERROR] [1793616034.964252782] [dynamixel_hardware_interface]: Dynamixel Read Fail (Duration: 188.463ms/500ms, cause: SYNC_READ_FAIL)
+[arm_ros2_control_node-3] [TTL Sync Read] [TxRxResult] Incorrect status packet!; clearing port and retrying once
+[arm_ros2_control_node-3] [TTL Sync Read] retry failed: [TxRxResult] Incorrect status packet!
+[arm_ros2_control_node-3] [ERROR] [1793616035.015885844] [dynamixel_hardware_interface]: Dynamixel Read Fail (Duration: 226.304ms/500ms, cause: SYNC_READ_FAIL)
+[arm_ros2_control_node-3] [TTL Sync Read] [TxRxResult] Incorrect status packet!; clearing port and retrying once
+[arm_ros2_control_node-3] [TTL Sync Read] retry failed: [TxRxResult] Incorrect status packet!
+[arm_ros2_control_node-3] [ERROR] [1793616035.049900043] [dynamixel_hardware_interface]: Dynamixel Read Fail (Duration: 277.954ms/500ms, cause: SYNC_READ_FAIL)
+[arm_ros2_control_node-3] [TTL Sync Read] [TxRxResult] Incorrect status packet!; clearing port and retrying once
+[arm_ros2_control_node-3] [TTL Sync Read] retry failed: [TxRxResult] Incorrect status packet!
+[arm_ros2_control_node-3] [ERROR] [1793616035.102720235] [dynamixel_hardware_interface]: Dynamixel Read Fail (Duration: 311.939ms/500ms, cause: SYNC_READ_FAIL)
+[python3-11] [INFO] [1793616035.113025391] [tool_trajectory_joy]: L2 tool trajectories enabled: 0,1,2
+[arm_ros2_control_node-3] [TTL Sync Read] [TxRxResult] Incorrect status packet!; clearing port and retrying once
+[python3-11] [INFO] [1793616035.126041076] [tool_trajectory_joy]: Optional docking paths: [0, 1]; motion_enabled=True; waiting for an explicit tool path request
+[arm_ros2_control_node-3] [TTL Sync Read] retry failed: [TxRxResult] Incorrect status packet!
+[arm_ros2_control_node-3] [ERROR] [1793616035.153035151] [dynamixel_hardware_interface]: Dynamixel Read Fail (Duration: 364.762ms/500ms, cause: SYNC_READ_FAIL)
+[arm_ros2_control_node-3] [TTL Sync Read] [TxRxResult] Incorrect status packet!; clearing port and retrying once
+[arm_ros2_control_node-3] [TTL Sync Read] retry failed: [TxRxResult] Incorrect status packet!
+[arm_ros2_control_node-3] [ERROR] [1793616035.169464487] [dynamixel_hardware_interface]: Dynamixel Read Fail (Duration: 415.08ms/500ms, cause: SYNC_READ_FAIL)
+[arm_ros2_control_node-3] [TTL Sync Read] [TxRxResult] Incorrect status packet!; clearing port and retrying once
+[arm_ros2_control_node-3] [TTL Sync Read] retry failed: [TxRxResult] Incorrect status packet!
+[arm_ros2_control_node-3] [ERROR] [1793616035.201352339] [dynamixel_hardware_interface]: Dynamixel Read Fail (Duration: 431.52ms/500ms, cause: SYNC_READ_FAIL)
+[arm_ros2_control_node-3] [TTL Sync Read] [TxRxResult] Incorrect status packet!; clearing port and retrying once
+[arm_ros2_control_node-3] [TTL Sync Read] retry failed: [TxRxResult] Incorrect status packet!
+[arm_ros2_control_node-3] [ERROR] [1793616035.239299547] [dynamixel_hardware_interface]: Dynamixel Read Fail (Duration: 463.389ms/500ms, cause: SYNC_READ_FAIL)
+[arm_ros2_control_node-3] [TTL Sync Read] [TxRxResult] Incorrect status packet!; clearing port and retrying once
+[arm_ros2_control_node-3] [TTL Sync Read] retry failed: [TxRxResult] Incorrect status packet!
+[arm_ros2_control_node-3] [ERROR] [1793616035.270272970] [dynamixel_hardware_interface]: Dynamixel Read Fail (Duration: 501.338ms/500ms, cause: SYNC_READ_FAIL)
+[arm_ros2_control_node-3] [ERROR] [1793616035.270329500] [dynamixel_hardware_interface]: Dynamixel feedback/communication watchdog expired after 500ms; bus retries stopped. Cause: SYNC_READ_FAIL
+[arm_ros2_control_node-3] [ERROR] [1793616035.270503053] [dynamixel_hardware_interface]: Published latched hardware fault: dynamixel_system: feedback watchdog expired: SYNC_READ_FAIL
+[arm_ros2_control_node-3] [ERROR] [1793616035.270674212] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[python3-7] [INFO] [1793616035.277024304] [arm_control_mode_manager]: mode=fault ready=True startup_complete=False: hardware fault: dynamixel_system: feedback watchdog expired: SYNC_READ_FAIL
+[move_group-12] [WARN] [1793616035.424532717] [moveit_robot_model.robot_model]: Link tool_case_1_center has visual geometry but no collision geometry. Collision geometry will be left empty. Fix your URDF file by explicitly specifying collision geometry.
+[move_group-12] [WARN] [1793616035.431659001] [moveit_robot_model.robot_model]: Link tool_case_y_plus_center has visual geometry but no collision geometry. Collision geometry will be left empty. Fix your URDF file by explicitly specifying collision geometry.
+[move_group-12] [WARN] [1793616035.431679760] [moveit_robot_model.robot_model]: Link tool_case_y_plus_docking has visual geometry but no collision geometry. Collision geometry will be left empty. Fix your URDF file by explicitly specifying collision geometry.
+[arm_ros2_control_node-3] [ERROR] [1793616036.276096554] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616037.286095690] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[move_group-12] [INFO] [1793616038.038643930] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: Publishing maintained planning scene on 'monitored_planning_scene'
+[move_group-12] [INFO] [1793616038.038808273] [moveit.ros_planning_interface.moveit_cpp]: Listening to 'joint_states' for joint states
+[move_group-12] [INFO] [1793616038.039156796] [moveit_ros.current_state_monitor]: Listening to joint states on topic 'joint_states'
+[move_group-12] [INFO] [1793616038.039470273] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: Listening to '/attached_collision_object' for attached collision objects
+[move_group-12] [INFO] [1793616038.039483522] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: Starting planning scene monitor
+[move_group-12] [INFO] [1793616038.039980749] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: Listening to '/planning_scene'
+[move_group-12] [INFO] [1793616038.039992151] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: Starting world geometry update monitor for collision objects, attached objects, octomap updates.
+[move_group-12] [INFO] [1793616038.040197115] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: Listening to 'collision_object'
+[move_group-12] [INFO] [1793616038.040413083] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: Listening to 'planning_scene_world' for planning scene world geometry
+[move_group-12] [WARN] [1793616038.040687424] [moveit.ros.occupancy_map_monitor.middleware_handle]: Resolution not specified for Octomap. Assuming resolution = 0.1 instead
+[move_group-12] [ERROR] [1793616038.040697827] [moveit.ros.occupancy_map_monitor.middleware_handle]: No 3D sensor plugin(s) defined for octomap updates
+[arm_ros2_control_node-3] [ERROR] [1793616038.296087953] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616039.296105686] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616040.306088846] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616041.306132106] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616042.316126704] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616043.326184231] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616044.336115840] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616045.346121300] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616046.356182246] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[move_group-12] [INFO] [1793616046.810625161] [moveit.ros_planning_interface.moveit_cpp]: Loading planning pipeline 'ompl'
+[move_group-12] [INFO] [1793616046.821202855] [moveit.ros_planning.planning_pipeline]: Using planning interface 'OMPL'
+[move_group-12] [INFO] [1793616046.823394648] [moveit_ros.add_time_optimal_parameterization]: Param 'ompl.path_tolerance' was not set. Using default value: 0.100000
+[move_group-12] [INFO] [1793616046.823407893] [moveit_ros.add_time_optimal_parameterization]: Param 'ompl.resample_dt' was not set. Using default value: 0.100000
+[move_group-12] [INFO] [1793616046.823411540] [moveit_ros.add_time_optimal_parameterization]: Param 'ompl.min_angle_change' was not set. Using default value: 0.001000
+[move_group-12] [INFO] [1793616046.823427512] [moveit_ros.fix_workspace_bounds]: Param 'ompl.default_workspace_bounds' was not set. Using default value: 10.000000
+[move_group-12] [INFO] [1793616046.823438497] [moveit_ros.fix_start_state_bounds]: Param 'ompl.start_state_max_bounds_error' was set to 0.100000
+[move_group-12] [INFO] [1793616046.823442622] [moveit_ros.fix_start_state_bounds]: Param 'ompl.start_state_max_dt' was not set. Using default value: 0.500000
+[move_group-12] [INFO] [1793616046.823451289] [moveit_ros.fix_start_state_collision]: Param 'ompl.start_state_max_dt' was not set. Using default value: 0.500000
+[move_group-12] [INFO] [1793616046.823455295] [moveit_ros.fix_start_state_collision]: Param 'ompl.jiggle_fraction' was not set. Using default value: 0.020000
+[move_group-12] [INFO] [1793616046.823459150] [moveit_ros.fix_start_state_collision]: Param 'ompl.max_sampling_attempts' was not set. Using default value: 100
+[move_group-12] [INFO] [1793616046.823492443] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Add Time Optimal Parameterization'
+[move_group-12] [INFO] [1793616046.823496338] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Resolve constraint frames to robot links'
+[move_group-12] [INFO] [1793616046.823499052] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Fix Workspace Bounds'
+[move_group-12] [INFO] [1793616046.823501732] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Fix Start State Bounds'
+[move_group-12] [INFO] [1793616046.823504300] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Fix Start State In Collision'
+[move_group-12] [INFO] [1793616046.823506760] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Fix Start State Path Constraints'
+[move_group-12] [INFO] [1793616046.824726937] [moveit.ros_planning_interface.moveit_cpp]: Loading planning pipeline 'pilz_industrial_motion_planner'
+[move_group-12] [ERROR] [1793616046.826857644] [moveit.ros_planning.planning_pipeline]: Exception while loading planner 'pilz_industrial_motion_planner/CommandPlanner': Failed to load library /opt/ros/humble/lib/libpilz_industrial_motion_planner.so. Make sure that you are calling the PLUGINLIB_EXPORT_CLASS macro in the library code, and that names are consistent between this macro and your XML. Error string: Could not load library dlopen error: libmoveit_planning_interface.so.2.5.9: cannot open shared object file: No such file or directory, at ./src/shared_library.c:99Available plugins: chomp_interface/CHOMPPlanner, ompl_interface/OMPLPlanner, pilz_industrial_motion_planner/CommandPlanner
+[move_group-12] [ERROR] [1793616046.827736163] [moveit.ros_planning_interface.moveit_cpp]: Failed to initialize planning pipeline 'pilz_industrial_motion_planner'.
+[move_group-12] [INFO] [1793616046.828108283] [moveit.ros_planning_interface.moveit_cpp]: Loading planning pipeline 'chomp'
+[move_group-12] [ERROR] [1793616046.829866539] [moveit.ros_planning.planning_pipeline]: Exception while loading planner 'chomp_interface/CHOMPPlanner': Failed to load library /opt/ros/humble/lib/libmoveit_chomp_planner_plugin.so. Make sure that you are calling the PLUGINLIB_EXPORT_CLASS macro in the library code, and that names are consistent between this macro and your XML. Error string: Could not load library dlopen error: libchomp_motion_planner.so.2.5.10: cannot open shared object file: No such file or directory, at ./src/shared_library.c:99Available plugins: chomp_interface/CHOMPPlanner, ompl_interface/OMPLPlanner, pilz_industrial_motion_planner/CommandPlanner
+[move_group-12] [INFO] [1793616046.831132213] [moveit_ros.add_time_optimal_parameterization]: Param 'chomp.path_tolerance' was not set. Using default value: 0.100000
+[move_group-12] [INFO] [1793616046.831141230] [moveit_ros.add_time_optimal_parameterization]: Param 'chomp.resample_dt' was not set. Using default value: 0.100000
+[move_group-12] [INFO] [1793616046.831144720] [moveit_ros.add_time_optimal_parameterization]: Param 'chomp.min_angle_change' was not set. Using default value: 0.001000
+[move_group-12] [INFO] [1793616046.831160859] [moveit_ros.fix_workspace_bounds]: Param 'chomp.default_workspace_bounds' was not set. Using default value: 10.000000
+[move_group-12] [INFO] [1793616046.831177656] [moveit_ros.fix_start_state_bounds]: Param 'chomp.start_state_max_bounds_error' was set to 0.100000
+[move_group-12] [INFO] [1793616046.831182004] [moveit_ros.fix_start_state_bounds]: Param 'chomp.start_state_max_dt' was not set. Using default value: 0.500000
+[move_group-12] [INFO] [1793616046.831190597] [moveit_ros.fix_start_state_collision]: Param 'chomp.start_state_max_dt' was not set. Using default value: 0.500000
+[move_group-12] [INFO] [1793616046.831195016] [moveit_ros.fix_start_state_collision]: Param 'chomp.jiggle_fraction' was set to 0.050000
+[move_group-12] [INFO] [1793616046.831198153] [moveit_ros.fix_start_state_collision]: Param 'chomp.max_sampling_attempts' was not set. Using default value: 100
+[move_group-12] [INFO] [1793616046.831206518] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Add Time Optimal Parameterization'
+[move_group-12] [INFO] [1793616046.831209847] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Resolve constraint frames to robot links'
+[move_group-12] [INFO] [1793616046.831223449] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Fix Workspace Bounds'
+[move_group-12] [INFO] [1793616046.831226407] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Fix Start State Bounds'
+[move_group-12] [INFO] [1793616046.831228993] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Fix Start State In Collision'
+[move_group-12] [INFO] [1793616046.831231541] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Fix Start State Path Constraints'
+[move_group-12] [ERROR] [1793616046.831938197] [moveit.ros_planning_interface.moveit_cpp]: Failed to initialize planning pipeline 'chomp'.
+[move_group-12] [INFO] [1793616046.846519907] [moveit.plugins.moveit_simple_controller_manager]: Added FollowJointTrajectory controller for arm_controller
+[move_group-12] [INFO] [1793616046.846657351] [moveit.plugins.moveit_simple_controller_manager]: Returned 1 controllers in list
+[move_group-12] [INFO] [1793616046.846680791] [moveit.plugins.moveit_simple_controller_manager]: Returned 1 controllers in list
+[move_group-12] [INFO] [1793616046.846879582] [moveit_ros.trajectory_execution_manager]: Trajectory execution is managing controllers
+[move_group-12] [INFO] [1793616046.846893740] [move_group.move_group]: MoveGroup debug mode is ON
+[move_group-12] [INFO] [1793616046.861143121] [move_group.move_group]: 
+[move_group-12] 
+[move_group-12] ********************************************************
+[move_group-12] * MoveGroup using: 
+[move_group-12] *     - ApplyPlanningSceneService
+[move_group-12] *     - ClearOctomapService
+[move_group-12] *     - CartesianPathService
+[move_group-12] *     - ExecuteTrajectoryAction
+[move_group-12] *     - GetPlanningSceneService
+[move_group-12] *     - KinematicsService
+[move_group-12] *     - MoveAction
+[move_group-12] *     - MotionPlanService
+[move_group-12] *     - QueryPlannersService
+[move_group-12] *     - StateValidationService
+[move_group-12] ********************************************************
+[move_group-12] 
+[move_group-12] [INFO] [1793616046.861197008] [moveit_move_group_capabilities_base.move_group_context]: MoveGroup context using planning plugin ompl_interface/OMPLPlanner
+[move_group-12] [INFO] [1793616046.861206529] [moveit_move_group_capabilities_base.move_group_context]: MoveGroup context initialization complete
+[move_group-12] [96mLoading 'move_group/ApplyPlanningSceneService'...
+[move_group-12] [0m[96mLoading 'move_group/ClearOctomapService'...
+[move_group-12] [0m[96mLoading 'move_group/MoveGroupCartesianPathService'...
+[move_group-12] [0m[96mLoading 'move_group/MoveGroupExecuteTrajectoryAction'...
+[move_group-12] [0m[96mLoading 'move_group/MoveGroupGetPlanningSceneService'...
+[move_group-12] [0m[96mLoading 'move_group/MoveGroupKinematicsService'...
+[move_group-12] [0m[96mLoading 'move_group/MoveGroupMoveAction'...
+[move_group-12] [0m[96mLoading 'move_group/MoveGroupPlanService'...
+[move_group-12] [0m[96mLoading 'move_group/MoveGroupQueryPlannersService'...
+[move_group-12] [0m[96mLoading 'move_group/MoveGroupStateValidationService'...
+[move_group-12] [0m[92m
+[move_group-12] You can start planning now!
+[move_group-12] 
+[arm_ros2_control_node-3] [ERROR] [1793616047.356284900] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616048.366112385] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616049.366129304] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616050.376134525] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616051.386132465] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616052.396122704] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616053.406133237] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616054.416128257] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616055.416220729] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616056.426152899] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616057.436131764] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616058.436261256] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616059.446107924] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616060.446140679] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616061.456144030] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616062.466155670] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616063.476218161] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616064.486144197] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616065.496242341] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616066.506112565] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616067.506123791] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616068.506157065] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616069.516128183] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616070.516136558] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616071.526125154] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616072.526131809] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616073.536108530] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
+[arm_ros2_control_node-3] [ERROR] [1793616074.536127480] [dynamixel_hardware_interface]: Dynamixel hardware fault is latched; bus retries are stopped. Restore communication and reactivate dynamixel_system.
