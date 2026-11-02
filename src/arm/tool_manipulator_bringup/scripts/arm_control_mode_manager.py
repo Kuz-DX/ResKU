@@ -50,6 +50,14 @@ def update_hardware_faults(faults, message):
 class ControlModeManager(Node):
     def __init__(self):
         super().__init__('arm_control_mode_manager')
+        delay = float(self.declare_parameter('diagnostic_activation_delay_sec', 0.).value)
+        if not math.isfinite(delay) or not 0. <= delay <= 120.:
+            raise ValueError('diagnostic_activation_delay_sec must be in [0, 120]')
+        self.activation_not_before = time.monotonic()+delay
+        if delay:
+            self.get_logger().warning(
+                f'Diagnostic: position controller activation delayed {delay:.1f}s; '
+                'hardware torque and DXL communication remain active; automatic activation follows')
         default = Path(get_package_share_directory('tool_manipulator_bringup'))/'config/hardware.yaml'
         path = Path(self.declare_parameter('hardware_config', str(default)).value)
         self.focus_arm_mode = str(self.declare_parameter('focus_arm_mode', '').value)
@@ -341,6 +349,7 @@ class ControlModeManager(Node):
             else:
                 self.activated = True
         if (self.activation_started is None and self.core.mode != 'fault' and fresh
+                and now >= getattr(self, 'activation_not_before', 0.)
                 and self.controllers.get('manual_position_controller') == 'inactive'
                 and self.controllers.get('ee_velocity_controller') == 'active'
                 and self.core.fresh(now) and max(map(abs, self.core.velocity)) <= .02

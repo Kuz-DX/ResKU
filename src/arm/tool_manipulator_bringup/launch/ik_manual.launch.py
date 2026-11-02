@@ -42,6 +42,8 @@ def bringup(context):
         scripts = Path(get_package_prefix('tool_manipulator_bringup'))/'lib/tool_manipulator_bringup'
     manager = Node(executable=sys.executable, arguments=[str(scripts/'arm_control_mode_manager.py')],
                    parameters=[{'hardware_config': base.hardware_file,
+                                'diagnostic_activation_delay_sec': float(LaunchConfiguration(
+                                    'diagnostic_activation_delay_sec').perform(context)),
                                 # TcpJoy owns entry after alignment and a fresh collision proof.
                                 'focus_arm_mode': ''}],
                    output='screen')
@@ -155,5 +157,6 @@ def generate_launch_description():
         DeclareLaunchArgument('launch_docking_bridge', default_value='true', choices=['true', 'false']),
         DeclareLaunchArgument('docking_serial_port', default_value='/dev/ttyACM0'),
         DeclareLaunchArgument('docking_serial_baud', default_value='115200'),
+        DeclareLaunchArgument('diagnostic_activation_delay_sec', default_value='0'),
         OpaqueFunction(function=bringup),
     ])
