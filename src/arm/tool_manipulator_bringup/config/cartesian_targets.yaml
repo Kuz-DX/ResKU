@@ -5,7 +5,7 @@ targets:
   tool0:
     joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
     # 30 mm before final docking along the final TCP -Z axis.
-    pre_joint_goal_rad: [-3.14159265358979, 0.13573901179137, 1.05724657574179, -1.33028056396925, 0, 0]
+    pre_joint_goal_rad: [-3.14159265358979, 0.261733654651922, 1.10018634816044, -1.31892875642036, 0, 0]
     # BACK -> this pre-dock directly crossed the fixed tool case. Route via
     # the previously collision-free approach before planning the second leg.
     transit_joint_goal_rad: [3.1001751723166735, 0.6403612785882697,
@@ -15,7 +15,7 @@ targets:
     role: measured_tagless_pre_dock
     final_capture_label: planar_axial_docking
     # Diagnostic copy; executable final target lives in tool_docking.yaml.
-    final_joint_goal_rad: [-3.14159265358979, 0.0800592386984226, 1.12171732060792, -1.21013004601018, 0, 0]
+    final_joint_goal_rad: [-3.14159265358979, 0.205142942344167, 1.16479369838855, -1.1977306938845, 0, 0]
     # Legacy final mating capture retained for comparison only.
     joint_goal_rad: [3.1231848841349588, 0.13823006976715305, 1.2369147556672264,
       -1.093099662587149, -0.00766990393963507, -0.013805827090765277]
@@ -24,30 +24,13 @@ targets:
     surface_plane_tilt_from_world_xy_deg: 35.0
     approach_z_tilt_from_world_xy_deg: -55.0
     orientation_xyzw: [0.0, 0.9537169507482269, 0.0, 0.30070579950427306]
-    # Final gear-mated pose, not a collision-free pre-dock.  The removal
-    # workflow must first reach a separate pre-dock, rotate EE to retract the
-    # rack, confirm the changed mechanism/scene state, then replan a straight
-    # insertion from fresh feedback.
-    final_role: measured_final_mating_after_rack_removal
-    required_prior_stage: ee_rack_removal_confirmed
+    # Final mating point recentered from operator capture 4: preserve X/Z
+    # and TCP elevation; base=-pi, wrist roll/yaw=0, TCP Y=0.
+    final_role: planar_final_mating
     required_final_motion: straight_tcp_approach
-    # The collision-free pre-dock is 30 mm away from the final mating point
-    # along TCP local -Z.  The subsequent insertion reverses this offset.
     pre_dock_offset_tcp_m: [0.0, 0.0, -0.030]
-    rack_removal_ee_command:
-      duration_s: 2.0
-      velocity_rad_s: -5.0
-      joint_direction: negative
-      physical_direction: cw
-      physical_viewpoint: gripper_toward_motor
-      # Do not declare success from the two-second command alone.  Accumulate
-      # CW-directed, unwrapped ee_joint feedback from the command start.
-      completion_feedback: ee_joint_accumulated_cw_displacement
-      # 10% completion tolerance around the nominal 5 rad/s * 2 s travel.
-      minimum_displacement_rad: 9.0
-      expected_displacement_rad: 10.0
-    # After fresh /arm/docked=true feedback, retreat straight away from the
-    # box along TCP -Z before MoveIt plans directly to BACK.
+    # Runtime sequence: /arm/docking=true once, wait 3 s, then checked
+    # reverse insertion path -> BACK -> HOME. No EE velocity command.
     retreat_distance_m: 0.030
     retreat_axis_tcp: [0.0, 0.0, -1.0]
   tool1:

@@ -71,7 +71,7 @@ def test_shipped_config_enables_tool0_and_tool1_camera_normal_docking():
     assert set(cfg) == {0, 1}
     assert cfg[0]['alignment_mode'] == 'fixed_joint_goal'
     np.testing.assert_allclose(cfg[0]['final_joint_goal'], [
-        -np.pi, .08005923869842259, 1.1217173206079156, -1.2101300460101767, 0., 0.])
+        -np.pi, .20514294234416736, 1.1647936983885467, -1.1977306938845027, 0., 0.])
     assert cfg[0]['tag_family'] == 'tag36h11'
     assert cfg[0]['tag_id'] == 0
     assert cfg[0]['tag_size_m'] == .020
@@ -363,6 +363,11 @@ def test_fixed_joint_tail_ends_at_measured_docking_pose(tmp_path):
     assert n.advance_plan['cartesian_line']
     assert len(n.advance_plan['waypoints']) == 15
     final = n.model.fk(expected)
+    capture4 = np.array([-2.997398, .189194, 1.152266, -1.194329, -.007670, .019942])
+    measured_final = n.model.fk(capture4)
+    np.testing.assert_allclose(final[[0, 2], 3], measured_final[[0, 2], 3], atol=1e-10)
+    assert final[1, 3] == pytest.approx(0., abs=1e-12)
+    assert final[2, 2] == pytest.approx(measured_final[2, 2], abs=1e-10)
     previous = q
     for point, duration in zip(n.advance_plan['waypoints'], n.advance_plan['durations']):
         for sample in np.linspace(previous, point, 11):
@@ -414,7 +419,11 @@ def test_fixed_joint_completion_uses_measured_joint_tolerance(
     n.model.fk.return_value = transform([.010, 0., 0.], [0., 0., 0., 1.])
 
     if accepted:
-        n.path_completed()
+        with patch('tool_docking_coordinator.time.monotonic', return_value=100.):
+            n.path_completed()
+        assert n.actuation_deadline == 103.
+        n.docking_command.publish.assert_called_once()
+        assert n.docking_command.publish.call_args.args[0].data is True
         assert n.stage == 'dock_attach_wait'
     else:
         with pytest.raises(RuntimeError, match='joint_error=0.006000'):
@@ -422,42 +431,55 @@ def test_fixed_joint_completion_uses_measured_joint_tolerance(
         n.docking_command.publish.assert_not_called()
 
 
-def test_tool0_finish_orders_true_only_cw_ee_and_retreat(tmp_path):
+@pytest.mark.parametrize('acknowledged', [False, True])
+def test_tool0_three_second_delay_then_retreat_without_ee(tmp_path, acknowledged):
     n = node(tmp_path)
     n.cfg = load_settings(ROOT/'config/tool_docking.yaml')[0]
     n.guard = Mock()
     n.lock_goal = np.zeros(6)
     n.stage = 'dock_attach_wait'
-    n.actuation_deadline = 20.
+    n.actuation_deadline = 103.
     n.command_feedback_sequence = 0
-    n.docked_feedback_sequence = 1
-    n.docked_state = True
+    n.docked_feedback_sequence = int(acknowledged)
+    n.docked_state = acknowledged
+    n.docking_status = 'DOCKED' if acknowledged else 'MOVING'
     n.mode = Mock()
     n.publisher = Mock()
-    n.docked_state = False
-    n.tick_tool0_finish(.9)
-    n.mode.call_async.assert_not_called()
-    n.docked_state = True
-    n.tick_tool0_finish(1.)
-    n.docking_command.publish.assert_not_called()  # no false/reset pulse
-    assert n.stage == 'ee_mode_wait'
-    n.future.done.return_value = True
-    n.future.result.return_value = SimpleNamespace(success=True)
-    n.status = dict(mode='tool_auto', transitioning=False, epoch='ee-mode')
-    n.tick_tool0_finish(1.3)
-    command = json.loads(n.publisher.publish.call_args.args[0].data)
-    assert command['ee_velocity_rad_s'] == -5.
-    assert command['ee_duration_sec'] == 2.
-    n.begin_docking_retreat.assert_not_called()
-    n.status.update(mode='hold', last_execution_id=n.execution_id,
-                    last_execution_result='succeeded')
-    n.tick_tool0_finish(4.)
+    for now in (100., 101., 102.999):
+        n.tick_tool0_finish(now)
+        n.begin_docking_retreat.assert_not_called()
+    n.tick_tool0_finish(103.)
     n.begin_docking_retreat.assert_called_once()
-    assert n.tool0_removal_complete
+    assert n.tool0_retreat_authorized
+    assert not n.active
+    n.docking_command.publish.assert_not_called()  # no second/false pulse
+    n.publisher.publish.assert_not_called()  # no EE command
+    n.mode.call_async.assert_not_called()
+    with patch.object(ToolTrajectoryJoy, 'tick'):
+        n.tick()
+    n.begin_docking_retreat.assert_called_once()
+
+
+@pytest.mark.parametrize('failure', ['drift', 'speed', 'ownership'])
+def test_tool0_delay_does_not_bypass_arm_guards(tmp_path, failure):
+    n = node(tmp_path)
+    n.guard = Mock()
+    n.lock_goal = np.zeros(6)
+    n.stage = 'dock_attach_wait'
+    n.actuation_deadline = 3.
+    if failure == 'drift':
+        n.full_state[ARM_JOINTS[0]] = .1
+    elif failure == 'speed':
+        n.velocity[0] = .1
+    else:
+        n.guard.side_effect = RuntimeError('ownership changed')
+    with pytest.raises(RuntimeError):
+        n.tick_tool0_finish(3.)
+    n.begin_docking_retreat.assert_not_called()
 
 
 @pytest.mark.parametrize('status', ['ERROR', 'UNKNOWN'])
-def test_tool0_arduino_failure_prevents_ee(tmp_path, status):
+def test_tool0_arduino_failure_prevents_retreat(tmp_path, status):
     n = node(tmp_path)
     n.guard = Mock()
     n.lock_goal = np.zeros(6)

@@ -3,7 +3,6 @@
 import json
 import math
 import time
-import uuid
 
 import cv2
 import numpy as np
@@ -78,7 +77,7 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         self.advance_locked = False
         self.advance_target = None
         self.advance_plan = None
-        self.tool0_removal_complete = False
+        self.tool0_retreat_authorized = False
         self.reset_tag_acquisition()
 
     def reset_tag_acquisition(self):
@@ -274,9 +273,9 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                     self.hold_epoch = self.status['epoch']
                     self.command_feedback_sequence = self.docked_feedback_sequence
                     self.send_docking_pulse(True)
-                    self.actuation_deadline = time.monotonic()+self.cfg['actuation_timeout_s']
+                    self.actuation_deadline = time.monotonic()+3.0
                     self.stage = 'dock_attach_wait'
-                    self.report('actuating', 'final dock reached; /arm/docking=true; waiting for Arduino completion')
+                    self.report('actuating', 'final dock reached; /arm/docking=true; waiting 3 seconds before checked retreat (no EE rotation)')
                     return
                 self.lock_goal = q.copy()
                 self.expected_docked = self.cfg['desired_docked']
@@ -374,8 +373,7 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
 
     def tick(self):
         try:
-            if self.active and self.stage in ('dock_attach_wait',
-                                              'ee_mode_wait', 'ee_removal_running'):
+            if self.active and self.stage == 'dock_attach_wait':
                 self.tick_tool0_finish(time.monotonic())
                 return
             if self.active and self.docking_started is None:
@@ -439,51 +437,19 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         q = np.asarray([self.full_state[j] for j in ARM_JOINTS])
         if np.max(np.abs(q-self.lock_goal)) > self.cfg['joint_tolerance_rad']:
             raise RuntimeError('arm departed final dock during completion sequence')
-        if self.stage == 'ee_mode_wait':
-            if now-self.ee_mode_started > 3.:
-                raise RuntimeError('EE mode transition timeout')
-            if not self.future.done():
-                return
-            if self.future.result() is None or not self.future.result().success:
-                raise RuntimeError('EE mode request rejected')
-            if self.status.get('mode') != 'tool_auto' or self.status.get('transitioning'):
-                return
-            self.execution_id = 'tool0-ee-'+uuid.uuid4().hex
-            self.publisher.publish(String(data=json.dumps(dict(
-                epoch=self.status['epoch'], execution_id=self.execution_id,
-                ee_velocity_rad_s=-5.0, ee_duration_sec=2.0))))
-            self.stage = 'ee_removal_running'
-            self.ee_mode_started = now
-            self.report('ee_removal', 'CW -5 rad/s for 2 seconds; waiting for stopped feedback')
+        if getattr(self, 'docking_status', None) in ('ERROR', 'UNKNOWN'):
+            raise RuntimeError('Arduino unavailable: '+self.docking_status)
+        if np.max(np.abs(self.velocity)) > self.cfg['stopped_speed_rad_s']:
+            raise RuntimeError('arm not stopped during Arduino delay')
+        if now < self.actuation_deadline:
             return
-        if self.stage == 'dock_attach_wait':
-            if getattr(self, 'docking_status', None) in ('ERROR', 'UNKNOWN'):
-                raise RuntimeError('Arduino unavailable: '+self.docking_status)
-            if np.max(np.abs(self.velocity)) > self.cfg['stopped_speed_rad_s']:
-                raise RuntimeError('arm not stopped during Arduino completion')
-            if now >= self.actuation_deadline:
-                raise RuntimeError('Arduino completion timeout; EE not started')
-            expected = True
-            if (self.docked_feedback_sequence <= self.command_feedback_sequence
-                    or self.docked_state != expected):
-                return
-            self.future = self.mode.call_async(Trigger.Request())
-            self.stage = 'ee_mode_wait'
-            self.ee_mode_started = now
-            return
-        if self.stage == 'ee_removal_running':
-            if now-self.ee_mode_started > 10.:
-                raise RuntimeError('EE removal completion timeout')
-            if self.status.get('last_execution_id') == self.execution_id:
-                if self.status.get('last_execution_result') != 'succeeded':
-                    raise RuntimeError('EE removal failed: '+self.status.get('reason', 'unknown'))
-                if self.status.get('mode') == 'hold' and not self.status.get('transitioning'):
-                    self.active = False
-                    self.advance_locked = False
-                    self.tool0_removal_complete = True
-                    self.begin_docking_retreat()
-            elif self.status.get('mode') != 'tool_auto':
-                raise RuntimeError('EE removal ownership lost')
+        # The operator requests a timed trigger, not an acknowledgement/EE
+        # sequence. This timer never blocks feedback or cancellation callbacks.
+        self.active = False
+        self.advance_locked = False
+        self.tool0_retreat_authorized = True
+        self.report('retreating', '3-second Arduino delay elapsed; checking reverse docking path')
+        self.begin_docking_retreat()
 
     def camera_advance_direction(self, base_tag, current):
         if self.tcp_camera is None:

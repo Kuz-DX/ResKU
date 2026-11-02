@@ -628,8 +628,8 @@ def test_source_pre_targets_enable_reviewed_tool0_tool1_and_tool2_goals():
     targets = load_pre_dock_targets(source)
     assert set(targets) == {0, 1, 2}
     np.testing.assert_allclose(targets[0]['joint_goal'], [
-        -np.pi, .13573901179137043, 1.0572465757417897,
-        -1.3302805639692503, 0., 0.])
+        -np.pi, .26173365465192155, 1.1001863481604437,
+        -1.3189287564203602, 0., 0.])
     np.testing.assert_allclose(targets[0]['transit_joint_goal'], [
         3.1001751723166735, 0.6403612785882697, 1.209862232156147,
         -1.427330240975674, -0.0030679615759781065, -0.021475731030191625])
@@ -647,14 +647,7 @@ def test_source_pre_targets_enable_reviewed_tool0_tool1_and_tool2_goals():
     assert model.within_limits(data['tool1']['pre_joint_goal_rad'], .02)
     assert model.within_limits(data['tool2']['pre_joint_goal_rad'], .02)
     assert data['tool0']['pre_dock_offset_tcp_m'] == [0., 0., -.030]
-    assert data['tool0']['rack_removal_ee_command'] == {
-        'duration_s': 2., 'velocity_rad_s': -5.,
-        'joint_direction': 'negative', 'physical_direction': 'cw',
-        'physical_viewpoint': 'gripper_toward_motor',
-        'completion_feedback':
-            'ee_joint_accumulated_cw_displacement',
-        'minimum_displacement_rad': 9.0,
-        'expected_displacement_rad': 10.}
+    assert 'rack_removal_ee_command' not in data['tool0']
     assert data['tool2']['grasp_stage_allowed_contacts'] == [
         ['rack_left', 'supply_box'], ['rack_right', 'supply_box']]
 
@@ -1000,7 +993,7 @@ def test_path_snapshot_ignores_ee_position_change(module, validation):
 def test_tool0_reverse_retreat_preserves_waypoints_and_stops():
     points = [np.full(6, value) for value in (0., .01, .02, .03)]
     n = SimpleNamespace(
-        healthy_hold=Mock(), path_id=0, tool0_removal_complete=True,
+        healthy_hold=Mock(), path_id=0, tool0_retreat_authorized=True,
         advance_plan=dict(start=points[0], waypoints=points[1:],
                           stop_at_waypoints=[False, True, True],
                           allowed_collision_pairs=frozenset({('tool_case_1', 'wrist_link_yaw')})),

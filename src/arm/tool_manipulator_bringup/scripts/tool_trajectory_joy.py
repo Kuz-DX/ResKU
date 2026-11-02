@@ -942,7 +942,7 @@ class ToolTrajectoryJoy(Node):
     def begin_docking_retreat(self):
         """Build a checked straight TCP retreat before planning directly to BACK."""
         self.healthy_hold(time.monotonic())
-        if self.path_id == 0 and getattr(self, 'tool0_removal_complete', False):
+        if self.path_id == 0 and getattr(self, 'tool0_retreat_authorized', False):
             advance = getattr(self, 'advance_plan', None)
             if not advance or not advance.get('waypoints'):
                 raise RuntimeError('completed docking path unavailable for reverse retreat')
@@ -1012,7 +1012,7 @@ class ToolTrajectoryJoy(Node):
             total=sum(durations), start_error=0., cartesian_line=True,
             stop_at_waypoints=[False]*(count-1)+[True],
             allowed_collision_pairs=(frozenset((('tool_case_1', 'wrist_link_yaw'),))
-                if self.path_id == 0 and getattr(self, 'tool0_removal_complete', False)
+                if self.path_id == 0 and getattr(self, 'tool0_retreat_authorized', False)
                 else frozenset())))
 
     def request_route_plan(self, path_id, measured, status):
