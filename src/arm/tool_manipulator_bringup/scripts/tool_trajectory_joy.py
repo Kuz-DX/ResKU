@@ -92,7 +92,15 @@ def load_pre_dock_targets(path):
                     or joint_goal.shape != (len(ARM_JOINTS),)
                     or not np.all(np.isfinite(joint_goal))):
                 raise ValueError(f'{path}: {key} has an invalid reviewed joint goal')
-            targets[path_id] = dict(joint_goal=joint_goal, **retreat)
+            target = dict(joint_goal=joint_goal, **retreat)
+            transit = value.get('transit_joint_goal_rad')
+            if transit is not None:
+                transit = np.asarray(transit, dtype=float)
+                if (transit.shape != (len(ARM_JOINTS),)
+                        or not np.all(np.isfinite(transit))):
+                    raise ValueError(f'{path}: {key} has an invalid transit joint goal')
+                target['transit_joint_goal'] = transit
+            targets[path_id] = target
             continue
         position = np.asarray(value.get('position_m'), dtype=float)
         quaternion = np.asarray(value.get('orientation_xyzw'), dtype=float)
@@ -1003,13 +1011,22 @@ class ToolTrajectoryJoy(Node):
                 raise ValueError(f'{tool_label(path_id)} pre-dock axis IK failed: '
                                  + ' | '.join(errors))
             pre_dock = np.asarray(pre_dock, dtype=float)
-        goals = [pre_dock]
-        for label, goal in zip((f'{tool_label(path_id)} pre-dock',), goals):
+        transit = target.get('transit_joint_goal')
+        if transit is not None:
+            transit = nearest_base_equivalent(
+                transit, measured, self.model.limits, self.margin)
+            goals = [transit, pre_dock]
+            labels = [f'{tool_label(path_id)} safe transit',
+                      f'{tool_label(path_id)} pre-dock']
+        else:
+            goals = [pre_dock]
+            labels = [f'{tool_label(path_id)} pre-dock']
+        for label, goal in zip(labels, goals):
             if not self.model.within_limits(goal):
                 raise ValueError(f'MoveIt route {label} violates joint limits')
         self.path_id = path_id
         self.route_kind = 'tool'
-        self.route_labels = [f'{tool_label(path_id)} pre-dock']
+        self.route_labels = labels
         self.snapshot = dict(self.full_state)
         self.original_epoch = status['epoch']
         self.route_goals = goals

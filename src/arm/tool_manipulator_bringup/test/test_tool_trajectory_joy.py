@@ -612,6 +612,8 @@ def test_source_pre_targets_enable_reviewed_tool0_tool1_and_tool2_goals():
     targets = load_pre_dock_targets(source)
     assert set(targets) == {0, 1, 2}
     np.testing.assert_allclose(targets[0]['joint_goal'], [
+        -3.143127, 0.401426, 1.459793, -0.940732, -0.044485, -0.030680])
+    np.testing.assert_allclose(targets[0]['transit_joint_goal'], [
         3.1001751723166735, 0.6403612785882697, 1.209862232156147,
         -1.427330240975674, -0.0030679615759781065, -0.021475731030191625])
     np.testing.assert_allclose(targets[1]['joint_goal'], [
@@ -825,6 +827,35 @@ def test_reviewed_joint_goal_is_moveit_goal_with_nearest_base_equivalent():
     assert [constraint.position for constraint in
             request.goal_constraints[0].joint_constraints] == pytest.approx(
                 node.route_goals[0])
+
+
+def test_reviewed_joint_goal_can_route_via_safe_transit():
+    transit = np.array([3.10, .64, 1.21, -1.43, 0., -.02])
+    goal = np.array([-3.143, .40, 1.46, -.94, -.04, -.03])
+    limits = {name: (-4., 4.) for name in ARM_JOINTS}
+    limits['base_joint'] = (-3.503, 3.614)
+    node = SimpleNamespace(
+        planner=Mock(), model=Mock(limits=limits), margin=.02,
+        pre_dock_targets={0: {'joint_goal': goal, 'transit_joint_goal': transit}},
+        full_state=dict(zip(ARM_JOINTS, np.zeros(6))),
+        planning_attempts=3, planning_timeout=8., planning_velocity_scale=.08,
+        planning_acceleration_scale=.4, report=Mock())
+    node._request_route_leg = lambda: ToolTrajectoryJoy._request_route_leg(node)
+    node.planner.service_is_ready.return_value = True
+    node.model.within_limits.return_value = True
+
+    ToolTrajectoryJoy.request_route_plan(node, 0, np.zeros(6), {'epoch': 'hold'})
+
+    assert len(node.route_goals) == 2
+    np.testing.assert_allclose(node.route_goals[0], transit)
+    expected_goal = goal.copy()
+    expected_goal[0] += 2.*math.pi
+    np.testing.assert_allclose(node.route_goals[1], expected_goal)
+    assert node.route_labels == ['tool0 (gripper) safe transit',
+                                 'tool0 (gripper) pre-dock']
+    request = node.planner.call_async.call_args.args[0].motion_plan_request
+    assert [constraint.position for constraint in
+            request.goal_constraints[0].joint_constraints] == pytest.approx(transit)
 
 
 def test_reviewed_joint_goal_outside_margin_is_blocked_before_moveit():

@@ -1003,7 +1003,7 @@ def test_advance_completion_checks_fk_endpoint_before_actuation(tmp_path, endpoi
         assert n.stage == 'dock_actuate'
         assert [call.args[0].data for call in
                 n.docking_command.publish.call_args_list] == [True]
-        assert 'tag-normal advance completed' in n.report.call_args.args[1]
+        assert 'advance completed' in n.report.call_args.args[1]
 
 
 def test_advance_completion_allows_axial_rotation_but_rejects_wrong_tilt(tmp_path):

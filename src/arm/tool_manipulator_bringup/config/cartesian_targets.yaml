@@ -8,6 +8,11 @@ targets:
     # view here; the checked final insertion therefore uses TCP local +Z.
     pre_joint_goal_rad: [-3.143127, 0.401426, 1.459793,
       -0.940732, -0.044485, -0.030680]
+    # BACK -> this pre-dock directly crossed the fixed tool case. Route via
+    # the previously collision-free approach before planning the second leg.
+    transit_joint_goal_rad: [3.1001751723166735, 0.6403612785882697,
+      1.209862232156147, -1.427330240975674, -0.0030679615759781065,
+      -0.021475731030191625]
     executable: true
     role: measured_tagless_50mm_pre_dock
     final_capture_label: finger
