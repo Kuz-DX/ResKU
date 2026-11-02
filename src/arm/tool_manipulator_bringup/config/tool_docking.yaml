@@ -9,7 +9,10 @@ tools:
     enabled: true
     require_l2_hold: false
     alignment_mode: camera_normal_advance
-    measured_pre_dock_alignment_enabled: true
+    # The latest tag-to-TCP capture contained zero detected/PnP/TF samples.
+    # Keep the reviewed taught endpoint + relative normal advance until a
+    # valid simultaneous tag/TCP measurement replaces the provisional offset.
+    measured_pre_dock_alignment_enabled: false
     tag_family: tag36h11
     tag_id: 0
     tag_size_m: 0.020

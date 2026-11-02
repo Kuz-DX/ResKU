@@ -477,7 +477,14 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             return
         if (distance > self.cfg['max_position_error_m']
                 or angle > self.cfg['max_angle_error_rad']):
-            raise RuntimeError('tag target beyond permitted correction envelope')
+            delta = target[:3, 3]-current[:3, 3]
+            raise RuntimeError(
+                'tag target beyond permitted correction envelope: '
+                f'position_error={distance:.6f}m '
+                f'delta=[{delta[0]:.6f}, {delta[1]:.6f}, {delta[2]:.6f}]m '
+                f'limit={self.cfg["max_position_error_m"]:.6f}m; '
+                f'angle_error={angle:.6f}rad '
+                f'limit={self.cfg["max_angle_error_rad"]:.6f}rad')
         if not self.motion_enabled:
             if now-self.last_preview_report >= 1.0:
                 self.last_preview_report = now

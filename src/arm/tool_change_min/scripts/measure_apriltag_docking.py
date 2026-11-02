@@ -396,7 +396,12 @@ class AprilTagDockingMeasurement(Node):
         self.writer.writerow(row)
         self.csv_stream.flush()
         self.total_frames += 1
-        if self.total_frames >= self.sample_count:
+        # sample_count means usable measurements, not merely messages.  In
+        # target-frame mode require the complete image-time TF calculation;
+        # otherwise a brief tag absence could produce a misleading all-null
+        # summary after only a few seconds.
+        accepted_samples = self.tf_frames if self.target_frame else self.pnp_frames
+        if accepted_samples >= self.sample_count:
             self.finish()
             rclpy.shutdown()
 

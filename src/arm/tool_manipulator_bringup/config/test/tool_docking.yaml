@@ -9,7 +9,8 @@ tools:
     enabled: true
     require_l2_hold: false
     alignment_mode: camera_normal_advance
-    measured_pre_dock_alignment_enabled: true
+    # Match production: use the taught endpoint until a valid tag/TCP capture.
+    measured_pre_dock_alignment_enabled: false
     tag_family: tag36h11
     tag_id: 0
     tag_size_m: 0.020

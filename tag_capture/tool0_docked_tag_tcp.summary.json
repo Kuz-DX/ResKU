@@ -1,0 +1,56 @@
+{
+  "tag_id": 0,
+  "tag_size_m": 0.02,
+  "total_frames": 100,
+  "detected_frames": 0,
+  "detection_rate": 0.0,
+  "pnp_success_frames": 0,
+  "tf_success_frames": 0,
+  "camera_info": {
+    "frame_id": "arm_camera_color_optical_frame",
+    "width": 640,
+    "height": 480,
+    "distortion_model": "plumb_bob",
+    "k": [
+      605.8599853515625,
+      0.0,
+      326.54400634765625,
+      0.0,
+      605.5801391601562,
+      250.81643676757812,
+      0.0,
+      0.0,
+      1.0
+    ],
+    "d": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  "raw_position_camera_m": null,
+  "corner_pnp_position_camera_m": null,
+  "corner_pnp_orientation_xyzw_mean": null,
+  "corner_pnp_orientation_deviation_rad": null,
+  "corner_pnp_minus_raw_m": null,
+  "corner_pnp_minus_reference_m": null,
+  "reprojection_rmse_px": null,
+  "capture_to_receive_latency_ms": {
+    "count": 100,
+    "mean": 59.667628029999996,
+    "std": 2.8769439665838523,
+    "min": 56.57481,
+    "max": 81.86717,
+    "p95": 62.866265299999995
+  },
+  "decision_margin": null,
+  "tag_to_target": {
+    "base_frame": "arm_world",
+    "target_frame": "tcp_link",
+    "translation_m": null,
+    "orientation_xyzw_mean": null,
+    "orientation_deviation_rad": null
+  }
+}
