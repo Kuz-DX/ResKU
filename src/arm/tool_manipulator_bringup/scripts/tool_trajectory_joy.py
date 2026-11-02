@@ -942,53 +942,18 @@ class ToolTrajectoryJoy(Node):
     def begin_docking_retreat(self):
         """Build a checked straight TCP retreat before planning directly to BACK."""
         self.healthy_hold(time.monotonic())
-        if self.path_id == 0 and getattr(self, 'tool0_retreat_authorized', False):
-            advance = getattr(self, 'advance_plan', None)
-            if not advance or not advance.get('waypoints'):
-                raise RuntimeError('completed docking path unavailable for reverse retreat')
-            seed = np.asarray([self.full_state[j] for j in ARM_JOINTS], dtype=float)
-            errors = np.abs(seed-advance['waypoints'][-1])
-            worst = int(np.argmax(errors))
-            if errors[worst] > self.cfg['joint_tolerance_rad']:
-                raise RuntimeError(
-                    'reverse retreat start differs from final docking goal: '
-                    f'{ARM_JOINTS[worst]} error={errors[worst]:.6f}rad '
-                    f'limit={self.cfg["joint_tolerance_rad"]:.6f}rad '
-                    f'goal={advance["waypoints"][-1][worst]:.6f} '
-                    f'measured={seed[worst]:.6f}')
-            waypoints = [np.asarray(q, dtype=float).copy() for q in
-                         reversed([advance['start'], *advance['waypoints'][:-1]])]
-            forward_stops = [True, *advance['stop_at_waypoints'][:-1]]
-            durations, previous = [], seed
-            for goal in waypoints:
-                if not self.model.within_limits(goal, self.margin):
-                    raise RuntimeError('reverse docking waypoint violates limits')
-                durations.append(max(.02, float(np.max(np.abs(goal-previous))) /
-                                     self.cfg['joint_speed_rad_s']))
-                if advance.get('cartesian_line', False):
-                    distance = np.linalg.norm(self.model.fk(goal)[:3, 3] -
-                                              self.model.fk(previous)[:3, 3])
-                    durations[-1] = max(durations[-1], distance/self.cfg['linear_speed_m_s'])
-                previous = goal
-            self.return_home_after_back = True
-            self.route_kind = 'dock_retreat'
-            self.report('retreating', 'checking reversed docking path; then BACK -> HOME')
-            self.begin(self.path_id, dict(
-                start=seed, waypoints=waypoints, durations=durations,
-                total=sum(durations), start_error=0.,
-                cartesian_line=advance.get('cartesian_line', False),
-                stop_at_waypoints=list(reversed(forward_stops)),
-                allowed_collision_pairs=advance.get('allowed_collision_pairs', frozenset())))
-            return
+        tool0 = self.path_id == 0 and getattr(self, 'tool0_retreat_authorized', False)
         target = self.pre_dock_targets.get(self.path_id)
         if target is None:
             raise RuntimeError(f'{tool_label(self.path_id)} retreat configuration unavailable')
-        distance = float(target['retreat_distance'])
-        local_axis = np.asarray(target['retreat_axis'], dtype=float)
+        distance = .030 if tool0 else float(target['retreat_distance'])
+        local_axis = np.array([0., 0., -1.]) if tool0 else np.asarray(target['retreat_axis'], dtype=float)
+        if tool0:
+            self.return_home_after_back = False
         seed = np.asarray([self.full_state[j] for j in ARM_JOINTS], dtype=float)
         origin = self.model.fk(seed)
         direction = origin[:3, :3] @ local_axis
-        count = max(1, math.ceil(distance/.003))
+        count = max(1, math.ceil(distance/(.002 if tool0 else .003)))
         waypoints, durations = [], []
         previous = seed.copy()
         for index in range(1, count+1):
@@ -1013,7 +978,10 @@ class ToolTrajectoryJoy(Node):
             waypoints.append(solved.copy())
             previous = solved
         self.route_kind = 'dock_retreat'
-        self.report('retreating', f'planning checked {distance*1000.:.1f} mm TCP retreat')
+        self.report('retreating',
+                    f'checking {distance*1000.:.1f} mm TCP retreat from current feedback; '
+                    f'origin_m={origin[:3, 3].round(6).tolist()} '
+                    f'direction={direction.round(6).tolist()}; then BACK')
         self.begin(self.path_id, dict(
             start=seed, waypoints=waypoints, durations=durations,
             total=sum(durations), start_error=0., cartesian_line=True,

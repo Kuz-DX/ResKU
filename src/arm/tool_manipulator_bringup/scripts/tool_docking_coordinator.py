@@ -434,32 +434,22 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
 
     def tick_tool0_finish(self, now):
         self.guard(now)
-        q = np.asarray([self.full_state[j] for j in ARM_JOINTS])
-        errors = np.abs(q-self.lock_goal)
-        worst = int(np.argmax(errors))
-        if errors[worst] > self.cfg['joint_tolerance_rad']:
-            raise RuntimeError(
-                'arm departed final dock during completion sequence: '
-                f'{ARM_JOINTS[worst]} error={errors[worst]:.6f}rad '
-                f'limit={self.cfg["joint_tolerance_rad"]:.6f}rad '
-                f'held={self.lock_goal[worst]:.6f} measured={q[worst]:.6f}; '
-                f'retreat_delay_remaining={max(0., self.actuation_deadline-now):.3f}s')
         if getattr(self, 'docking_status', None) in ('ERROR', 'UNKNOWN'):
             raise RuntimeError('Arduino unavailable: '+self.docking_status)
+        if now < self.actuation_deadline:
+            return
         if np.max(np.abs(self.velocity)) > self.cfg['stopped_speed_rad_s']:
             fastest = int(np.argmax(np.abs(self.velocity)))
             raise RuntimeError(
-                'arm not stopped during Arduino delay: '
+                'arm not stopped before current-pose retreat: '
                 f'{ARM_JOINTS[fastest]} speed={self.velocity[fastest]:.6f}rad/s '
                 f'limit={self.cfg["stopped_speed_rad_s"]:.6f}rad/s')
-        if now < self.actuation_deadline:
-            return
         # The operator requests a timed trigger, not an acknowledgement/EE
         # sequence. This timer never blocks feedback or cancellation callbacks.
         self.active = False
         self.advance_locked = False
         self.tool0_retreat_authorized = True
-        self.report('retreating', '3-second Arduino delay elapsed; checking reverse docking path')
+        self.report('retreating', '3-second Arduino delay elapsed; planning 30 mm TCP -Z retreat from current feedback')
         self.begin_docking_retreat()
 
     def camera_advance_direction(self, base_tag, current):

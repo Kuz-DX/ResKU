@@ -3,7 +3,7 @@ import json
 import math
 from pathlib import Path
 import sys
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from types import SimpleNamespace
 
 import numpy as np
@@ -990,27 +990,49 @@ def test_path_snapshot_ignores_ee_position_change(module, validation):
     assert not ToolTrajectoryJoy.unchanged(node, validation=validation)
 
 
-def test_tool0_reverse_retreat_preserves_waypoints_and_stops():
-    points = [np.full(6, value) for value in (0., .01, .02, .03)]
+def test_tool0_retreat_uses_displaced_current_pose_and_orientation():
+    from tool_trajectory_joy import ArmKinematics
+    model = ArmKinematics(
+        SCRIPTS.parent.parent/'tool_manipulator_description/urdf/tool_manipulator.urdf.xacro',
+        SCRIPTS.parent/'config/hardware.yaml')
+    # Real feedback sent after docking; do not require the taught endpoint.
+    seed = np.array([-3.143127, .114843, 1.146507, -1.196598, .001534, -.009204])
     n = SimpleNamespace(
         healthy_hold=Mock(), path_id=0, tool0_retreat_authorized=True,
-        advance_plan=dict(start=points[0], waypoints=points[1:],
-                          stop_at_waypoints=[False, True, True],
-                          allowed_collision_pairs=frozenset({('tool_case_1', 'wrist_link_yaw')})),
-        full_state=dict(zip(ARM_JOINTS, points[-1])),
-        cfg=dict(joint_tolerance_rad=.005, joint_speed_rad_s=.025),
-        model=SimpleNamespace(within_limits=lambda q, margin: True), margin=.02,
-        report=Mock(), begin=Mock())
+        advance_plan=None,  # reverse taught path is intentionally unnecessary
+        pre_dock_targets={0: {'retreat_distance': .030, 'retreat_axis': [0., 0., -1.]}},
+        full_state=dict(zip(ARM_JOINTS, seed)), model=model, margin=.02,
+        report=Mock(), begin=Mock(), return_home_after_back=True)
     ToolTrajectoryJoy.begin_docking_retreat(n)
     plan = n.begin.call_args.args[1]
-    np.testing.assert_allclose(plan['waypoints'], points[-2::-1])
-    assert plan['stop_at_waypoints'] == [True, False, True]
-    assert n.return_home_after_back
+    origin = model.fk(seed)
+    np.testing.assert_allclose(plan['start'], seed)
+    assert len(plan['waypoints']) == 15
+    previous = seed
+    for i, (q, duration) in enumerate(zip(plan['waypoints'], plan['durations']), 1):
+        expected = origin.copy()
+        expected[:3, 3] -= origin[:3, 2]*(.002*i)
+        residual = model.pose_error(q, expected)
+        assert np.linalg.norm(residual[:3]) < 1e-4
+        assert np.linalg.norm(residual[3:]) < 1e-3
+        assert model.within_limits(q, .02)
+        assert np.max(np.abs(q-previous))/duration <= .025+1e-10
+        distance = np.linalg.norm(model.fk(q)[:3, 3]-model.fk(previous)[:3, 3])
+        assert distance/duration <= .005+1e-10
+        previous = q
+    assert plan['cartesian_line']
+    assert plan['stop_at_waypoints'] == [False]*14+[True]
+    assert plan['allowed_collision_pairs'] == frozenset({('tool_case_1', 'wrist_link_yaw')})
+    assert not n.return_home_after_back
     assert n.route_kind == 'dock_retreat'
-    n.full_state[ARM_JOINTS[0]] += .02
+    n.begin_back = Mock()
+    ToolTrajectoryJoy.path_completed(n)
+    n.begin_back.assert_called_once_with(via_home=False)
+    # Failed IK still prevents the path from reaching execution.
     n.begin.reset_mock()
-    with pytest.raises(RuntimeError, match='start differs'):
-        ToolTrajectoryJoy.begin_docking_retreat(n)
+    with patch.object(model, 'solve', side_effect=ValueError('unreachable')):
+        with pytest.raises(RuntimeError, match='retreat IK point'):
+            ToolTrajectoryJoy.begin_docking_retreat(n)
     n.begin.assert_not_called()
 
 

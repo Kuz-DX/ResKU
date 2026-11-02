@@ -447,9 +447,13 @@ def test_tool0_three_second_delay_then_retreat_without_ee(tmp_path, acknowledged
     n.docking_status = 'DOCKED' if acknowledged else 'MOVING'
     n.mode = Mock()
     n.publisher = Mock()
+    # Movement during the Arduino delay must not compare against lock_goal.
+    n.full_state[ARM_JOINTS[0]] = .5
+    n.velocity[0] = .1
     for now in (100., 101., 102.999):
         n.tick_tool0_finish(now)
         n.begin_docking_retreat.assert_not_called()
+    n.velocity[0] = 0.
     n.tick_tool0_finish(103.)
     n.begin_docking_retreat.assert_called_once()
     assert n.tool0_retreat_authorized
@@ -462,25 +466,20 @@ def test_tool0_three_second_delay_then_retreat_without_ee(tmp_path, acknowledged
     n.begin_docking_retreat.assert_called_once()
 
 
-@pytest.mark.parametrize('failure', ['drift', 'speed', 'ownership'])
+@pytest.mark.parametrize('failure', ['speed', 'ownership'])
 def test_tool0_delay_does_not_bypass_arm_guards(tmp_path, failure):
     n = node(tmp_path)
     n.guard = Mock()
     n.lock_goal = np.zeros(6)
     n.stage = 'dock_attach_wait'
     n.actuation_deadline = 3.
-    if failure == 'drift':
-        n.full_state[ARM_JOINTS[0]] = .1
-    elif failure == 'speed':
+    if failure == 'speed':
         n.velocity[0] = .1
     else:
         n.guard.side_effect = RuntimeError('ownership changed')
     with pytest.raises(RuntimeError) as failure_info:
         n.tick_tool0_finish(3.)
-    if failure == 'drift':
-        assert 'base_joint error=0.100000rad' in str(failure_info.value)
-        assert 'limit=' in str(failure_info.value)
-    elif failure == 'speed':
+    if failure == 'speed':
         assert 'base_joint speed=0.100000rad/s' in str(failure_info.value)
     n.begin_docking_retreat.assert_not_called()
 

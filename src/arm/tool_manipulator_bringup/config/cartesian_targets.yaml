@@ -30,7 +30,7 @@ targets:
     required_final_motion: straight_tcp_approach
     pre_dock_offset_tcp_m: [0.0, 0.0, -0.030]
     # Runtime sequence: /arm/docking=true once, wait 3 s, then checked
-    # reverse insertion path -> BACK -> HOME. No EE velocity command.
+    # current-feedback TCP -Z 30 mm retreat -> BACK. No EE velocity command.
     retreat_distance_m: 0.030
     retreat_axis_tcp: [0.0, 0.0, -1.0]
   tool1:
