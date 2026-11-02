@@ -606,24 +606,27 @@ def test_pre_dock_targets_prefer_explicit_pre_over_final_capture(tmp_path):
     np.testing.assert_allclose(targets[0]['joint_goal'], pre)
 
 
-def test_source_pre_targets_enable_tool0_and_explain_blocked_tool2():
+def test_source_pre_targets_enable_reviewed_tool0_tool1_and_tool2_goals():
     from tool_trajectory_joy import ArmKinematics
     source = Path(__file__).resolve().parents[1] / 'config/cartesian_targets.yaml'
     targets = load_pre_dock_targets(source)
-    assert set(targets) == {0, 2}
+    assert set(targets) == {0, 1, 2}
     np.testing.assert_allclose(targets[0]['joint_goal'], [
         3.1001751723166735, 0.6403612785882697, 1.209862232156147,
         -1.427330240975674, -0.0030679615759781065, -0.021475731030191625])
-    assert 'violates planning limits' in targets[2]['blocked_reason']
+    np.testing.assert_allclose(targets[1]['joint_goal'], [
+        3.2888548092266077, .4934045542387666, 1.4027210346066878,
+        -1.5432200926554531, -.4801359866084125, -1.9527575429782145])
+    np.testing.assert_allclose(targets[2]['joint_goal'], [
+        -2.13180646665643, .8056224119758513, 1.2458380150140123,
+        -1.4895040589039743, -.5463633803567056, -.3205989853677441])
     data = yaml.safe_load(source.read_text())['targets']
     model = ArmKinematics(
         SCRIPTS.parent.parent/'tool_manipulator_description/urdf/tool_manipulator.urdf.xacro',
         SCRIPTS.parent/'config/hardware.yaml')
     assert model.within_limits(data['tool0']['pre_joint_goal_rad'], .02)
-    assert not model.within_limits(data['tool2']['pre_joint_goal_rad'], .02)
-    tool2_pre = dict(zip(ARM_JOINTS, data['tool2']['pre_joint_goal_rad']))
-    assert tool2_pre['elbow_joint'] > model.limits['elbow_joint'][1]-.02
-    assert tool2_pre['wrist_pitch_joint'] < model.limits['wrist_pitch_joint'][0]+.02
+    assert model.within_limits(data['tool1']['pre_joint_goal_rad'], .02)
+    assert model.within_limits(data['tool2']['pre_joint_goal_rad'], .02)
     assert data['tool0']['pre_dock_offset_tcp_m'] == [0., 0., -.030]
     assert data['tool0']['rack_removal_ee_command'] == {
         'duration_s': 2., 'velocity_rad_s': 5.,

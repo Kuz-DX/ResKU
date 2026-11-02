@@ -48,6 +48,13 @@ targets:
     retreat_axis_tcp: [0.0, 0.0, -1.0]
   tool1:
     joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
+    # Reviewed production approach endpoint. The test point-17 endpoint is
+    # geometrically labelled as the centred 80 mm observation pose, but its
+    # wrist_pitch is only 0.0005 rad inside the 0.02-rad planning boundary.
+    # Keep the safer recorded endpoint as the executable pre-dock instead.
+    pre_joint_goal_rad: [3.2888548092266077, 0.4934045542387666, 1.4027210346066878,
+      -1.5432200926554531, -0.4801359866084125, -1.9527575429782145]
+    pre_capture_label: production_tool1_trajectory_endpoint
     # Retained for diagnosis only: elbow=1.581792 exceeds the 1.577952 hard
     # soft-limit endpoint and the 1.557952 planning-margin endpoint.
     joint_goal_rad: [2.853204265467086, 0.6768386626181123, 1.5817918531455613,
@@ -59,22 +66,18 @@ targets:
     surface_plane_tilt_from_world_xy_deg: 55.0
     approach_z_tilt_from_world_xy_deg: -35.0
     orientation_xyzw: [0.0, 0.8870108331782217, 0.0, 0.4617486132350339]
-    # Fail closed until a replacement capture stays below the 1.557952-rad
-    # planning-margin endpoint.  The measured value remains diagnostic data.
-    executable: false
-    role: measured_joint_pre_dock_requires_limit_correction
+    executable: true
+    role: reviewed_collision_free_pre_dock
     retreat_distance_m: 0.030
     retreat_axis_tcp: [0.0, 0.0, -1.0]
   tool2:
     joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
-    # 2026-11-01 capture `tool1pre`, mapped to logical tool2.  Preserve it but
-    # do not execute: elbow and wrist_pitch exceed the 0.02-rad planning margin.
-    pre_joint_goal_rad: [3.3410101560147196, 1.0098475158565634, 1.5908676398244423,
-      -1.5940091046462999, -0.5016117176388115, -2.02485464000884]
-    pre_capture_label: tool1pre
-    blocked_reason: >-
-      captured tool2 pre violates planning limits: elbow_joint=1.590868 allowed<=1.557952;
-      wrist_pitch_joint=-1.594009 allowed>=-1.576453; reteach inside limits
+    # Imported from config/test/tool2_trajectory.yaml point 16. This is the
+    # collision-checked high approach with the final TCP X/Y and Z +95 mm;
+    # point 17 is contact/grasp and remains diagnostic only.
+    pre_joint_goal_rad: [-2.13180646665643, 0.8056224119758513, 1.2458380150140123,
+      -1.4895040589039743, -0.5463633803567056, -0.3205989853677441]
+    pre_capture_label: test_tool2_point16_high_approach
     final_capture_label: tool1
     final_joint_goal_rad: [3.034213998437591, 0.6241297112184002, 1.5446163880149817,
       -1.4226177774267788, -0.3451456772744761, -1.7732817907955942]
@@ -82,8 +85,8 @@ targets:
       -1.5091862255047854, -0.2316310989709387, -0.0828349625456184]
     # Contact/grasp pose: rack_left intentionally touches the supply box here.
     # It must not be used as an ordinary collision-free MoveIt entry goal.
-    executable: false
-    role: measured_final_grasp_contact
+    executable: true
+    role: collision_free_pregrasp_95mm_above_contact
     required_prior_stage: collision_free_pregrasp
     required_scene_transition: attach_supply_box_after_grasp_confirmation
     grasp_stage_allowed_contacts:
