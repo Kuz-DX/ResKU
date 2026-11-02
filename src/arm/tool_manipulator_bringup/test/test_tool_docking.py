@@ -365,7 +365,8 @@ def test_fixed_joint_tail_ends_at_measured_docking_pose(tmp_path):
     np.testing.assert_array_equal(n.cfg['final_joint_goal'], final_capture)
     captures = [
         [-3.215224, .127060, .914029, -1.466426, .039884, .072097],
-        [-3.202952, .071908, .926944, -1.406910, .032214, .061359]]
+        [-3.202952, .071908, .926944, -1.406910, .032214, .061359],
+        [-3.183010, .132296, 1.070934, -1.287878, .046019, -.004602]]
     np.testing.assert_allclose(n.cfg['intermediate_joint_goals'], captures)
     hit_indices = []
     for capture in captures:
@@ -374,7 +375,7 @@ def test_fixed_joint_tail_ends_at_measured_docking_pose(tmp_path):
         assert len(indices) == 1
         assert n.advance_plan['stop_at_waypoints'][indices[0]]
         hit_indices.append(indices[0])
-    assert hit_indices[0] < hit_indices[1]
+    assert all(a < b for a, b in zip(hit_indices, hit_indices[1:]))
     previous = q
     for point, duration in zip(n.advance_plan['waypoints'], n.advance_plan['durations']):
         for sample in np.linspace(previous, point, 11):

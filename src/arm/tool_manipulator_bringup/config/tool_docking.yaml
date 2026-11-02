@@ -9,7 +9,7 @@ tools:
     enabled: true
     require_l2_hold: false
     alignment_mode: fixed_joint_goal
-    # Latest measured approach captures 1 -> 2 -> 3 -> unchanged final dock.
+    # Measured approach captures 1 -> 2 -> 3 -> near-dock capture -> unchanged final.
     axial_sampled_path: false
     maintain_entry_orientation: true
     # Measured approach orientations vary; the final target remains unchanged.
@@ -20,6 +20,7 @@ tools:
     intermediate_joint_goals_rad:
       - [-3.215224, 0.127060, 0.914029, -1.466426, 0.039884, 0.072097]
       - [-3.202952, 0.071908, 0.926944, -1.406910, 0.032214, 0.061359]
+      - [-3.183010, 0.132296, 1.070934, -1.287878, 0.046019, -0.004602]
     final_joint_goal_rad: [-3.1860780000, 0.0474730000, 1.0911800000, -1.2349950000, 0.0368160000, 0.0490870000]
     actuation_enabled: true
     desired_docked: true           # true=attach pulse, false=release pulse

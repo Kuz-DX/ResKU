@@ -4,7 +4,7 @@
 targets:
   tool0:
     joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
-    # Latest measured approach capture 1; then capture 2 -> 3 -> unchanged final.
+    # Measured approach capture 1; then 2 -> 3 -> near-dock capture -> unchanged final.
     pre_joint_goal_rad: [-3.215224, 0.129329, 0.917694, -1.492082, 0.038350, 0.056757]
     # BACK -> this pre-dock directly crossed the fixed tool case. Route via
     # the previously collision-free approach before planning the second leg.
