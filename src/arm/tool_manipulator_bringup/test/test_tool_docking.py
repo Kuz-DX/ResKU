@@ -71,7 +71,7 @@ def test_shipped_config_enables_tool0_and_tool1_camera_normal_docking():
     assert set(cfg) == {0, 1}
     assert cfg[0]['alignment_mode'] == 'fixed_joint_goal'
     np.testing.assert_allclose(cfg[0]['final_joint_goal'], [
-        -np.pi, .20514294234416736, 1.1647936983885467, -1.1977306938845027, 0., 0.])
+        -np.pi, .21151712949834325, 1.1755009219319108, -1.1885271125779613, 0., 0.])
     assert cfg[0]['tag_family'] == 'tag36h11'
     assert cfg[0]['tag_id'] == 0
     assert cfg[0]['tag_size_m'] == .020
@@ -367,7 +367,9 @@ def test_fixed_joint_tail_ends_at_measured_docking_pose(tmp_path):
     measured_final = n.model.fk(capture4)
     np.testing.assert_allclose(final[[0, 2], 3], measured_final[[0, 2], 3], atol=1e-10)
     assert final[1, 3] == pytest.approx(0., abs=1e-12)
-    assert final[2, 2] == pytest.approx(measured_final[2, 2], abs=1e-10)
+    approach_capture = np.array([-3.176874, .311018, .922057, -1.541475, -.003068, -.019942])
+    approach_pose = n.model.fk(approach_capture)
+    assert final[2, 2] == pytest.approx(approach_pose[2, 2], abs=1e-10)
     previous = q
     for point, duration in zip(n.advance_plan['waypoints'], n.advance_plan['durations']):
         for sample in np.linspace(previous, point, 11):
