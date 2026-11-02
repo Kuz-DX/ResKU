@@ -19,6 +19,7 @@
 #if defined(__linux__)
 
 #include <stdio.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <string.h>
 #include <unistd.h>
@@ -150,7 +151,11 @@ int PortHandlerLinux::getBytesAvailable()
 
 int PortHandlerLinux::readPort(uint8_t *packet, int length)
 {
-  return read(socket_fd_, packet, length);
+  const int received = read(socket_fd_, packet, length);
+  // Nonblocking no-data/interruption is not a disconnected device.
+  if (received < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR))
+    return 0;
+  return received;
 }
 
 int PortHandlerLinux::writePort(uint8_t *packet, int length)

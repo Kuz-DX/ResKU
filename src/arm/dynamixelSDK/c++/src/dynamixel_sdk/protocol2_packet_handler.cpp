@@ -313,21 +313,8 @@ int Protocol2PacketHandler::rxPacket(PortHandler *port, uint8_t *rxpacket, bool 
 
   while(true)
   {
-    // A disconnected port returns -1; never wrap it into the unsigned offset.
     const int received = port->readPort(&rxpacket[rx_length], wait_length - rx_length);
-    if (received < 0) {
-      result = COMM_RX_FAIL;
-      break;
-    }
-    // Opt-in raw transport diagnostics; disabled during normal operation.
-    // Print chunks before parsing so invalid headers/lengths are observable.
-    if (received > 0 && getenv("DXL_PACKET_TRACE") != NULL) {
-      fprintf(stderr, "[DXL RX] offset=%u count=%d bytes=", rx_length, received);
-      for (int i = 0; i < received && i < 32; ++i)
-        fprintf(stderr, "%02X ", rxpacket[rx_length + i]);
-      if (received > 32) fprintf(stderr, "...");
-      fprintf(stderr, "\n");
-    }
+    if (received < 0) { result = COMM_RX_FAIL; break; }
     rx_length += received;
     if (rx_length >= wait_length)
     {
@@ -345,7 +332,7 @@ int Protocol2PacketHandler::rxPacket(PortHandler *port, uint8_t *rxpacket, bool 
         if (rxpacket[PKT_RESERVED] != 0x00 ||
 //           rxpacket[PKT_ID] > 0xFC || // FAST protocol responds with a broadcast ID
            DXL_MAKEWORD(rxpacket[PKT_LENGTH_L], rxpacket[PKT_LENGTH_H]) < 4 ||
-           DXL_MAKEWORD(rxpacket[PKT_LENGTH_L], rxpacket[PKT_LENGTH_H]) > RXPACKET_MAX_LEN - (PKT_LENGTH_H + 1) ||
+           DXL_MAKEWORD(rxpacket[PKT_LENGTH_L], rxpacket[PKT_LENGTH_H]) > RXPACKET_MAX_LEN - 7 ||
            rxpacket[PKT_INSTRUCTION] != 0x55)
         {
           // remove the first byte in the packet
@@ -479,6 +466,14 @@ int Protocol2PacketHandler::txRxPacket(PortHandler *port, uint8_t *txpacket, uin
 
   if (result == COMM_SUCCESS && txpacket[PKT_ID] == rxpacket[PKT_ID])
   {
+    const uint16_t actual = DXL_MAKEWORD(rxpacket[PKT_LENGTH_L], rxpacket[PKT_LENGTH_H]);
+    const uint8_t instruction = txpacket[PKT_INSTRUCTION];
+    uint32_t expected = 0;
+    if (instruction == INST_PING) expected = 7;
+    else if (instruction == INST_READ)
+      expected = 4u + DXL_MAKEWORD(txpacket[PKT_PARAMETER0+2], txpacket[PKT_PARAMETER0+3]);
+    else if (instruction == INST_WRITE || instruction == INST_REG_WRITE) expected = 4;
+    if (expected && actual != expected) return COMM_RX_CORRUPT;
     if (error != 0)
       *error = (uint8_t)rxpacket[PKT_ERROR];
   }
@@ -725,6 +720,9 @@ int Protocol2PacketHandler::readRx(PortHandler *port, uint8_t id, uint16_t lengt
     result = rxPacket(port, rxpacket);
   } while (result == COMM_SUCCESS && rxpacket[PKT_ID] != id);
 
+  if (result == COMM_SUCCESS &&
+      DXL_MAKEWORD(rxpacket[PKT_LENGTH_L], rxpacket[PKT_LENGTH_H]) != 4u + length)
+    result = COMM_RX_CORRUPT;
   if (result == COMM_SUCCESS && rxpacket[PKT_ID] == id)
   {
     if (error != 0)
@@ -900,11 +898,6 @@ int Protocol2PacketHandler::writeTxRx(PortHandler *port, uint8_t id, uint16_t ad
   //memcpy(&txpacket[PKT_PARAMETER0+2], data, length);
 
   result = txRxPacket(port, txpacket, rxpacket, error);
-  // A write acknowledgement has no payload. A delayed read response is not
-  // confirmation that the write (including Torque OFF) succeeded.
-  if (result == COMM_SUCCESS && id != BROADCAST_ID &&
-      DXL_MAKEWORD(rxpacket[PKT_LENGTH_L], rxpacket[PKT_LENGTH_H]) != 4)
-    result = COMM_RX_CORRUPT;
 
   free(txpacket);
   //delete[] txpacket;
