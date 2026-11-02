@@ -9,7 +9,7 @@ tools:
     enabled: true
     require_l2_hold: false
     alignment_mode: fixed_joint_goal
-    # Fixed final orientation; 70 mm axial approach sampled every 2 mm.
+    # Captures 5..12 form the outer approach; fixed final orientation for the last 70 mm.
     # 78 mm exceeds the wrist-pitch planning limit; do not extend to 100 mm.
     axial_sampled_path: true
     axial_entry_distance_m: 0.070
@@ -19,6 +19,17 @@ tools:
     tag_family: tag36h11
     tag_id: 0
     tag_size_m: 0.020
+    # Starting at capture 5 in cartesian_targets.yaml: captures 6..12, then
+    # the calculated axial entry. The entire executed prefix is reversed on retreat.
+    axial_approach_joint_goals_rad:
+      - [-3.193748, 0.359538, 1.023112, -1.486497, 0.023010, 0.023010]
+      - [-3.195282, 0.312763, 0.989776, -1.496445, 0.027612, 0.032214]
+      - [-3.196816, 0.283441, 0.969007, -1.502728, 0.030680, 0.036816]
+      - [-3.196816, 0.250629, 0.947888, -1.509535, 0.035282, 0.041417]
+      - [-3.199884, 0.222879, 0.929213, -1.515295, 0.038350, 0.047553]
+      - [-3.199884, 0.197920, 0.914203, -1.520705, 0.039884, 0.052155]
+      - [-3.199884, 0.169297, 0.895179, -1.526640, 0.041417, 0.055223]
+      - [-3.2010609083, 0.1329587479, 0.8744011184, -1.5376735580, 0.0481969563, 0.0588406346]
     intermediate_joint_goals_rad:
       - [-3.2005055092, 0.1324210051, 0.8835359584, -1.5279836475, 0.0477751524, 0.0584789035]
       - [-3.1999597387, 0.1317490660, 0.8924599209, -1.5183708667, 0.0473606551, 0.0581234576]

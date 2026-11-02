@@ -508,9 +508,11 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
 
     def start_final_joint_goal(self, q):
         """Build one fully checked joint-space tail to the measured dock pose."""
-        goals = list(self.cfg.get('intermediate_joint_goals', [])) + [self.cfg['final_joint_goal']]
+        prefix = list(self.cfg.get('axial_approach_joint_goals', []))
+        goals = prefix + list(self.cfg.get('intermediate_joint_goals', [])) + [self.cfg['final_joint_goal']]
         waypoints, stops, seed = [], [], q.copy()
-        for captured in goals:
+        axial_start, axial_entry = 0, q.copy()
+        for goal_index, captured in enumerate(goals):
             goal = np.asarray(captured, dtype=float).copy()
             goal[0] += 2.*math.pi*round((seed[0]-goal[0])/(2.*math.pi))
             if not self.model.within_limits(goal, self.margin):
@@ -520,12 +522,14 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             waypoints.extend(seed+(goal-seed)*(i/count) for i in range(1, count+1))
             stops.extend([False]*(count-1)+[True])
             seed = goal
+            if goal_index + 1 == len(prefix):
+                axial_start, axial_entry = len(waypoints), goal.copy()
         axial = self.cfg.get('axial_sampled_path', False)
         if axial:
             # Reject an off-axis measured entry rather than silently dragging it
             # into the insertion line. All samples still go through collision checks.
             final_pose = self.model.fk(goal)
-            entry_pose = self.model.fk(q)
+            entry_pose = self.model.fk(axial_entry)
             expected_entry = final_pose.copy()
             entry_distance = float(self.cfg.get('axial_entry_distance_m', .030))
             if not math.isfinite(entry_distance) or entry_distance <= 0:
@@ -535,7 +539,7 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             if position_error > .008 or angle_error > math.radians(5.):
                 raise RuntimeError('axial docking entry mismatch: '
                                    f'{position_error:.6f}m, {angle_error:.6f}rad')
-            stops = [False] * (len(waypoints)-1) + [True]
+            stops[axial_start:] = [False] * (len(waypoints)-axial_start-1) + [True]
         count = len(waypoints)
         durations, previous = [], q.copy()
         for point in waypoints:
@@ -553,7 +557,8 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         self.advance_direction = self.advance_target[:3, 2].copy()
         self.advance_plan = dict(
             start=q.copy(), waypoints=waypoints, durations=durations,
-            total=sum(durations), start_error=0., cartesian_line=axial,
+            total=sum(durations), start_error=0., cartesian_line=axial and not prefix,
+            preserve_joint_path=axial, axial_start_index=axial_start,
             stop_at_waypoints=stops,
             allowed_collision_pairs=frozenset((
                 tuple(sorted(('tool_case_1', 'wrist_link_yaw'))),)))

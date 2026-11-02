@@ -335,6 +335,26 @@ def test_ee_collision_check_sweeps_gripper_with_arm_held():
                for value in values)
 
 
+def test_preserved_mixed_approach_keeps_geometry_and_still_checks_collisions():
+    start = np.array([0., .1, 0., 0., 0., 0.])
+    goal = np.array([0., .04, .03, 0., 0., 0.])
+    node = SimpleNamespace(
+        healthy_hold=Mock(return_value={'epoch': 'hold-epoch'}),
+        full_state=dict(zip(ARM_JOINTS, start)), shoulder_isolation_enabled=True,
+        collision=Mock(), mode=Mock(), collision_timeout=10., collision_step=.01,
+        start_tolerance=.03, report=Mock(), begin_failed=Mock())
+    path = dict(start=start, waypoints=[goal], durations=[3.], total=3.,
+                start_error=0., cartesian_line=False, preserve_joint_path=True)
+    with patch('tool_trajectory_joy.isolate_shoulder_zero_crossings') as isolate:
+        ToolTrajectoryJoy.begin(node, 0, path)
+    isolate.assert_not_called()
+    node.begin_failed.assert_not_called()
+    assert node.path is path
+    assert node.stage == 'checking'
+    assert len(node.requests) >= 7
+    node.collision.call_async.assert_called_once_with(node.requests[0])
+
+
 def test_ee_goal_dispatch_uses_manager_and_requires_collision_success():
     import json
     import time
@@ -628,8 +648,8 @@ def test_source_pre_targets_enable_reviewed_tool0_tool1_and_tool2_goals():
     targets = load_pre_dock_targets(source)
     assert set(targets) == {0, 1, 2}
     np.testing.assert_allclose(targets[0]['joint_goal'], [
-        -3.2010609083, .1329587479, .8744011184,
-        -1.5376735580, .0481969563, .0588406346])
+        -3.190680, .418530, 1.061160,
+        -1.473931, .015340, .013806])
     np.testing.assert_allclose(targets[0]['transit_joint_goal'], [
         3.1001751723166735, 0.6403612785882697, 1.209862232156147,
         -1.427330240975674, -0.0030679615759781065, -0.021475731030191625])

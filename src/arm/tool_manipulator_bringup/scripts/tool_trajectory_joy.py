@@ -842,6 +842,7 @@ class ToolTrajectoryJoy(Node):
             else:
                 path = planned_path
             if (self.shoulder_isolation_enabled and not path.get('cartesian_line', False)
+                    and not path.get('preserve_joint_path', False)
                     and not path.get('moveit_planned', False)):
                 path = isolate_shoulder_zero_crossings(
                     path, self.shoulder_isolation_half_width,
@@ -1056,10 +1057,11 @@ class ToolTrajectoryJoy(Node):
             previous = goal
         self.return_home_after_back = True
         self.route_kind = 'dock_retreat'
-        self.report('retreating', 'checking reversed measured docking path: capture 1 -> 2 -> 3')
+        self.report('retreating', 'checking reverse of the complete executed docking approach')
         self.begin(self.path_id, dict(
             start=seed, waypoints=waypoints, durations=durations,
             total=sum(durations), start_error=0., cartesian_line=False,
+            preserve_joint_path=advance.get('preserve_joint_path', False),
             stop_at_waypoints=stops,
             allowed_collision_pairs=advance.get('allowed_collision_pairs', frozenset())))
 

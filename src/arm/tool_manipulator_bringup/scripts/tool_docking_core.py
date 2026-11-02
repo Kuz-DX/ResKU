@@ -241,6 +241,14 @@ def load_settings(filename):
             if intermediate.ndim != 2 or intermediate.shape[1] != 6 or not np.all(np.isfinite(intermediate)):
                 raise ValueError('intermediate_joint_goals_rad requires finite six-joint rows')
             item['intermediate_joint_goals'] = intermediate
+            prefix = np.asarray(item.get('axial_approach_joint_goals_rad', []), dtype=float)
+            if prefix.size == 0:
+                prefix = np.empty((0, 6))
+            if prefix.ndim != 2 or prefix.shape[1] != 6 or not np.all(np.isfinite(prefix)):
+                raise ValueError('axial_approach_joint_goals_rad requires finite six-joint rows')
+            if len(prefix) and not item.get('axial_sampled_path', False):
+                raise ValueError('axial approach prefix requires axial_sampled_path')
+            item['axial_approach_joint_goals'] = prefix
             if (item['actuation_enabled']
                     and type(item.get('desired_docked')) is not bool):
                 raise ValueError('fixed-joint actuation requires desired_docked state')

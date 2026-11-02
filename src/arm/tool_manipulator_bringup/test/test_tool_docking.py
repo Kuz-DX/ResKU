@@ -339,6 +339,20 @@ def test_fixed_joint_completion_starts_checked_goal_without_tag(tmp_path):
     assert n.execution_id is None
 
 
+@pytest.mark.parametrize('prefix,axial', [([[0.]*5], True),
+                                        ([[float('nan')]*6], True),
+                                        ([[0.]*6], False)])
+def test_axial_approach_prefix_rejects_invalid_configuration(tmp_path, prefix, axial):
+    import yaml
+    data = yaml.safe_load((ROOT/'config/tool_docking.yaml').read_text())
+    data['tools'][0]['axial_approach_joint_goals_rad'] = prefix
+    data['tools'][0]['axial_sampled_path'] = axial
+    path = tmp_path/'invalid_prefix.yaml'
+    path.write_text(yaml.safe_dump(data))
+    with pytest.raises(ValueError, match='axial'):
+        load_settings(path)
+
+
 def test_fixed_joint_tail_ends_at_measured_docking_pose(tmp_path):
     n = node(tmp_path)
     n.cfg = load_settings(ROOT/'config/tool_docking.yaml')[0]
@@ -360,17 +374,30 @@ def test_fixed_joint_tail_ends_at_measured_docking_pose(tmp_path):
             if np.allclose(point, intermediate)]
     assert len(hits) == 1
     assert n.advance_plan['stop_at_waypoints'][hits[0]] is False
-    assert n.advance_plan['cartesian_line']
+    assert not n.advance_plan['cartesian_line']
+    assert n.advance_plan['preserve_joint_path']
     final_capture = np.array([-3.186078, .047473, 1.091180, -1.234995, .036816, .049087])
     np.testing.assert_array_equal(n.cfg['final_joint_goal'], final_capture)
     final_pose = n.model.fk(final_capture)
     axis = final_pose[:3, 2]
-    np.testing.assert_allclose(n.model.fk(q)[:3, 3],
+    axial_start = n.advance_plan['axial_start_index']
+    entry = n.advance_plan['waypoints'][axial_start-1]
+    np.testing.assert_allclose(n.model.fk(entry)[:3, 3],
                                final_pose[:3, 3] - .070 * axis, atol=1e-5)
-    assert sum(n.advance_plan['stop_at_waypoints']) == 1
-    previous_remaining = .07001
+    prefix_hits = []
+    for capture in n.cfg['axial_approach_joint_goals']:
+        indices = [i for i, point in enumerate(n.advance_plan['waypoints'])
+                   if np.allclose(point, capture)]
+        assert len(indices) == 1
+        assert n.advance_plan['stop_at_waypoints'][indices[0]]
+        prefix_hits.append(indices[0])
+    assert len(prefix_hits) == 8
+    assert prefix_hits == sorted(prefix_hits)
+    assert prefix_hits[-1] == axial_start-1
+    assert sum(n.advance_plan['stop_at_waypoints'][axial_start:]) == 1
+    previous_remaining = .122
     previous = q
-    for point, duration in zip(n.advance_plan['waypoints'], n.advance_plan['durations']):
+    for index, (point, duration) in enumerate(zip(n.advance_plan['waypoints'], n.advance_plan['durations'])):
         for sample in np.linspace(previous, point, 11):
             assert n.model.within_limits(sample, n.margin)
             pose = n.model.fk(sample)
@@ -378,8 +405,9 @@ def test_fixed_joint_tail_ends_at_measured_docking_pose(tmp_path):
             remaining = -float(delta @ axis)
             assert remaining <= previous_remaining + 1e-6
             previous_remaining = remaining
-            assert np.linalg.norm(delta - axis * (delta @ axis)) < 1e-5
-            np.testing.assert_allclose(pose[:3, :3], final_pose[:3, :3], atol=1e-4)
+            if index >= axial_start:
+                assert np.linalg.norm(delta - axis * (delta @ axis)) < 1e-5
+                np.testing.assert_allclose(pose[:3, :3], final_pose[:3, :3], atol=1e-4)
         assert np.max(np.abs(point-previous))/duration <= n.cfg['joint_speed_rad_s']+1e-12
         distance = np.linalg.norm(n.model.fk(point)[:3, 3]-n.model.fk(previous)[:3, 3])
         assert distance/duration <= n.cfg['linear_speed_m_s']+1e-12
@@ -395,6 +423,7 @@ def test_fixed_joint_tail_ends_at_measured_docking_pose(tmp_path):
     n.begin.reset_mock()
     ToolTrajectoryJoy.begin_reverse_docking_retreat(n)
     reverse = n.begin.call_args.args[1]
+    assert reverse['preserve_joint_path']
     np.testing.assert_array_equal(reverse['start'], current)
     np.testing.assert_allclose(reverse['waypoints'],
                                list(reversed([q, *forward['waypoints'][:-1]])))
@@ -402,6 +431,7 @@ def test_fixed_joint_tail_ends_at_measured_docking_pose(tmp_path):
     assert n.return_home_after_back
     assert n.route_kind == 'dock_retreat'
     # Keep regression coverage for the optional axial-mode entry envelope.
+    n.cfg['axial_approach_joint_goals'] = []
     n.cfg['axial_sampled_path'] = True
     with pytest.raises(RuntimeError, match='entry mismatch'):
         n.start_final_joint_goal(expected)
@@ -410,10 +440,10 @@ def test_fixed_joint_tail_ends_at_measured_docking_pose(tmp_path):
             (.0081, 0., False), (0., math.radians(5.01), False)]:
         with patch('tool_docking_coordinator.pose_errors', return_value=(position, angle)):
             if accepted:
-                n.start_final_joint_goal(q)
+                n.start_final_joint_goal(entry)
             else:
                 with pytest.raises(RuntimeError, match='entry mismatch'):
-                    n.start_final_joint_goal(q)
+                    n.start_final_joint_goal(entry)
 
 
 @pytest.mark.parametrize('joint_error,accepted', [(.004, True), (.006, False)])
