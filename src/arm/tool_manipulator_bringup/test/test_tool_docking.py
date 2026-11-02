@@ -980,6 +980,18 @@ def test_advance_completion_allows_axial_rotation_but_rejects_wrong_tilt(tmp_pat
                 n.path_completed()
 
 
+def test_advance_completion_validates_preserved_orientation_not_tag_normal(tmp_path):
+    n = camera_node(tmp_path)
+    n.cfg['maintain_entry_orientation'] = True
+    n.advance_locked = True
+    n.advance_local_axis = np.array([0., 0., 1.])
+    n.advance_direction = np.array([np.sin(.24), 0., np.cos(.24)])
+    n.advance_target = transform([0., 0., .030], [0., 0., 0., 1.])
+    n.model.fk.return_value = n.advance_target.copy()
+    n.path_completed()
+    assert n.stage == 'dock_actuate'
+
+
 def test_front_on_tag_accepts_equivalent_ippe_solutions():
     cfg = load_settings(ROOT/'config/tool_docking.yaml')[1]
     k = np.array([[600., 0, 320], [0, 600., 240], [0, 0, 1]])

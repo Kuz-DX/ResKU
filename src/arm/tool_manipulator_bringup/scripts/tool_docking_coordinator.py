@@ -239,12 +239,22 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             q = np.asarray([self.full_state[j] for j in ARM_JOINTS])
             actual = self.model.fk(q)
             distance = np.linalg.norm(actual[:3, 3]-self.advance_target[:3, 3])
-            angle = direction_angle(actual[:3, :3] @ self.advance_local_axis,
-                                    self.advance_direction)
+            angle = (pose_errors(actual, self.advance_target)[1]
+                     if self.cfg.get('maintain_entry_orientation', False) else
+                     direction_angle(actual[:3, :3] @ self.advance_local_axis,
+                                     self.advance_direction))
+            speed = float(np.max(np.abs(self.velocity)))
             if (distance > self.cfg['position_tolerance_m']
                     or angle > self.cfg['angle_tolerance_rad']
-                    or np.max(np.abs(self.velocity)) > self.cfg['stopped_speed_rad_s']):
-                raise RuntimeError('advance endpoint feedback outside tolerance; remain HOLD')
+                    or speed > self.cfg['stopped_speed_rad_s']):
+                raise RuntimeError(
+                    'advance endpoint feedback outside tolerance; remain HOLD: '
+                    f'position_error={distance:.6f}m '
+                    f'limit={self.cfg["position_tolerance_m"]:.6f}m; '
+                    f'angle_error={angle:.6f}rad '
+                    f'limit={self.cfg["angle_tolerance_rad"]:.6f}rad; '
+                    f'max_speed={speed:.6f}rad/s '
+                    f'limit={self.cfg["stopped_speed_rad_s"]:.6f}rad/s')
             if self.cfg['actuation_enabled']:
                 self.lock_goal = q.copy()
                 self.expected_docked = self.cfg['desired_docked']
@@ -396,10 +406,10 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         self.advance_snapshot = dict(self.full_state)
         self.stage = 'dock_advance_plan'
         self.report('advance_planning',
-                    'tag confirmed at stopped tool-1 endpoint; planning fixed %.1f mm tag-normal advance; '
+                    'tag confirmed at stopped %s endpoint; planning fixed %.1f mm tag-normal advance; '
                     'normal=[%.4f, %.4f, %.4f] seed=%s; %s; '
                     'entry tilt %.2f deg; tag visibility no longer required; %s' %
-                    (self.cfg['advance_distance_m']*1000.,
+                    (tool_label(self.path_id), self.cfg['advance_distance_m']*1000.,
                      *map(float, tag_normal),
                      '['+', '.join(f'{value:.4f}' for value in q)+']',
                      ('holding the completed pre-dock TCP orientation'

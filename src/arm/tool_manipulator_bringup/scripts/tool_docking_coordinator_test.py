@@ -277,10 +277,18 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             distance, angle = advance_endpoint_errors(
                 actual, self.advance_target, self.advance_local_axis, self.advance_direction,
                 self.cfg.get('maintain_entry_orientation', False))
+            speed = float(np.max(np.abs(self.velocity)))
             if (distance > self.cfg['position_tolerance_m']
                     or angle > self.cfg['angle_tolerance_rad']
-                    or np.max(np.abs(self.velocity)) > self.cfg['stopped_speed_rad_s']):
-                raise RuntimeError('advance endpoint feedback outside tolerance; remain HOLD')
+                    or speed > self.cfg['stopped_speed_rad_s']):
+                raise RuntimeError(
+                    'advance endpoint feedback outside tolerance; remain HOLD: '
+                    f'position_error={distance:.6f}m '
+                    f'limit={self.cfg["position_tolerance_m"]:.6f}m; '
+                    f'angle_error={angle:.6f}rad '
+                    f'limit={self.cfg["angle_tolerance_rad"]:.6f}rad; '
+                    f'max_speed={speed:.6f}rad/s '
+                    f'limit={self.cfg["stopped_speed_rad_s"]:.6f}rad/s')
             if self.path_id == 0 and self.cfg['actuation_enabled']:
                 self.hold_epoch = self.status['epoch']
                 self.lock_goal = q.copy()
