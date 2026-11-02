@@ -196,26 +196,32 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                 self.base_frame, self.camera_frame, stamp,
                 timeout=Duration(seconds=self.cfg['tf_timeout_s'])).transform
             p, q = tf.translation, tf.rotation
-            base_tag = transform([p.x, p.y, p.z], [q.x, q.y, q.z, q.w]) @ camera_tag
+            base_camera = transform([p.x, p.y, p.z], [q.x, q.y, q.z, q.w])
+            base_tag = base_camera @ camera_tag
             if self.last_base_tag is not None:
                 jump, turn = pose_errors(self.last_base_tag, base_tag)
                 if (jump > self.cfg['max_tag_position_jump_m']
                         or turn > self.cfg['max_tag_angle_jump_rad']):
-                    raise ValueError(
-                        f'tag pose discontinuity rejected: translation={jump:.4f}m '
-                        f'angle={turn:.4f}rad')
+                    camera_reference = np.linalg.inv(base_camera) @ self.last_base_tag
+                    camera_tag = tag_pose(
+                        detections[0], *self.camera, self.cfg, reference=camera_reference)
+                    base_tag = base_camera @ camera_tag
+                    jump, turn = pose_errors(self.last_base_tag, base_tag)
+                    if (jump > self.cfg['max_tag_position_jump_m']
+                            or turn > self.cfg['max_tag_angle_jump_rad']):
+                        raise ValueError(
+                            f'tag pose discontinuity rejected: translation={jump:.4f}m '
+                            f'angle={turn:.4f}rad')
             self.last_base_tag = base_tag
             self.observation = (stamp_ns, time.monotonic(), base_tag)
             self.tag_accepted += 1
             self.tag_reason = 'valid tag pose accepted'
         except TransformException as exc:
-            self.stable = 0
             self.tag_reason = f'TF {self.base_frame} <- {self.camera_frame}: {exc}'
         except (ValueError, TypeError, KeyError, IndexError, OverflowError,
                 cv2.error) as exc:
             # Keep the last accepted pose only until its strict freshness
             # deadline. One missed image must not cancel an in-flight correction.
-            self.stable = 0
             self.tag_reason = str(exc)
 
     def begin(self, path_id, planned_path=None):

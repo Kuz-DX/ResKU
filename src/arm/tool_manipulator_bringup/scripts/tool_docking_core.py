@@ -92,8 +92,14 @@ def tag_normal_from_camera_side(base_tag, base_camera):
     return normal, distance
 
 
-def tag_pose(detection, camera_matrix, distortion, settings):
-    """PnP uses detector corner ordering, matching measure_apriltag_docking.py."""
+def tag_pose(detection, camera_matrix, distortion, settings, reference=None):
+    """Solve planar tag pose, optionally preserving temporal pose continuity.
+
+    IPPE's two planar solutions can exchange reprojection-error order under
+    sub-pixel corner noise.  Once a stationary rack tag has an accepted pose,
+    ``reference`` selects the valid candidate continuous with that pose rather
+    than allowing a mirror-solution flip.
+    """
     if (detection.get('hamming') != 0
             or not math.isfinite(float(detection.get('decision_margin', float('nan'))))
             or float(detection['decision_margin']) < settings['min_decision_margin']):
@@ -123,26 +129,34 @@ def tag_pose(detection, camera_matrix, distortion, settings):
             square, rotation, translation, camera_matrix, distortion)[0]
         residual = pixels-projected.reshape(4, 2)
         rmse = float(np.sqrt(np.mean(np.sum(residual**2, axis=1))))
-        candidates.append((rmse, rotation, translation))
+        pose = np.eye(4)
+        pose[:3, :3], pose[:3, 3] = cv2.Rodrigues(rotation)[0], translation.reshape(3)
+        candidates.append((rmse, rotation, translation, pose))
     if not candidates:
         raise ValueError('tag behind camera or invalid PnP candidates')
     candidates.sort(key=lambda candidate: candidate[0])
-    error, rotation, translation = candidates[0]
+    error, rotation, translation, result = candidates[0]
     if error > settings['max_reprojection_px']:
         raise ValueError('tag reprojection error too large')
-    if (len(candidates) > 1
+    if reference is not None:
+        reference = np.asarray(reference, dtype=float)
+        if reference.shape != (4, 4) or not np.all(np.isfinite(reference)):
+            raise ValueError('invalid tag pose continuity reference')
+        valid = [candidate for candidate in candidates
+                 if candidate[0] <= settings['max_reprojection_px']]
+        error, rotation, translation, result = min(
+            valid, key=lambda candidate: pose_errors(reference, candidate[3])[1])
+    elif (len(candidates) > 1
             and candidates[1][0]-error < settings['min_pnp_solution_gap_px']):
         # At the requested front-on alignment IPPE can return the same pose
         # twice. Reject distinct mirror solutions, not equivalent duplicates.
-        _, other_rotation, other_translation = candidates[1]
+        _, other_rotation, other_translation, _ = candidates[1]
         turn = float(np.linalg.norm(cv2.Rodrigues(
             cv2.Rodrigues(other_rotation)[0] @ cv2.Rodrigues(rotation)[0].T)[0]))
         shift = float(np.linalg.norm(other_translation-translation))
         if (turn > settings.get('angle_tolerance_rad', .02)
                 or shift > settings.get('position_tolerance_m', .002)):
             raise ValueError('ambiguous planar tag pose')
-    result = np.eye(4)
-    result[:3, :3], result[:3, 3] = cv2.Rodrigues(rotation)[0], translation.reshape(3)
     return result
 
 

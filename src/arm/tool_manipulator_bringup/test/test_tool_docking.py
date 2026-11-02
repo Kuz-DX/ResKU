@@ -155,6 +155,28 @@ def test_pnp_rejects_tag_that_is_too_small_for_docking(tmp_path):
         tag_pose(detection, k, np.zeros(5), cfg)
 
 
+def test_pnp_reference_prevents_planar_solution_flip_from_measured_tool0_corners(tmp_path):
+    cfg = settings(tmp_path)
+    k = np.array([[605.8599853515625, 0., 326.54400634765625],
+                  [0., 605.5801391601562, 250.81643676757812], [0., 0., 1.]])
+    corners = [(431.3188781738281, 416.9869384765625),
+               (481.305419921875, 415.8382263183594),
+               (477.633056640625, 365.6019287109375),
+               (428.405517578125, 366.53204345703125)]
+    detection = dict(hamming=0, decision_margin=67.17005157470703,
+                     corners_px=[dict(u=u, v=v) for u, v in corners])
+    first = tag_pose(detection, k, np.zeros(5), cfg)
+    # The measured frame has two valid IPPE candidates about 0.269 rad apart.
+    # A continuity reference close to the alternate branch must select that
+    # branch even though its reprojection error is slightly higher.
+    alternate = np.eye(4)
+    alternate[:3, :3] = cv2.Rodrigues(np.array([-.23930766, .33380690, -.05694369]))[0]
+    alternate[:3, 3] = [.05207151, .05714951, .24688093]
+    continuous = tag_pose(detection, k, np.zeros(5), cfg, reference=alternate)
+    assert pose_errors(first, continuous)[1] > .25
+    assert pose_errors(alternate, continuous)[1] < .01
+
+
 def test_duplicate_images_or_feedback_never_count_as_stability(tmp_path):
     n = node(tmp_path)
     sample(n)
@@ -785,9 +807,11 @@ def test_one_rejected_frame_keeps_recent_tag_but_stale_tag_stops_motion(tmp_path
     n, _, data = tag_input_node(tmp_path)
     n.on_tag(SimpleNamespace(data=json.dumps(data)))
     accepted = n.observation
+    n.stable = 3
     data['detections'] = []
     n.on_tag(SimpleNamespace(data=json.dumps(data)))
     assert n.observation is accepted
+    assert n.stable == 3
     assert n.tag_received == 2 and n.tag_accepted == 1
     assert ToolDockingCoordinator.fresh_observation(n, accepted[1] + .1)[0] == accepted[0]
     with pytest.raises(RuntimeError, match='target tag stale: received=2 accepted=1'):
