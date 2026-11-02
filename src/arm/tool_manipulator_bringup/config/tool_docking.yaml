@@ -19,9 +19,9 @@ tools:
     tag_family: tag36h11
     tag_id: 0
     tag_size_m: 0.020
-    final_joint_goal_rad: [-3.1446606151657712, 0.12932889490961874,
-      1.2365657484063717, -1.0850711640069417,
-      -2.0694557179012918e-13, 0.0015339807880909717]
+    final_joint_goal_rad: [-3.143126634377886, 0.130550628382071,
+      1.2369147556672264, -1.0843730163271774,
+      -0.0030679615759781065, -0.001533980787678857]
     actuation_enabled: true
     desired_docked: true           # true=attach pulse, false=release pulse
     actuation_timeout_s: 10.0

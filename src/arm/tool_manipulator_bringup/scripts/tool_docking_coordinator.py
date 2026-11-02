@@ -273,10 +273,10 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                     self.lock_goal = q.copy()
                     self.hold_epoch = self.status['epoch']
                     self.command_feedback_sequence = self.docked_feedback_sequence
-                    self.send_docking_pulse(False)
+                    self.send_docking_pulse(True)
                     self.actuation_deadline = time.monotonic()+self.cfg['actuation_timeout_s']
-                    self.stage = 'dock_release_wait'
-                    self.report('actuating', 'final dock reached; /arm/docking=false; waiting for release completion')
+                    self.stage = 'dock_attach_wait'
+                    self.report('actuating', 'final dock reached; /arm/docking=true; waiting for Arduino completion')
                     return
                 self.lock_goal = q.copy()
                 self.expected_docked = self.cfg['desired_docked']
@@ -467,12 +467,12 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             if (self.docked_feedback_sequence <= self.command_feedback_sequence
                     or self.docked_state != expected):
                 return
-            if not expected:
+            if expected:
                 self.command_feedback_sequence = self.docked_feedback_sequence
-                self.send_docking_pulse(True)
+                self.send_docking_pulse(False)
                 self.actuation_deadline = now+self.cfg['actuation_timeout_s']
-                self.stage = 'dock_attach_wait'
-                self.report('actuating', '/arm/docking=true; waiting for Arduino completion')
+                self.stage = 'dock_release_wait'
+                self.report('actuating', '/arm/docking=false; waiting for Arduino completion')
             else:
                 self.future = self.mode.call_async(Trigger.Request())
                 self.stage = 'ee_mode_wait'

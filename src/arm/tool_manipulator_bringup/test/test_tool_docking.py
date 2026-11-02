@@ -71,8 +71,8 @@ def test_shipped_config_enables_tool0_and_tool1_camera_normal_docking():
     assert set(cfg) == {0, 1}
     assert cfg[0]['alignment_mode'] == 'fixed_joint_goal'
     np.testing.assert_allclose(cfg[0]['final_joint_goal'], [
-        -3.1446606151657712, .12932889490961874, 1.2365657484063717,
-        -1.0850711640069417, -2.0694557179012918e-13, .0015339807880909717])
+        -3.143126634377886, .130550628382071, 1.2369147556672264,
+        -1.0843730163271774, -.0030679615759781065, -.001533980787678857])
     assert cfg[0]['tag_family'] == 'tag36h11'
     assert cfg[0]['tag_id'] == 0
     assert cfg[0]['tag_size_m'] == .020
@@ -382,32 +382,32 @@ def test_fixed_joint_completion_uses_measured_joint_tolerance(
 
     if accepted:
         n.path_completed()
-        assert n.stage == 'dock_release_wait'
+        assert n.stage == 'dock_attach_wait'
     else:
         with pytest.raises(RuntimeError, match='joint_error=0.006000'):
             n.path_completed()
         n.docking_command.publish.assert_not_called()
 
 
-def test_tool0_finish_orders_false_true_ee_and_retreat(tmp_path):
+def test_tool0_finish_orders_true_false_ee_and_retreat(tmp_path):
     n = node(tmp_path)
     n.cfg = load_settings(ROOT/'config/tool_docking.yaml')[0]
     n.guard = Mock()
     n.lock_goal = np.zeros(6)
-    n.stage = 'dock_release_wait'
+    n.stage = 'dock_attach_wait'
     n.actuation_deadline = 20.
     n.command_feedback_sequence = 0
     n.docked_feedback_sequence = 1
-    n.docked_state = False
+    n.docked_state = True
     n.mode = Mock()
     n.publisher = Mock()
     n.tick_tool0_finish(1.)
-    assert n.stage == 'dock_attach_wait'
-    assert n.docking_command.publish.call_args.args[0].data is True
+    assert n.stage == 'dock_release_wait'
+    assert n.docking_command.publish.call_args.args[0].data is False
     n.mode.call_async.assert_not_called()
     n.tick_tool0_finish(1.1)
     n.mode.call_async.assert_not_called()
-    n.docked_state = True
+    n.docked_state = False
     n.docked_feedback_sequence = 2
     n.tick_tool0_finish(1.2)
     assert n.stage == 'ee_mode_wait'
