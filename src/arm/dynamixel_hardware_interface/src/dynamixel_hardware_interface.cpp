@@ -737,6 +737,8 @@ hardware_interface::CallbackReturn DynamixelHardware::on_activate(
   [[maybe_unused]] const rclcpp_lifecycle::State & previous_state)
 {
   // A lifecycle activation explicitly starts a new communication attempt.
+  stop_attempted_ = false;
+  stop_succeeded_ = false;
   hardware_fault_latched_ = false;
   hardware_fault_published_ = false;
   is_read_in_error_ = false;
@@ -886,16 +888,27 @@ hardware_interface::CallbackReturn DynamixelHardware::start()
 
 hardware_interface::CallbackReturn DynamixelHardware::stop()
 {
+  // Deactivation and destruction both call stop. Do not repeat a failed
+  // shutdown transaction sequence; activation explicitly re-arms this attempt.
+  if (stop_attempted_) {
+    return stop_succeeded_ ? hardware_interface::CallbackReturn::SUCCESS :
+           hardware_interface::CallbackReturn::ERROR;
+  }
+  stop_attempted_ = true;
   if (dxl_comm_) {
-    dxl_comm_->DynamixelDisable(dxl_comm_id_id_);
-    dxl_comm_->DynamixelDisable(virtual_dxl_comm_id_id_);
+    const auto physical = dxl_comm_->DynamixelDisable(dxl_comm_id_id_);
+    const auto virtual_result = dxl_comm_->DynamixelDisable(virtual_dxl_comm_id_id_);
+    if (physical != DxlError::OK || virtual_result != DxlError::OK) {
+      RCLCPP_ERROR(logger_, "Dynamixel stop failed: Torque OFF not confirmed; inspect motor power/state");
+      return hardware_interface::CallbackReturn::ERROR;
+    }
   } else {
     RCLCPP_ERROR_STREAM(logger_, "Dynamixel Hardware Stop Fail : dxl_comm_ is nullptr");
     return hardware_interface::CallbackReturn::ERROR;
   }
 
   RCLCPP_INFO_STREAM(logger_, "Dynamixel Hardware Stop!");
-
+  stop_succeeded_ = true;
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 

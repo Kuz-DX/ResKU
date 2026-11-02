@@ -313,7 +313,13 @@ int Protocol2PacketHandler::rxPacket(PortHandler *port, uint8_t *rxpacket, bool 
 
   while(true)
   {
-    rx_length += port->readPort(&rxpacket[rx_length], wait_length - rx_length);
+    // A disconnected port returns -1; never wrap it into the unsigned offset.
+    const int received = port->readPort(&rxpacket[rx_length], wait_length - rx_length);
+    if (received < 0) {
+      result = COMM_RX_FAIL;
+      break;
+    }
+    rx_length += received;
     if (rx_length >= wait_length)
     {
       uint16_t idx = 0;
@@ -329,7 +335,8 @@ int Protocol2PacketHandler::rxPacket(PortHandler *port, uint8_t *rxpacket, bool 
       {
         if (rxpacket[PKT_RESERVED] != 0x00 ||
 //           rxpacket[PKT_ID] > 0xFC || // FAST protocol responds with a broadcast ID
-           DXL_MAKEWORD(rxpacket[PKT_LENGTH_L], rxpacket[PKT_LENGTH_H]) > RXPACKET_MAX_LEN ||
+           DXL_MAKEWORD(rxpacket[PKT_LENGTH_L], rxpacket[PKT_LENGTH_H]) < 4 ||
+           DXL_MAKEWORD(rxpacket[PKT_LENGTH_L], rxpacket[PKT_LENGTH_H]) > RXPACKET_MAX_LEN - (PKT_LENGTH_H + 1) ||
            rxpacket[PKT_INSTRUCTION] != 0x55)
         {
           // remove the first byte in the packet
@@ -480,7 +487,7 @@ int Protocol2PacketHandler::ping(PortHandler *port, uint8_t id, uint16_t *model_
   int result                 = COMM_TX_FAIL;
 
   uint8_t txpacket[10]        = {0};
-  uint8_t rxpacket[14]        = {0};
+  uint8_t rxpacket[RXPACKET_MAX_LEN]        = {0};
 
   if (id >= BROADCAST_ID)
     return COMM_NOT_AVAILABLE;
@@ -609,7 +616,7 @@ int Protocol2PacketHandler::action(PortHandler *port, uint8_t id)
 int Protocol2PacketHandler::reboot(PortHandler *port, uint8_t id, uint8_t *error)
 {
   uint8_t txpacket[10]        = {0};
-  uint8_t rxpacket[11]        = {0};
+  uint8_t rxpacket[RXPACKET_MAX_LEN]        = {0};
 
   txpacket[PKT_ID]            = id;
   txpacket[PKT_LENGTH_L]      = 3;
@@ -622,7 +629,7 @@ int Protocol2PacketHandler::reboot(PortHandler *port, uint8_t id, uint8_t *error
 int Protocol2PacketHandler::clearMultiTurn(PortHandler *port, uint8_t id, uint8_t *error)
 {
   uint8_t txpacket[15]        = {0};
-  uint8_t rxpacket[11]        = {0};
+  uint8_t rxpacket[RXPACKET_MAX_LEN]        = {0};
 
   txpacket[PKT_ID]            = id;
   txpacket[PKT_LENGTH_L]      = 8;
@@ -640,7 +647,7 @@ int Protocol2PacketHandler::clearMultiTurn(PortHandler *port, uint8_t id, uint8_
 int Protocol2PacketHandler::clearError(PortHandler *port, uint8_t id, uint8_t *error)
 {
   uint8_t txpacket[15]        = {0};
-  uint8_t rxpacket[11]        = {0};
+  uint8_t rxpacket[RXPACKET_MAX_LEN]        = {0};
 
   txpacket[PKT_ID]            = id;
   txpacket[PKT_LENGTH_L]      = 8;
@@ -658,7 +665,7 @@ int Protocol2PacketHandler::clearError(PortHandler *port, uint8_t id, uint8_t *e
 int Protocol2PacketHandler::factoryReset(PortHandler *port, uint8_t id, uint8_t option, uint8_t *error)
 {
   uint8_t txpacket[11]        = {0};
-  uint8_t rxpacket[11]        = {0};
+  uint8_t rxpacket[RXPACKET_MAX_LEN]        = {0};
 
   txpacket[PKT_ID]            = id;
   txpacket[PKT_LENGTH_L]      = 4;
@@ -867,7 +874,7 @@ int Protocol2PacketHandler::writeTxRx(PortHandler *port, uint8_t id, uint16_t ad
   int result                  = COMM_TX_FAIL;
 
   uint8_t *txpacket           = (uint8_t *)malloc(length + 12 + (length / 3));
-  uint8_t rxpacket[11]        = {0};
+  uint8_t rxpacket[RXPACKET_MAX_LEN]        = {0};
 
   if (txpacket == NULL)
     return result;
@@ -884,6 +891,11 @@ int Protocol2PacketHandler::writeTxRx(PortHandler *port, uint8_t id, uint16_t ad
   //memcpy(&txpacket[PKT_PARAMETER0+2], data, length);
 
   result = txRxPacket(port, txpacket, rxpacket, error);
+  // A write acknowledgement has no payload. A delayed read response is not
+  // confirmation that the write (including Torque OFF) succeeded.
+  if (result == COMM_SUCCESS && id != BROADCAST_ID &&
+      DXL_MAKEWORD(rxpacket[PKT_LENGTH_L], rxpacket[PKT_LENGTH_H]) != 4)
+    result = COMM_RX_CORRUPT;
 
   free(txpacket);
   //delete[] txpacket;
@@ -956,7 +968,7 @@ int Protocol2PacketHandler::regWriteTxRx(PortHandler *port, uint8_t id, uint16_t
   int result                  = COMM_TX_FAIL;
 
   uint8_t *txpacket           = (uint8_t *)malloc(length + 12 + (length / 3));
-  uint8_t rxpacket[11]        = {0};
+  uint8_t rxpacket[RXPACKET_MAX_LEN]        = {0};
 
   if (txpacket == NULL)
     return result;

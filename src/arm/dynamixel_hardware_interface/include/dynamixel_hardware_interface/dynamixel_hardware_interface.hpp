@@ -195,6 +195,8 @@ private:
   bool use_individual_feedback_read_{false};
   std::string mixed_channel_command_mode_{"sync_write"};
   bool hardware_fault_latched_{false};
+  bool stop_attempted_{false};
+  bool stop_succeeded_{false};
   bool hardware_fault_published_{false};
   double position_limit_rejection_margin_{0.0872665};
   std::map<std::string, std::pair<double, double>> position_limits_;
