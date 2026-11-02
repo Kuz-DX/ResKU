@@ -186,6 +186,60 @@ def test_managed_dxl_entry_aligns_beyond_old_start_limit():
     assert c.mode == 'hold' and not c.entry_alignment_complete
 
 
+def test_dxl_entry_accepts_observed_offsets_and_ignores_rmd_velocity_noise():
+    c = ModeCore([(-2., 2.)]*6, [.12]*6)
+    c.entry_alignment_enabled = True
+    c.entry_alignment_complete = False
+    c.ready, c.focus = True, 'arm'
+    measured = [.04, .4, -.3, -.5, -.0062, -.0246]
+    velocity = [0., .03, -.03, .03, 0., 0.]
+    c.feedback(measured, velocity, 1.)
+    c.target = [0., measured[1], measured[2], measured[3], 0., 0.]
+    c.entry_alignment_started = 1.
+    c.entry_alignment_deadline = 20.
+    for now in (1.02, 1.12, 1.23):
+        c.feedback(measured, velocity, now)
+        c.tick(now, .02)
+    assert c.entry_alignment_complete
+
+
+def test_dxl_entry_rejects_position_outside_five_hundredths_rad():
+    c = ModeCore([(-2., 2.)]*6, [.12]*6)
+    c.entry_alignment_enabled = True
+    c.entry_alignment_complete = False
+    c.ready, c.focus = True, 'arm'
+    measured = [.0501, 0., 0., 0., 0., 0.]
+    c.feedback(measured, [0.]*6, 1.)
+    c.target = [0.]*6
+    c.entry_alignment_started = 1.
+    c.entry_alignment_deadline = 20.
+    for now in (1.02, 1.12, 1.23):
+        c.feedback(measured, [0.]*6, now)
+        c.tick(now, .02)
+    assert not c.entry_alignment_complete
+
+
+def test_fault_reset_restarts_expired_dxl_entry_alignment_deadline():
+    c = ModeCore([(-2., 2.)]*6, [.12]*6)
+    c.entry_alignment_enabled = True
+    c.entry_alignment_complete = False
+    c.ready, c.focus = True, 'arm'
+    c.feedback([.06, 0., 0., 0., 0., 0.], [0.]*6, 2.)
+    c.entry_alignment_started = 1.
+    c.entry_alignment_deadline = 1.5
+    c.fault('DXL entry alignment timed out; inspect feedback')
+    c.reset(2.)
+    assert c.entry_alignment_started is None
+    assert c.entry_alignment_deadline is None
+    # The manager confirms the requested HOLD controller transition before
+    # the next entry-alignment attempt is allowed to run.
+    c.transitioning = False
+    c.requested = c.mode = 'hold'
+    c.tick(2.02, .02)
+    assert c.mode == 'hold'
+    assert c.entry_alignment_deadline > 2.02
+
+
 def test_transition_blocks_commands_and_invalidates_pending_messages():
     c = ready()
     old = c.epoch

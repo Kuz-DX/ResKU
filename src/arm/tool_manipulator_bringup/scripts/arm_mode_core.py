@@ -133,6 +133,12 @@ class ModeCore:
         self.entry_alignment_deadline = None
         self.entry_alignment_speed = .09
         self.entry_alignment_timeout_margin = 15.
+        # The DXL feedback observed at a physically aligned/docked pose can
+        # settle a few hundredths of a radian away from joint zero (notably
+        # wrist yaw).  Keep commanding exact zero, but use a realistic
+        # feedback acceptance band for the one-shot entry verification.
+        self.entry_alignment_tolerance = .05
+        self.entry_alignment_stable_since = None
         self.tcp_entry_required = False
         self.tcp_entry = None
         self.entry_stable_since = None
@@ -271,14 +277,19 @@ class ModeCore:
             self.target = candidate
         self.goal = list(self.target)
         self.reason = 'aligning DXL base/roll/yaw to zero'
+        dxl_stopped = max(abs(self.velocity[i]) for i in indexes) <= .02
+        if not dxl_stopped:
+            self.entry_alignment_stable_since = None
+        elif self.entry_alignment_stable_since is None:
+            self.entry_alignment_stable_since = now
         if (max(abs(self.target[i]) for i in indexes) <= 1e-9 and
-                max(abs(self.position[i]) for i in indexes) <= .005 and
-                max(map(abs, self.velocity)) <= .02 and
-                self.entry_stable_since is not None and
-                now-self.entry_stable_since >= .2):
+                max(abs(self.position[i]) for i in indexes) <= self.entry_alignment_tolerance and
+                dxl_stopped and self.entry_alignment_stable_since is not None and
+                now-self.entry_alignment_stable_since >= .2):
             self.entry_alignment_complete = True
             self.entry_alignment_started = None
             self.entry_alignment_deadline = None
+            self.entry_alignment_stable_since = None
             self.reason = 'DXL entry alignment verified; HOLD'
         return list(self.target)
 
@@ -478,6 +489,13 @@ class ModeCore:
             raise ValueError('incomplete startup recovery requires inspection and restart')
         if not self.ready or not self.fresh(now) or max(map(abs, self.velocity)) > .02:
             raise ValueError('healthy controllers and stopped fresh feedback required')
+        if self.entry_alignment_enabled and not self.entry_alignment_complete:
+            # A timed-out alignment is retryable after inspection.  The next
+            # HOLD tick must calculate a new deadline from fresh feedback,
+            # rather than immediately reusing the expired attempt.
+            self.entry_alignment_started = None
+            self.entry_alignment_deadline = None
+            self.entry_alignment_stable_since = None
         self.mode = 'hold'
         self.request('hold', now)
 

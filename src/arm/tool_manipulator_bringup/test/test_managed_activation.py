@@ -105,9 +105,9 @@ def test_focus_activation_waits_for_first_dxl_alignment():
     node.focus_activation_pending = True
     ControlModeManager.activate_pending_focus(node, 1.)
     assert node.focus_activation_pending and node.core.mode == 'hold'
-    for now in (1.02, 1.1, 1.22):
+    for now in (1.02, 1.1, 1.23):
         node.core.feedback([0.]*6, [0.]*6, now)
         node.core.tick(now, .02)
     assert node.core.entry_alignment_complete
-    ControlModeManager.activate_pending_focus(node, 1.22)
+    ControlModeManager.activate_pending_focus(node, 1.23)
     assert not node.focus_activation_pending
