@@ -32,6 +32,8 @@ targets:
     # current-feedback TCP -Z 50 mm retreat -> captured waypoint -> BACK -> HOME.
     # Operator-captured return waypoint; still requires live collision validation.
     return_joint_goal_rad: [-3.143127, 0.747175, 1.300096, -1.363102, 0.003068, -0.004602]
+    # Capture 1 then capture 2 distances along the final TCP -Z axis.
+    retreat_checkpoints_m: [0.0129035032851267, 0.0266983032300609]
     retreat_distance_m: 0.050
     retreat_axis_tcp: [0.0, 0.0, -1.0]
   tool1:

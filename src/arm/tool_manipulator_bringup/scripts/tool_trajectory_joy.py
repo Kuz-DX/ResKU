@@ -83,6 +83,14 @@ def load_pre_dock_targets(path):
             raise ValueError(f'{path}: {key} has invalid Cartesian retreat settings')
         retreat_axis /= axis_norm
         retreat = dict(retreat_distance=retreat_distance, retreat_axis=retreat_axis)
+        if 'retreat_checkpoints_m' in value:
+            checkpoints = np.asarray(value['retreat_checkpoints_m'], dtype=float)
+            if (checkpoints.ndim != 1 or not np.all(np.isfinite(checkpoints))
+                    or np.any(checkpoints <= 0.) or np.any(checkpoints >= retreat_distance)
+                    or np.any(np.diff(checkpoints) <= 0.)):
+                raise ValueError(f'{path}: {key} has invalid retreat checkpoints')
+            retreat['retreat_checkpoints'] = checkpoints.tolist()
+
         if 'return_joint_goal_rad' in value:
             return_goal = np.asarray(value['return_joint_goal_rad'], dtype=float)
             if return_goal.shape != (len(ARM_JOINTS),) or not np.all(np.isfinite(return_goal)):
@@ -980,11 +988,14 @@ class ToolTrajectoryJoy(Node):
         origin = self.model.fk(seed)
         direction = origin[:3, :3] @ local_axis
         count = max(1, math.ceil(distance/(.002 if tool0 else .003)))
+        offsets = sorted(set([distance*i/count for i in range(1, count+1)] +
+                             (target.get('retreat_checkpoints', []) if tool0 else [])))
+        count = len(offsets)
         waypoints, durations = [], []
         previous = seed.copy()
-        for index in range(1, count+1):
+        for index, offset in enumerate(offsets, 1):
             pose = origin.copy()
-            pose[:3, 3] += direction*(distance*index/count)
+            pose[:3, 3] += direction*offset
             try:
                 solved = self.model.solve(
                     pose, previous, self.margin, max_iterations=100, max_time_s=.05)

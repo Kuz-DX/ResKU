@@ -361,11 +361,17 @@ def test_fixed_joint_tail_ends_at_measured_docking_pose(tmp_path):
     assert len(hits) == 1
     assert n.advance_plan['stop_at_waypoints'][hits[0]] is False
     assert n.advance_plan['cartesian_line']
-    assert len(n.advance_plan['waypoints']) == 15
+    assert len(n.advance_plan['waypoints']) == 17
     final = n.model.fk(expected)
     final_capture = np.array([-3.178408, .072606, 1.130275, -1.219287, .038350, .009204])
     np.testing.assert_array_equal(n.cfg['final_joint_goal'], final_capture)
     np.testing.assert_allclose(final, n.model.fk(final_capture), atol=1e-12)
+    checkpoints = load_pre_dock_targets(ROOT/'config/cartesian_targets.yaml')[0]['retreat_checkpoints']
+    offsets = [float(np.dot(final[:3, 3]-n.model.fk(point)[:3, 3], final[:3, 2]))
+               for point in n.advance_plan['waypoints']]
+    for checkpoint in checkpoints:
+        assert any(abs(offset-checkpoint) < 1e-10 for offset in offsets)
+    assert np.all(np.diff(offsets) < 0.)
     previous = q
     for point, duration in zip(n.advance_plan['waypoints'], n.advance_plan['durations']):
         for sample in np.linspace(previous, point, 11):
@@ -373,10 +379,11 @@ def test_fixed_joint_tail_ends_at_measured_docking_pose(tmp_path):
             delta = pose[:3, 3]-final[:3, 3]
             lateral = delta-np.dot(delta, final[:3, 2])*final[:3, 2]
             assert np.linalg.norm(lateral) < 3e-6
-            np.testing.assert_allclose(pose[:3, :3], final[:3, :3], atol=1e-8, rtol=0.)
+            # Allow numerical IK/interpolation residual far below the runtime 1e-3-rad bound.
+            np.testing.assert_allclose(pose[:3, :3], final[:3, :3], atol=1e-7, rtol=0.)
             assert n.model.within_limits(sample, n.margin)
         distance = np.linalg.norm(n.model.fk(point)[:3, 3]-n.model.fk(previous)[:3, 3])
-        assert distance == pytest.approx(.002, abs=1e-10)
+        assert 0. < distance <= .002+1e-10
         assert distance/duration <= n.cfg['linear_speed_m_s']+1e-12
         previous = point
     assert n.advance_plan['allowed_collision_pairs'] == frozenset((

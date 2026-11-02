@@ -1007,11 +1007,13 @@ def test_tool0_retreat_uses_displaced_current_pose_and_orientation():
     plan = n.begin.call_args.args[1]
     origin = model.fk(seed)
     np.testing.assert_allclose(plan['start'], seed)
-    assert len(plan['waypoints']) == 25
+    offsets = sorted([.002*i for i in range(1, 26)] +
+                     n.pre_dock_targets[0]['retreat_checkpoints'])
+    assert len(plan['waypoints']) == len(offsets) == 27
     previous = seed
     for i, (q, duration) in enumerate(zip(plan['waypoints'], plan['durations']), 1):
         expected = origin.copy()
-        expected[:3, 3] -= origin[:3, 2]*(.002*i)
+        expected[:3, 3] -= origin[:3, 2]*offsets[i-1]
         residual = model.pose_error(q, expected)
         assert np.linalg.norm(residual[:3]) < 1e-4
         assert np.linalg.norm(residual[3:]) < 1e-3
@@ -1021,7 +1023,7 @@ def test_tool0_retreat_uses_displaced_current_pose_and_orientation():
         assert distance/duration <= .005+1e-10
         previous = q
     assert plan['cartesian_line']
-    assert plan['stop_at_waypoints'] == [False]*24+[True]
+    assert plan['stop_at_waypoints'] == [False]*26+[True]
     assert plan['allowed_collision_pairs'] == frozenset({('tool_case_1', 'wrist_link_yaw')})
     assert n.return_home_after_back
     assert n.route_kind == 'dock_retreat'
@@ -1094,3 +1096,14 @@ def test_return_waypoint_uses_live_start_and_moveit_planner():
     with pytest.raises(RuntimeError, match='planner unavailable'):
         ToolTrajectoryJoy.begin_return_waypoint(n, goal)
     n._request_route_leg.assert_not_called()
+
+
+@pytest.mark.parametrize('checkpoints', [[.02, .01], [0.], [.05], [float('nan')], [[.01]], [.01, .01]])
+def test_invalid_retreat_checkpoints_rejected(tmp_path, checkpoints):
+    path = tmp_path/'invalid_checkpoints.yaml'
+    path.write_text(yaml.safe_dump({'targets': {'tool0': {
+        'executable': True, 'joint_names': list(ARM_JOINTS),
+        'pre_joint_goal_rad': [0.]*6, 'retreat_distance_m': .05,
+        'retreat_checkpoints_m': checkpoints}}}))
+    with pytest.raises(ValueError, match='invalid retreat checkpoints'):
+        load_pre_dock_targets(path)
