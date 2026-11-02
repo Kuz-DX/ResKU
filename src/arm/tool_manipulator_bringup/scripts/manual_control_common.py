@@ -36,7 +36,7 @@ def rotation(axis, angle):
 
 
 class ArmChain:
-    """FK uses every movable joint; the Jacobian contains only the RMDs."""
+    """FK uses every movable joint; default Jacobian columns are the RMDs."""
     def __init__(self, description, root='base_actuator', tip='tcp_link'):
         by_child = {}
         mimic_joints = set()
@@ -79,11 +79,12 @@ class ArmChain:
         if set(self.required) - set(JOINTS):
             raise ValueError('chain contains unsupported movable joints')
 
-    def pose_and_jacobian(self, positions, include_angular=False):
+    def pose_and_jacobian(self, positions, include_angular=False, all_joints=False):
+        """Root-frame geometric Jacobian; opt in to all six axes for TCP assist."""
         transform, frames = np.eye(4), []
         for name, kind, _, origin, axis in self.chain:
             transform = transform @ origin
-            if name in RMD:
+            if name in (JOINTS if all_joints else RMD):
                 frames.append((transform[:3, 3].copy(), transform[:3, :3] @ axis))
             if kind in ('revolute', 'continuous'):
                 transform[:3, :3] = transform[:3, :3] @ rotation(axis, positions[name])

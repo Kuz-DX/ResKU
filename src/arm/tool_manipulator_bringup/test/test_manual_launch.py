@@ -18,6 +18,11 @@ def test_manual_mode_uses_common_base_and_inactive_seed_controller():
         "mock_initial_positions_file": "",
         "launch_joy": "false",
         "launch_rviz": "false",
+        "docking_mock_input": "false",
+        "docking_assist_config": str(ROOT / "config/manual_docking_assist.yaml"),
+        "docking_camera_frame": "arm_camera_color_optical_frame",
+        "docking_camera_info_topic": "/arm/camera/color/camera_info",
+        "docking_centers_topic": "/arm/apriltag/centers",
     }
     spawner = Mock(side_effect=lambda name, inactive=False: {
         "kind": "spawner", "name": name, "inactive": inactive})
@@ -67,6 +72,17 @@ def test_manual_mode_uses_common_base_and_inactive_seed_controller():
 
 
 ROBOT_DESCRIPTION = "<robot name='test'/>"
+
+
+def test_synthetic_tag_input_is_blocked_before_real_hardware_construction():
+    import pytest
+    values = {'real_hardware': 'true', 'docking_mock_input': 'true'}
+    with patch.object(module, 'LaunchConfiguration',
+                      side_effect=lambda name: SimpleNamespace(perform=lambda ctx: values[name])), \
+            patch.object(module.common, 'build_arm_base') as build:
+        with pytest.raises(RuntimeError, match='real_hardware:=false'):
+            module._bringup(None)
+        build.assert_not_called()
 
 
 def test_real_rmd_transport_keeps_can_bus_headroom():

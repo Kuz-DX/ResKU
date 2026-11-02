@@ -17,6 +17,12 @@ debug_report/
 /ARM_MODE_TRANSITION_REVIEW_20261026.md
 REPORT.md
 
+# Local DYNAMIXEL communication audit tests and reports (2026-11-02).
+/src/arm/dynamixel_hardware_interface/test/test_communication_audit.py
+/src/arm/dynamixel_hardware_interface/test/communication_audit/
+/src/arm/tool_manipulator_bringup/docs/dxl_communication_audit_2026-11-02.md
+/src/arm/tool_manipulator_bringup/docs/dxl_communication_audit_2026-11-02_results.json
+
 # 루트에 보관한 이전 ROS2 / colcon 산출물
 /build.stale-*/
 /install.stale-*/
