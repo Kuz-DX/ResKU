@@ -355,7 +355,37 @@ def test_fixed_joint_tail_ends_at_measured_docking_pose(tmp_path):
     np.testing.assert_allclose(n.advance_plan['waypoints'][-1], expected)
     assert n.advance_plan['stop_at_waypoints'][-1] is True
     assert not n.advance_plan['cartesian_line']
+    assert n.advance_plan['allowed_collision_pairs'] == frozenset((
+        ('tool_case_1', 'wrist_link_yaw'),))
     n.begin.assert_called_once_with(0, n.advance_plan)
+
+
+@pytest.mark.parametrize('joint_error,accepted', [(.004, True), (.006, False)])
+def test_fixed_joint_completion_uses_measured_joint_tolerance(
+        tmp_path, joint_error, accepted):
+    n = node(tmp_path)
+    n.cfg = load_settings(ROOT/'config/tool_docking.yaml')[0]
+    n.path_id = 0
+    goal = n.cfg['final_joint_goal'].copy()
+    measured = goal.copy()
+    measured[1] += joint_error
+    n.full_state = dict(zip(ARM_JOINTS, measured))
+    n.velocity = np.zeros(6)
+    n.advance_locked = True
+    n.advance_plan = {'waypoints': [goal]}
+    n.advance_target = np.eye(4)
+    n.advance_local_axis = n.advance_direction = np.array([0., 0., 1.])
+    # A joint-measured final goal is not rejected by an independently stricter
+    # Cartesian tolerance amplified through FK.
+    n.model.fk.return_value = transform([.010, 0., 0.], [0., 0., 0., 1.])
+
+    if accepted:
+        n.path_completed()
+        assert n.stage == 'dock_actuate'
+    else:
+        with pytest.raises(RuntimeError, match='joint_error=0.006000'):
+            n.path_completed()
+        n.docking_command.publish.assert_not_called()
 
 
 def test_missing_tag_cancels_in_flight_correction_before_parent_tick(tmp_path):

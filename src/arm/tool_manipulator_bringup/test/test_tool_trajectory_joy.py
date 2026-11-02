@@ -13,7 +13,8 @@ from std_msgs.msg import String
 
 SCRIPTS = Path(__file__).resolve().parents[1]/'scripts'
 sys.path.insert(0, str(SCRIPTS))
-from tool_trajectory_joy import (collision_check_budget, execution_plan, load_path,
+from tool_trajectory_joy import (collision_check_budget, collision_result_accepted,
+                                 execution_plan, load_path,
                                  isolate_shoulder_zero_crossings, nearest_path_suffix,
                                  load_pre_dock_targets, load_route_poses,
                                  nearest_base_equivalent, planned_entry, planned_leg,
@@ -21,6 +22,21 @@ from tool_trajectory_joy import (collision_check_budget, execution_plan, load_pa
                                  requested_back, requested_path, ARM_JOINTS,
                                  ToolTrajectoryJoy)
 from tool_trajectory_joy import reverse_path
+
+
+def test_scoped_collision_acceptance_allows_only_declared_contact_pair():
+    def response(*pairs):
+        contacts = [SimpleNamespace(contact_body_1=a, contact_body_2=b)
+                    for a, b in pairs]
+        return SimpleNamespace(valid=not contacts, contacts=contacts)
+    allowed = frozenset((('tool_case_1', 'wrist_link_yaw'),))
+    assert collision_result_accepted(response())
+    assert collision_result_accepted(
+        response(('wrist_link_yaw', 'tool_case_1')), allowed)
+    assert not collision_result_accepted(
+        response(('wrist_link_yaw', 'tool_case_1')))
+    assert not collision_result_accepted(response(
+        ('wrist_link_yaw', 'tool_case_1'), ('elbow_link', 'tool_case_1')), allowed)
 
 
 def write_path(tmp_path, enabled=True, times=(0., 1., 3.)):

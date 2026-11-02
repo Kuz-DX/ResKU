@@ -283,11 +283,17 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                 actual, self.advance_target, self.advance_local_axis, self.advance_direction,
                 self.cfg.get('maintain_entry_orientation', False))
             speed = float(np.max(np.abs(self.velocity)))
-            if (distance > self.cfg['position_tolerance_m']
-                    or angle > self.cfg['angle_tolerance_rad']
-                    or speed > self.cfg['stopped_speed_rad_s']):
+            fixed_joint = self.cfg.get('alignment_mode') == 'fixed_joint_goal'
+            joint_error = (float(np.max(np.abs(q-self.advance_plan['waypoints'][-1])))
+                           if fixed_joint else 0.)
+            invalid = ((joint_error > self.cfg['joint_tolerance_rad']) if fixed_joint else
+                       (distance > self.cfg['position_tolerance_m']
+                        or angle > self.cfg['angle_tolerance_rad']))
+            if invalid or speed > self.cfg['stopped_speed_rad_s']:
                 raise RuntimeError(
                     'advance endpoint feedback outside tolerance; remain HOLD: '
+                    f'joint_error={joint_error:.6f}rad '
+                    f'limit={self.cfg["joint_tolerance_rad"]:.6f}rad; '
                     f'position_error={distance:.6f}m '
                     f'limit={self.cfg["position_tolerance_m"]:.6f}m; '
                     f'angle_error={angle:.6f}rad '
@@ -531,7 +537,9 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         self.advance_plan = dict(
             start=q.copy(), waypoints=waypoints, durations=durations,
             total=sum(durations), start_error=0., cartesian_line=False,
-            stop_at_waypoints=[False]*(count-1)+[True])
+            stop_at_waypoints=[False]*(count-1)+[True],
+            allowed_collision_pairs=frozenset((
+                tuple(sorted(('tool_case_1', 'wrist_link_yaw'))),)))
         self.report('advance_planning',
                     'stopped pre-dock; checking measured final joint goal; '
                     'joint_delta_max=%.4f rad, samples=%d; tag not required' %

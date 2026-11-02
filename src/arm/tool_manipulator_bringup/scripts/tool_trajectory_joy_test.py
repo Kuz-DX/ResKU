@@ -664,7 +664,8 @@ class ToolTrajectoryJoy(Node):
                 req.robot_state.is_diff = True
                 self.requests.append(req)
                 self.request_contact_pairs.append(
-                    docking_contact_pairs(path, [values[j] for j in ARM_JOINTS])
+                    (docking_contact_pairs(path, [values[j] for j in ARM_JOINTS])
+                     | path.get('allowed_collision_pairs', frozenset()))
                     if 'ee_target_rad' not in path else frozenset())
             self.stage, self.started, self.request_index = 'checking', now, 0
             budget = collision_check_budget(len(self.requests), self.collision_timeout)

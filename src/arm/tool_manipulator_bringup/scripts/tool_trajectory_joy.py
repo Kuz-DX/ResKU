@@ -278,6 +278,17 @@ def collision_check_budget(sample_count, minimum_timeout, service_rate=50.):
     return min(120., max(float(minimum_timeout), sample_count/service_rate+2.))
 
 
+def collision_result_accepted(result, allowed_pairs=frozenset()):
+    """Accept only explicitly scoped contact pairs; never hide other faults."""
+    if result is None:
+        return False
+    if result.valid:
+        return True
+    contacts = {tuple(sorted((c.contact_body_1, c.contact_body_2)))
+                for c in result.contacts}
+    return bool(contacts) and all(pair in allowed_pairs for pair in contacts)
+
+
 def execution_timeout(path, measured, speed_limits):
     """Account for manager speed retiming and ramp/settling overhead.
 
@@ -1333,7 +1344,8 @@ class ToolTrajectoryJoy(Node):
                 if not self.future.done():
                     return
                 result = self.future.result()
-                if result is None or not result.valid:
+                allowed_pairs = self.path.get('allowed_collision_pairs', frozenset())
+                if not collision_result_accepted(result, allowed_pairs):
                     pairs = sorted({' <-> '.join(sorted((c.contact_body_1, c.contact_body_2)))
                                     for c in getattr(result, 'contacts', [])})
                     detail = ', '.join(pairs[:6]) or 'no contacts; check joint bounds/scene'
