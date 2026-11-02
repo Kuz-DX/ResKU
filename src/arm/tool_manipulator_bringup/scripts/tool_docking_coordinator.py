@@ -569,7 +569,7 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             expected_entry = final_pose.copy()
             expected_entry[:3, 3] -= final_pose[:3, 2] * .030
             position_error, angle_error = pose_errors(entry_pose, expected_entry)
-            if position_error > .002 or angle_error > .02:
+            if position_error > .008 or angle_error > math.radians(5.):
                 raise RuntimeError('axial docking entry mismatch: '
                                    f'{position_error:.6f}m, {angle_error:.6f}rad')
             stops = [False] * (len(waypoints)-1) + [True]

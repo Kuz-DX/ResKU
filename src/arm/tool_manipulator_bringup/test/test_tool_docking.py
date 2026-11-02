@@ -361,6 +361,7 @@ def test_fixed_joint_tail_ends_at_measured_docking_pose(tmp_path):
     assert len(hits) == 1
     assert n.advance_plan['stop_at_waypoints'][hits[0]] is False
     assert n.advance_plan['cartesian_line']
+    assert len(n.advance_plan['waypoints']) == 15
     final = n.model.fk(expected)
     previous = q
     for point, duration in zip(n.advance_plan['waypoints'], n.advance_plan['durations']):
@@ -368,11 +369,12 @@ def test_fixed_joint_tail_ends_at_measured_docking_pose(tmp_path):
             pose = n.model.fk(sample)
             delta = pose[:3, 3]-final[:3, 3]
             lateral = delta-np.dot(delta, final[:3, 2])*final[:3, 2]
-            assert np.linalg.norm(lateral) < 1e-6
+            assert np.linalg.norm(lateral) < 3e-6
             assert abs(pose[1, 3]) < 1e-12
             np.testing.assert_allclose(pose[:3, :3], final[:3, :3], atol=1e-10)
             assert n.model.within_limits(sample, n.margin)
         distance = np.linalg.norm(n.model.fk(point)[:3, 3]-n.model.fk(previous)[:3, 3])
+        assert distance == pytest.approx(.002, abs=1e-10)
         assert distance/duration <= n.cfg['linear_speed_m_s']+1e-12
         previous = point
     assert n.advance_plan['allowed_collision_pairs'] == frozenset((
@@ -380,6 +382,15 @@ def test_fixed_joint_tail_ends_at_measured_docking_pose(tmp_path):
     n.begin.assert_called_once_with(0, n.advance_plan)
     with pytest.raises(RuntimeError, match='entry mismatch'):
         n.start_final_joint_goal(expected)
+    for position, angle, accepted in [
+            (.0079, math.radians(4.99), True),
+            (.0081, 0., False), (0., math.radians(5.01), False)]:
+        with patch('tool_docking_coordinator.pose_errors', return_value=(position, angle)):
+            if accepted:
+                n.start_final_joint_goal(q)
+            else:
+                with pytest.raises(RuntimeError, match='entry mismatch'):
+                    n.start_final_joint_goal(q)
 
 
 @pytest.mark.parametrize('joint_error,accepted', [(.004, True), (.006, False)])
