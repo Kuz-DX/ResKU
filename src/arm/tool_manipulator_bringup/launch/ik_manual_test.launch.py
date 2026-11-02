@@ -164,7 +164,7 @@ def generate_launch_description():
         DeclareLaunchArgument('docking_config', default_value=str(hardware_default.parent/'test/tool_docking.yaml')),
         DeclareLaunchArgument('docking_camera_frame', default_value='arm_camera_color_optical_frame'),
         DeclareLaunchArgument('launch_docking_bridge', default_value='true', choices=['true', 'false']),
-        DeclareLaunchArgument('docking_serial_port', default_value='/dev/ttyUSB1'),
+        DeclareLaunchArgument('docking_serial_port', default_value='/dev/ttyACM0'),
         DeclareLaunchArgument('docking_serial_baud', default_value='115200'),
         OpaqueFunction(function=bringup),
     ])
