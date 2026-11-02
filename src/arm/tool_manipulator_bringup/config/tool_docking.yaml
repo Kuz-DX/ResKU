@@ -19,8 +19,25 @@ tools:
     tag_family: tag36h11
     tag_id: 0
     tag_size_m: 0.020
-    # Starting at capture 5 in cartesian_targets.yaml: captures 6..12, then
-    # the calculated axial entry. The entire executed prefix is reversed on retreat.
+    tag_translation_correction:
+      enabled: true
+      # Provisional reference from user capture stamp 1793596416.903671875.
+      # Joint values are the associated rounded capture, not a synchronized calibration.
+      # Translation only; never infer approach length from the 28.5 cm visibility report.
+      reference_joint_rad: [-3.181476, 0.640536, 1.209164, -1.426807, -0.003068, -0.019942]
+      reference_camera_matrix: [605.8599853515625, 0.0, 326.54400634765625, 0.0, 605.5801391601562, 250.81643676757812, 0.0, 0.0, 1.0]
+      reference_distortion: [0.0, 0.0, 0.0, 0.0, 0.0]
+      reference_corners_px:
+        - [435.30267333984375, 417.8131408691406]
+        - [485.0721435546875, 417.004638671875]
+        - [481.6163330078125, 366.8092956542969]
+        - [432.4145202636719, 367.70806884765625]
+      outer_entry_joint_rad: [-3.190680, 0.418530, 1.061160, -1.473931, 0.015340, 0.013806]
+      sample_count: 8
+      sample_spread_m: 0.003
+      max_translation_m: 0.010
+    # After tag correction and capture 5: captures 6..12, then the axial entry.
+    # The observation connector and the entire prefix are reversed on retreat.
     axial_approach_joint_goals_rad:
       - [-3.193748, 0.359538, 1.023112, -1.486497, 0.023010, 0.023010]
       - [-3.195282, 0.312763, 0.989776, -1.496445, 0.027612, 0.032214]

@@ -590,6 +590,7 @@ class ToolTrajectoryJoy(Node):
         self.collision_deadline = None
         self.sequence_phase = 'approach'
         self.return_home_after_back = False
+        self.pending_tool_request = None
 
     def report(self, state, reason):
         self.diagnostics.publish(String(data=json.dumps(dict(
@@ -793,9 +794,21 @@ class ToolTrajectoryJoy(Node):
         now = time.monotonic()
         ready, reason = self.back_is_ready(now)
         if not ready:
-            self.path_id = request
-            self.report('blocked', reason)
-            self.path_id = None
+            # A tool selection owns staging as well as docking. Only queue from
+            # fresh, ready HOLD; faults or an active/manual motion never auto-resume.
+            try:
+                self.healthy_hold(now)
+            except RuntimeError:
+                self.path_id = request
+                self.report('blocked', reason)
+                self.path_id = None
+                return
+            self.pending_tool_request = (request, desired_docked, nearest_entry)
+            self.report('staging', f'{tool_label(request)} selected; planning HOME -> BACK before automatic continuation')
+            try:
+                self.begin_back()
+            except (ValueError, RuntimeError) as exc:
+                self.begin_failed(str(exc))
             return
         s = self.status
         available = (now-self.status_time < .3 and now-self.state_time < .3
@@ -923,6 +936,9 @@ class ToolTrajectoryJoy(Node):
             self.back_ready_epoch = status.get('epoch')
             if getattr(self, 'return_home_after_back', False):
                 self.begin_named_route('home')
+                return
+            if getattr(self, 'pending_tool_request', None) is not None:
+                self.continue_selected_tool()
                 return
             self.report('completed',
                         'already at BACK; no motion planned, select tool0/1/2')
@@ -1205,6 +1221,12 @@ class ToolTrajectoryJoy(Node):
         self.report('blocked', reason)
         self.reset()
 
+    def continue_selected_tool(self):
+        request, desired_docked, nearest_entry = self.pending_tool_request
+        self.reset()
+        self.report('continuing', f'BACK verified; automatically continuing {tool_label(request)}')
+        self.request_path(request, desired_docked, nearest_entry=nearest_entry)
+
     def path_completed(self):
         if getattr(self, 'route_kind', None) == 'home':
             measured = np.asarray([self.full_state[j] for j in ARM_JOINTS], dtype=float)
@@ -1224,6 +1246,9 @@ class ToolTrajectoryJoy(Node):
             if getattr(self, 'return_home_after_back', False):
                 self.report('returning', 'BACK feedback verified; automatically planning HOME')
                 self.begin_named_route('home')
+                return
+            if getattr(self, 'pending_tool_request', None) is not None:
+                self.continue_selected_tool()
                 return
             self.report('completed', 'BACK reached and feedback verified; select tool0/1/2')
             self.reset()

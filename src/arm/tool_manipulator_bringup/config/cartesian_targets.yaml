@@ -4,15 +4,15 @@
 targets:
   tool0:
     joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
-    # Capture 5 (~121 mm behind final); measured 6..12 then the 70 mm axial tail.
-    pre_joint_goal_rad: [-3.190680, 0.418530, 1.061160, -1.473931, 0.015340, 0.013806]
+    # Recorded observation pose (25.97 cm tag range); stops for one translation estimate.
+    pre_joint_goal_rad: [-3.181476, 0.640536, 1.209164, -1.426807, -0.003068, -0.019942]
     # BACK -> this pre-dock directly crossed the fixed tool case. Route via
     # the previously collision-free approach before planning the second leg.
     transit_joint_goal_rad: [3.1001751723166735, 0.6403612785882697,
       1.209862232156147, -1.427330240975674, -0.0030679615759781065,
       -0.021475731030191625]
     executable: true
-    role: measured_tagless_pre_dock
+    role: measured_tag_observation
     final_capture_label: axial_final_capture
     # Diagnostic copy; executable final target lives in tool_docking.yaml.
     final_joint_goal_rad: [-3.1860780000, 0.0474730000, 1.0911800000, -1.2349950000, 0.0368160000, 0.0490870000]
@@ -27,7 +27,8 @@ targets:
     # Exact latest final capture: retain all six measured joints and TCP orientation.
     final_role: measured_final_mating
     required_final_motion: axial_sampled_path
-    # true once -> 3 s -> reverse 70 mm axial tail and measured outer approach
+    # Observe/correct once, then approach; true once -> 3 s -> reverse corrected
+    # 70 mm axial tail, measured outer approach, and observation connector
     # -> return waypoint -> BACK -> HOME; no EE rotation or extra straight retreat.
     retreat_mode: reverse_docking_path
     # Operator-captured return waypoint; still requires live collision validation.

@@ -230,6 +230,31 @@ def load_settings(filename):
             result[tool_id] = item
             continue
         if mode == 'fixed_joint_goal':
+            correction = item.get('tag_translation_correction', {})
+            if not isinstance(correction, dict):
+                raise ValueError('tag_translation_correction must be a mapping')
+            if correction.get('enabled', False):
+                matrix = np.asarray(correction.get('reference_camera_matrix'), dtype=float)
+                distortion = np.asarray(correction.get('reference_distortion'), dtype=float)
+                if (matrix.shape != (9,) or not np.all(np.isfinite(matrix))
+                        or distortion.ndim != 1 or distortion.size not in (4, 5, 8)
+                        or not np.all(np.isfinite(distortion))):
+                    raise ValueError('tag correction requires recorded camera calibration')
+                for key in ('reference_joint_rad', 'outer_entry_joint_rad'):
+                    values = np.asarray(correction.get(key), dtype=float)
+                    if values.shape != (6,) or not np.all(np.isfinite(values)):
+                        raise ValueError(f'tag correction requires six finite {key}')
+                pixels = np.asarray(correction.get('reference_corners_px'), dtype=float)
+                if pixels.shape != (4, 2) or not np.all(np.isfinite(pixels)):
+                    raise ValueError('tag correction requires four reference corners')
+                for key in ('max_translation_m', 'sample_spread_m'):
+                    value = float(correction.get(key, 0))
+                    if not math.isfinite(value) or value <= 0:
+                        raise ValueError(f'invalid tag correction {key}')
+                if not 0 < correction['sample_spread_m'] <= correction['max_translation_m'] <= .010:
+                    raise ValueError('single-frame tag reference permits at most 10 mm correction')
+                if type(correction.get('sample_count')) is not int or correction['sample_count'] < 3:
+                    raise ValueError('tag correction requires at least three distinct samples')
             goal = np.asarray(item.get('final_joint_goal_rad'), dtype=float)
             if goal.shape != (6,) or not np.all(np.isfinite(goal)):
                 raise ValueError(

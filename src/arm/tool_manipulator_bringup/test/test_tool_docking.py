@@ -319,9 +319,150 @@ def test_non_docking_path_completion_keeps_old_behavior(tmp_path):
     n.docking_command.publish.assert_not_called()
 
 
+def test_production_completion_waits_for_tag_without_another_button(tmp_path):
+    n = node(tmp_path)
+    n.cfg = load_settings(ROOT/'config/tool_docking.yaml')[0]
+    n.docking_started = None
+    n.status = {'epoch': 'observation-hold'}
+    n.start_final_joint_goal = Mock()
+    n.path_completed()
+    assert n.stage == 'dock_tag_acquire'
+    assert n.tag_translation_samples == []
+    n.start_final_joint_goal.assert_not_called()
+
+
+def translation_node(tmp_path):
+    n = node(tmp_path)
+    n.cfg = load_settings(ROOT/'config/tool_docking.yaml')[0]
+    n.docking_started = 0.
+    n.tag_translation_reference = np.array([.1, .2, .3])
+    n.tag_translation_samples = []
+    n.observe_after_ns = 0
+    n.full_state = dict(zip(ARM_JOINTS, n.cfg['tag_translation_correction']['reference_joint_rad']))
+    n.stage = 'dock_tag_acquire'
+    return n
+
+
+def feed_translation(n, delta, count=8):
+    for i in range(count):
+        pose = np.eye(4)
+        pose[:3, 3] = n.tag_translation_reference + np.asarray(delta)
+        n.observation = (i+1, 1., pose)
+        n.feedback_sequence += 1
+        n.tick_tag_translation(1.)
+
+
+@pytest.mark.parametrize('delta', [[0., 0., 0.], [.002, -.001, .001]])
+def test_translation_rebuilds_whole_path_and_reverse_from_one_measurement(tmp_path, delta):
+    from tool_trajectory_joy import ArmKinematics
+    n = translation_node(tmp_path)
+    n.model = ArmKinematics(ROOT.parent/'tool_manipulator_description/urdf/tool_manipulator.urdf.xacro', ROOT/'config/hardware.yaml')
+    feed_translation(n, delta)
+    assert n.stage == 'dock_tag_plan'
+    assert n.advance_locked
+    original_targets = [np.asarray(q).copy() for q in n.tag_translation_targets]
+    n.observation = None  # Tag may disappear once the correction is frozen.
+    for _ in original_targets:
+        n.plan_tag_translation_step()
+    assert n.advance_plan['preserve_joint_path']
+    assert len(n.cfg['axial_approach_joint_goals']) == 9
+    for original, solved in zip(original_targets, n.tag_translation_solutions):
+        expected = n.model.fk(original)
+        expected[:3, 3] += delta
+        np.testing.assert_allclose(n.model.fk(solved), expected, atol=1e-4)
+    n.begin.assert_called_once_with(0, n.advance_plan)
+    final_pose = n.model.fk(n.cfg['final_joint_goal'])
+    axis = final_pose[:3, 2]
+    start_index = n.advance_plan['axial_start_index']
+    previous = n.advance_plan['waypoints'][start_index-1]
+    np.testing.assert_allclose(n.model.fk(previous)[:3, 3],
+                              final_pose[:3, 3] - .070 * axis, atol=2e-5)
+    for point in n.advance_plan['waypoints'][start_index:]:
+        for q in np.linspace(previous, point, 5):
+            assert n.model.within_limits(q, n.margin)
+            pose = n.model.fk(q)
+            offset = pose[:3, 3]-final_pose[:3, 3]
+            assert np.linalg.norm(offset-axis*(axis@offset)) < 2e-5
+            assert pose_errors(pose, final_pose)[1] < .001
+        previous = point
+    n.full_state = dict(zip(ARM_JOINTS, n.cfg['final_joint_goal']))
+    n.pre_dock_targets = {}
+    ToolTrajectoryJoy.begin_reverse_docking_retreat(n)
+    reverse = n.begin.call_args.args[1]
+    np.testing.assert_allclose(reverse['waypoints'],
+        list(reversed([n.advance_plan['start'], *n.advance_plan['waypoints'][:-1]])))
+
+
+def test_tag_translation_does_not_move_for_missing_unstable_or_excessive_measurements(tmp_path):
+    n = translation_node(tmp_path)
+    feed_translation(n, [.001, 0., 0.], count=1)
+    for _ in range(10):
+        n.tick_tag_translation(1.)  # Repeated image cannot count as new evidence.
+    assert len(n.tag_translation_samples) == 1
+    assert n.stage == 'dock_tag_acquire'
+    n.begin.assert_not_called()
+    with pytest.raises(RuntimeError, match='exceeds calibrated envelope'):
+        feed_translation(n, [.02, 0., 0.], count=12)
+    n.begin.assert_not_called()
+    n.observation = None
+    with pytest.raises(RuntimeError, match='acquisition timed out'):
+        n.tick_tag_translation(11.)
+
+
+def test_tag_plan_rejects_motion_during_ik(tmp_path):
+    n = translation_node(tmp_path)
+    feed_translation(n, [0., 0., 0.])
+    n.full_state[ARM_JOINTS[1]] += .02
+    with pytest.raises(RuntimeError, match='arm moved'):
+        n.plan_tag_translation_step()
+    n.begin.assert_not_called()
+
+
+def test_recorded_tag_reference_uses_camera_extrinsics_and_pnp(tmp_path):
+    from tool_trajectory_joy import ArmKinematics
+    n = translation_node(tmp_path)
+    c = n.cfg['tag_translation_correction']
+    n.camera = (np.asarray(c['reference_camera_matrix']).reshape(3, 3),
+                np.asarray(c['reference_distortion']))
+    n.camera_frame = 'arm_camera_color_optical_frame'
+    n.model = ArmKinematics(ROOT.parent/'tool_manipulator_description/urdf/tool_manipulator.urdf.xacro', ROOT/'config/hardware.yaml')
+    n.tag_translation_reference = None
+    n.tf_buffer = Mock()
+    n.tf_buffer.lookup_transform.return_value.transform = SimpleNamespace(
+        translation=SimpleNamespace(x=.01, y=.02, z=.03),
+        rotation=SimpleNamespace(x=0., y=0., z=0., w=1.))
+    n.observation = (1, 1., np.eye(4))
+    n.tick_tag_translation(1.)
+    detection = dict(hamming=0, decision_margin=68.496788,
+        corners_px=[dict(u=u, v=v) for u, v in c['reference_corners_px']])
+    camera_tag = tag_pose(detection, *n.camera, dict(n.cfg, min_pnp_solution_gap_px=0.))
+    expected = n.model.fk(c['reference_joint_rad']) @ transform([.01, .02, .03], [0., 0., 0., 1.]) @ camera_tag
+    np.testing.assert_allclose(n.tag_translation_reference, expected[:3, 3])
+    assert .24 < camera_tag[2, 3] < .26
+    n.tag_translation_reference = None
+    n.camera[0][0, 0] += 10.
+    n.observation = (2, 1., np.eye(4))
+    n.feedback_sequence += 1
+    with pytest.raises(RuntimeError, match='camera calibration differs'):
+        n.tick_tag_translation(1.)
+
+
+def test_unstable_tag_translation_waits_without_motion(tmp_path):
+    n = translation_node(tmp_path)
+    for i in range(16):
+        pose = np.eye(4)
+        pose[:3, 3] = n.tag_translation_reference + [(-1)**i * .004, 0., 0.]
+        n.observation = (i+1, 1., pose)
+        n.feedback_sequence += 1
+        n.tick_tag_translation(1.)
+    assert n.stage == 'dock_tag_acquire'
+    n.begin.assert_not_called()
+
+
 def test_fixed_joint_completion_starts_checked_goal_without_tag(tmp_path):
     n = node(tmp_path)
     n.cfg = load_settings(ROOT/'config/tool_docking.yaml')[0]
+    n.cfg['tag_translation_correction']['enabled'] = False
     n.path_id = 0
     n.docking_started = None
     n.status = {'epoch': 'fixed-joint-hold'}
@@ -361,7 +502,7 @@ def test_fixed_joint_tail_ends_at_measured_docking_pose(tmp_path):
     n.model = ArmKinematics(
         ROOT.parent/'tool_manipulator_description/urdf/tool_manipulator.urdf.xacro',
         ROOT/'config/hardware.yaml')
-    q = load_pre_dock_targets(ROOT/'config/cartesian_targets.yaml')[0]['joint_goal']
+    q = np.asarray(n.cfg['tag_translation_correction']['outer_entry_joint_rad'])
 
     n.start_final_joint_goal(q)
 

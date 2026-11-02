@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Optional tool path -> tag-guided continuation coordinator."""
+import copy
 import json
 import math
 import time
@@ -78,6 +79,11 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         self.advance_target = None
         self.advance_plan = None
         self.tool0_retreat_authorized = False
+        self.tag_translation_samples = []
+        self.tag_translation_reference = None
+        self.tag_translation_delta = None
+        self.tag_translation_targets = []
+        self.tag_translation_solutions = []
         self.reset_tag_acquisition()
 
     def reset_tag_acquisition(self):
@@ -156,7 +162,9 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                 raise ValueError(
                     f'expected one tag id={self.cfg["tag_id"]} '
                     f'family={self.cfg.get("tag_family", "any")}; received={seen}')
-            camera_tag = tag_pose(detections[0], *self.camera, self.cfg)
+            position_only = self.cfg.get('tag_translation_correction', {}).get('enabled', False)
+            pose_settings = dict(self.cfg, min_pnp_solution_gap_px=0.) if position_only else self.cfg
+            camera_tag = tag_pose(detections[0], *self.camera, pose_settings)
             tf = self.tf_buffer.lookup_transform(
                 self.base_frame, self.camera_frame, stamp,
                 timeout=Duration(seconds=self.cfg['tf_timeout_s'])).transform
@@ -166,17 +174,17 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             if self.last_base_tag is not None:
                 jump, turn = pose_errors(self.last_base_tag, base_tag)
                 if (jump > self.cfg['max_tag_position_jump_m']
-                        or turn > self.cfg['max_tag_angle_jump_rad']):
+                        or (not position_only and turn > self.cfg['max_tag_angle_jump_rad'])):
                     # Planar IPPE candidates can swap reprojection-error order
                     # from sub-pixel noise. Retry against the previously
                     # accepted stationary rack pose before rejecting the frame.
                     camera_reference = np.linalg.inv(base_camera) @ self.last_base_tag
                     camera_tag = tag_pose(
-                        detections[0], *self.camera, self.cfg, reference=camera_reference)
+                        detections[0], *self.camera, pose_settings, reference=camera_reference)
                     base_tag = base_camera @ camera_tag
                     jump, turn = pose_errors(self.last_base_tag, base_tag)
                     if (jump > self.cfg['max_tag_position_jump_m']
-                            or turn > self.cfg['max_tag_angle_jump_rad']):
+                            or (not position_only and turn > self.cfg['max_tag_angle_jump_rad'])):
                         raise ValueError(
                             f'tag pose discontinuity rejected: translation={jump:.4f}m '
                             f'angle={turn:.4f}rad')
@@ -196,7 +204,7 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
     def begin(self, path_id, planned_path=None):
         if planned_path is None and path_id in self.settings:
             self.active = True
-            self.cfg = self.settings[path_id]
+            self.cfg = copy.deepcopy(self.settings[path_id])
             self.docking_started = None
             self.path_id = path_id
             mode = self.cfg.get('alignment_mode')
@@ -303,6 +311,17 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             self.execution_id = None
             self.hold_epoch = self.status['epoch']
             self.docking_started = time.monotonic()
+            if self.cfg.get('tag_translation_correction', {}).get('enabled', False):
+                self.reset_tag_acquisition()
+                self.tag_translation_samples = []
+                self.tag_translation_reference = None
+                self.tag_translation_delta = None
+                self.observe_after_ns = self.get_clock().now().nanoseconds
+                self.observed_image = -1
+                self.observed_feedback = self.feedback_sequence
+                self.stage = 'dock_tag_acquire'
+                self.report('dock_tag_acquire', 'stopped at recorded observation pose; acquiring tag translation before automatic docking')
+                return
             self.start_final_joint_goal(q)
             return
         if (self.docking_started is None
@@ -381,6 +400,12 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             if self.active and self.docking_started is not None:
                 now = time.monotonic()
                 self.guard(now)
+                if self.stage == 'dock_tag_acquire':
+                    self.tick_tag_translation(now)
+                    return
+                if self.stage == 'dock_tag_plan':
+                    self.plan_tag_translation_step()
+                    return
                 if self.stage == 'dock_acquire':
                     if now-self.docking_started > self.cfg['acquire_timeout_s']:
                         raise RuntimeError('target tag acquisition timed out: '+self.tag_diagnostic())
@@ -431,6 +456,100 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             super().tick()
         except (ValueError, RuntimeError, KeyError, TransformException, np.linalg.LinAlgError) as exc:
             self.fail(str(exc))
+
+    def tick_tag_translation(self, now):
+        """Freeze one translation estimate at rest; never track a moving/tagless arm."""
+        if now-self.docking_started > self.cfg['acquire_timeout_s']:
+            raise RuntimeError('tag translation acquisition timed out: '+self.tag_diagnostic())
+        if self.observation is None:
+            return
+        try:
+            stamp, observed = self.fresh_observation(now)
+        except RuntimeError:
+            self.observation = None
+            self.last_base_tag = None
+            self.tag_translation_samples = []
+            return
+        if (stamp <= self.observe_after_ns or stamp == self.observed_image
+                or self.feedback_sequence == self.observed_feedback):
+            return
+        self.observed_image, self.observed_feedback = stamp, self.feedback_sequence
+        if np.max(np.abs(self.velocity)) > self.cfg['stopped_speed_rad_s']:
+            self.tag_translation_samples = []
+            return
+        correction = self.cfg['tag_translation_correction']
+        if self.tag_translation_reference is None:
+            reference_matrix = np.asarray(correction['reference_camera_matrix']).reshape(3, 3)
+            reference_distortion = np.asarray(correction['reference_distortion'])
+            if (self.camera is None or self.camera[1].shape != reference_distortion.shape
+                    or not np.allclose(self.camera[0], reference_matrix, rtol=0., atol=.1)
+                    or not np.allclose(self.camera[1], reference_distortion, rtol=0., atol=1e-6)):
+                raise RuntimeError('camera calibration differs from recorded tag reference')
+            # Same PnP estimator/intrinsics for archived corners and live frames.
+            # Rotation is not used as a correction: small planar tags can flip normals.
+            reference_detection = dict(hamming=0, decision_margin=68.496788,
+                corners_px=[dict(u=u, v=v) for u, v in correction['reference_corners_px']])
+            reference_pose = tag_pose(reference_detection, reference_matrix, reference_distortion,
+                                      dict(self.cfg, min_pnp_solution_gap_px=0.))
+            tf = self.tf_buffer.lookup_transform(
+                'tcp_link', self.camera_frame, Time(),
+                timeout=Duration(seconds=self.cfg['tf_timeout_s'])).transform
+            p, r = tf.translation, tf.rotation
+            tcp_camera = transform([p.x, p.y, p.z], [r.x, r.y, r.z, r.w])
+            self.tag_translation_reference = (
+                self.model.fk(correction['reference_joint_rad']) @ tcp_camera @ reference_pose)[:3, 3]
+        position = observed[:3, 3].copy()
+        if not np.all(np.isfinite(position)):
+            raise RuntimeError('nonfinite tag translation')
+        self.tag_translation_samples.append(position)
+        self.tag_translation_samples = self.tag_translation_samples[-correction['sample_count']:]
+        if len(self.tag_translation_samples) < correction['sample_count']:
+            return
+        samples = np.asarray(self.tag_translation_samples)
+        centre = np.median(samples, axis=0)
+        if np.max(np.linalg.norm(samples-centre, axis=1)) > correction['sample_spread_m']:
+            return
+        delta = centre-self.tag_translation_reference
+        if np.linalg.norm(delta) > correction['max_translation_m']:
+            raise RuntimeError('tag translation exceeds calibrated envelope: '
+                               f'{np.linalg.norm(delta)*1000:.2f} mm > '
+                               f'{correction["max_translation_m"]*1000:.2f} mm')
+        self.tag_translation_delta = delta
+        self.tag_translation_start = np.asarray([self.full_state[j] for j in ARM_JOINTS])
+        prefix = [np.asarray(correction['outer_entry_joint_rad'])] + list(
+            self.cfg.get('axial_approach_joint_goals', []))
+        self.tag_translation_prefix_count = len(prefix)
+        self.tag_translation_targets = prefix + list(self.cfg['intermediate_joint_goals']) + [self.cfg['final_joint_goal']]
+        self.tag_translation_solutions = []
+        self.advance_locked = True  # Measurement is frozen; tag loss cannot cancel insertion.
+        self.stage = 'dock_tag_plan'
+        self.report('dock_tag_plan', 'stable tag translation (mm)='
+                    f'{(delta*1000).round(3).tolist()}; rebuilding entire remaining path; final orientation retained')
+
+    def plan_tag_translation_step(self):
+        current = np.asarray([self.full_state[j] for j in ARM_JOINTS])
+        if (np.max(np.abs(current-self.tag_translation_start)) > .005
+                or np.max(np.abs(self.velocity)) > self.cfg['stopped_speed_rad_s']):
+            raise RuntimeError('arm moved while rebuilding tag-corrected path')
+        index = len(self.tag_translation_solutions)
+        nominal = np.asarray(self.tag_translation_targets[index], dtype=float)
+        target = self.model.fk(nominal)
+        target[:3, 3] += self.tag_translation_delta
+        solved = self.model.solve(target, nominal, self.margin,
+                                  max_iterations=150, max_time_s=.03)
+        actual = self.model.fk(solved)
+        error, angle = pose_errors(actual, target)
+        if error > .0001 or angle > .001 or not self.model.within_limits(solved, self.margin):
+            raise RuntimeError('tag-corrected IK residual or joint limit violation')
+        self.tag_translation_solutions.append(solved)
+        if len(self.tag_translation_solutions) == len(self.tag_translation_targets):
+            count = self.tag_translation_prefix_count
+            self.cfg['axial_approach_joint_goals'] = self.tag_translation_solutions[:count]
+            self.cfg['intermediate_joint_goals'] = self.tag_translation_solutions[count:-1]
+            self.cfg['final_joint_goal'] = self.tag_translation_solutions[-1]
+            # begin() collision-checks the observation->outer-entry connector and
+            # every corrected sample before any command is dispatched.
+            self.start_final_joint_goal(current)
 
     def tick_tool0_finish(self, now):
         self.guard(now)

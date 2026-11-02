@@ -648,8 +648,8 @@ def test_source_pre_targets_enable_reviewed_tool0_tool1_and_tool2_goals():
     targets = load_pre_dock_targets(source)
     assert set(targets) == {0, 1, 2}
     np.testing.assert_allclose(targets[0]['joint_goal'], [
-        -3.190680, .418530, 1.061160,
-        -1.473931, .015340, .013806])
+        -3.181476, .640536, 1.209164,
+        -1.426807, -.003068, -.019942])
     np.testing.assert_allclose(targets[0]['transit_joint_goal'], [
         3.1001751723166735, 0.6403612785882697, 1.209862232156147,
         -1.427330240975674, -0.0030679615759781065, -0.021475731030191625])
@@ -691,6 +691,53 @@ def test_face_button_requests_complete_autonomous_docking_sequence():
         node, SimpleNamespace(axes=[0., 0., -1.], buttons=[0, 0, 1, 0]))
     node.request_path.assert_called_once_with(0, desired_docked=True)
     node.request_back.assert_not_called()
+
+
+@pytest.mark.parametrize('ready_hold', [True, False])
+def test_single_tool_selection_stages_only_from_healthy_hold(ready_hold):
+    node = SimpleNamespace(stage='idle', paths={0: {}},
+        back_is_ready=Mock(return_value=(False, 'not at BACK')),
+        healthy_hold=Mock(), begin_back=Mock(), begin=Mock(),
+        begin_failed=Mock(), report=Mock(), pending_tool_request=None)
+    if not ready_hold:
+        node.healthy_hold.side_effect = RuntimeError('hardware fault')
+    ToolTrajectoryJoy.request_path(node, 0, True)
+    node.begin.assert_not_called()
+    if ready_hold:
+        assert node.pending_tool_request == (0, True, False)
+        node.begin_back.assert_called_once()
+    else:
+        assert node.pending_tool_request is None
+        node.begin_back.assert_not_called()
+
+
+def test_verified_staging_continues_selected_tool_without_second_button():
+    back = np.ones(6)*.2
+    node = SimpleNamespace(route_kind='back', pending_tool_request=(0, True, False),
+        full_state=dict(zip(ARM_JOINTS, back)), route_poses={'back': back},
+        back_tolerance=.03, status={'epoch': 'back'},
+        continue_selected_tool=Mock(), report=Mock(), reset=Mock())
+    ToolTrajectoryJoy.path_completed(node)
+    node.continue_selected_tool.assert_called_once()
+    node.reset.assert_not_called()
+
+
+def test_selected_tool_is_consumed_before_continuation():
+    node = SimpleNamespace(pending_tool_request=(0, True, False),
+        report=Mock(), request_path=Mock())
+    node.reset = lambda: ToolTrajectoryJoy.reset(node)
+    ToolTrajectoryJoy.continue_selected_tool(node)
+    assert node.pending_tool_request is None
+    assert node.stage == 'idle'
+    node.request_path.assert_called_once_with(0, True, nearest_entry=False)
+
+
+def test_failed_staging_clears_selected_tool():
+    node = SimpleNamespace(pending_tool_request=(0, True, False), report=Mock())
+    node.reset = lambda: ToolTrajectoryJoy.reset(node)
+    ToolTrajectoryJoy.begin_failed(node, 'route collision')
+    assert node.pending_tool_request is None
+    assert node.stage == 'idle'
 
 
 def test_automatic_return_plans_directly_to_back_without_home():
