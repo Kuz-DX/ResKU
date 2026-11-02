@@ -265,6 +265,13 @@ class ControlModeManager(Node):
             elif source == 'tool_auto':
                 if data.get('cancel') is True:
                     accepted = self.core.cancel_path(data['epoch'], data['execution_id'], time.monotonic())
+                elif 'ee_duration_sec' in data:
+                    accepted = self.core.timed_docking_ee(
+                        data['epoch'], data['execution_id'], data['ee_velocity_rad_s'],
+                        data['ee_duration_sec'], time.monotonic())
+                    if accepted:
+                        self.independent_ee_velocity = 0.
+                        self.independent_ee_command_time = -float('inf')
                 elif 'ee_target_rad' in data:
                     accepted = self.core.close_ee(data['epoch'], data['execution_id'],
                                                   data['ee_target_rad'], time.monotonic(),
@@ -431,6 +438,8 @@ class ControlModeManager(Node):
         if target is not None:
             self.position.publish(Float64MultiArray(data=target))
         independent_ee_enabled = bool(
+            self.core.execution_id is None
+            and
             self.core.focus == 'arm' and self.core.ready
             and self.controllers.get('ee_velocity_controller') == 'active'
             and 0 <= now-self.core.ee_state_time < .3

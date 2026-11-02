@@ -352,6 +352,11 @@ class ModeCore:
         if not all(math.isfinite(v) for v in (position, velocity)):
             self.ee_state_time = -math.inf
             return
+        if (self.execution_id is not None
+                and getattr(self, 'docking_ee_id', None) == self.execution_id
+                and self.ee_position is not None):
+            delta = (position-self.ee_position+math.pi) % (2.*math.pi)-math.pi
+            self.docking_ee_travel += delta
         self.ee_position, self.ee_velocity, self.ee_state_time = position, velocity, now
 
     def close_ee(self, epoch, execution_id, target, now, speed=.12):
@@ -378,9 +383,44 @@ class ModeCore:
         self.settled = 0
         return True
 
+    def timed_docking_ee(self, epoch, execution_id, velocity, duration, now):
+        if velocity != 5.0 or duration != 2.0:
+            raise ValueError('docking removal requires +5 rad/s for 2 seconds')
+        if not self.close_ee(epoch, execution_id, self.ee_position, now):
+            return False
+        self.docking_ee_id = execution_id
+        self.docking_ee_travel = 0.
+        self.docking_ee_end = now+duration
+        self.docking_ee_stopped_since = None
+        return True
+
     def run_ee(self, now):
         """Hold all arm joints; stop on stale feedback, drift, stall or timeout."""
         self.ee = 0.
+        if self.execution_id is not None and getattr(self, 'docking_ee_id', None) == self.execution_id:
+            if not 0 <= now-self.ee_state_time < .3:
+                self.abort_path_to_hold('docking EE feedback timeout', now)
+            elif any(abs(a-b) > tol for a,b,tol in zip(
+                    self.position, self.goal, (.02,.005,.005,.005,.02,.02))):
+                self.abort_path_to_hold('arm moved during docking EE', now)
+            elif now < self.docking_ee_end:
+                self.ee = 5.0
+            elif now-self.docking_ee_end > 3.:
+                self.abort_path_to_hold('docking EE stop timeout', now)
+            elif abs(self.ee_velocity) > .02:
+                self.docking_ee_stopped_since = None
+            elif self.docking_ee_stopped_since is None:
+                self.docking_ee_stopped_since = now
+            elif now-self.docking_ee_stopped_since >= .3:
+                if self.docking_ee_travel < 9.:
+                    self.abort_path_to_hold(
+                        'docking EE insufficient CCW travel: %.3f rad < 9 rad' %
+                        self.docking_ee_travel, now)
+                    return
+                completed = self.execution_id
+                self.request('hold', now)
+                self.last_execution_id, self.last_execution_result = completed, 'succeeded'
+            return
         if not 0 <= now-self.ee_state_time < .3:
             self.abort_path_to_hold('ee feedback timeout', now)
         elif any(abs(a-b) > tol for a, b, tol in zip(

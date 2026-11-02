@@ -975,7 +975,10 @@ class ToolTrajectoryJoy(Node):
         self.begin(self.path_id, dict(
             start=seed, waypoints=waypoints, durations=durations,
             total=sum(durations), start_error=0., cartesian_line=True,
-            stop_at_waypoints=[False]*(count-1)+[True]))
+            stop_at_waypoints=[False]*(count-1)+[True],
+            allowed_collision_pairs=(frozenset((('tool_case_1', 'wrist_link_yaw'),))
+                if self.path_id == 0 and getattr(self, 'tool0_removal_complete', False)
+                else frozenset())))
 
     def request_route_plan(self, path_id, measured, status):
         """Plan verified BACK -> reviewed joint or Cartesian pre-dock."""

@@ -366,6 +366,7 @@ def test_fixed_joint_completion_uses_measured_joint_tolerance(
     n = node(tmp_path)
     n.cfg = load_settings(ROOT/'config/tool_docking.yaml')[0]
     n.path_id = 0
+    n.status = {'epoch': 'final-hold'}
     goal = n.cfg['final_joint_goal'].copy()
     measured = goal.copy()
     measured[1] += joint_error
@@ -381,11 +382,75 @@ def test_fixed_joint_completion_uses_measured_joint_tolerance(
 
     if accepted:
         n.path_completed()
-        assert n.stage == 'dock_actuate'
+        assert n.stage == 'dock_release_wait'
     else:
         with pytest.raises(RuntimeError, match='joint_error=0.006000'):
             n.path_completed()
         n.docking_command.publish.assert_not_called()
+
+
+def test_tool0_finish_orders_false_true_ee_and_retreat(tmp_path):
+    n = node(tmp_path)
+    n.cfg = load_settings(ROOT/'config/tool_docking.yaml')[0]
+    n.guard = Mock()
+    n.lock_goal = np.zeros(6)
+    n.stage = 'dock_release_wait'
+    n.actuation_deadline = 20.
+    n.command_feedback_sequence = 0
+    n.docked_feedback_sequence = 1
+    n.docked_state = False
+    n.mode = Mock()
+    n.publisher = Mock()
+    n.tick_tool0_finish(1.)
+    assert n.stage == 'dock_attach_wait'
+    assert n.docking_command.publish.call_args.args[0].data is True
+    n.mode.call_async.assert_not_called()
+    n.tick_tool0_finish(1.1)
+    n.mode.call_async.assert_not_called()
+    n.docked_state = True
+    n.docked_feedback_sequence = 2
+    n.tick_tool0_finish(1.2)
+    assert n.stage == 'ee_mode_wait'
+    n.future.done.return_value = True
+    n.future.result.return_value = SimpleNamespace(success=True)
+    n.status = dict(mode='tool_auto', transitioning=False, epoch='ee-mode')
+    n.tick_tool0_finish(1.3)
+    command = json.loads(n.publisher.publish.call_args.args[0].data)
+    assert command['ee_velocity_rad_s'] == 5.
+    assert command['ee_duration_sec'] == 2.
+    n.begin_docking_retreat.assert_not_called()
+    n.status.update(mode='hold', last_execution_id=n.execution_id,
+                    last_execution_result='succeeded')
+    n.tick_tool0_finish(4.)
+    n.begin_docking_retreat.assert_called_once()
+    assert n.tool0_removal_complete
+
+
+@pytest.mark.parametrize('status', ['ERROR', 'UNKNOWN'])
+def test_tool0_arduino_failure_prevents_ee(tmp_path, status):
+    n = node(tmp_path)
+    n.guard = Mock()
+    n.lock_goal = np.zeros(6)
+    n.stage = 'dock_attach_wait'
+    n.docking_status = status
+    n.mode = Mock()
+    with pytest.raises(RuntimeError, match='Arduino unavailable'):
+        n.tick_tool0_finish(1.)
+    n.mode.call_async.assert_not_called()
+    n.begin_docking_retreat.assert_not_called()
+
+
+def test_tool0_disabled_final_motion_stays_in_hold(tmp_path):
+    n = node(tmp_path)
+    n.cfg = load_settings(ROOT/'config/tool_docking.yaml')[0]
+    n.docking_started = None
+    n.motion_enabled = False
+    n.advance_locked = False
+    n.start_final_joint_goal = Mock()
+    n.path_completed()
+    n.start_final_joint_goal.assert_not_called()
+    n.docking_command.publish.assert_not_called()
+    n.reset.assert_called_once()
 
 
 def test_missing_tag_cancels_in_flight_correction_before_parent_tick(tmp_path):
