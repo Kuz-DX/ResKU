@@ -475,8 +475,13 @@ def test_tool0_delay_does_not_bypass_arm_guards(tmp_path, failure):
         n.velocity[0] = .1
     else:
         n.guard.side_effect = RuntimeError('ownership changed')
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError) as failure_info:
         n.tick_tool0_finish(3.)
+    if failure == 'drift':
+        assert 'base_joint error=0.100000rad' in str(failure_info.value)
+        assert 'limit=' in str(failure_info.value)
+    elif failure == 'speed':
+        assert 'base_joint speed=0.100000rad/s' in str(failure_info.value)
     n.begin_docking_retreat.assert_not_called()
 
 

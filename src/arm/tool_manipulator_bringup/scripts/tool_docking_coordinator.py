@@ -435,12 +435,23 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
     def tick_tool0_finish(self, now):
         self.guard(now)
         q = np.asarray([self.full_state[j] for j in ARM_JOINTS])
-        if np.max(np.abs(q-self.lock_goal)) > self.cfg['joint_tolerance_rad']:
-            raise RuntimeError('arm departed final dock during completion sequence')
+        errors = np.abs(q-self.lock_goal)
+        worst = int(np.argmax(errors))
+        if errors[worst] > self.cfg['joint_tolerance_rad']:
+            raise RuntimeError(
+                'arm departed final dock during completion sequence: '
+                f'{ARM_JOINTS[worst]} error={errors[worst]:.6f}rad '
+                f'limit={self.cfg["joint_tolerance_rad"]:.6f}rad '
+                f'held={self.lock_goal[worst]:.6f} measured={q[worst]:.6f}; '
+                f'retreat_delay_remaining={max(0., self.actuation_deadline-now):.3f}s')
         if getattr(self, 'docking_status', None) in ('ERROR', 'UNKNOWN'):
             raise RuntimeError('Arduino unavailable: '+self.docking_status)
         if np.max(np.abs(self.velocity)) > self.cfg['stopped_speed_rad_s']:
-            raise RuntimeError('arm not stopped during Arduino delay')
+            fastest = int(np.argmax(np.abs(self.velocity)))
+            raise RuntimeError(
+                'arm not stopped during Arduino delay: '
+                f'{ARM_JOINTS[fastest]} speed={self.velocity[fastest]:.6f}rad/s '
+                f'limit={self.cfg["stopped_speed_rad_s"]:.6f}rad/s')
         if now < self.actuation_deadline:
             return
         # The operator requests a timed trigger, not an acknowledgement/EE

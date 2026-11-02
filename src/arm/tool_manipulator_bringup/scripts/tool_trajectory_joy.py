@@ -947,8 +947,15 @@ class ToolTrajectoryJoy(Node):
             if not advance or not advance.get('waypoints'):
                 raise RuntimeError('completed docking path unavailable for reverse retreat')
             seed = np.asarray([self.full_state[j] for j in ARM_JOINTS], dtype=float)
-            if np.max(np.abs(seed-advance['waypoints'][-1])) > self.cfg['joint_tolerance_rad']:
-                raise RuntimeError('reverse retreat start differs from final docking goal')
+            errors = np.abs(seed-advance['waypoints'][-1])
+            worst = int(np.argmax(errors))
+            if errors[worst] > self.cfg['joint_tolerance_rad']:
+                raise RuntimeError(
+                    'reverse retreat start differs from final docking goal: '
+                    f'{ARM_JOINTS[worst]} error={errors[worst]:.6f}rad '
+                    f'limit={self.cfg["joint_tolerance_rad"]:.6f}rad '
+                    f'goal={advance["waypoints"][-1][worst]:.6f} '
+                    f'measured={seed[worst]:.6f}')
             waypoints = [np.asarray(q, dtype=float).copy() for q in
                          reversed([advance['start'], *advance['waypoints'][:-1]])]
             forward_stops = [True, *advance['stop_at_waypoints'][:-1]]
