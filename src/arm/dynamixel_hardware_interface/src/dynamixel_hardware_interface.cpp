@@ -895,6 +895,12 @@ hardware_interface::CallbackReturn DynamixelHardware::stop()
   if (dxl_comm_) {
     dxl_comm_->DynamixelDisable(dxl_comm_id_id_);
     dxl_comm_->DynamixelDisable(virtual_dxl_comm_id_id_);
+    // Reset is deferred until the communication object closes its port.
+    // Read back all four torque registers; a sent command alone is insufficient.
+    if (!dxl_comm_->ConfirmShutdownReset()) {
+      RCLCPP_ERROR(logger_, "U2D2 shutdown reset disabled: Torque OFF not verified");
+      return hardware_interface::CallbackReturn::ERROR;
+    }
   } else {
     RCLCPP_ERROR_STREAM(logger_, "Dynamixel Hardware Stop Fail : dxl_comm_ is nullptr");
     return hardware_interface::CallbackReturn::ERROR;

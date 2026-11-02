@@ -24,9 +24,62 @@
 #include <functional>
 #include <thread>
 #include <chrono>
+#include <fstream>
+#include <cerrno>
+#include <cstring>
+#include <cstdlib>
+#include <limits.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include <linux/usbdevice_fs.h>
 
 namespace dynamixel_hardware_interface
 {
+namespace {
+std::string usb_attribute(const std::string & path) {
+  std::ifstream file(path);
+  std::string value;
+  file >> value;
+  return value;
+}
+
+void reset_shutdown_u2d2(const std::string & port) {
+  char resolved[PATH_MAX];
+  if (!realpath(port.c_str(), resolved)) {
+    fprintf(stderr, "[U2D2 reset] skipped: serial device unavailable\n");
+    return;
+  }
+  const std::string tty_path(resolved);
+  const auto tty = tty_path.substr(tty_path.find_last_of('/') + 1);
+  if (!realpath(("/sys/class/tty/" + tty + "/device").c_str(), resolved)) return;
+  std::string path(resolved);
+  while (path.size() > 1 && usb_attribute(path + "/idVendor").empty())
+    path = path.substr(0, path.find_last_of('/'));
+  // Never reset an Arduino, a hub, CAN adapter, or another FTDI device.
+  if (usb_attribute(path + "/idVendor") != "0403" ||
+      usb_attribute(path + "/idProduct") != "6014" ||
+      usb_attribute(path + "/serial") != "FTAAML39") {
+    fprintf(stderr, "[U2D2 reset] skipped: USB identity mismatch\n");
+    return;
+  }
+  const auto bus = usb_attribute(path + "/busnum");
+  const auto dev = usb_attribute(path + "/devnum");
+  if (bus.empty() || dev.empty()) return;
+  char device[64];
+  snprintf(device, sizeof(device), "/dev/bus/usb/%03d/%03d", atoi(bus.c_str()), atoi(dev.c_str()));
+  int fd = open(device, O_WRONLY | O_CLOEXEC);
+  if (fd < 0) {
+    fprintf(stderr, "[U2D2 reset] cannot open %s: %s\n", device, strerror(errno));
+    return;
+  }
+  if (ioctl(fd, USBDEVFS_RESET, 0) < 0)
+    fprintf(stderr, "[U2D2 reset] failed: %s\n", strerror(errno));
+  else
+    fprintf(stderr, "[U2D2 reset] completed after confirmed Torque OFF and port close\n");
+  close(fd);
+}
+}  // namespace
 
 Dynamixel::Dynamixel(const char * path)
 : port_handler_(nullptr),
@@ -73,9 +126,12 @@ Dynamixel::~Dynamixel()
     group_bulk_write_ = nullptr;
   }
   if (port_handler_) {
+    const std::string port(port_handler_->getPortName());
     port_handler_->closePort();
     delete port_handler_;
     port_handler_ = nullptr;
+    if (shutdown_reset_ready_) reset_shutdown_u2d2(port);
+    else fprintf(stderr, "[U2D2 reset] skipped: all four Torque OFF states not confirmed\n");
   }
   packet_handler_ = nullptr;
   fprintf(stderr, "Dynamixel destructor end\n");
@@ -208,6 +264,7 @@ void Dynamixel::OverrideUnitInfo(
 
 DxlError Dynamixel::SetupPort(const std::string & port_name, const std::string & baudrate)
 {
+  shutdown_reset_ready_ = false;
   const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
   port_handler_ = dynamixel::PortHandler::getPortHandler(port_name.c_str());
   packet_handler_ = dynamixel::PacketHandler::getPacketHandler();
@@ -630,6 +687,7 @@ DxlError Dynamixel::SetMultiDxlWrite()
 
 DxlError Dynamixel::DynamixelEnable(const std::vector<std::pair<uint8_t, uint8_t>> & comm_id_id_arr)
 {
+  shutdown_reset_ready_ = false;
   const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
   for (auto p : comm_id_id_arr) {
     uint8_t comm_id = p.first;
@@ -673,6 +731,21 @@ DxlError Dynamixel::DynamixelEnable(const std::vector<std::pair<uint8_t, uint8_t
     std::this_thread::sleep_for(std::chrono::milliseconds(15));
   }
   return DxlError::OK;
+}
+
+bool Dynamixel::ConfirmShutdownReset()
+{
+  const std::lock_guard<std::recursive_mutex> port_lock(port_mutex_);
+  shutdown_reset_ready_ = false;
+  for (uint8_t id = 1; id <= 4; ++id) {
+    uint32_t enabled = 1;
+    if (ReadItem(id, id, "Torque Enable", enabled) != DxlError::OK || enabled != 0) {
+      fprintf(stderr, "[U2D2 reset] Torque OFF verification failed for ID %u\n", id);
+      return false;
+    }
+  }
+  shutdown_reset_ready_ = true;
+  return true;
 }
 
 DxlError Dynamixel::DynamixelDisable(

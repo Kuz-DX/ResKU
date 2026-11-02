@@ -194,6 +194,7 @@ private:
   // transport transitions, retries and clearPort(). Recursive because grouped
   // operations call ReadItem/WriteItem, which must also be safe on their own.
   std::recursive_mutex port_mutex_;
+  bool shutdown_reset_ready_{false};
   std::map<uint8_t, uint32_t> last_position_write_raw_;
   // dxl communication variable
   dynamixel::PortHandler * port_handler_ = nullptr;
@@ -277,6 +278,7 @@ public:
   // DxlError SetOperatingMode(uint8_t id, uint8_t dynamixel_mode);
   DxlError DynamixelEnable(const std::vector<std::pair<uint8_t, uint8_t>> & comm_id_id_arr);
   DxlError DynamixelDisable(const std::vector<std::pair<uint8_t, uint8_t>> & comm_id_id_arr);
+  bool ConfirmShutdownReset();
 
   // DXL Item Write
   DxlError WriteItem(uint8_t comm_id, uint8_t id, std::string item_name, uint32_t data);
