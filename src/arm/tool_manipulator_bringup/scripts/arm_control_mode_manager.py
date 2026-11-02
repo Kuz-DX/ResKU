@@ -8,6 +8,7 @@ from pathlib import Path
 
 import rclpy
 import yaml
+from rclpy.clock import Clock, ClockType
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
 from std_msgs.msg import String, Float64MultiArray
@@ -120,8 +121,10 @@ class ControlModeManager(Node):
             raise ValueError('path_clamp_warning_rad must be in (0, 0.05]')
         self.activation_blockers = []
         # Match the 100 Hz ros2_control update rate so the position stream does
-        # not alternate between new and repeated 20 ms samples.
-        self.create_timer(.01, self.tick)
+        # not alternate between new and repeated 20 ms samples. Schedule on a
+        # steady clock, matching the monotonic watchdogs even if ROS time jumps.
+        self.control_clock = Clock(clock_type=ClockType.STEADY_TIME)
+        self.create_timer(.01, self.tick, clock=self.control_clock)
         self.publish_status()
 
     def on_state(self, msg):

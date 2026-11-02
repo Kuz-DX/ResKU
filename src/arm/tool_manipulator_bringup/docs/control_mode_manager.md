@@ -45,6 +45,16 @@ but never requests a nearest candidate, named-pose motion, or mode transition.
 Use `/arm/go_tcp_ready` for an explicit posture move. R2 is suppressed during
 L2 path selection and while the arm is not in healthy stopped HOLD.
 
+## Control timing
+
+The common mode manager, including `arm_control_mode_manager_test.py`, schedules
+its 100 Hz control callback with a `STEADY_TIME` clock. Its command ages and
+watchdogs use `time.monotonic()`, so ROS or system-clock corrections do not
+change the control time base. A callback interval outside `0 < dt <= 0.2` seconds
+still faults; the fault reason includes the measured `dt`. This does not prevent
+CPU/executor delays or repair stale feedback. ROS timestamps for camera/TF data
+remain on the ROS clock.
+
 ## RMD feedback-fault recovery
 
 An RMD CAN/watchdog fault intentionally stops retries and freezes the last safe
