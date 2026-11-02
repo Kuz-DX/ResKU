@@ -71,8 +71,8 @@ def test_shipped_config_enables_tool0_and_tool1_camera_normal_docking():
     assert set(cfg) == {0, 1}
     assert cfg[0]['alignment_mode'] == 'fixed_joint_goal'
     np.testing.assert_allclose(cfg[0]['final_joint_goal'], [
-        -3.143126634377886, .130550628382071, 1.2369147556672264,
-        -1.0843730163271774, -.0030679615759781065, -.001533980787678857])
+        -3.146194595953657, .20978856743444488, 1.3679890197762559,
+        -.9571385644568514, -.0828349625460314, -.015339807878650191])
     assert cfg[0]['tag_family'] == 'tag36h11'
     assert cfg[0]['tag_id'] == 0
     assert cfg[0]['tag_size_m'] == .020
@@ -346,7 +346,8 @@ def test_fixed_joint_tail_ends_at_measured_docking_pose(tmp_path):
     n.path_id = 0
     n.model.within_limits.return_value = True
     n.model.fk.return_value = np.eye(4)
-    q = np.array([-math.pi, .331263, 1.488591, -.842994, -.041417, -.032214])
+    q = np.array([-3.146194595953657, .3558726238289994, 1.4789919708557395,
+                  -.970577607686691, -.0843689433339172, -.04141748127270617])
 
     n.start_final_joint_goal(q)
 

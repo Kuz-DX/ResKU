@@ -628,8 +628,8 @@ def test_source_pre_targets_enable_reviewed_tool0_tool1_and_tool2_goals():
     targets = load_pre_dock_targets(source)
     assert set(targets) == {0, 1, 2}
     np.testing.assert_allclose(targets[0]['joint_goal'], [
-        -3.141592653589793, 0.331263, 1.488591,
-        -0.842994, -0.041417, -0.032214])
+        -3.146194595953657, 0.3558726238289994, 1.4789919708557395,
+        -0.970577607686691, -0.0843689433339172, -0.04141748127270617])
     np.testing.assert_allclose(targets[0]['transit_joint_goal'], [
         3.1001751723166735, 0.6403612785882697, 1.209862232156147,
         -1.427330240975674, -0.0030679615759781065, -0.021475731030191625])

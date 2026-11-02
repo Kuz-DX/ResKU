@@ -9,9 +9,8 @@ tools:
     enabled: true
     require_l2_hold: false
     alignment_mode: fixed_joint_goal
-    # The taught pre-dock endpoint is the completed alignment pose. After a
-    # fresh tag confirms the approach normal, preserve this full TCP
-    # orientation and translate on one straight line.
+    # Follow the paired hand-measured joint goals with collision validation.
+    # fixed_joint_goal uses the final FK orientation, not a fixed-axis advance.
     maintain_entry_orientation: true
     # This confirmed pre-dock is outside the tag FOV. Do not reacquire a tag;
     # move to the hand-confirmed final docking joint pose below.
@@ -19,9 +18,9 @@ tools:
     tag_family: tag36h11
     tag_id: 0
     tag_size_m: 0.020
-    final_joint_goal_rad: [-3.143126634377886, 0.130550628382071,
-      1.2369147556672264, -1.0843730163271774,
-      -0.0030679615759781065, -0.001533980787678857]
+    final_joint_goal_rad: [-3.146194595953657, 0.20978856743444488,
+      1.3679890197762559, -0.9571385644568514,
+      -0.0828349625460314, -0.015339807878650191]
     actuation_enabled: true
     desired_docked: true           # true=attach pulse, false=release pulse
     actuation_timeout_s: 10.0
