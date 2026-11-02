@@ -1011,6 +1011,19 @@ class ToolTrajectoryJoy(Node):
                 raise ValueError(f'{tool_label(path_id)} pre-dock axis IK failed: '
                                  + ' | '.join(errors))
             pre_dock = np.asarray(pre_dock, dtype=float)
+        if np.max(np.abs(pre_dock-measured)) <= getattr(self, 'start_tolerance', .03):
+            self.path_id = path_id
+            self.route_kind = 'tool'
+            self.route_labels = [f'{tool_label(path_id)} pre-dock hold validation']
+            self.snapshot = dict(self.full_state)
+            self.original_epoch = status['epoch']
+            self.report('checking', f'already at {tool_label(path_id)} pre-dock; '
+                        'validating current state before docking continuation')
+            self.begin(path_id, dict(
+                start=np.asarray(measured, dtype=float).copy(),
+                waypoints=[np.asarray(measured, dtype=float).copy()],
+                durations=[.02], total=.02, start_error=0.))
+            return
         transit = target.get('transit_joint_goal')
         if transit is not None:
             transit = nearest_base_equivalent(

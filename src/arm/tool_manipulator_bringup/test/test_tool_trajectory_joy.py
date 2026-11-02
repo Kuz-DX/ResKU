@@ -612,7 +612,8 @@ def test_source_pre_targets_enable_reviewed_tool0_tool1_and_tool2_goals():
     targets = load_pre_dock_targets(source)
     assert set(targets) == {0, 1, 2}
     np.testing.assert_allclose(targets[0]['joint_goal'], [
-        -3.143127, 0.401426, 1.459793, -0.940732, -0.044485, -0.030680])
+        -3.141592653589793, 0.331263, 1.488591,
+        -0.842994, -0.041417, -0.032214])
     np.testing.assert_allclose(targets[0]['transit_joint_goal'], [
         3.1001751723166735, 0.6403612785882697, 1.209862232156147,
         -1.427330240975674, -0.0030679615759781065, -0.021475731030191625])
@@ -856,6 +857,30 @@ def test_reviewed_joint_goal_can_route_via_safe_transit():
     request = node.planner.call_async.call_args.args[0].motion_plan_request
     assert [constraint.position for constraint in
             request.goal_constraints[0].joint_constraints] == pytest.approx(transit)
+
+
+def test_already_at_pre_dock_validates_hold_without_replanning_transit():
+    measured = np.array([-3.143127, .331263, 1.488591, -.842994, -.041417, -.032214])
+    goal = measured.copy()
+    goal[0] = -math.pi
+    transit = np.array([3.10, .64, 1.21, -1.43, 0., -.02])
+    limits = {name: (-4., 4.) for name in ARM_JOINTS}
+    node = SimpleNamespace(
+        planner=Mock(), model=Mock(limits=limits), margin=.02,
+        pre_dock_targets={0: {'joint_goal': goal, 'transit_joint_goal': transit}},
+        full_state=dict(zip(ARM_JOINTS, measured)), start_tolerance=.03,
+        report=Mock(), begin=Mock())
+    node.planner.service_is_ready.return_value = True
+    node.model.within_limits.return_value = True
+
+    ToolTrajectoryJoy.request_route_plan(node, 0, measured, {'epoch': 'hold'})
+
+    node.planner.call_async.assert_not_called()
+    node.begin.assert_called_once()
+    path = node.begin.call_args.args[1]
+    np.testing.assert_allclose(path['start'], measured)
+    np.testing.assert_allclose(path['waypoints'], [measured])
+    assert node.route_labels == ['tool0 (gripper) pre-dock hold validation']
 
 
 def test_reviewed_joint_goal_outside_margin_is_blocked_before_moveit():
