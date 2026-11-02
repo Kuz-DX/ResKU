@@ -77,6 +77,7 @@ def test_shipped_config_enables_tool0_and_tool1_camera_normal_docking():
     assert cfg[0]['actuation_enabled']
     assert cfg[0]['desired_docked'] is True
     assert cfg[0]['require_l2_hold'] is False
+    assert cfg[0]['maintain_entry_orientation'] is True
     assert cfg[1]['alignment_mode'] == 'camera_normal_advance'
     assert cfg[1]['advance_distance_m'] == .030
     assert cfg[1]['measured_final_dock_joint_rad'] == pytest.approx([
@@ -87,6 +88,7 @@ def test_shipped_config_enables_tool0_and_tool1_camera_normal_docking():
     assert cfg[1]['actuation_enabled']
     assert cfg[1]['desired_docked'] is True
     assert cfg[1]['require_l2_hold'] is False
+    assert cfg[1]['maintain_entry_orientation'] is True
     assert 'targets' not in cfg[1]
 
 
@@ -437,6 +439,7 @@ def camera_node(tmp_path):
     # Fixed-advance unit tests isolate the legacy line planner. Separate tests
     # below cover the measured pre-dock correction added in front of it.
     n.cfg['measured_pre_dock_alignment_enabled'] = False
+    n.cfg['maintain_entry_orientation'] = False
     n.path_id = 1
     n.tcp_camera = np.eye(4)
     n.advance_locked = False
@@ -581,6 +584,32 @@ def test_complete_line_is_solved_before_collision_checked_submission(tmp_path, t
             origin[:3, 2], np.array([0, 0, 1]), i/n.advance_count), atol=1e-12)
         np.testing.assert_allclose(call.args[2], [0, 0, 1])
     n.model.solve.assert_not_called()
+
+
+def test_maintained_entry_orientation_uses_full_pose_ik_for_straight_advance(tmp_path):
+    n = camera_node(tmp_path)
+    n.cfg['maintain_entry_orientation'] = True
+    q0 = np.zeros(6)
+    origin = np.eye(4)
+    n.start_advance(q0, origin, np.array([0., 0., 1.]))
+    poses = {tuple(q0): origin}
+
+    def solve(target, seed, *args, **kwargs):
+        solved = seed+0.0001
+        poses[tuple(solved)] = target.copy()
+        return solved
+
+    n.model.solve.side_effect = solve
+    n.model.fk.side_effect = lambda q: poses[tuple(q)]
+    n.model.within_limits.return_value = True
+    for _ in range(n.advance_count):
+        n.plan_advance_step()
+
+    n.model.solve_axis.assert_not_called()
+    for call in n.model.solve.call_args_list:
+        np.testing.assert_allclose(call.args[0][:3, :3], origin[:3, :3])
+    _, plan = n.begin.call_args.args
+    assert len(plan['waypoints']) == n.advance_count
 
 
 def test_failed_advance_ik_never_submits_partial_path(tmp_path):

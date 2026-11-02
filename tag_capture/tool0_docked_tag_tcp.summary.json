@@ -39,11 +39,11 @@
   "reprojection_rmse_px": null,
   "capture_to_receive_latency_ms": {
     "count": 100,
-    "mean": 59.667628029999996,
-    "std": 2.8769439665838523,
-    "min": 56.57481,
-    "max": 81.86717,
-    "p95": 62.866265299999995
+    "mean": 58.76249826,
+    "std": 4.132709507762068,
+    "min": 55.59271,
+    "max": 95.835626,
+    "p95": 61.88430745
   },
   "decision_margin": null,
   "tag_to_target": {

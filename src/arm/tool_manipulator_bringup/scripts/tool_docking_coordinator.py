@@ -365,19 +365,22 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         self.advance_target = current.copy()
         self.advance_target[:3, 3] += tag_normal*self.cfg['advance_distance_m']
         self.advance_seed = q.copy()
+        maintain = self.cfg.get('maintain_entry_orientation', False)
         self.advance_count = max(math.ceil(self.cfg['advance_distance_m']/self.cfg['step_m']),
-                                 math.ceil(tilt/self.cfg['step_rad']))
+                                 1 if maintain else math.ceil(tilt/self.cfg['step_rad']))
         self.advance_plan = dict(start=q.copy(), waypoints=[], durations=[], total=0., start_error=0.,
                                  cartesian_line=True)
         self.advance_snapshot = dict(self.full_state)
         self.stage = 'dock_advance_plan'
         self.report('advance_planning',
                     'tag confirmed at stopped tool-1 endpoint; planning fixed %.1f mm tag-normal advance; '
-                    'normal=[%.4f, %.4f, %.4f] seed=%s; axial rotation free; '
-                    'tilt changes gradually by %.2f deg; tag visibility no longer required; %s' %
+                    'normal=[%.4f, %.4f, %.4f] seed=%s; %s; '
+                    'entry tilt %.2f deg; tag visibility no longer required; %s' %
                     (self.cfg['advance_distance_m']*1000.,
                      *map(float, tag_normal),
                      '['+', '.join(f'{value:.4f}' for value in q)+']',
+                     ('holding the completed pre-dock TCP orientation'
+                      if maintain else 'axial rotation free; tilt changes gradually'),
                      math.degrees(tilt),
                      'L2 remains required' if self.cfg.get('require_l2_hold', True)
                      else 'continuing automatic tool sequence'))
@@ -395,12 +398,21 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         target = self.advance_origin.copy()
         target[:3, 3] += ((self.advance_target[:3, 3]-self.advance_origin[:3, 3])
                          * index/self.advance_count)
-        direction = interpolate_direction(self.advance_start_direction, self.advance_direction,
-                                          index/self.advance_count)
+        maintain = self.cfg.get('maintain_entry_orientation', False)
+        direction = (self.advance_start_direction if maintain else interpolate_direction(
+            self.advance_start_direction, self.advance_direction, index/self.advance_count))
         try:
-            solved = self.model.solve_axis(
-                target[:3, 3], direction, self.advance_local_axis, self.advance_seed, self.margin,
-                max_iterations=100, max_time_s=.03, joint_step_rad=self.cfg['joint_step_rad'])
+            if maintain:
+                # target retains advance_origin's complete rotation, so every
+                # point is translation-only after pre-dock alignment.
+                solved = self.model.solve(
+                    target, self.advance_seed, self.margin,
+                    max_iterations=100, max_time_s=.03)
+            else:
+                solved = self.model.solve_axis(
+                    target[:3, 3], direction, self.advance_local_axis,
+                    self.advance_seed, self.margin, max_iterations=100,
+                    max_time_s=.03, joint_step_rad=self.cfg['joint_step_rad'])
         except ValueError as exc:
             raise ValueError(f'advance IK point {index}/{self.advance_count}: {exc}') from exc
         delta = np.abs(solved-self.advance_seed)
@@ -408,8 +420,10 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                 or np.max(delta) > self.cfg['joint_step_rad']):
             raise RuntimeError('advance IK exceeds joint step/limits')
         actual = self.model.fk(solved)
+        rotation_error = (pose_errors(actual, target)[1] if maintain else
+                          direction_angle(actual[:3, :3] @ self.advance_local_axis, direction))
         if (np.linalg.norm(actual[:3, 3]-target[:3, 3]) > 1e-4
-                or direction_angle(actual[:3, :3] @ self.advance_local_axis, direction) > 1e-3):
+                or rotation_error > 1e-3):
             raise RuntimeError('advance IK residual too large')
         duration = max(.02, float(np.max(delta))/self.cfg['joint_speed_rad_s'],
                        self.cfg['advance_distance_m']/self.advance_count
