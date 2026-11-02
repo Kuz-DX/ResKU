@@ -14,7 +14,7 @@ import serial
 class ArduinoDockingBridge(Node):
     def __init__(self):
         super().__init__('arduino_docking_bridge')
-        self.declare_parameter('port', '/dev/ttyACM0')
+        self.declare_parameter('port', '/dev/ttyUSB1')
         self.declare_parameter('baud', 115200)
         self.port = self.get_parameter('port').value
         self.baud = self.get_parameter('baud').value
