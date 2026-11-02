@@ -13,10 +13,10 @@ tools:
     # fresh tag confirms the approach normal, preserve this full TCP
     # orientation and translate on one straight line.
     maintain_entry_orientation: true
-    # The latest tag-to-TCP capture contained zero detected/PnP/TF samples.
-    # Keep the reviewed taught endpoint + relative normal advance until a
-    # valid simultaneous tag/TCP measurement replaces the provisional offset.
-    measured_pre_dock_alignment_enabled: false
+    # Resolve the remaining travel from the live tag pose and the measured
+    # tag-to-docking-point offset.  The coordinator first approaches the
+    # derived point 30 mm before contact, then performs the checked final line.
+    measured_pre_dock_alignment_enabled: true
     tag_family: tag36h11
     tag_id: 0
     tag_size_m: 0.020
@@ -27,9 +27,9 @@ tools:
     # Measured tag-to-final-TCP translation, expressed in the confirmed
     # tag/TCP-aligned axes: +X up, +Y left, +Z from TCP toward the box.
     # Final TCP is therefore below and in front of the tag centre.
-    measured_tag_tcp_xyz_m: [-0.0457, 0.0, -0.0445]
+    measured_tag_tcp_xyz_m: [-0.0457, 0.0, -0.05157]
     measured_tag_tcp_xyzw: [0.0, 0.0, 0.0, 1.0]
-    measured_pre_dock_30mm_xyz_m: [-0.0457, 0.0, -0.0745]
+    measured_pre_dock_30mm_xyz_m: [-0.0457, 0.0, -0.08157]
     stages:
       - {name: coarse, xyz_m: null, xyzw: null}
       - {name: fine, xyz_m: null, xyzw: null}
@@ -49,7 +49,10 @@ tools:
     angle_tolerance_rad: 0.02
     step_m: 0.002
     step_rad: 0.01
-    max_position_error_m: 0.05
+    # The repeatable HOLD endpoint can be roughly 0.18--0.20 m from the
+    # tag-derived pre-dock point. Every 2 mm correction is still IK/collision
+    # checked; this only widens the initial target-envelope rejection gate.
+    max_position_error_m: 0.25
     # Measured tool-0 pre-dock tag/camera-axis tilt is 0.284 rad. This gate
     # validates the observed advance direction; the checked 30 mm trajectory
     # still preserves the taught TCP orientation and all IK/collision limits.

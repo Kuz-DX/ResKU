@@ -411,7 +411,18 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                     self.stage = 'dock_observe'
                 elif not getattr(self, 'advance_locked', False):
                     # Tag loss also cancels a correction while it is being checked/executed.
-                    self.fresh_observation(now)
+                    try:
+                        self.fresh_observation(now)
+                    except RuntimeError as exc:
+                        if (self.cfg.get('alignment_mode') != 'camera_normal_advance'
+                                or not str(exc).startswith('target tag stale:')):
+                            raise
+                        self.observation = None
+                        self.last_base_tag = None
+                        self.stable = 0
+                        self.stage = 'dock_acquire'
+                        self.tag_reason = 'stale pre-advance sample discarded; waiting for fresh tag'
+                        return
                 if self.stage == 'dock_advance_plan':
                     self.plan_advance_step()
                     return
@@ -605,6 +616,16 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         if camera_mode:
             return
         self.stable = 0
+        if camera_mode and now-self.last_preview_report >= 1.0:
+            self.last_preview_report = now
+            delta = target[:3, 3]-current[:3, 3]
+            self.report(
+                'aligning',
+                'tag-derived pre-dock target: remaining=%.1f mm '
+                'delta=[%.1f, %.1f, %.1f] mm; tag stand-off=%.1f mm; '
+                'final checked advance=%.1f mm' %
+                (distance*1000., *(delta*1000.), tag_distance*1000.,
+                 self.cfg['advance_distance_m']*1000.))
         increment = bounded_target(current, target, self.cfg['step_m'], self.cfg['step_rad'])
         solved = self.model.solve(increment, q, self.margin, max_iterations=60, max_time_s=.03)
         if (not self.model.within_limits(solved, self.margin)

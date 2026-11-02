@@ -78,6 +78,10 @@ def test_shipped_config_enables_tool0_and_tool1_camera_normal_docking():
     assert cfg[0]['desired_docked'] is True
     assert cfg[0]['require_l2_hold'] is False
     assert cfg[0]['maintain_entry_orientation'] is True
+    assert cfg[0]['measured_pre_dock_alignment_enabled'] is True
+    np.testing.assert_allclose(cfg[0]['measured_tag_tcp_target'][:3, 3],
+                               [-.0457, 0., -.05157])
+    assert cfg[0]['max_position_error_m'] == .25
     assert cfg[0]['max_angle_error_rad'] == .35
     assert cfg[1]['alignment_mode'] == 'camera_normal_advance'
     assert cfg[1]['advance_distance_m'] == .030
@@ -862,6 +866,25 @@ def test_stale_first_acquisition_sample_is_discarded_while_waiting_for_fresh_tag
         RuntimeError('target tag stale: received=1 accepted=1'))
     with patch('tool_docking_coordinator.time.monotonic', return_value=1.3):
         n.tick()
+    assert n.observation is None and n.last_base_tag is None
+    assert n.stable == 0
+    assert 'waiting for fresh tag' in n.tag_reason
+    n.fail.assert_not_called()
+
+
+def test_stale_camera_normal_sample_returns_to_acquisition_before_advance(tmp_path):
+    n = camera_node(tmp_path)
+    n.stage = 'dock_observe'
+    n.docking_started = 1.
+    n.guard = Mock()
+    n.advance_locked = False
+    n.last_base_tag = np.eye(4)
+    n.observation = (1, 1., np.eye(4))
+    n.fresh_observation = lambda now: (_ for _ in ()).throw(
+        RuntimeError('target tag stale: received=2 accepted=1'))
+    with patch('tool_docking_coordinator.time.monotonic', return_value=1.3):
+        n.tick()
+    assert n.stage == 'dock_acquire'
     assert n.observation is None and n.last_base_tag is None
     assert n.stable == 0
     assert 'waiting for fresh tag' in n.tag_reason
