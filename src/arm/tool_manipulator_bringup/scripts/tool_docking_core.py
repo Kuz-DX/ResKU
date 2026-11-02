@@ -166,6 +166,9 @@ def load_settings(filename):
         if ('maintain_entry_orientation' in item
                 and type(item['maintain_entry_orientation']) is not bool):
             raise ValueError('maintain_entry_orientation must be a boolean')
+        if ('measured_pre_dock_alignment_enabled' in item
+                and type(item['measured_pre_dock_alignment_enabled']) is not bool):
+            raise ValueError('measured_pre_dock_alignment_enabled must be a boolean')
         if 'tag_family' in item and (not isinstance(item['tag_family'], str)
                                      or not item['tag_family'].strip()):
             raise ValueError('tag_family must be a nonempty string')
@@ -201,6 +204,15 @@ def load_settings(filename):
             if (item['actuation_enabled']
                     and type(item.get('desired_docked')) is not bool):
                 raise ValueError('camera-normal actuation requires desired_docked state')
+            # The final tag-to-TCP measurement supplies the missing lateral
+            # docking geometry. The coordinator derives pre-dock by backing
+            # off exactly advance_distance_m along the observed tag normal.
+            try:
+                item['measured_tag_tcp_target'] = transform(
+                    item['measured_tag_tcp_xyz_m'], item['measured_tag_tcp_xyzw'])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError(
+                    f'{tool_label(tool_id)}: measured tag-to-TCP transform required') from exc
             result[tool_id] = item
             continue
         if type(item.get('desired_docked')) is not bool:

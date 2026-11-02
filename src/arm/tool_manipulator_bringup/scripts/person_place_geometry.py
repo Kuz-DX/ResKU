@@ -47,16 +47,34 @@ def person_on_floor(payload, camera_matrix, distortion, floor_camera, min_confid
 
 def person_direction_on_floor(payload, camera_matrix, distortion, floor_camera,
                               min_confidence):
-    """Horizontal bearing from bbox centre X; distance and visible feet are unnecessary."""
+    """Horizontal bearing from the visible bbox extent; feet are unnecessary.
+
+    Use the box centre when both horizontal edges are in the image.  If only
+    one edge is visible, aim at that edge instead of averaging it with an
+    off-image coordinate.  A box spanning both sides has no observed
+    horizontal edge and cannot provide this directional cue.
+    """
     person = highest_confidence_person(payload, min_confidence)
     box = np.asarray(person['xyxy'], dtype=float)
     width = payload['image_size']['width']
     if (box.shape != (4,) or not np.isfinite(box).all()
-            or not box[0] < box[2] or box[2] < 0 or box[0] > width):
+            or not box[0] < box[2] or width <= 0):
         raise ValueError('person box has no valid horizontal extent')
+    # Detectors clamp off-image coordinates to 0/width (or width-1), so an
+    # edge touching the two-pixel image margin is still treated as clipped.
+    left_visible = 1 < box[0] < width-2
+    right_visible = 1 < box[2] < width-2
+    if left_visible and right_visible:
+        aim_x = (box[0]+box[2])/2
+    elif left_visible:
+        aim_x = box[0]
+    elif right_visible:
+        aim_x = box[2]
+    else:
+        raise ValueError('person box has no visible horizontal edge')
     # Only horizontal image position is requested. Use the calibrated optical
     # centre vertically so clipped head/feet do not bias the bearing.
-    pixel = np.array([[(box[0]+box[2])/2, camera_matrix[1, 2]]], dtype=float)
+    pixel = np.array([[aim_x, camera_matrix[1, 2]]], dtype=float)
     xy = cv2.undistortPoints(pixel.reshape(1, 1, 2), camera_matrix, distortion).reshape(2)
     ray = floor_camera[:3, :3] @ np.r_[xy, 1.]
     direction = ray[:2]

@@ -111,7 +111,7 @@ def test_foot_ray_uses_full_box_and_calibrated_floor():
         [.2, -.2, 0.])
 
 
-def test_direction_only_accepts_clipped_person_and_uses_bbox_centre_x():
+def test_direction_only_uses_bbox_centre_when_both_edges_are_visible():
     camera = np.eye(4)
     camera[:3, :3] = [[0., 0., 1.], [-1., 0., 0.], [0., -1., 0.]]
     matrix = np.array([[500., 0., 320.], [0., 500., 240.], [0., 0., 1.]])
@@ -121,6 +121,32 @@ def test_direction_only_accepts_clipped_person_and_uses_bbox_centre_x():
     expected = np.array([1., -.26])
     expected /= np.linalg.norm(expected)
     np.testing.assert_allclose(direction, expected)
+
+
+@pytest.mark.parametrize('xyxy,aim_x', [
+    ([-80., 0., 100., 480.], 100.),
+    ([0., 0., 100., 480.], 100.),
+    ([540., 0., 720., 480.], 540.),
+    ([540., 0., 639., 480.], 540.),
+])
+def test_direction_only_aims_at_single_visible_bbox_edge(xyxy, aim_x):
+    camera = np.eye(4)
+    camera[:3, :3] = [[0., 0., 1.], [-1., 0., 0.], [0., -1., 0.]]
+    matrix = np.array([[500., 0., 320.], [0., 500., 240.], [0., 0., 1.]])
+    payload = dict(image_size=dict(width=640, height=480), detections=[dict(
+        class_name='person', confidence=.9, xyxy=xyxy)])
+    direction = person_direction_on_floor(payload, matrix, np.zeros(5), camera, .8)
+    expected = np.array([1., -(aim_x-320.)/500.])
+    expected /= np.linalg.norm(expected)
+    np.testing.assert_allclose(direction, expected)
+
+
+def test_direction_only_rejects_bbox_with_both_horizontal_edges_off_image():
+    matrix = np.array([[500., 0., 320.], [0., 500., 240.], [0., 0., 1.]])
+    payload = dict(image_size=dict(width=640, height=480), detections=[dict(
+        class_name='person', confidence=.9, xyxy=[-20., 0., 660., 480.])])
+    with pytest.raises(ValueError, match='no visible horizontal edge'):
+        person_direction_on_floor(payload, matrix, np.zeros(5), np.eye(4), .8)
 
 
 def test_direction_only_uses_highest_confidence_person():

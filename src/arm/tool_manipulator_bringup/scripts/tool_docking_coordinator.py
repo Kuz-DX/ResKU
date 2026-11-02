@@ -435,7 +435,19 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         camera_mode = self.cfg.get('alignment_mode') == 'camera_normal_advance'
         if camera_mode:
             tag_normal, tag_distance = self.camera_advance_direction(base_tag, current)
-            aligned = True  # Tool 1 uses the taught endpoint; no visual correction.
+            if self.cfg.get('measured_pre_dock_alignment_enabled', False):
+                final_target = base_tag @ self.cfg['measured_tag_tcp_target']
+                target = current.copy()
+                target[:3, 3] = final_target[:3, 3]
+                if self.stage != 'dock_actuate':
+                    target[:3, 3] -= tag_normal*self.cfg['advance_distance_m']
+                distance = float(np.linalg.norm(target[:3, 3]-current[:3, 3]))
+                angle = 0.0  # Axis tilt is corrected gradually by the fixed advance.
+                aligned = distance <= self.cfg['position_tolerance_m']
+            else:
+                target = current
+                distance = angle = 0.0
+                aligned = True
         else:
             target = base_tag @ self.cfg['targets'][self.dock_stage]
             distance, angle = pose_errors(current, target)
@@ -463,13 +475,14 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         if not stopped:
             self.stable = 0
             return
-        if not camera_mode and (distance > self.cfg['max_position_error_m']
-                                or angle > self.cfg['max_angle_error_rad']):
+        if (distance > self.cfg['max_position_error_m']
+                or angle > self.cfg['max_angle_error_rad']):
             raise RuntimeError('tag target beyond permitted correction envelope')
         if not self.motion_enabled:
             if now-self.last_preview_report >= 1.0:
                 self.last_preview_report = now
-                detail = (f'tag stand-off={tag_distance:.3f}m; advance motion disarmed'
+                detail = (f'tag stand-off={tag_distance:.3f}m; '
+                          f'pre-dock position_error={distance:.6f}m; motion disarmed'
                           if camera_mode else
                           f'stage {self.dock_stage}: position_error={distance:.6f}m, '
                           f'angle_error={angle:.6f}rad; alignment motion disarmed')
@@ -502,8 +515,6 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             self.stage = 'dock_actuate'
             action = 'dock' if self.expected_docked else 'release'
             self.report('actuating', f'Arduino {action} pulse sent; waiting for /arm/docked')
-            return
-        if camera_mode:
             return
         self.stable = 0
         increment = bounded_target(current, target, self.cfg['step_m'], self.cfg['step_rad'])

@@ -9,6 +9,7 @@ tools:
     enabled: true
     require_l2_hold: false
     alignment_mode: camera_normal_advance
+    measured_pre_dock_alignment_enabled: true
     tag_family: tag36h11
     tag_id: 0
     tag_size_m: 0.020
@@ -69,6 +70,7 @@ tools:
     # One tool-1 request starts the path and its automatic docking continuation.
     require_l2_hold: false
     alignment_mode: camera_normal_advance
+    measured_pre_dock_alignment_enabled: true
     tag_family: tag36h11
     tag_id: 1
     tag_size_m: 0.020             # measured outer black square, excluding white margin

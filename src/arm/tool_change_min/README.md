@@ -526,7 +526,7 @@ ros2 topic pub --once /selected_tool_id std_msgs/msg/Int32 '{data: 1}'
 
 ```bash
 ros2 run tool_change_min measure_apriltag_docking.py --ros-args \
-  -p tag_id:=1 -p tag_size_m:=0.02 -p sample_count:=100 \
+  -p tag_id:=1 -p sample_count:=100 \
   -p output_csv:=./tag1_target_offset.csv \
   -p base_frame:=base_actuator -p target_frame:=tcp_link
 ```
@@ -646,22 +646,20 @@ IK 노드는 현재 `/joint_states` 전체를 읽어 여러 점으로 된 Cartes
 
     ros2 run tool_change_min measure_apriltag_docking.py --ros-args \
       -p tag_id:=1 \
-      -p tag_size_m:=<실측한-검은-정사각형-한변-m> \
       -p sample_count:=<승인한-프레임수> \
       -p output_csv:=./tag1_stationary.csv
 
 프레임별 CSV와 `tag1_stationary.summary.json`이 생성됩니다. 요약 파일에는
 기존 검출기의 XYZ와 보정 코너·CameraInfo 왜곡계수로 다시 푼 PnP XYZ의 비교,
 검출률, XYZ 흔들림, 재투영 RMSE, 촬영 timestamp부터 결과 수신까지 지연이
-들어갑니다. `tag_size_m`은 출력한 검은 정사각형 외곽 한 변을 직접 재서
-입력하고, 기존 AprilTag 노드의 `tag_size_cm`에도 같은 길이를 사용해야 합니다.
+들어갑니다. 계측기의 `tag_size_m` 기본값은 고정된 20 mm 검은 정사각형과
+일치하는 `0.020`입니다.
 
 태그에서 체결 목표까지의 고정 관계를 재려면 팔을 검토된 실제 체결 목표에
 수동으로 정지시키고 실제 목표 TF 프레임을 추가합니다.
 
     ros2 run tool_change_min measure_apriltag_docking.py --ros-args \
       -p tag_id:=1 \
-      -p tag_size_m:=<실측한-검은-정사각형-한변-m> \
       -p sample_count:=<승인한-프레임수> \
       -p output_csv:=./tag1_target_offset.csv \
       -p base_frame:=base_actuator \

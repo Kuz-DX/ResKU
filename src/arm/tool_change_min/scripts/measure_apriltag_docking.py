@@ -13,8 +13,8 @@ When target_frame is non-empty, external TF supplies T_base_camera and
 T_base_target at the image stamp. The measured docking offset is
 T_tag_target = inv(T_base_camera*T_camera_tag)*T_base_target. Translation
 statistics and a sign-consistent quaternion mean are written to the summary.
-No TF is published. Sample count, physical tag size, and output CSV path are
-mandatory; missing values terminate startup instead of being guessed.
+No TF is published. The deployed tags are fixed at 20 mm square. Sample count
+and output CSV path are mandatory; missing values terminate startup.
 """
 from __future__ import annotations
 
@@ -164,7 +164,7 @@ class AprilTagDockingMeasurement(Node):
         self.declare_parameter("centers_topic", "/arm/apriltag/centers")
         self.declare_parameter("camera_info_topic", "/arm/camera/color/camera_info")
         self.declare_parameter("tag_id", 1)
-        self.declare_parameter("tag_size_m", 0.0)
+        self.declare_parameter("tag_size_m", 0.020)
         self.declare_parameter("sample_count", 0)
         self.declare_parameter("output_csv", "")
         self.declare_parameter("base_frame", "base_actuator")

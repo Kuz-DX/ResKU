@@ -434,6 +434,9 @@ def test_launch_selects_exactly_one_path_input_owner(enabled, motion, place_test
 def camera_node(tmp_path):
     n = node(tmp_path)
     n.cfg = load_settings(ROOT/'config/tool_docking.yaml')[1]
+    # Fixed-advance unit tests isolate the legacy line planner. Separate tests
+    # below cover the measured pre-dock correction added in front of it.
+    n.cfg['measured_pre_dock_alignment_enabled'] = False
     n.path_id = 1
     n.tcp_camera = np.eye(4)
     n.advance_locked = False
@@ -450,6 +453,26 @@ def camera_sample(n):
     n.feedback_sequence += 1
     n.observation = (n.observation[0]+1, 0., n.observation[2])
     n.observe(1.)
+
+
+def test_camera_mode_corrects_measured_pre_dock_position_before_advance(tmp_path):
+    n = camera_node(tmp_path)
+    n.cfg['measured_pre_dock_alignment_enabled'] = True
+    # With the tag at base Z=.2 and a .03 m final advance, this measurement
+    # places pre-dock at base [+.01, 0, 0].
+    n.cfg['measured_tag_tcp_target'] = transform(
+        [.01, 0., -.17], [0., 0., 0., 1.])
+    n.model.solve.return_value = np.zeros(6)
+    n.model.within_limits.return_value = True
+    n.model.pose_error.return_value = np.zeros(6)
+
+    camera_sample(n)
+
+    n.model.solve.assert_called_once()
+    increment = n.model.solve.call_args.args[0]
+    np.testing.assert_allclose(increment[:3, 3], [.002, 0., 0.])
+    assert not n.advance_locked
+    n.begin.assert_called_once()
 
 
 @pytest.mark.parametrize('flip', [False, True])
