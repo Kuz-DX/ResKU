@@ -628,8 +628,8 @@ def test_source_pre_targets_enable_reviewed_tool0_tool1_and_tool2_goals():
     targets = load_pre_dock_targets(source)
     assert set(targets) == {0, 1, 2}
     np.testing.assert_allclose(targets[0]['joint_goal'], [
-        -np.pi, .2243923360364801, 1.209983669005402,
-        -1.1820938735271251, 0., 0.])
+        -3.145138553912288, .22393675859859596, 1.2080267785375698,
+        -1.1839588539296415, .003462881733035171, -.0027994354442011497])
     np.testing.assert_allclose(targets[0]['transit_joint_goal'], [
         3.1001751723166735, 0.6403612785882697, 1.209862232156147,
         -1.427330240975674, -0.0030679615759781065, -0.021475731030191625])
@@ -1000,14 +1000,14 @@ def test_tool0_retreat_uses_displaced_current_pose_and_orientation():
     n = SimpleNamespace(
         healthy_hold=Mock(), path_id=0, tool0_retreat_authorized=True,
         advance_plan=None,  # reverse taught path is intentionally unnecessary
-        pre_dock_targets={0: {'retreat_distance': .030, 'retreat_axis': [0., 0., -1.]}},
+        pre_dock_targets=load_pre_dock_targets(SCRIPTS.parent/'config/cartesian_targets.yaml'),
         full_state=dict(zip(ARM_JOINTS, seed)), model=model, margin=.02,
         report=Mock(), begin=Mock(), return_home_after_back=True)
     ToolTrajectoryJoy.begin_docking_retreat(n)
     plan = n.begin.call_args.args[1]
     origin = model.fk(seed)
     np.testing.assert_allclose(plan['start'], seed)
-    assert len(plan['waypoints']) == 15
+    assert len(plan['waypoints']) == 25
     previous = seed
     for i, (q, duration) in enumerate(zip(plan['waypoints'], plan['durations']), 1):
         expected = origin.copy()
@@ -1021,7 +1021,7 @@ def test_tool0_retreat_uses_displaced_current_pose_and_orientation():
         assert distance/duration <= .005+1e-10
         previous = q
     assert plan['cartesian_line']
-    assert plan['stop_at_waypoints'] == [False]*14+[True]
+    assert plan['stop_at_waypoints'] == [False]*24+[True]
     assert plan['allowed_collision_pairs'] == frozenset({('tool_case_1', 'wrist_link_yaw')})
     assert not n.return_home_after_back
     assert n.route_kind == 'dock_retreat'

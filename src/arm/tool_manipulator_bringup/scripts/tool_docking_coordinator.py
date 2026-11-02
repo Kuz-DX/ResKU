@@ -449,7 +449,7 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         self.active = False
         self.advance_locked = False
         self.tool0_retreat_authorized = True
-        self.report('retreating', '3-second Arduino delay elapsed; planning 30 mm TCP -Z retreat from current feedback')
+        self.report('retreating', '3-second Arduino delay elapsed; planning configured TCP -Z retreat from current feedback')
         self.begin_docking_retreat()
 
     def camera_advance_direction(self, base_tag, current):

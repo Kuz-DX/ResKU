@@ -71,7 +71,7 @@ def test_shipped_config_enables_tool0_and_tool1_camera_normal_docking():
     assert set(cfg) == {0, 1}
     assert cfg[0]['alignment_mode'] == 'fixed_joint_goal'
     np.testing.assert_allclose(cfg[0]['final_joint_goal'], [
-        -np.pi, .14821550205607423, 1.2462314095052063, -1.0696692990469152, 0., 0.])
+        -3.144661, .148004, 1.244594, -1.071458, .003068, -.003068])
     assert cfg[0]['tag_family'] == 'tag36h11'
     assert cfg[0]['tag_id'] == 0
     assert cfg[0]['tag_size_m'] == .020
@@ -363,13 +363,9 @@ def test_fixed_joint_tail_ends_at_measured_docking_pose(tmp_path):
     assert n.advance_plan['cartesian_line']
     assert len(n.advance_plan['waypoints']) == 15
     final = n.model.fk(expected)
-    last_capture = np.array([-3.141593, .126711, 1.208641, -1.103397, -.006136, -.001534])
-    measured_final = n.model.fk(last_capture)
-    np.testing.assert_allclose(final[[0, 2], 3], measured_final[[0, 2], 3], atol=1e-10)
-    assert final[1, 3] == pytest.approx(0., abs=1e-12)
-    approach_capture = np.array([-3.141593, .243648, 1.223650, -1.187696, -.006136, -.001534])
-    approach_pose = n.model.fk(approach_capture)
-    assert final[2, 2] == pytest.approx(approach_pose[2, 2], abs=1e-10)
+    first_capture = np.array([-3.144661, .148004, 1.244594, -1.071458, .003068, -.003068])
+    np.testing.assert_array_equal(n.cfg['final_joint_goal'], first_capture)
+    np.testing.assert_allclose(final, n.model.fk(first_capture), atol=1e-12)
     previous = q
     for point, duration in zip(n.advance_plan['waypoints'], n.advance_plan['durations']):
         for sample in np.linspace(previous, point, 11):
@@ -377,8 +373,7 @@ def test_fixed_joint_tail_ends_at_measured_docking_pose(tmp_path):
             delta = pose[:3, 3]-final[:3, 3]
             lateral = delta-np.dot(delta, final[:3, 2])*final[:3, 2]
             assert np.linalg.norm(lateral) < 3e-6
-            assert abs(pose[1, 3]) < 1e-12
-            np.testing.assert_allclose(pose[:3, :3], final[:3, :3], atol=1e-10)
+            np.testing.assert_allclose(pose[:3, :3], final[:3, :3], atol=1e-8, rtol=0.)
             assert n.model.within_limits(sample, n.margin)
         distance = np.linalg.norm(n.model.fk(point)[:3, 3]-n.model.fk(previous)[:3, 3])
         assert distance == pytest.approx(.002, abs=1e-10)

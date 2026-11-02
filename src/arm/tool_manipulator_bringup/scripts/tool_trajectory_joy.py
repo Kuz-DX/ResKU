@@ -946,7 +946,7 @@ class ToolTrajectoryJoy(Node):
         target = self.pre_dock_targets.get(self.path_id)
         if target is None:
             raise RuntimeError(f'{tool_label(self.path_id)} retreat configuration unavailable')
-        distance = .030 if tool0 else float(target['retreat_distance'])
+        distance = float(target['retreat_distance'])
         local_axis = np.array([0., 0., -1.]) if tool0 else np.asarray(target['retreat_axis'], dtype=float)
         if tool0:
             self.return_home_after_back = False
