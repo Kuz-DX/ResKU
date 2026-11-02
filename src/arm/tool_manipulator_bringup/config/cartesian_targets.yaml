@@ -29,7 +29,9 @@ targets:
     required_final_motion: straight_tcp_approach
     pre_dock_offset_tcp_m: [0.0, 0.0, -0.030]
     # Runtime sequence: /arm/docking=true once, wait 3 s, then checked
-    # current-feedback TCP -Z 50 mm retreat -> BACK. No EE velocity command.
+    # current-feedback TCP -Z 50 mm retreat -> captured waypoint -> BACK -> HOME.
+    # Operator-captured return waypoint; still requires live collision validation.
+    return_joint_goal_rad: [-3.143127, 0.747175, 1.300096, -1.363102, 0.003068, -0.004602]
     retreat_distance_m: 0.050
     retreat_axis_tcp: [0.0, 0.0, -1.0]
   tool1:

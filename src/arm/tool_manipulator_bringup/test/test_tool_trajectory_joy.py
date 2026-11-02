@@ -1023,11 +1023,14 @@ def test_tool0_retreat_uses_displaced_current_pose_and_orientation():
     assert plan['cartesian_line']
     assert plan['stop_at_waypoints'] == [False]*24+[True]
     assert plan['allowed_collision_pairs'] == frozenset({('tool_case_1', 'wrist_link_yaw')})
-    assert not n.return_home_after_back
+    assert n.return_home_after_back
     assert n.route_kind == 'dock_retreat'
     n.begin_back = Mock()
+    n.begin_return_waypoint = Mock()
     ToolTrajectoryJoy.path_completed(n)
-    n.begin_back.assert_called_once_with(via_home=False)
+    np.testing.assert_array_equal(n.begin_return_waypoint.call_args.args[0],
+                                  n.pre_dock_targets[0]['return_joint_goal'])
+    n.begin_back.assert_not_called()
     # Failed IK still prevents the path from reaching execution.
     n.begin.reset_mock()
     with patch.object(model, 'solve', side_effect=ValueError('unreachable')):
@@ -1049,3 +1052,45 @@ def test_back_completion_only_continues_home_for_automatic_return(automatic):
     else:
         n.begin_named_route.assert_not_called()
         n.reset.assert_called_once()
+
+
+@pytest.mark.parametrize('error,accepted', [(0., True), (.1, False)])
+def test_return_waypoint_verified_before_back(error, accepted):
+    goal = np.array([-3.143127, .747175, 1.300096, -1.363102, .003068, -.004602])
+    measured = goal.copy()
+    measured[1] += error
+    n = SimpleNamespace(route_kind='dock_return_waypoint', route_goals=[goal],
+                        full_state=dict(zip(ARM_JOINTS, measured)), back_tolerance=.02,
+                        report=Mock(), begin_back=Mock())
+    if accepted:
+        ToolTrajectoryJoy.path_completed(n)
+        n.begin_back.assert_called_once_with(via_home=False)
+    else:
+        with pytest.raises(RuntimeError, match='waypoint feedback mismatch'):
+            ToolTrajectoryJoy.path_completed(n)
+        n.begin_back.assert_not_called()
+
+
+def test_return_waypoint_uses_live_start_and_moveit_planner():
+    from tool_trajectory_joy import ArmKinematics
+    model = ArmKinematics(
+        SCRIPTS.parent.parent/'tool_manipulator_description/urdf/tool_manipulator.urdf.xacro',
+        SCRIPTS.parent/'config/hardware.yaml')
+    goal = load_pre_dock_targets(SCRIPTS.parent/'config/cartesian_targets.yaml')[0]['return_joint_goal']
+    expected = [-3.143127, .747175, 1.300096, -1.363102, .003068, -.004602]
+    np.testing.assert_array_equal(goal, expected)
+    seed = np.array([-3.14, .25, 1.1, -1.2, 0., 0.])
+    n = SimpleNamespace(healthy_hold=Mock(return_value={'epoch': 'return'}),
+                        full_state=dict(zip(ARM_JOINTS, seed)), model=model, margin=.02,
+                        planner=Mock(), _request_route_leg=Mock(), path_id=0)
+    ToolTrajectoryJoy.begin_return_waypoint(n, goal)
+    n._request_route_leg.assert_called_once()
+    assert n.route_kind == 'dock_return_waypoint'
+    np.testing.assert_allclose(n.route_goals[0], goal)
+    np.testing.assert_array_equal(n.route_start, seed)
+    assert n.original_epoch == 'return'
+    n.planner.service_is_ready.return_value = False
+    n._request_route_leg.reset_mock()
+    with pytest.raises(RuntimeError, match='planner unavailable'):
+        ToolTrajectoryJoy.begin_return_waypoint(n, goal)
+    n._request_route_leg.assert_not_called()

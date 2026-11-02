@@ -83,6 +83,11 @@ def load_pre_dock_targets(path):
             raise ValueError(f'{path}: {key} has invalid Cartesian retreat settings')
         retreat_axis /= axis_norm
         retreat = dict(retreat_distance=retreat_distance, retreat_axis=retreat_axis)
+        if 'return_joint_goal_rad' in value:
+            return_goal = np.asarray(value['return_joint_goal_rad'], dtype=float)
+            if return_goal.shape != (len(ARM_JOINTS),) or not np.all(np.isfinite(return_goal)):
+                raise ValueError(f'{path}: {key} has invalid return joint goal')
+            retreat['return_joint_goal'] = return_goal
         # PRE is the only ordinary collision-free MoveIt entry goal.  Keep
         # joint_goal_rad/final_joint_goal_rad as diagnostic final captures.
         joint_goal = value.get('pre_joint_goal_rad', value.get('joint_goal_rad'))
@@ -887,6 +892,8 @@ class ToolTrajectoryJoy(Node):
             return 'BACK staging'
         if route == 'dock_retreat':
             return 'docking retreat'
+        if route == 'dock_return_waypoint':
+            return 'post-retreat waypoint'
         selected = self.path_id if path_id is None else path_id
         return tool_label(selected)
 
@@ -924,6 +931,25 @@ class ToolTrajectoryJoy(Node):
         self.route_start = measured
         self._request_route_leg()
 
+    def begin_return_waypoint(self, goal):
+        """Plan the captured waypoint from stopped retreat feedback."""
+        status = self.healthy_hold(time.monotonic())
+        measured = np.asarray([self.full_state[j] for j in ARM_JOINTS], dtype=float)
+        goal = nearest_base_equivalent(goal, measured, self.model.limits, self.margin)
+        if not self.model.within_limits(goal, self.margin):
+            raise ValueError('post-retreat waypoint violates planning joint limits')
+        if not self.planner.service_is_ready():
+            raise RuntimeError('MoveIt route planner unavailable')
+        self.route_kind = 'dock_return_waypoint'
+        self.route_labels = ['post-retreat captured waypoint']
+        self.snapshot = dict(self.full_state)
+        self.original_epoch = status['epoch']
+        self.route_goals = [goal.copy()]
+        self.route_waypoints, self.route_durations = [], []
+        self.route_index = 0
+        self.route_start = measured
+        self._request_route_leg()
+
     def begin_docking_actuation(self, desired=True):
         """Command Arduino only from stopped HOLD and wait for fresh feedback."""
         self.healthy_hold(time.monotonic())
@@ -949,7 +975,7 @@ class ToolTrajectoryJoy(Node):
         distance = float(target['retreat_distance'])
         local_axis = np.array([0., 0., -1.]) if tool0 else np.asarray(target['retreat_axis'], dtype=float)
         if tool0:
-            self.return_home_after_back = False
+            self.return_home_after_back = True
         seed = np.asarray([self.full_state[j] for j in ARM_JOINTS], dtype=float)
         origin = self.model.fk(seed)
         direction = origin[:3, :3] @ local_axis
@@ -1153,9 +1179,22 @@ class ToolTrajectoryJoy(Node):
             self.report('completed', 'BACK reached and feedback verified; select tool0/1/2')
             self.reset()
             return
-        if getattr(self, 'route_kind', None) == 'dock_retreat':
-            self.report('retreated', 'Docking retreat completed; planning direct BACK')
+        if getattr(self, 'route_kind', None) == 'dock_return_waypoint':
+            measured = np.asarray([self.full_state[j] for j in ARM_JOINTS], dtype=float)
+            error = float(np.max(np.abs(measured-self.route_goals[-1])))
+            if error > self.back_tolerance:
+                raise RuntimeError(f'post-retreat waypoint feedback mismatch ({error:.4f} rad)')
+            self.report('returning', 'captured waypoint feedback verified; planning BACK, then HOME')
             self.begin_back(via_home=False)
+            return
+        if getattr(self, 'route_kind', None) == 'dock_retreat':
+            target = self.pre_dock_targets.get(self.path_id, {})
+            if self.path_id == 0 and 'return_joint_goal' in target:
+                self.report('retreated', 'Docking retreat completed; planning captured return waypoint')
+                self.begin_return_waypoint(target['return_joint_goal'])
+            else:
+                self.report('retreated', 'Docking retreat completed; planning direct BACK')
+                self.begin_back(via_home=False)
             return
         after = self.paths[self.path_id].get('after_path')
         if after is not None:
