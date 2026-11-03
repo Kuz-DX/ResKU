@@ -38,13 +38,16 @@ targets:
     retreat_distance_m: 0.050
     retreat_axis_tcp: [0.0, 0.0, -1.0]
   tool1:
-    # Preserve measured approach orientation; move 5 mm toward docking along TCP Z
-    # to respect the existing 0.02 rad planning margin. Visibility needs live confirmation.
+    # Collision-clear observation: retreat 10 mm along the previous TCP Z axis,
+    # rotate orientation +5 deg about arm_world Y to avoid the wrist-pitch limit.
+    # Mesh/FCL tool_id=99: 729 +/-0.005 rad perturbations clear; connector to
+    # the unchanged 8 mm entry only contacts the approved box/wrist pair.
+    # Final mating pose/orientation unchanged. Tag visibility needs live confirmation.
     joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
     executable: true
     role: computed_limit_valid_observation
-    pre_joint_goal_rad: [-3.15811777182003, 0.4368706784735036, 1.2252842861979594,
-      -1.558061081232102, -0.32788405398679027, -1.3966743865034847]
+    pre_joint_goal_rad: [-3.1294904571474103, 0.5476316324756092, 1.3223789182131294,
+      -1.491256667024597, -0.34896330672762116, -1.4171677684817408]
     retreat_mode: reverse_docking_path
     retreat_distance_m: 0.008
     retreat_axis_tcp: [0.0, 0.0, -1.0]

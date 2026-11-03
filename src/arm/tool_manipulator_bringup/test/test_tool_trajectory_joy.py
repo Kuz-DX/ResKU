@@ -1312,3 +1312,25 @@ def test_missing_executed_approach_blocks_reverse_retreat():
     with pytest.raises(RuntimeError, match='completed docking path unavailable'):
         ToolTrajectoryJoy.begin_reverse_docking_retreat(n)
     n.begin.assert_not_called()
+
+
+def test_tool1_clear_observation_retreats_without_changing_final_mating_pose():
+    from tool_trajectory_joy import ArmKinematics
+    angle = math.radians(5)
+    rotation = np.array([[math.cos(angle), 0., math.sin(angle)],
+                         [0., 1., 0.], [-math.sin(angle), 0., math.cos(angle)]])
+    model = ArmKinematics(
+        SCRIPTS.parent.parent/'tool_manipulator_description/urdf/tool_manipulator.urdf.xacro',
+        SCRIPTS.parent/'config/hardware.yaml', base_link='arm_world')
+    targets = load_pre_dock_targets(SCRIPTS.parent/'config/cartesian_targets.yaml')
+    old = np.array([-3.15811777182003, .4368706784735036, 1.2252842861979594,
+                    -1.558061081232102, -.32788405398679027, -1.3966743865034847])
+    prior, current = model.fk(old), model.fk(targets[1]['joint_goal'])
+    np.testing.assert_allclose(current[:3, 3], prior[:3, 3]-.010*prior[:3, 2], atol=1e-6)
+    np.testing.assert_allclose(current[:3, :3],
+        rotation@prior[:3, :3], atol=1e-5)
+    assert model.within_limits(targets[1]['joint_goal'], .02)
+    data = yaml.safe_load((SCRIPTS.parent/'config/cartesian_targets.yaml').read_text())
+    np.testing.assert_allclose(data['targets']['tool1']['final_joint_goal_rad'], [
+        -3.136990711226343, .20682150637447397, 1.1557570519759337,
+        -1.5262903776058194, -.3390097541229333, -1.5017671913398365])

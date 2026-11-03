@@ -928,7 +928,7 @@ def test_tool1_tag_confirmation_resets_on_motion_or_stale_feedback_and_times_out
     n.start_final_joint_goal.assert_not_called()
 
 
-def test_tool1_measured_joint_path_and_reverse_keep_both_exact_captures(tmp_path):
+def test_tool1_clear_observation_and_reverse_keep_exact_final_capture(tmp_path):
     from tool_trajectory_joy import ArmKinematics
     n = node(tmp_path)
     n.cfg = load_settings(ROOT/'config/tool_docking.yaml')[1]
@@ -940,10 +940,7 @@ def test_tool1_measured_joint_path_and_reverse_keep_both_exact_captures(tmp_path
     observation = load_pre_dock_targets(ROOT/'config/cartesian_targets.yaml')[1]['joint_goal']
     original = np.array([-3.1446606151657712, .43528509147893596, 1.1995647203271922,
                          -1.5854570285957827, -.33747577333504797, -1.4066603824909265])
-    original_pose = n.model.fk(original)
-    expected_observation = original_pose.copy()
-    expected_observation[:3, 3] += original_pose[:3, 2]*.005
-    np.testing.assert_allclose(n.model.fk(observation), expected_observation, atol=1e-4)
+    assert n.model.within_limits(observation, .02)
     assert not n.model.within_limits(original, .02)
     n.start_final_joint_goal(observation)
     forward = n.advance_plan
