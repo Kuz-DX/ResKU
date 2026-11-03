@@ -52,6 +52,7 @@ class ManualDocking:
         self.future = self.collision_future = self.plan = None
         self.collision_client = n.create_client(GetStateValidity, '/check_state_validity')
         self.stage = 'idle'
+        self.request_wrist_yaw = None
         self.plan_started = 0.
 
     def clear_plan(self):
@@ -61,6 +62,7 @@ class ManualDocking:
                 future.cancel()
         self.future = self.collision_future = self.plan = None
         self.stage = 'idle'
+        self.request_wrist_yaw = None
 
     def shutdown(self):
         self.clear_plan()
@@ -106,6 +108,9 @@ class ManualDocking:
             return
         self.clear_plan()
         n.stop('angular alignment request', n.last_dt)
+        # Capture actual ID3 feedback at the accepted button edge, not when
+        # tag acquisition or asynchronous planning later completes.
+        self.request_wrist_yaw = float(n.measured()[5]) if tool == 1 else 0.
         self.core.begin(tool, n.now_seconds())
         self.raw_base_tag = None
         self.tcp_camera_rotation = None
@@ -252,6 +257,11 @@ class ManualDocking:
                 self.held_ee = ee
                 self.fixed_state = dict(n.positions)
                 cfg = dict(self.core.settings['alignment'], max_angle_rad=self.core.cfg['max_target_angle_rad'])
+                if self.core.tool == 1:
+                    if getattr(self, 'request_wrist_yaw', None) is None:
+                        self.fail('missing ID3 angle captured at alignment request', dt)
+                        return
+                    cfg['wrist_yaw_rad'] = self.request_wrist_yaw
                 if self.core.settings['tools'][self.core.tool].get('alignment_reference') == 'camera_plane':
                     if getattr(self, 'tcp_camera_rotation', None) is None:
                         self.fail('TCP-to-camera optical TF required for camera alignment', dt)
@@ -276,6 +286,8 @@ class ManualDocking:
                     self.plan = self.future.result()
                     self.core.target = self.plan['target'].copy()
                     self.stage, self.check_index = 'checking', 0
+                # ASSUMED/reused: 0.005 rad path settling, 0.01 rad EE-change guard;
+                # these are controller tolerances, not measured hardware accuracy.
                 if np.max(np.abs(measured-self.plan['start'])) > .005 or abs(n.positions['ee_joint']-self.held_ee) > .01:
                     self.fail('robot moved after planning snapshot', dt)
                     return
@@ -301,6 +313,7 @@ class ManualDocking:
                     n.status = f'ALIGNMENT_READY: collision sample {self.check_index+1}/{len(self.plan["samples"])}'
                     return
                 self.stage, self.elapsed = 'executing', 0.
+                self.dxl_prepared = False
                 self.deadline = now+sum(self.plan['durations'])+self.core.settings['alignment']['feedback_timeout_s']
                 self.core.state, self.core.reason = 'ALIGNING', 'DXL reference then RMD pitch alignment'
             if self.stage == 'executing':
@@ -310,20 +323,34 @@ class ManualDocking:
                 if abs(n.positions['ee_joint']-self.held_ee) > .01:
                     self.fail('EE moved during alignment', dt)
                     return
-                self.elapsed = min(sum(self.plan['durations']), self.elapsed+dt)
+                prep_end = self.plan['durations'][0]
+                # A timed command endpoint is not measured hardware arrival.
+                # Wait under the existing deadline while holding the validated reference.
+                if not self.dxl_prepared:
+                    if (self.elapsed >= prep_end
+                            and np.max(np.abs(measured-self.plan['reference'])) <= .005
+                            and np.linalg.norm(pose[:3, 3]-self.core.target[:3, 3])
+                            <= self.core.settings['alignment']['position_tolerance_m']):
+                        self.dxl_prepared = True
+                    else:
+                        self.elapsed = min(prep_end, self.elapsed+dt)
+                if self.dxl_prepared:
+                    self.elapsed = min(sum(self.plan['durations']), self.elapsed+dt)
                 candidate = trajectory_position(self.plan, self.elapsed)
                 if np.max(np.abs(candidate-measured)) > n.params['max_target_lead_rad']:
                     self.fail('alignment following error', dt)
                     return
                 # DXL preparation may translate TCP; RMD-only phase must hold its new position.
-                rmd_phase = self.elapsed >= self.plan['durations'][0]
+                rmd_phase = self.dxl_prepared
                 if rmd_phase and np.max(np.abs(measured[[0, 4, 5]]-self.plan['reference'][[0, 4, 5]])) > .005:
                     self.fail('DXL reference not reached or moved during RMD alignment', dt)
                     return
                 if rmd_phase and np.linalg.norm(pose[:3, 3]-self.core.target[:3, 3]) > self.core.settings['alignment']['position_tolerance_m']:
                     self.fail('measured TCP drift during RMD alignment', dt)
                     return
-                n.status = 'ALIGNING: ' + ('RMD-only pitch, DXL held' if rmd_phase else 'DXL reference preparation')
+                n.status = 'ALIGNING: ' + ('RMD-only pitch, DXL held' if rmd_phase else
+                    'waiting for measured DXL preparation' if self.elapsed >= prep_end else
+                    'DXL reference preparation')
                 n.apply_motion(candidate, 0., 'angular_alignment', dt)
                 self.core.monitor(pose)
                 if (self.elapsed >= sum(self.plan['durations']) and
