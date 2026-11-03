@@ -3,6 +3,7 @@ import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location(
@@ -11,9 +12,10 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
 
-def test_manual_mode_uses_common_base_and_inactive_seed_controller():
+@pytest.mark.parametrize('real', [False, True])
+def test_manual_mode_uses_common_base_and_inactive_seed_controller(real):
     values = {
-        "real_hardware": "false",
+        "real_hardware": str(real).lower(),
         "hardware_config": str(ROOT / "config/hardware.yaml"),
         "mock_initial_positions_file": "",
         "launch_joy": "false",
@@ -22,6 +24,10 @@ def test_manual_mode_uses_common_base_and_inactive_seed_controller():
         "docking_camera_frame": "arm_camera_color_optical_frame",
         "docking_camera_info_topic": "/arm/camera/color/camera_info",
         "docking_centers_topic": "/arm/apriltag/centers",
+        "docking_config": str(ROOT / "config/tool_docking.yaml"),
+        "launch_docking_bridge": "true",
+        "docking_serial_port": "/dev/ttyACM0",
+        "docking_serial_baud": "115200",
     }
     spawner = Mock(side_effect=lambda name, inactive=False: {
         "kind": "spawner", "name": name, "inactive": inactive})
@@ -54,7 +60,7 @@ def test_manual_mode_uses_common_base_and_inactive_seed_controller():
         result = module._bringup(None)
 
     build.assert_called_once_with(
-        real_hardware=False,
+        real_hardware=real,
         hardware_file=values["hardware_config"],
         mock_initial_positions_file="",
         mock_ee_velocity=True,
@@ -64,13 +70,22 @@ def test_manual_mode_uses_common_base_and_inactive_seed_controller():
     assert spawner.call_args_list[1].args == ("ee_velocity_controller",)
     assert spawner.call_args_list[2].args == ("manual_position_controller",)
     assert spawner.call_args_list[2].kwargs == {"inactive": True}
-    manual = next(item for item in nodes if item.get("executable") == "manual.py")
+    manual = next(item for item in nodes if item.get("executable") == "standalone_managed_manual.py")
     assert manual["parameters"][0] == base.description
     assert manual['output'] == 'screen'
     assert manual['parameters'][1]['terminal_status_log'] is True
     assert manual['parameters'][1]['invert_forward'] is False
     assert manual['parameters'][1]['r2_pitch_translation'] is True
     assert manual['parameters'][1]['docking_lock_buttons'] is True
+    assert manual['parameters'][1]['startup_recovery_enabled'] is False
+    manager = next(item for item in nodes if item.get('executable') == 'arm_control_mode_manager.py')
+    assert manager['parameters'][0]['focus_arm_mode'] == 'manual'
+    auto_scene = next(item for item in nodes if item.get('namespace') == 'manual_auto')
+    assert auto_scene['parameters'][1] == base.description
+    sequence = next(item for item in nodes if item.get('executable') == 'manual_tool_sequence.py')
+    assert ('/check_state_validity', '/manual_auto/check_state_validity') in sequence['remappings']
+    bridges = [item for item in nodes if item.get('executable') == 'arduino_docking_bridge.py']
+    assert len(bridges) == int(real)
     assert next(item for item in nodes if item.get('executable') == 'joy_node')['output'] == 'screen'
     scene = next(item for item in nodes if item.get('executable') == 'move_group')
     assert scene['parameters'][-1]['allow_trajectory_execution'] is False

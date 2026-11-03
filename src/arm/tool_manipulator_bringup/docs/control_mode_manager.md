@@ -85,8 +85,11 @@ captured approach -> gripper close -> full reverse captured path -> exact
 TCP ready -> stable person observation -> base-only alignment -> planned
 preplace transit -> fixed-orientation straight descent -> gripper open -> HOLD.
 Home/focus changes and cancellation invalidate ownership; failures stop without
-an automatic release or retreat. Standalone `manual.launch.py` remains local
-path playback and does not run this autonomous continuation.
+an automatic release or retreat. `manual.launch.py` now uses the same manager
+with its original manual controls as a producer. Its topic-only
+`manual_tool_sequence.py` runs the normal docking coordinator and returns to
+manual after successful completion; it does not enable this optional tool-2
+pick/place continuation. Failed or cancelled sequences remain stopped.
 
 Responsibilities are separated into `tool2_sequence.py` (ordered stages and
 configuration), `person_place_geometry.py` (vision/placement geometry), and
