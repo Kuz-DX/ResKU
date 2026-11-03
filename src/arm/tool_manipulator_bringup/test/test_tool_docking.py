@@ -84,13 +84,14 @@ def test_shipped_config_uses_fixed_joint_docking_for_tool0_and_tool1():
     assert cfg[0]['max_position_error_m'] == .25
     assert cfg[0]['max_angle_error_rad'] == .35
     assert cfg[1]['alignment_mode'] == 'fixed_joint_goal'
-    assert not cfg[1]['axial_sampled_path']
+    assert cfg[1]['axial_sampled_path']
+    assert cfg[1]['axial_entry_distance_m'] == .008
     np.testing.assert_array_equal(cfg[1]['final_joint_goal'], [
         -3.136990711226343, .20682150637447397, 1.1557570519759337,
         -1.5262903776058194, -.3390097541229333, -1.5017671913398365])
     assert cfg[1]['confirm_tag_before_motion'] is True
     assert cfg[1]['tag_translation_correction']['enabled'] is False
-    assert 'pending' in cfg[1]['blocked_reason']
+    assert 'blocked_reason' not in cfg[1]
     assert 'limit_margin_rad' not in cfg[1]
     assert cfg[1]['final_entry_ignored_collision_links'] == ['tool_case_y_plus']
     assert 'advance_distance_m' not in cfg[1]
@@ -931,16 +932,19 @@ def test_tool1_measured_joint_path_and_reverse_keep_both_exact_captures(tmp_path
     from tool_trajectory_joy import ArmKinematics
     n = node(tmp_path)
     n.cfg = load_settings(ROOT/'config/tool_docking.yaml')[1]
-    # Exercise the isolated sampler with the historical capture; production
-    # remains blocked until the operator supplies its replacement observation.
-    n.cfg.pop('blocked_reason')
-    n.cfg['limit_margin_rad'] = .01
+    from tool_trajectory_joy import load_pre_dock_targets
     n.path_id = 1
     n.model = ArmKinematics(
         ROOT.parent/'tool_manipulator_description/urdf/tool_manipulator.urdf.xacro',
         ROOT/'config/hardware.yaml')
-    observation = np.array([-3.1446606151657712, .43528509147893596, 1.1995647203271922,
-                            -1.5854570285957827, -.33747577333504797, -1.4066603824909265])
+    observation = load_pre_dock_targets(ROOT/'config/cartesian_targets.yaml')[1]['joint_goal']
+    original = np.array([-3.1446606151657712, .43528509147893596, 1.1995647203271922,
+                         -1.5854570285957827, -.33747577333504797, -1.4066603824909265])
+    original_pose = n.model.fk(original)
+    expected_observation = original_pose.copy()
+    expected_observation[:3, 3] += original_pose[:3, 2]*.005
+    np.testing.assert_allclose(n.model.fk(observation), expected_observation, atol=1e-4)
+    assert not n.model.within_limits(original, .02)
     n.start_final_joint_goal(observation)
     forward = n.advance_plan
     assert not forward['cartesian_line']
@@ -949,9 +953,27 @@ def test_tool1_measured_joint_path_and_reverse_keep_both_exact_captures(tmp_path
     assert forward['final_docking_entry']
     assert forward['final_entry_ignored_collision_links'] == frozenset({'tool_case_y_plus'})
     np.testing.assert_array_equal(forward['waypoints'][-1], n.cfg['final_joint_goal'])
+    final_pose = n.model.fk(n.cfg['final_joint_goal'])
+    axis = final_pose[:3, 2]
+    axial_start = forward['axial_start_index']
+    entry = n.model.fk(forward['waypoints'][axial_start-1])
+    np.testing.assert_allclose(entry[:3, 3], final_pose[:3, 3]-.008*axis, atol=1e-5)
+    assert forward['stop_at_waypoints'][axial_start-1]
+    assert sum(forward['stop_at_waypoints'][axial_start:]) == 1
+    last_remaining = 1.
     previous = observation
-    for goal, duration in zip(forward['waypoints'], forward['durations']):
-        assert n.model.within_limits(goal, .01)
+    for index, (goal, duration) in enumerate(zip(forward['waypoints'], forward['durations'])):
+        assert n.model.within_limits(goal, .02)
+        for sample in np.linspace(previous, goal, 21):
+            assert n.model.within_limits(sample, .02)
+            pose = n.model.fk(sample)
+            delta = pose[:3, 3]-final_pose[:3, 3]
+            remaining = -float(delta@axis)
+            assert remaining <= last_remaining+1e-6
+            last_remaining = remaining
+            if index >= axial_start:
+                assert np.linalg.norm(delta-axis*(delta@axis)) < 1e-5
+                assert pose_errors(pose, final_pose)[1] < .001
         assert np.max(np.abs(goal-previous)) <= n.cfg['joint_step_rad']
         assert np.max(np.abs(goal-previous))/duration <= n.cfg['joint_speed_rad_s']+1e-12
         travel = np.linalg.norm(n.model.fk(goal)[:3, 3]-n.model.fk(previous)[:3, 3])
@@ -961,6 +983,10 @@ def test_tool1_measured_joint_path_and_reverse_keep_both_exact_captures(tmp_path
     live = n.cfg['final_joint_goal'].copy()
     live[0] += .001
     n.full_state = dict(zip(ARM_JOINTS, live))
+    n.docking_retreat_authorized = False
+    with pytest.raises(RuntimeError, match='not authorized'):
+        ToolTrajectoryJoy.begin_reverse_docking_retreat(n)
+    n.docking_retreat_authorized = True
     n.begin.reset_mock()
     ToolTrajectoryJoy.begin_reverse_docking_retreat(n)
     reverse = n.begin.call_args.args[1]
@@ -970,7 +996,8 @@ def test_tool1_measured_joint_path_and_reverse_keep_both_exact_captures(tmp_path
                                list(reversed([observation, *forward['waypoints'][:-1]])))
     assert reverse['preserve_joint_path']
     assert not reverse['allowed_collision_pairs']
-    assert 'final_entry_ignored_collision_links' not in reverse
+    assert reverse['final_entry_ignored_collision_links'] == frozenset({'tool_case_y_plus'})
+    assert reverse['final_docking_retreat']
     assert 'final_docking_entry' not in reverse
     assert n.return_home_after_back
 

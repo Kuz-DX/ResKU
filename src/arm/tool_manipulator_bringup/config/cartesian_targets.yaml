@@ -37,11 +37,16 @@ targets:
     retreat_distance_m: 0.050
     retreat_axis_tcp: [0.0, 0.0, -1.0]
   tool1:
-    # Final docking capture confirmed by the operator. A replacement observation
-    # will be supplied later; do not execute the previous observation/route.
-    executable: false
-    blocked_reason: tool1 observation pose is pending; rebuild the complete path after the new capture
-    role: final_capture_confirmed_observation_pending
+    # Preserve measured approach orientation; move 5 mm toward docking along TCP Z
+    # to respect the existing 0.02 rad planning margin. Visibility needs live confirmation.
+    joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
+    executable: true
+    role: computed_limit_valid_observation
+    pre_joint_goal_rad: [-3.15811777182003, 0.4368706784735036, 1.2252842861979594,
+      -1.558061081232102, -0.32788405398679027, -1.3966743865034847]
+    retreat_mode: reverse_docking_path
+    retreat_distance_m: 0.008
+    retreat_axis_tcp: [0.0, 0.0, -1.0]
     final_joint_goal_rad: [-3.136990711226343, 0.20682150637447397, 1.1557570519759337,
       -1.5262903776058194, -0.3390097541229333, -1.5017671913398365]
   tool2:

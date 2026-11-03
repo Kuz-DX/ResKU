@@ -131,13 +131,26 @@ tools:
     stable_samples: 5
     acquire_timeout_s: 10.0
     sequence_timeout_s: 180.0
-  # Tool 1 final capture is confirmed. Observation and route integration
-  # are pending the next user capture; this entry cannot start arm motion.
+  # Tool 1 keeps the confirmed final capture. The observation pose is adjusted
+  # 5 mm along its measured TCP axis; final insertion holds orientation for 8 mm.
   1:
     enabled: true
     require_l2_hold: false
     alignment_mode: fixed_joint_goal
-    axial_sampled_path: false
+    axial_sampled_path: true
+    axial_entry_distance_m: 0.008
+    maintain_entry_orientation: true
+    # Align outside contact; final 8 mm follows the measured final TCP Z axis.
+    axial_approach_joint_goals_rad:
+      - [-3.12137932272057, 0.20574350547362674, 1.1165800474557, -1.5687906619936485, -0.3486327690345207, -1.5148241552555979]
+    intermediate_joint_goals_rad:
+      - [-3.1233772360512453, 0.20599855152203206, 1.1216365190871727, -1.563417645456962, -0.34740426500335553, -1.5131481034724068]
+      - [-3.125361679489528, 0.20621879336734655, 1.12664671657938, -1.5580623712891297, -0.34618315411054806, -1.5114848275261574]
+      - [-3.127332773301462, 0.20640451897031922, 1.1316111436422536, -1.5527245375135417, -0.34496938443812136, -1.5098341910140225]
+      - [-3.129290636556773, 0.20655600857298437, 1.1365302890190614, -1.5474038507794559, -0.3437629042966149, -1.5081960593216277]
+      - [-3.131235387139136, 0.20667353499083896, 1.141404627020813, -1.5421000260957, -0.3425636622308137, -1.506570299596857]
+      - [-3.133167141754743, 0.2067573638863038, 1.1462346180258238, -1.5368127865816736, -0.3413716070262546, -1.5049567807255706]
+      - [-3.1350860145309998, 0.20680774949847994, 1.151020700816379, -1.531541867435821, -0.34018668860802026, -1.5033553745616302]
     tag_family: tag36h11
     tag_id: 1
     tag_size_m: 0.02
@@ -179,7 +192,6 @@ tools:
     stable_samples: 8
     acquire_timeout_s: 10.0
     sequence_timeout_s: 180.0
-    blocked_reason: tool1 observation pose is pending; rebuild the complete path after the new capture
     confirm_tag_before_motion: true
     final_entry_ignored_collision_links:
     - tool_case_y_plus

@@ -304,9 +304,10 @@ def collision_check_budget(sample_count, minimum_timeout, service_rate=50.):
 
 
 def final_entry_ignored_links(path_id, path):
-    """The operator's toolbox-2 exception belongs only to tool-1 final entry."""
+    """Scope the toolbox-2 exception to tool1 final entry or its authorized reverse."""
     links = frozenset(path.get('final_entry_ignored_collision_links', ()))
-    if links and (path_id != 1 or not path.get('final_docking_entry', False)
+    if links and (path_id != 1 or not (path.get('final_docking_entry', False)
+                                     or path.get('final_docking_retreat', False))
                   or links != frozenset({'tool_case_y_plus'})):
         raise ValueError('toolbox2 collision exception requires tool1 final docking entry')
     return links
@@ -1089,6 +1090,9 @@ class ToolTrajectoryJoy(Node):
         advance = getattr(self, 'advance_plan', None)
         if not advance or not advance.get('waypoints'):
             raise RuntimeError('completed docking path unavailable for reverse retreat')
+        ignored_links = final_entry_ignored_links(self.path_id, advance)
+        if ignored_links and not getattr(self, 'docking_retreat_authorized', False):
+            raise RuntimeError('tool1 contact-tolerant retreat is not authorized')
         seed = np.asarray([self.full_state[j] for j in ARM_JOINTS], dtype=float)
         margin = self.cfg.get('limit_margin_rad', self.margin)
         if not self.model.within_limits(seed, margin):
@@ -1112,6 +1116,8 @@ class ToolTrajectoryJoy(Node):
             start=seed, waypoints=waypoints, durations=durations,
             total=sum(durations), start_error=0., cartesian_line=False,
             preserve_joint_path=advance.get('preserve_joint_path', False),
+            final_docking_retreat=bool(ignored_links),
+            final_entry_ignored_collision_links=ignored_links,
             stop_at_waypoints=stops,
             allowed_collision_pairs=advance.get('allowed_collision_pairs', frozenset())))
 
