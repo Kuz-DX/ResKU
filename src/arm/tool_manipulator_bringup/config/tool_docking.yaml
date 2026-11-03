@@ -192,7 +192,8 @@ tools:
     stable_samples: 8
     acquire_timeout_s: 10.0
     sequence_timeout_s: 180.0
-    confirm_tag_before_motion: true
+    # Tool1 uses the reviewed joint path; do not wait for delayed tag images.
+    confirm_tag_before_motion: false
     final_entry_ignored_collision_links:
     - tool_case_y_plus
   2:

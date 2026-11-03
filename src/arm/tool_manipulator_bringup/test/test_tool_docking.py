@@ -89,7 +89,7 @@ def test_shipped_config_uses_fixed_joint_docking_for_tool0_and_tool1():
     np.testing.assert_array_equal(cfg[1]['final_joint_goal'], [
         -3.136990711226343, .20682150637447397, 1.1557570519759337,
         -1.5262903776058194, -.3390097541229333, -1.5017671913398365])
-    assert cfg[1]['confirm_tag_before_motion'] is True
+    assert cfg[1]['confirm_tag_before_motion'] is False
     assert cfg[1]['tag_translation_correction']['enabled'] is False
     assert 'blocked_reason' not in cfg[1]
     assert 'limit_margin_rad' not in cfg[1]
@@ -876,9 +876,11 @@ def camera_node(tmp_path):
     return n
 
 
-def tool1_confirmation_node(tmp_path):
+def tool1_confirmation_node(tmp_path, confirm=True):
     n = node(tmp_path)
     n.cfg = load_settings(ROOT/'config/tool_docking.yaml')[1]
+    if confirm:
+        n.cfg['confirm_tag_before_motion'] = True
     n.path_id = 1
     n.advance_locked = False
     n.docking_started = None
@@ -886,9 +888,17 @@ def tool1_confirmation_node(tmp_path):
     n.start_final_joint_goal = Mock()
     n.reset_tag_acquisition = Mock()
     n.path_completed()
-    assert n.stage == 'dock_tag_confirm'
+    if confirm:
+        assert n.stage == 'dock_tag_confirm'
     assert n.execution_id is None
     return n
+
+
+def test_tool1_default_starts_final_path_without_tag_acquisition(tmp_path):
+    n = tool1_confirmation_node(tmp_path, confirm=False)
+    n.start_final_joint_goal.assert_called_once()
+    n.reset_tag_acquisition.assert_not_called()
+    assert n.stage != 'dock_tag_confirm'
 
 
 def test_tool1_waits_for_distinct_stopped_tag_feedback_then_checks_joint_path(tmp_path):
