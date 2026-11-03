@@ -91,7 +91,7 @@ def test_shipped_config_uses_fixed_joint_docking_for_tool0_and_tool1():
         -1.3185961699868833, -.2300971181830529, -1.7855536370986798])
     assert cfg[1]['confirm_tag_before_motion'] is False
     assert cfg[1]['tag_translation_correction']['enabled'] is False
-    assert 'circuit_box/wrist_link_yaw' in cfg[1]['blocked_reason']
+    assert 'blocked_reason' not in cfg[1]
     assert 'limit_margin_rad' not in cfg[1]
     assert cfg[1]['final_entry_ignored_collision_links'] == ['tool_case_y_plus']
     assert 'advance_distance_m' not in cfg[1]

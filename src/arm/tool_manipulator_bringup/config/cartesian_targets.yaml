@@ -41,7 +41,6 @@ targets:
     # Latest outer retreat capture, IK-adjusted 1 mm along its TCP axis for pitch margin.
     joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
     executable: true
-    blocked_reason: New measured tool1 final has circuit_box/wrist_link_yaw contact in mesh validation; review fixture geometry/contact before enabling
     role: reviewed_outer_approach
     pre_joint_goal_rad: [-3.2286119054446, 0.923426383865938, 1.2997378743085, -1.55712730391413, -0.3937272632493, -1.46504858436652]
     retreat_mode: reverse_docking_path

@@ -752,7 +752,7 @@ def test_source_targets_use_limit_valid_tool1_observation_and_exact_final():
     np.testing.assert_allclose(targets[0]['transit_joint_goal'], [
         3.1001751723166735, 0.6403612785882697, 1.209862232156147,
         -1.427330240975674, -0.0030679615759781065, -0.021475731030191625])
-    assert 'circuit_box/wrist_link_yaw' in targets[1]['blocked_reason']
+    assert 'blocked_reason' not in targets[1]
     assert targets[1]['retreat_mode'] == 'reverse_docking_path'
     np.testing.assert_allclose(targets[2]['joint_goal'], [
         -2.13180646665643, .8056224119758513, 1.2458380150140123,
@@ -1326,3 +1326,23 @@ def test_tool1_outer_capture_preserves_orientation_with_one_mm_limit_adjustment(
     np.testing.assert_allclose(current[:3, 3], prior[:3, 3]+.001*prior[:3, 2], atol=1e-5)
     np.testing.assert_allclose(current[:3, :3], prior[:3, :3], atol=1e-4)
     assert model.within_limits(targets[1]['joint_goal'], .025)
+
+
+def test_circuit_box_contact_is_only_allowed_at_tool1_terminal_samples():
+    from tool_trajectory_joy import terminal_contact_pairs
+    q = np.zeros(6)
+    pair = frozenset({('circuit_box', 'wrist_link_yaw')})
+    path = dict(terminal_contact_joint_goal=q, preserve_joint_path=True,
+                final_docking_entry=True)
+    assert terminal_contact_pairs(1, path, 9, 10, q) == pair
+    for index in range(9):
+        assert not terminal_contact_pairs(1, path, index, 10, q)
+    assert not terminal_contact_pairs(0, path, 9, 10, q)
+    assert not terminal_contact_pairs(1, path, 9, 10, q+.006)
+    path['final_docking_entry'] = False
+    path['final_docking_retreat'] = True
+    assert terminal_contact_pairs(1, path, 0, 10, q+.001) == pair
+    for index in range(1, 10):
+        assert not terminal_contact_pairs(1, path, index, 10, q)
+    assert not collision_result_accepted(SimpleNamespace(valid=False, contacts=[
+        SimpleNamespace(contact_body_1='circuit_box', contact_body_2='cam_link')]), pair)

@@ -320,6 +320,22 @@ def final_entry_ignored_links(path_id, path):
     return links
 
 
+def terminal_contact_pairs(path_id, path, index, count, positions):
+    """One approved tool1 pair at docking's last or retreat's first sample only."""
+    final = path.get('terminal_contact_joint_goal')
+    if path_id != 1 or final is None or 'ee_target_rad' in path:
+        return frozenset()
+    terminal = ((path.get('final_docking_entry', False) and index == count-1)
+                or (path.get('final_docking_retreat', False) and index == 0))
+    if not terminal or not path.get('preserve_joint_path', False):
+        return frozenset()
+    q, goal = np.asarray(positions), np.asarray(final)
+    if (q.shape != (6,) or goal.shape != (6,) or not np.all(np.isfinite(q))
+            or not np.all(np.isfinite(goal)) or np.max(np.abs(q-goal)) > .005):
+        return frozenset()
+    return frozenset({('circuit_box', 'wrist_link_yaw')})
+
+
 def collision_result_accepted(result, allowed_pairs=frozenset(), ignored_links=frozenset()):
     """Accept only explicitly scoped contact pairs; never hide other faults."""
     if result is None:
@@ -1154,6 +1170,7 @@ class ToolTrajectoryJoy(Node):
             preserve_joint_path=advance.get('preserve_joint_path', False),
             final_docking_retreat=bool(ignored_links),
             final_entry_ignored_collision_links=ignored_links,
+            terminal_contact_joint_goal=advance.get('terminal_contact_joint_goal'),
             stop_at_waypoints=stops,
             allowed_collision_pairs=advance.get('allowed_collision_pairs', frozenset())))
 
@@ -1552,6 +1569,12 @@ class ToolTrajectoryJoy(Node):
                     return
                 result = self.future.result()
                 allowed_pairs = self.path.get('allowed_collision_pairs', frozenset())
+                if self.path.get('terminal_contact_joint_goal') is not None:
+                    checked = self.requests[self.request_index].robot_state.joint_state
+                    values = dict(zip(checked.name, checked.position))
+                    allowed_pairs = allowed_pairs | terminal_contact_pairs(
+                        self.path_id, self.path, self.request_index, len(self.requests),
+                        [values[j] for j in ARM_JOINTS])
                 ignored_links = final_entry_ignored_links(self.path_id, self.path)
                 if not collision_result_accepted(result, allowed_pairs, ignored_links):
                     pairs = sorted({' <-> '.join(sorted((c.contact_body_1, c.contact_body_2)))

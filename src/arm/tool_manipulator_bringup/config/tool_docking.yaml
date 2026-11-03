@@ -131,10 +131,9 @@ tools:
     stable_samples: 5
     acquire_timeout_s: 10.0
     sequence_timeout_s: 180.0
-  # Updated tool1 candidate; blocked pending circuit-box contact review.
+  # Tool1 final circuit_box/wrist_link_yaw contact approved at terminal sample only.
   1:
     enabled: true
-    blocked_reason: New measured tool1 final has circuit_box/wrist_link_yaw contact in mesh validation; review fixture geometry/contact before enabling
     require_l2_hold: false
     alignment_mode: fixed_joint_goal
     axial_sampled_path: true
