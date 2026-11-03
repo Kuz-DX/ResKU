@@ -67,3 +67,15 @@ src/vision/models/person_480_openvino_model/
 .env
 *.key
 secrets/
+
+# Local manual docking tests added for virtual verification (2026-11-03).
+/src/arm/tool_manipulator_bringup/test/manual_docking_initial_positions.yaml
+/src/arm/tool_manipulator_bringup/test/manual_docking_mock_smoke.py
+/src/arm/tool_manipulator_bringup/test/test_manual_docking.py
+.pytest_cache/
+
+# Local RViz view/layout used during manual virtual verification.
+/src/arm/tool_manipulator_bringup/config/joint_rviz.rviz
+
+# Local-only RViz docking simulation: launcher, adapter, assumed scene and notes.
+/src/arm/tool_manipulator_bringup/local_manual_rviz/

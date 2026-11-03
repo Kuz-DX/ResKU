@@ -15,35 +15,23 @@ from tool_docking_core import transform, tag_pose
 
 
 class ManualDocking:
-    def __init__(self, node, config_file, mock_input=False):
+    def __init__(self, node, config_file):
         self.node = node
         self.core = DockingAssist(load_config(config_file))
-        self.mock_input = mock_input
         self.ready = False
         self.camera = None
         self.camera_frame = node.declare_parameter(
             'docking_camera_frame', 'arm_camera_color_optical_frame').value
         self.base_frame = node.params['root_link']
-        if mock_input:
-            # Mock poses cannot be enabled on a physical-hardware description,
-            # even when manual.py is invoked directly without the launch guard.
-            import xml.etree.ElementTree as ET
-            root = ET.fromstring(node.params['robot_description'])
-            plugins = [p.text for p in root.findall('ros2_control/hardware/plugin')]
-            if not plugins or any(p != 'mock_components/GenericSystem' for p in plugins):
-                raise ValueError('synthetic tag input requires mock_components/GenericSystem only')
-            node.create_subscription(String, '/manual/docking/mock_tag_pose', self.on_mock, 1)
-            node.get_logger().warning('SIMULATION ONLY: synthetic tag poses; camera recognition NOT evaluated')
-        else:
-            if not self.camera_frame:
-                raise ValueError('docking_camera_frame must not be empty')
-            self.tf_buffer = Buffer()
-            self.tf_listener = TransformListener(self.tf_buffer, node)
-            node.create_subscription(CameraInfo, node.declare_parameter(
-                'docking_camera_info_topic', '/arm/camera/color/camera_info').value,
-                self.on_camera, qos_profile_sensor_data)
-            node.create_subscription(String, node.declare_parameter(
-                'docking_centers_topic', '/arm/apriltag/centers').value, self.on_tag, 1)
+        if not self.camera_frame:
+            raise ValueError('docking_camera_frame must not be empty')
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, node)
+        node.create_subscription(CameraInfo, node.declare_parameter(
+            'docking_camera_info_topic', '/arm/camera/color/camera_info').value,
+            self.on_camera, qos_profile_sensor_data)
+        node.create_subscription(String, node.declare_parameter(
+            'docking_centers_topic', '/arm/apriltag/centers').value, self.on_tag, 1)
         node.create_service(Trigger, '/manual/docking/cancel', self.on_cancel)
         node.get_logger().warning(
             'Manual docking uses ASSUMED/unverified tuning and tag-to-TCP transforms from ' + config_file)
@@ -67,10 +55,20 @@ class ManualDocking:
         if self.selected and self.core.tool == tool:
             n.stop('docking assist cancelled by operator', n.last_dt)
             return
-        if (not n.controller_ready or n.focus != 'arm' or n.neutral_required or
-                n.hardware_fault or n.fault or n.startup_recovering or
-                not n.entry_alignment_complete or not n.valid_measured(n.now_seconds())):
-            n.get_logger().warning('Docking assist requires ready arm, neutral controls and fresh feedback')
+        blockers = [name for name, blocked in (
+            ('controller not ready', not n.controller_ready),
+            ('focus is not arm', n.focus != 'arm'),
+            ('neutral controls required', n.neutral_required),
+            ('hardware fault', n.hardware_fault), ('fault', n.fault),
+            ('startup recovery active', n.startup_recovering),
+            ('entry alignment incomplete', not n.entry_alignment_complete)) if blocked]
+        now = n.now_seconds()
+        if not n.fresh_state(now):
+            blockers.append('joint feedback stale or missing')
+        elif not n.valid_measured(now):
+            blockers.append('joint feedback outside limits or non-finite')
+        if blockers:
+            n.get_logger().warning('Docking assist selection rejected: ' + '; '.join(blockers))
             return
         n.stop('docking assist selection', n.last_dt)
         self.core.begin(tool, n.now_seconds())
@@ -121,7 +119,7 @@ class ManualDocking:
             self.camera = matrix, distortion
 
     def on_tag(self, message):
-        if not self.selected or self.mock_input:
+        if not self.selected:
             return
         try:
             data = json.loads(message.data)
@@ -147,22 +145,6 @@ class ManualDocking:
             self.core.observe(base_camera @ camera_tag, stamp_ns, self.node.now_seconds(), age)
         except (ValueError, TypeError, KeyError, IndexError, AttributeError, OverflowError,
                 TransformException, cv2.error, np.linalg.LinAlgError) as exc:
-            self.core.reject(str(exc))
-
-    def on_mock(self, message):
-        """Synthetic BASE-frame poses only; deliberately bypass detector and PnP."""
-        if not self.mock_input or not self.selected:
-            return
-        try:
-            data = json.loads(message.data)
-            stamp_ns, age = self.stamp(data)
-            item = self.core.settings['tools'][self.core.tool]
-            if (data['synthetic'] is not True or data['frame_id'] != self.base_frame or
-                    data['id'] != item['tag_id'] or data['family'] != item['tag_family']):
-                raise ValueError('wrong synthetic tag identity/frame')
-            self.core.observe(transform(data['xyz_m'], data['xyzw']), stamp_ns,
-                              self.node.now_seconds(), age)
-        except (ValueError, TypeError, KeyError, AttributeError, OverflowError) as exc:
             self.core.reject(str(exc))
 
     def run(self, now, dt):
@@ -193,7 +175,7 @@ class ManualDocking:
     def adjust(self, manual_candidate, measured, now, dt):
         """Add tag correction to the already-mapped/bounded manual position step.
 
-        Explicit DXL or O-layer inputs always take priority and pass through
+        Explicit DXL, O-layer or R2 pitch-hold inputs take priority and pass through
         exactly. The right-stick RMD coordination receives assistance only when
         its ACTUAL Cartesian velocity approaches the dock, regardless of axis sign.
         """
@@ -201,7 +183,7 @@ class ManualDocking:
         if self.core.state != 'active':
             n.status = 'manual control; acquiring docking tag'
             return manual_candidate
-        explicit = (n.button('ee_enable_button') or n.button('base_ccw_button') or
+        explicit = (n.pitch_hold_requested() or n.button('ee_enable_button') or n.button('base_ccw_button') or
                     n.button('base_cw_button') or n.axis('wrist_roll_axis') or
                     n.axis('wrist_yaw_axis'))
         if explicit or not n.axis('forward_axis'):
@@ -241,5 +223,5 @@ class ManualDocking:
 
     def snapshot(self):
         return dict(**self.core.snapshot(), ready=self.ready,
-                    synthetic_input=self.mock_input, assumed_parameters=True,
+                    assumed_parameters=True,
                     input_mapping='manual')

@@ -18,7 +18,6 @@ def test_manual_mode_uses_common_base_and_inactive_seed_controller():
         "mock_initial_positions_file": "",
         "launch_joy": "false",
         "launch_rviz": "false",
-        "docking_mock_input": "false",
         "docking_assist_config": str(ROOT / "config/manual_docking_assist.yaml"),
         "docking_camera_frame": "arm_camera_color_optical_frame",
         "docking_camera_info_topic": "/arm/camera/color/camera_info",
@@ -67,22 +66,17 @@ def test_manual_mode_uses_common_base_and_inactive_seed_controller():
     assert spawner.call_args_list[2].kwargs == {"inactive": True}
     manual = next(item for item in nodes if item.get("executable") == "manual.py")
     assert manual["parameters"][0] == base.description
+    assert manual['output'] == 'screen'
+    assert manual['parameters'][1]['terminal_status_log'] is True
+    assert manual['parameters'][1]['invert_forward'] is False
+    assert manual['parameters'][1]['r2_pitch_translation'] is True
+    assert manual['parameters'][1]['docking_lock_buttons'] is True
+    assert next(item for item in nodes if item.get('executable') == 'joy_node')['output'] == 'screen'
     assert not any(item.get('executable') == 'move_group' for item in nodes)
     assert base.moveit_config.robot_description_semantic['robot_description_semantic'] == '<robot name="test"/>'
 
 
 ROBOT_DESCRIPTION = "<robot name='test'/>"
-
-
-def test_synthetic_tag_input_is_blocked_before_real_hardware_construction():
-    import pytest
-    values = {'real_hardware': 'true', 'docking_mock_input': 'true'}
-    with patch.object(module, 'LaunchConfiguration',
-                      side_effect=lambda name: SimpleNamespace(perform=lambda ctx: values[name])), \
-            patch.object(module.common, 'build_arm_base') as build:
-        with pytest.raises(RuntimeError, match='real_hardware:=false'):
-            module._bringup(None)
-        build.assert_not_called()
 
 
 def test_real_rmd_transport_keeps_can_bus_headroom():

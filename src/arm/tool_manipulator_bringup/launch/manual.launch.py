@@ -58,9 +58,6 @@ def _shutdown_on_exit(process):
 
 def _bringup(context):
     real = LaunchConfiguration('real_hardware').perform(context) == 'true'
-    mock_tag = LaunchConfiguration('docking_mock_input').perform(context) == 'true'
-    if real and mock_tag:
-        raise RuntimeError('docking_mock_input requires real_hardware:=false')
     base = common.build_arm_base(
         real_hardware=real,
         hardware_file=LaunchConfiguration('hardware_config').perform(context),
@@ -81,15 +78,18 @@ def _bringup(context):
     # not start its collision gate or the MoveIt state-validity scene.
     manual = Node(package='tool_manipulator_bringup', executable='manual.py',
                   parameters=[description, {'hardware_config': hardware, 'servo_mode': False,
+                      'invert_forward': False,  # Reverse standalone manual right-stick RMD motion.
+                      'r2_pitch_translation': True,
+                      'docking_lock_buttons': True,
+                      'terminal_status_log': True,
                       'docking_assist_config': LaunchConfiguration('docking_assist_config').perform(context),
-                      'docking_mock_input': mock_tag,
                       'docking_camera_frame': LaunchConfiguration('docking_camera_frame').perform(context),
                       'docking_camera_info_topic': LaunchConfiguration('docking_camera_info_topic').perform(context),
                       'docking_centers_topic': LaunchConfiguration('docking_centers_topic').perform(context)}],
                   output='screen', sigterm_timeout='3', sigkill_timeout='3')
     joy = Node(package='joy', executable='joy_node',
                parameters=[{'device_id': 0, 'deadzone': .05, 'autorepeat_rate': 50.}],
-               output='log', respawn=True, respawn_delay=2.)
+               output='screen', respawn=True, respawn_delay=2.)
     joy_log = JoystickConnectionLog()
     joy_events = RegisterEventHandler(OnProcessIO(
         target_action=joy, on_stdout=joy_log.stdout, on_stderr=joy_log.stderr))
@@ -132,7 +132,6 @@ def generate_launch_description():
         DeclareLaunchArgument('launch_joy', default_value='true', choices=['true', 'false']),
         DeclareLaunchArgument('mock_initial_positions_file', default_value=''),
         DeclareLaunchArgument('docking_assist_config', default_value=str(share/'config/manual_docking_assist.yaml')),
-        DeclareLaunchArgument('docking_mock_input', default_value='false', choices=['true', 'false']),
         DeclareLaunchArgument('docking_camera_frame', default_value='arm_camera_color_optical_frame'),
         DeclareLaunchArgument('docking_camera_info_topic', default_value='/arm/camera/color/camera_info'),
         DeclareLaunchArgument('docking_centers_topic', default_value='/arm/apriltag/centers'),

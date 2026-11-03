@@ -23,7 +23,7 @@
 
 `manual.launch.py`의 L2+△(툴0), L2+○(툴1)는 사용자가 근처까지 접근한 뒤
 AprilTag 기반 수동 이동 보조를 선택한다. 기존 manual 키 매핑을 유지한다. 조작 순서,
-가상 테스트와 임의 파라미터는 [manual_docking_assist.md](docs/manual_docking_assist.md)를 따른다.
+도킹 보조 동작과 임의 파라미터는 [manual_docking_assist.md](docs/manual_docking_assist.md)를 따른다.
 아래의 IK/Manual 자동 경로·도킹 설명은 `ik_manual.launch.py`에 해당한다.
 
 ## 제어 모드 기반 구조

@@ -33,7 +33,7 @@ def harness():
     node.last_dt = .02
     node.diagnostics = Mock()
     node.joy = Joy(axes=[0.]*8, buttons=[0]*11)
-    node.params.update(forward_axis=4, wrist_yaw_axis=0, wrist_roll_axis=6,
+    node.params.update(forward_axis=4, wrist_yaw_axis=0, wrist_roll_axis=6, pitch_hold_axis=5,
                        ee_velocity_axis=6, wrist_pitch_axis=7, vertical_axis=1, base_ccw_button=4, base_cw_button=5,
                        ee_enable_button=1, focus_button=9, stop_pose_button=3, deadzone=.12, manage_focus=True,
                        entry_alignment_speed_rad_s=.09, entry_alignment_timeout_margin_sec=15.)
@@ -55,6 +55,110 @@ def harness():
 def tick(node):
     node.last_time = .98
     node.on_timer()
+
+
+@pytest.mark.parametrize('button,desired', [(0, True), (2, False)])
+def test_standalone_docking_buttons_publish_once_per_press_without_home(button, desired):
+    node = harness()
+    node.params['docking_lock_buttons'] = True
+    node.docking_lock_publisher = Mock()
+    node.docking = Mock()
+    message = Joy(axes=[0., 0., 1., 0., 0., 1., 0., 0.], buttons=[0]*11)
+    message.buttons[button] = 1
+    for _ in range(10):
+        node.on_joy(message)
+    node.docking_lock_publisher.publish.assert_called_once()
+    assert node.docking_lock_publisher.publish.call_args.args[0].data is desired
+    assert not node.stop_pose_active
+    node.docking.handle_joy.assert_not_called()
+    message.buttons[button] = 0
+    node.on_joy(message)
+    assert node.docking_lock_publisher.publish.call_count == 1
+    message.buttons[button] = 1
+    node.on_joy(message)
+    assert node.docking_lock_publisher.publish.call_count == 2
+
+
+@pytest.mark.parametrize('modifier', ['r2', 'circle', 'l1', 'other_face', 'drive'])
+@pytest.mark.parametrize('button', [0, 2])
+def test_docking_commands_require_standalone_button_and_arm_focus(modifier, button):
+    node = harness()
+    node.params['docking_lock_buttons'] = True
+    node.docking_lock_publisher = Mock()
+    message = Joy(axes=[0., 0., 1., 0., 0., 1., 0., 0.], buttons=[0]*11)
+    message.buttons[button] = 1
+    if modifier == 'r2': message.axes[5] = -1.
+    elif modifier == 'circle': message.buttons[1] = 1
+    elif modifier == 'l1': message.buttons[4] = 1
+    elif modifier == 'other_face': message.buttons[2 if button == 0 else 0] = 1
+    else: node.focus = 'drive'
+    node.on_joy(message)
+    assert not node.stop_pose_active
+    node.docking_lock_publisher.publish.assert_not_called()
+    # Removing a modifier while still holding a face must not create a press.
+    message.axes[5], message.buttons[1], message.buttons[4] = 1., 0, 0
+    message.buttons[2 if button == 0 else 0] = 0
+    node.focus = 'arm'
+    node.on_joy(message)
+    node.docking_lock_publisher.publish.assert_not_called()
+
+
+@pytest.mark.parametrize('button,tool,desired', [(0, 2, True), (2, 0, False)])
+def test_l2_face_keeps_tool_request_and_modifier_release_never_commands_latch(button, tool, desired):
+    node = harness()
+    node.params['docking_lock_buttons'] = True
+    node.docking_lock_publisher = Mock()
+    node.start_tool_path = Mock()
+    message = Joy(axes=[0., 0., -1., 0., 0., 1., 0., 0.], buttons=[0]*11)
+    message.buttons[button] = 1
+    node.on_joy(message)
+    node.start_tool_path.assert_called_once_with(tool)
+    node.docking_lock_publisher.publish.assert_not_called()
+    message.axes[2] = 1.
+    node.on_joy(message)
+    node.docking_lock_publisher.publish.assert_not_called()
+    message.buttons[button] = 0
+    node.on_joy(message)
+    message.buttons[button] = 1
+    node.on_joy(message)
+    assert node.docking_lock_publisher.publish.call_args.args[0].data is desired
+
+
+def test_terminal_status_heartbeat_is_throttled_without_throttling_diagnostics():
+    node = harness()
+    node.params['terminal_status_log'] = True
+    logger = Mock()
+    node.get_logger = Mock(return_value=logger)
+    now = [1.]
+    node.now_seconds = lambda: now[0]
+    node.docking = SimpleNamespace(snapshot=lambda: dict(
+        state='acquiring', tool=0, ready=False, reason='waiting for fresh tag samples',
+        observation_reason='no camera input'))
+    for stamp in (1., 1.02, 1.5, 2.):
+        now[0] = stamp
+        node.emit_diagnostics(.02)
+    assert node.diagnostics.publish.call_count == 4
+    assert logger.info.call_count == 2
+    message = logger.info.call_args.args[0]
+    assert 'phase=ready focus=arm' in message
+    assert 'q_rad=[' in message
+    assert 'docking=acquiring tool=0 ready=False' in message
+    assert 'tag=no camera input' in message
+
+
+def test_terminal_status_handles_missing_feedback_and_disabled_output():
+    node = harness()
+    node.get_logger = Mock()
+    node.emit_diagnostics(.02)
+    node.get_logger.assert_not_called()
+    node.params['terminal_status_log'] = True
+    node.positions.clear()
+    node.target = None
+    node.joy_time = None
+    node.emit_diagnostics(.02)
+    message = node.get_logger.return_value.info.call_args.args[0]
+    assert 'joy=stale' in message
+    assert 'q_rad=[?, ?, ?, ?, ?, ?] max_error_rad=?' in message
 
 
 @pytest.mark.parametrize('button,path_id', [(2, 0), (1, 1), (0, 2)])
@@ -690,8 +794,11 @@ def test_one_rmd_lead_budget_cannot_freeze_the_other_two():
     assert node.rmd_lead_blocked_joints == ['shoulder_joint']
 
 
-def test_square_visits_ready_then_zeroed_startup_home_and_stops_on_timeout():
+@pytest.mark.parametrize('latch_enabled', [False, True])
+def test_square_visits_ready_then_zeroed_startup_home_and_stops_on_timeout(latch_enabled):
     node = harness()
+    node.params['docking_lock_buttons'] = latch_enabled
+    node.docking_lock_publisher = Mock()
     node.startup_goal = np.array([.2, .3, .4, -.5, .6, .7])
     expected = node.startup_goal.copy()
     expected[[0, 4, 5]] = 0.
@@ -699,6 +806,7 @@ def test_square_visits_ready_then_zeroed_startup_home_and_stops_on_timeout():
     node.button = lambda name: bool(node.joy.buttons[node.params[name]])
     node.previous_focus = False
     node.on_joy(Joy(axes=[0.]*8, buttons=[0, 0, 0, 1]+[0]*7))
+    node.docking_lock_publisher.publish.assert_not_called()
     assert node.stop_pose_active
     reached_ready = False
     for _ in range(2000):
@@ -720,25 +828,33 @@ def test_square_visits_ready_then_zeroed_startup_home_and_stops_on_timeout():
     assert not node.stop_pose_active
 
 
-def test_square_accepts_recovered_home_within_real_hardware_limits():
+@pytest.mark.parametrize('latch_enabled', [False, True])
+def test_square_accepts_recovered_home_within_real_hardware_limits(latch_enabled):
     node = storage_pose_harness()
+    node.params['docking_lock_buttons'] = latch_enabled
+    node.docking_lock_publisher = Mock()
     node.startup_recovering = False
     node.button = lambda name: bool(node.joy.buttons[node.params[name]])
     node.previous_focus = False
     node.on_joy(Joy(axes=[0.]*8, buttons=[0, 0, 0, 1]+[0]*7))
+    node.docking_lock_publisher.publish.assert_not_called()
     assert node.stop_pose_active
     np.testing.assert_array_equal(node.home_goals[1][1:4], node.startup_goal[1:4])
     np.testing.assert_array_equal(node.home_goals[1][[0, 4, 5]], 0.)
     node.get_logger().error.assert_not_called()
 
 
-def test_square_cancels_home_on_second_press():
+@pytest.mark.parametrize('latch_enabled', [False, True])
+def test_square_cancels_home_on_second_press(latch_enabled):
     node = storage_pose_harness()
+    node.params['docking_lock_buttons'] = latch_enabled
+    node.docking_lock_publisher = Mock()
     node.startup_recovering = False
     node.button = lambda name: bool(node.joy.buttons[node.params[name]])
     node.previous_focus = False
     press = Joy(axes=[0.]*8, buttons=[0, 0, 0, 1]+[0]*7)
     node.on_joy(press)
+    node.docking_lock_publisher.publish.assert_not_called()
     assert node.stop_pose_active
     node.on_joy(Joy(axes=[0.]*8, buttons=[0]*11))
     node.on_joy(press)
@@ -770,6 +886,71 @@ def test_circle_layer_real_joy_mapping(sign):
     assert not node.neutral()
     node.joy.buttons[1] = 0
     np.testing.assert_array_equal(node.command_velocity(node.measured()), np.zeros(6))
+
+
+@pytest.mark.parametrize('axis', [1, 4])
+@pytest.mark.parametrize('sign', [-1., 1.])
+def test_r2_real_joy_preserves_pitch_in_both_translation_directions(axis, sign):
+    from manual_control_common import ManualController
+    node = harness()
+    node.params.update(r2_pitch_translation=True, pitch_hold_axis=5)
+    node.axis = ManualController.axis.__get__(node)
+    node.button = ManualController.button.__get__(node)
+    node.joy.axes[5] = -1.
+    node.joy.axes[axis] = sign
+    initial, _ = node.chain.pose_and_jacobian(node.positions)
+    base = node.positions['base_joint']
+    direction = np.array([0., 0., sign] if axis == 1 else
+                         [np.cos(base)*sign, np.sin(base)*sign, 0.])
+    for _ in range(100):
+        tick(node)
+        node.positions = dict(zip(JOINTS, node.target))
+    final, _ = node.chain.pose_and_jacobian(node.positions)
+    delta = final[:3, 3]-initial[:3, 3]
+    np.testing.assert_allclose(final[:3, :3], initial[:3, :3], atol=1e-10)
+    assert delta @ direction > .001
+    np.testing.assert_allclose(delta-direction*(delta @ direction), 0., atol=1e-4)
+    assert not node.neutral()
+    node.joy.axes[axis] = 0.
+    assert not node.neutral()  # R2 must be released to rearm after a stop.
+    np.testing.assert_array_equal(node.command_velocity(node.measured()), np.zeros(6))
+    node.joy.axes[5] = 1.
+    assert node.neutral()
+
+
+def test_standalone_circle_vertical_is_removed_and_circle_keeps_pitch_priority():
+    from manual_control_common import ManualController
+    node = harness()
+    node.params.update(r2_pitch_translation=True, pitch_hold_axis=5)
+    node.axis = ManualController.axis.__get__(node)
+    node.button = ManualController.button.__get__(node)
+    node.joy.buttons[1] = 1
+    node.joy.axes[1] = 1.
+    np.testing.assert_array_equal(node.command_velocity(node.measured()), np.zeros(6))
+    node.joy.axes[5], node.joy.axes[4], node.joy.axes[7] = -1., 1., 1.
+    np.testing.assert_allclose(node.command_velocity(node.measured()), [0., 0., 0., .12, 0., 0.])
+
+
+@pytest.mark.parametrize('axis', ['vertical_axis', 'forward_axis'])
+@pytest.mark.parametrize('block', ['limit', 'lead'])
+def test_r2_pitch_constraint_survives_limits_and_lead(axis, block):
+    node = harness()
+    node.params.update(r2_pitch_translation=True, pitch_hold_axis=5)
+    node.axis = lambda name: -1. if name == 'pitch_hold_axis' else (1. if name == axis else 0.)
+    velocity = node.command_velocity(node.measured())
+    index = 1+int(np.argmax(np.abs(velocity[1:4])))
+    sign = np.sign(velocity[index])
+    assert sign != 0.
+    if block == 'limit':
+        if sign > 0:
+            node.upper[index] = node.target[index]+.02
+        else:
+            node.lower[index] = node.target[index]-.02
+    else:
+        node.positions[JOINTS[index]] = node.target[index]-sign*.0999
+    before = node.target.copy()
+    tick(node)
+    np.testing.assert_array_equal(node.target, before)
 
 
 def test_pitch_adjust_then_vertical_keeps_adjusted_orientation():
@@ -838,3 +1019,26 @@ def test_vertical_with_actual_robot_model(base, direction):
     np.testing.assert_allclose(final[:3, :3], initial[:3, :3], atol=1e-10)
     np.testing.assert_allclose(final[:2, 3], initial[:2, 3], atol=1e-4)
     assert direction*(final[2, 3]-initial[2, 3]) > .001
+
+
+@pytest.mark.parametrize('base', [0., .7])
+@pytest.mark.parametrize('sign', [-1., 1.])
+@pytest.mark.parametrize('vertical', [0., .5])
+def test_pitch_preserving_forward_and_diagonal_with_actual_model(base, sign, vertical):
+    import xacro
+    from manual_control_common import pitch_translation_velocity
+    path = Path(__file__).resolve().parents[2]/'tool_manipulator_description/urdf/tool_manipulator.urdf.xacro'
+    chain = ArmChain(xacro.process_file(str(path)).toxml())
+    q = np.array([base, -.4, .7, -.2, .3, -.2])
+    initial, _ = chain.pose_and_jacobian(dict(zip(JOINTS, q)))
+    direction = sign*np.array([np.cos(base), np.sin(base), vertical])
+    direction /= np.linalg.norm(direction)
+    for _ in range(100):
+        velocity = pitch_translation_velocity(chain, dict(zip(JOINTS, q)), direction*.03, .05, np.full(3, .12))
+        assert np.max(np.abs(velocity)) <= .12+1e-12
+        q[1:4] += .02*velocity
+    final, _ = chain.pose_and_jacobian(dict(zip(JOINTS, q)))
+    delta = final[:3, 3]-initial[:3, 3]
+    np.testing.assert_allclose(final[:3, :3], initial[:3, :3], atol=1e-10)
+    np.testing.assert_allclose(delta-direction*(direction @ delta), 0., atol=1e-4)
+    assert direction @ delta > .001

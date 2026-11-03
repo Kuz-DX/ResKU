@@ -115,18 +115,30 @@ def coordinated_velocity(jacobian, requested, damping, speed_limits):
 
 
 def vertical_pitch_velocity(chain, positions, speed, damping, speed_limits):
-    """Move vertically in root coordinates with zero horizontal/angular velocity.
+    """Move vertically in root coordinates with zero horizontal/angular velocity."""
+    return pitch_translation_velocity(chain, positions, [0., 0., speed], damping, speed_limits)
 
-    Use the constraint nullspace so damping and speed limiting cannot relax
-    the pitch constraint. At a singularity an unreachable request stops.
+
+def pitch_translation_velocity(chain, positions, requested, damping, speed_limits):
+    """Translate along a root-frame direction with zero angular velocity.
+
+    Constrain both orientation and sideways motion before damping/scaling.
+    An unreachable direction at a singularity produces zero velocity.
     """
+    requested = np.asarray(requested, dtype=float)
+    if requested.shape != (3,) or not np.isfinite(requested).all():
+        raise ValueError('expected finite root-frame translation velocity')
+    speed = float(np.linalg.norm(requested))
+    if speed < 1e-12:
+        return np.zeros(3)
+    direction = requested/speed
     _, linear, angular = chain.pose_and_jacobian(positions, include_angular=True)
-    constraints = np.vstack((linear[:2], angular))
+    constraints = np.vstack(((np.eye(3)-np.outer(direction, direction)) @ linear, angular))
     _, singular, vh = np.linalg.svd(constraints, full_matrices=True)
     rank = np.count_nonzero(singular > 1e-8)
     basis = vh[rank:].T
-    vertical = linear[2] @ basis
-    velocity = basis @ (vertical * speed / (vertical @ vertical + damping*damping))
+    translation = direction @ linear @ basis
+    velocity = basis @ (translation * speed / (translation @ translation + damping*damping))
     return velocity / max(1., float(np.max(np.abs(velocity) / speed_limits)))
 
 

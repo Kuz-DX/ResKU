@@ -15,9 +15,9 @@ from builtin_interfaces.msg import Duration
 from controller_manager_msgs.srv import ListControllers, SwitchController
 from rcl_interfaces.srv import GetParameters
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
-from std_msgs.msg import Float64MultiArray, String
+from std_msgs.msg import Bool, Float64MultiArray, String
 
-from manual_control_common import JOINTS, ManualController, bounded_step, vertical_pitch_velocity
+from manual_control_common import JOINTS, ManualController, bounded_step, vertical_pitch_velocity, pitch_translation_velocity
 from tool_ids import tool_label
 
 
@@ -52,7 +52,11 @@ class Manual(ManualController):
         'ee_velocity_axis': 6,
         'wrist_pitch_axis': 7,
         'vertical_axis': 1,
+        'pitch_hold_axis': 5,  # Linux PlayStation R2: released=+1, pressed=-1.
+        'r2_pitch_translation': False,  # Opted in by standalone manual.launch.py.
+        'docking_lock_buttons': False,  # Standalone X=lock, triangle=release; square retains HOME.
         'stop_pose_button': 3,  # Linux PlayStation square
+        'terminal_status_log': False,  # Enabled by manual.launch.py only.
         'startup_recovery_enabled': True,
         'startup_recovery_margin_rad': math.radians(2.),
         'startup_recovery_speed_rad_s': .03,
@@ -120,6 +124,9 @@ class Manual(ManualController):
         self.switch_client = self.create_client(SwitchController, '/controller_manager/switch_controller')
         self.parameter_client = self.create_client(GetParameters, '/manual_position_controller/get_parameters')
         self.diagnostics = self.create_publisher(String, '/manual/diagnostics', 10)
+        if self.params['docking_lock_buttons']:
+            self.docking_lock_publisher = self.create_publisher(Bool, '/arm/docking', 10)
+        self.previous_docking_buttons = (False, False)
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE,
                          durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.create_subscription(String, '/control/hardware_fault', self.on_hardware_fault, qos)
@@ -133,12 +140,14 @@ class Manual(ManualController):
         enabled = self.declare_parameter('docking_assist_enabled', True).value
         if enabled and self.local_tool_paths and not self.collision_guarded:
             from ament_index_python.packages import get_package_share_directory
-            from manual_docking import ManualDocking
             default_config = str(Path(get_package_share_directory(
                 'tool_manipulator_bringup'))/'config/manual_docking_assist.yaml')
-            self.docking = ManualDocking(self,
-                self.declare_parameter('docking_assist_config', default_config).value,
-                self.declare_parameter('docking_mock_input', False).value)
+            self.docking = self.create_docking(
+                self.declare_parameter('docking_assist_config', default_config).value)
+
+    def create_docking(self, config_file):
+        from manual_docking import ManualDocking
+        return ManualDocking(self, config_file)
 
     def now_seconds(self):
         # Watchdogs must continue to expire if ROS /clock stalls or jumps.
@@ -209,6 +218,8 @@ class Manual(ManualController):
 
     def on_joy(self, message):
         axes = ('forward_axis', 'wrist_yaw_axis', 'wrist_roll_axis', 'ee_velocity_axis', 'wrist_pitch_axis', 'vertical_axis')
+        if self.params.get('r2_pitch_translation', False) or self.params.get('docking_lock_buttons', False):
+            axes += ('pitch_hold_axis',)
         buttons = ('base_ccw_button', 'base_cw_button', 'ee_enable_button', 'focus_button', 'stop_pose_button')
         if (len(message.axes) <= max(self.params[n] for n in axes) or
                 len(message.buttons) <= max(self.params[n] for n in buttons) or
@@ -233,6 +244,9 @@ class Manual(ManualController):
         if self.path_points is not None and not l2:
             self.path_points = None
             self.neutral_required = True
+        if self.handle_docking_lock_buttons(message, l2):
+            self.previous_stop_pose = bool(message.buttons[3])
+            return
         if (getattr(self, 'docking', None) is not None and
                 self.docking.handle_joy(request, message, l2)):
             self.previous_stop_pose = bool(message.buttons[3])
@@ -283,6 +297,31 @@ class Manual(ManualController):
                 self.home_stage = 0
                 self.stop_pose_active = True
         self.previous_stop_pose = pressed
+
+    def handle_docking_lock_buttons(self, message, l2):
+        """Publish one desired latch state per standalone press, never on release.
+
+        Remember edges during modifier combinations so releasing L2 while X or
+        triangle is held cannot turn a tool request into a latch command.
+        """
+        if not self.params.get('docking_lock_buttons', False):
+            return False
+        current = (bool(message.buttons[0]), bool(message.buttons[2]))
+        previous = getattr(self, 'previous_docking_buttons', (False, False))
+        self.previous_docking_buttons = current
+        if l2:
+            return False  # Preserve L2+X tool2 and L2+triangle tool0 routing.
+        if not any(current):
+            return False
+        r2 = message.axes[self.params.get('pitch_hold_axis', 5)] < -.5
+        if self.focus == 'arm' and not r2 and sum(message.buttons) == 1:
+            for index, desired in ((0, True), (1, False)):
+                if current[index] and not previous[index]:
+                    self.docking_lock_publisher.publish(Bool(data=desired))
+                    self.get_logger().info(
+                        f'Docking {"LOCK" if desired else "RELEASE"} command: '
+                        f'/arm/docking={str(desired).lower()}')
+        return True
 
     def start_tool_path(self, path_id):
         if not self.local_tool_paths:
@@ -368,24 +407,41 @@ class Manual(ManualController):
         return (all(self.axis(n) == 0. for n in
                     ('forward_axis', 'wrist_roll_axis', 'wrist_yaw_axis', 'ee_velocity_axis',
                      'wrist_pitch_axis', 'vertical_axis')) and
-                not any(self.button(n) for n in ('base_ccw_button', 'base_cw_button', 'ee_enable_button', 'stop_pose_button')))
+                not any(self.button(n) for n in ('base_ccw_button', 'base_cw_button', 'ee_enable_button', 'stop_pose_button')) and
+                not self.pitch_hold_requested())
+
+    def pitch_hold_requested(self):
+        return (self.params.get('r2_pitch_translation', False) and
+                self.axis('pitch_hold_axis') < -.5)
 
     def command_velocity(self, measured):
         self.pitch_vertical_active = False
         if self.button('ee_enable_button'):
-            # O is an exclusive tool/pitch layer. Simultaneous pitch requests
-            # favor explicit wrist adjustment; release D-pad to translate.
+            # O retains EE/pitch priority, including simultaneous O+R2 input.
             velocity = np.zeros(6)
             pitch = self.axis('wrist_pitch_axis')
             vertical = self.axis('vertical_axis')
             if pitch:
                 velocity[3] = self.speeds[3]*pitch
-            elif vertical:
+            elif vertical and not self.params.get('r2_pitch_translation', False):
                 self.pitch_vertical_active = True
                 positions = dict(zip(JOINTS, self.target if self.target is not None else measured))
                 velocity[1:4] = vertical_pitch_velocity(
                     self.chain, positions, vertical*self.params['linear_speed_mps'],
                     self.params['damping'], self.speeds[1:4])
+            self.rmd_requested_velocity = velocity[1:4].copy()
+            return velocity
+        if self.pitch_hold_requested():
+            self.pitch_vertical_active = True  # Both translations share RMD limit/lead scaling.
+            positions = dict(zip(JOINTS, self.target if self.target is not None else measured))
+            forward = self.axis('forward_axis') * (-1 if self.params['invert_forward'] else 1)
+            vertical = self.axis('vertical_axis')
+            base = positions['base_joint']
+            requested = np.array([math.cos(base)*forward, math.sin(base)*forward, vertical])
+            requested *= self.params['linear_speed_mps']/max(1., float(np.linalg.norm(requested)))
+            velocity = np.zeros(6)
+            velocity[1:4] = pitch_translation_velocity(
+                self.chain, positions, requested, self.params['damping'], self.speeds[1:4])
             self.rmd_requested_velocity = velocity[1:4].copy()
             return velocity
         # Reuse the existing ResKU FK/DLS, direction and mapping only when the
@@ -696,6 +752,33 @@ class Manual(ManualController):
                     joy_axes=None if self.joy is None else list(self.joy.axes),
                     joy_buttons=None if self.joy is None else list(self.joy.buttons))
         self.diagnostics.publish(String(data=json.dumps(data, allow_nan=False)))
+        self.log_terminal_status(data)
+
+    def log_terminal_status(self, data):
+        """One-second console heartbeat; retain full-rate topic diagnostics."""
+        if not self.params.get('terminal_status_log', False):
+            return
+        now = data['monotonic_sec']
+        if now-getattr(self, '_last_terminal_status_time', -math.inf) < 1.:
+            return
+        self._last_terminal_status_time = now
+        joy_fresh = (self.joy_time is not None and
+                     0 <= now-self.joy_time <= self.params['joy_timeout_sec'])
+        measured = ', '.join('?' if q is None else f'{q:.3f}' for q in data['measured_rad'])
+        errors = [abs(e) for e in (data['error_rad'] or []) if e is not None]
+        error = '?' if not errors else f'{max(errors):.4f}'
+        message = (f"phase={data['phase']} focus={data['focus']} "
+                   f"ready={data['controller_ready']} joy={'fresh' if joy_fresh else 'stale'} "
+                   f"neutral_required={self.neutral_required} fault={data['fault']} "
+                   f"status={data['status']}; q_rad=[{measured}] max_error_rad={error}")
+        if data['activation_blockers']:
+            message += '; blocked=' + '; '.join(data['activation_blockers'])
+        docking = data['docking_assist']
+        if docking is not None:
+            message += (f"; docking={docking['state']} tool={docking['tool']} "
+                        f"ready={docking['ready']} reason={docking['reason']} "
+                        f"tag={docking['observation_reason']}")
+        self.get_logger().info(message)
 
     def on_timer(self):
         now = self.now_seconds()
@@ -756,6 +839,11 @@ class Manual(ManualController):
             self.run_tool_path(dt)
         elif self.path_l2_held:
             self.stop('L2 path selection', dt)
+            # L2 is a selector, not motion input. Allow L2-first combinations
+            # once ordinary controls are neutral and the hold has settled.
+            if self.neutral() and (self.stop_target is None or np.allclose(self.target, self.stop_target, atol=1e-9)):
+                self.neutral_required = False
+                self.stop_target = None
         elif self.neutral_required:
             self.stop('neutral controls required', dt)
             if self.neutral() and (self.stop_target is None or np.allclose(self.target, self.stop_target, atol=1e-9)):
@@ -784,7 +872,7 @@ class Manual(ManualController):
                     step-self.target[indexes], velocity[indexes]*dt, atol=1e-12, rtol=0.):
                 if JOINTS[index] not in self.rmd_limit_blocked_joints:
                     self.rmd_limit_blocked_joints.extend(JOINTS[indexes] if self.pitch_vertical_active else [JOINTS[index]])
-            # Vertical motion shares limits and lead budget across all RMDs
+            # Pitch-preserving translation shares limits/lead across all RMDs
             # to preserve pitch. Legacy bending retains per-joint gates.
             if np.max(np.abs(step-measured[indexes])) <= self.params['max_target_lead_rad']:
                 candidate[indexes] = step
