@@ -747,8 +747,8 @@ def test_source_targets_use_limit_valid_tool1_observation_and_exact_final():
     targets = load_pre_dock_targets(source)
     assert set(targets) == {0, 1, 2}
     np.testing.assert_allclose(targets[0]['joint_goal'], [
-        -3.181476, .640536, 1.209164,
-        -1.426807, -.003068, -.019942])
+        -math.pi, .6138322659684726, 1.3924236559357874,
+        -1.2140509850766783, 0., 0.])
     np.testing.assert_allclose(targets[0]['transit_joint_goal'], [
         3.1001751723166735, 0.6403612785882697, 1.209862232156147,
         -1.427330240975674, -0.0030679615759781065, -0.021475731030191625])

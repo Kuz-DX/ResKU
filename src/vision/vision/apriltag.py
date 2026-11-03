@@ -8,7 +8,7 @@ import numpy as np
 import rclpy
 
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import qos_profile_sensor_data, QoSProfile, ReliabilityPolicy, DurabilityPolicy
 
 from sensor_msgs.msg import CameraInfo, CompressedImage
 from std_msgs.msg import String
@@ -191,7 +191,8 @@ class AprilTagCompressedNode(Node):
             CompressedImage,
             self.input_topic,
             self.image_callback,
-            qos_profile_sensor_data
+            QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT,
+                       durability=DurabilityPolicy.VOLATILE)
         )
 
         self.camera_info_subscription = self.create_subscription(
@@ -212,7 +213,7 @@ class AprilTagCompressedNode(Node):
         self.center_pub = self.create_publisher(
             String,
             self.centers_topic,
-            10
+            1
         )
 
         self.get_logger().info(
@@ -736,6 +737,34 @@ class AprilTagCompressedNode(Node):
         )
 
         # ------------------------------------------------------------
+        # 중심좌표 JSON publish
+        # ------------------------------------------------------------
+        center_msg = String()
+
+        center_msg.data = json.dumps(
+            {
+                'stamp': {
+                    'sec': int(msg.header.stamp.sec),
+                    'nanosec': int(msg.header.stamp.nanosec)
+                },
+
+                'frame_id':
+                    msg.header.frame_id,
+
+                'detections':
+                    result_list
+            }
+        )
+
+        self.center_pub.publish(
+            center_msg
+        )
+
+        # Publish control data before optional preview JPEG encoding.
+        if self.image_pub.get_subscription_count() == 0:
+            return
+
+        # ------------------------------------------------------------
         # Visualization -> JPEG compressed
         # ------------------------------------------------------------
         success, encoded = cv2.imencode(
@@ -762,29 +791,6 @@ class AprilTagCompressedNode(Node):
                 output_msg
             )
 
-        # ------------------------------------------------------------
-        # 중심좌표 JSON publish
-        # ------------------------------------------------------------
-        center_msg = String()
-
-        center_msg.data = json.dumps(
-            {
-                'stamp': {
-                    'sec': int(msg.header.stamp.sec),
-                    'nanosec': int(msg.header.stamp.nanosec)
-                },
-
-                'frame_id':
-                    msg.header.frame_id,
-
-                'detections':
-                    result_list
-            }
-        )
-
-        self.center_pub.publish(
-            center_msg
-        )
 
 
 def main(args=None):
