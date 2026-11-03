@@ -19,7 +19,7 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from sensor_msgs.msg import Joy, JointState
-from std_msgs.msg import Bool, String
+from std_msgs.msg import Bool, Int32, String
 from std_srvs.srv import Trigger
 from moveit_msgs.msg import Constraints, JointConstraint, MotionPlanRequest, MoveItErrorCodes
 from moveit_msgs.srv import GetMotionPlan, GetStateValidity
@@ -556,6 +556,8 @@ class ToolTrajectoryJoy(Node):
         self.create_subscription(String, '/arm/control_status', self.on_status, qos)
         self.create_subscription(JointState, '/joint_states', self.on_state, 1)
         self.create_subscription(Joy, '/joy', self.on_joy, 1)
+        # Volatile command topic: never replay an old UI selection on startup.
+        self.create_subscription(Int32, '/selected_tool_id', self.on_selected_tool, 10)
         self.create_service(Trigger, '/arm/go_home', self.go_home_service)
         self.docking_command = self.create_publisher(Bool, '/arm/docking', 10)
         docking_qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
@@ -770,11 +772,38 @@ class ToolTrajectoryJoy(Node):
         return True, ''
 
     def on_ui_request(self, msg, path_id, desired_docked):
+        if desired_docked:
+            if msg.data:
+                self.on_selected_tool(Int32(data=path_id))
+            return
         key = (path_id, desired_docked)
         rising = bool(msg.data) and not self.ui_held[key]
         self.ui_held[key] = bool(msg.data)
         if rising:
             self.request_path(path_id, desired_docked, nearest_entry=True)
+
+    def on_selected_tool(self, msg):
+        """One UI command owns HOME -> BACK -> the selected tool sequence."""
+        if self.stage != 'idle':
+            self.report('ignored', 'UI tool request ignored while a sequence is active')
+            return
+        path_id = msg.data
+        if path_id not in TOOL_IDS or path_id not in self.paths:
+            self.report('blocked', f'UI tool id {path_id} is not execution-enabled')
+            return
+        target = self.pre_dock_targets.get(path_id, {})
+        if target.get('blocked_reason'):
+            self.report('blocked', target['blocked_reason'])
+            return
+        try:
+            self.healthy_hold(time.monotonic())
+            # Do not short-circuit on the shared Arduino latch state: it does
+            # not identify which tool is selected or where the arm is located.
+            self.pending_tool_request = (path_id, True, False)
+            self.report('staging', f'UI selected {tool_label(path_id)}; HOME -> BACK -> tool')
+            self.begin_back(force_home=True)
+        except (ValueError, RuntimeError) as exc:
+            self.begin_failed(str(exc))
 
     def request_path(self, request, desired_docked=None, nearest_entry=False):
         if self.stage != 'idle':
@@ -956,13 +985,13 @@ class ToolTrajectoryJoy(Node):
         selected = self.path_id if path_id is None else path_id
         return tool_label(selected)
 
-    def begin_back(self, via_home=True):
+    def begin_back(self, via_home=True, force_home=False):
         now = time.monotonic()
         status = self.healthy_hold(now)
         measured = np.asarray(
             [self.full_state[j] for j in ARM_JOINTS], dtype=float)
         error = float(np.max(np.abs(measured-self.route_poses['back'])))
-        if error <= self.back_tolerance:
+        if error <= self.back_tolerance and not force_home:
             self.back_ready = True
             self.back_ready_epoch = status.get('epoch')
             if getattr(self, 'return_home_after_back', False):

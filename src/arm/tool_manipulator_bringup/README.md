@@ -143,10 +143,21 @@ ros2 service call /arm/tool_docking/cancel std_srvs/srv/Trigger '{}'
 ros2 topic echo /arm/tool_trajectory/status
 ```
 
-UI의 `/arm/tool{0,1,2}_docking` 또는 `/arm/tool{0,1,2}_release`는 Bool 상승 에지로
-요청한다. 같은 요청을 다시 보내려면 먼저 false로 내려 재무장한다. UI 요청은 알려진
-체결 상태를 먼저 확인한다. `actuation_enabled: true`인 경로는 시작할 때부터
+UI는 실행 중인 `ik_manual.launch.py`에 `/selected_tool_id` (`std_msgs/msg/Int32`, 0/1/2)를
+한 번 발행한다. 준비된 arm focus/HOLD에서 HOME → BACK → 선택 tool 경로를 자동 실행한다.
+BACK에 있더라도 UI 요청은 HOME을 먼저 방문한다. 진행 중 추가 요청은 무시하고,
+fault·정렬 미완료 상태의 요청은 보류하지 않고 거절한다. 실패/취소 시 예약된 tool도 지운다.
+`/arm/tool{0,1,2}_docking`의 Bool `true`도 같은 요청이며 `false` 재무장은 필요 없다.
+명령은 클릭 시 한 번만 발행한다. 상태를 주기적으로 발행하면 완료 후 다시 실행될 수 있다.
+기존 `tool_change_fsm`과 동시에 실행하지 않는다(동일 UI 토픽을 구독함).
+`/arm/tool{0,1,2}_release`는 기존 Bool 상승 에지와 체결 상태 확인 방식을 유지한다.
+tool2는 현재 설정된 상단 접근/일반 도킹 분기를 실행하며 완성된 집기 시퀀스가 아니다.
+`actuation_enabled: true`인 경로는 시작할 때부터
 `/arm/docking` subscriber와 `/arm/docked` publisher가 있어야 한다.
+
+```bash
+ros2 topic pub --once /selected_tool_id std_msgs/msg/Int32 '{data: 0}'
+```
 
 ## 수동 구동
 
