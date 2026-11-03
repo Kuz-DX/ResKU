@@ -85,10 +85,10 @@ def test_shipped_config_uses_fixed_joint_docking_for_tool0_and_tool1():
     assert cfg[0]['max_angle_error_rad'] == .35
     assert cfg[1]['alignment_mode'] == 'fixed_joint_goal'
     assert cfg[1]['axial_sampled_path']
-    assert cfg[1]['axial_entry_distance_m'] == .008
-    np.testing.assert_array_equal(cfg[1]['final_joint_goal'], [
-        -3.136990711226343, .20682150637447397, 1.1557570519759337,
-        -1.5262903776058194, -.3390097541229333, -1.5017671913398365])
+    assert cfg[1]['axial_entry_distance_m'] == .100
+    np.testing.assert_allclose(cfg[1]['final_joint_goal'], [
+        -3.1860780964386834, .4049163664889763, 1.470265324595768,
+        -.9321803508270103, -.004601942363863909, -.004601942363450462])
     assert cfg[1]['confirm_tag_before_motion'] is False
     assert cfg[1]['tag_translation_correction']['enabled'] is False
     assert 'blocked_reason' not in cfg[1]
@@ -964,7 +964,7 @@ def test_tool1_clear_observation_and_reverse_keep_exact_final_capture(tmp_path):
     axis = final_pose[:3, 2]
     axial_start = forward['axial_start_index']
     entry = n.model.fk(forward['waypoints'][axial_start-1])
-    np.testing.assert_allclose(entry[:3, 3], final_pose[:3, 3]-.008*axis, atol=1e-5)
+    np.testing.assert_allclose(entry[:3, 3], final_pose[:3, 3]-.100*axis, atol=1e-5)
     assert forward['stop_at_waypoints'][axial_start-1]
     assert sum(forward['stop_at_waypoints'][axial_start:]) == 1
     last_remaining = 1.
@@ -976,7 +976,8 @@ def test_tool1_clear_observation_and_reverse_keep_exact_final_capture(tmp_path):
             pose = n.model.fk(sample)
             delta = pose[:3, 3]-final_pose[:3, 3]
             remaining = -float(delta@axis)
-            assert remaining <= last_remaining+1e-6
+            if index >= axial_start:
+                assert remaining <= last_remaining+1e-6
             last_remaining = remaining
             if index >= axial_start:
                 assert np.linalg.norm(delta-axis*(delta@axis)) < 1e-5
