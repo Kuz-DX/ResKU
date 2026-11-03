@@ -85,13 +85,13 @@ def test_shipped_config_uses_fixed_joint_docking_for_tool0_and_tool1():
     assert cfg[0]['max_angle_error_rad'] == .35
     assert cfg[1]['alignment_mode'] == 'fixed_joint_goal'
     assert cfg[1]['axial_sampled_path']
-    assert cfg[1]['axial_entry_distance_m'] == .100
+    assert cfg[1]['axial_entry_distance_m'] == .040
     np.testing.assert_allclose(cfg[1]['final_joint_goal'], [
-        -3.1860780964386834, .4049163664889763, 1.470265324595768,
-        -.9321803508270103, -.004601942363863909, -.004601942363450462])
+        -3.2505052895298805, .5297074013486681, 1.5561354918359558,
+        -1.3185961699868833, -.2300971181830529, -1.7855536370986798])
     assert cfg[1]['confirm_tag_before_motion'] is False
     assert cfg[1]['tag_translation_correction']['enabled'] is False
-    assert 'blocked_reason' not in cfg[1]
+    assert 'circuit_box/wrist_link_yaw' in cfg[1]['blocked_reason']
     assert 'limit_margin_rad' not in cfg[1]
     assert cfg[1]['final_entry_ignored_collision_links'] == ['tool_case_y_plus']
     assert 'advance_distance_m' not in cfg[1]
@@ -879,6 +879,7 @@ def camera_node(tmp_path):
 def tool1_confirmation_node(tmp_path, confirm=True):
     n = node(tmp_path)
     n.cfg = load_settings(ROOT/'config/tool_docking.yaml')[1]
+    n.cfg.pop('blocked_reason', None)  # Inspect candidate geometry/optional tag behavior only.
     if confirm:
         n.cfg['confirm_tag_before_motion'] = True
     n.path_id = 1
@@ -942,6 +943,7 @@ def test_tool1_clear_observation_and_reverse_keep_exact_final_capture(tmp_path):
     from tool_trajectory_joy import ArmKinematics
     n = node(tmp_path)
     n.cfg = load_settings(ROOT/'config/tool_docking.yaml')[1]
+    n.cfg.pop('blocked_reason', None)  # Inspect candidate geometry/optional tag behavior only.
     from tool_trajectory_joy import load_pre_dock_targets
     n.path_id = 1
     n.model = ArmKinematics(
@@ -964,7 +966,7 @@ def test_tool1_clear_observation_and_reverse_keep_exact_final_capture(tmp_path):
     axis = final_pose[:3, 2]
     axial_start = forward['axial_start_index']
     entry = n.model.fk(forward['waypoints'][axial_start-1])
-    np.testing.assert_allclose(entry[:3, 3], final_pose[:3, 3]-.100*axis, atol=1e-5)
+    np.testing.assert_allclose(entry[:3, 3], final_pose[:3, 3]-.040*axis, atol=1e-5)
     assert forward['stop_at_waypoints'][axial_start-1]
     assert sum(forward['stop_at_waypoints'][axial_start:]) == 1
     last_remaining = 1.

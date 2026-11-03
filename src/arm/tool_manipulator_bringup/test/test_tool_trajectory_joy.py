@@ -752,7 +752,7 @@ def test_source_targets_use_limit_valid_tool1_observation_and_exact_final():
     np.testing.assert_allclose(targets[0]['transit_joint_goal'], [
         3.1001751723166735, 0.6403612785882697, 1.209862232156147,
         -1.427330240975674, -0.0030679615759781065, -0.021475731030191625])
-    assert 'blocked_reason' not in targets[1]
+    assert 'circuit_box/wrist_link_yaw' in targets[1]['blocked_reason']
     assert targets[1]['retreat_mode'] == 'reverse_docking_path'
     np.testing.assert_allclose(targets[2]['joint_goal'], [
         -2.13180646665643, .8056224119758513, 1.2458380150140123,

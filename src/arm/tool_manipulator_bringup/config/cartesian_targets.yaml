@@ -41,12 +41,13 @@ targets:
     # Latest outer retreat capture, IK-adjusted 1 mm along its TCP axis for pitch margin.
     joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
     executable: true
+    blocked_reason: New measured tool1 final has circuit_box/wrist_link_yaw contact in mesh validation; review fixture geometry/contact before enabling
     role: reviewed_outer_approach
     pre_joint_goal_rad: [-3.2286119054446, 0.923426383865938, 1.2997378743085, -1.55712730391413, -0.3937272632493, -1.46504858436652]
     retreat_mode: reverse_docking_path
-    retreat_distance_m: 0.100
+    retreat_distance_m: 0.040
     retreat_axis_tcp: [0.0, 0.0, -1.0]
-    final_joint_goal_rad: [-3.18607809643868, 0.404916366488976, 1.47026532459577, -0.93218035082701, -0.00460194236386391, -0.00460194236345046]
+    final_joint_goal_rad: [-3.2505052895298805, 0.5297074013486681, 1.5561354918359558, -1.3185961699868833, -0.2300971181830529, -1.7855536370986798]
   tool2:
     joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
     # Imported from config/test/tool2_trajectory.yaml point 16. This is the

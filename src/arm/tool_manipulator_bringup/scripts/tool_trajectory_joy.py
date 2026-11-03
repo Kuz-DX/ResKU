@@ -83,6 +83,13 @@ def load_pre_dock_targets(path):
             raise ValueError(f'{path}: {key} has invalid Cartesian retreat settings')
         retreat_axis /= axis_norm
         retreat = dict(retreat_distance=retreat_distance, retreat_axis=retreat_axis)
+        # Retain candidate geometry for diagnostics, but never discard an
+        # explicit execution blocker merely because executable is true.
+        if 'blocked_reason' in value:
+            reason = value['blocked_reason']
+            if not isinstance(reason, str) or not reason.strip():
+                raise ValueError(f'{path}: {key} blocked_reason must be nonempty text')
+            retreat['blocked_reason'] = reason.strip()
         if 'retreat_mode' in value:
             mode = value['retreat_mode']
             if mode not in ('current_tcp_axis', 'reverse_docking_path'):
