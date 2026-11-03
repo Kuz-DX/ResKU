@@ -730,8 +730,6 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             allowed_collision_pairs=(frozenset((('tool_case_1', 'wrist_link_yaw'),))
                                      if self.path_id == 0 else frozenset()))
         ignored_links = self.cfg.get('final_entry_ignored_collision_links', [])
-        if self.path_id == 1:
-            self.advance_plan['terminal_contact_joint_goal'] = goal.copy()
         if ignored_links:
             self.advance_plan.update(final_docking_entry=True,
                                      final_entry_ignored_collision_links=frozenset(ignored_links))

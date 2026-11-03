@@ -38,15 +38,15 @@ targets:
     retreat_distance_m: 0.050
     retreat_axis_tcp: [0.0, 0.0, -1.0]
   tool1:
-    # Latest outer retreat capture, IK-adjusted 1 mm along its TCP axis for pitch margin.
+    # Collision-clear gate: third capture TCP back 20 mm, orientation Y +5 deg.
     joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
     executable: true
     role: reviewed_outer_approach
-    pre_joint_goal_rad: [-3.2286119054446, 0.923426383865938, 1.2997378743085, -1.55712730391413, -0.3937272632493, -1.46504858436652]
+    pre_joint_goal_rad: [-3.0702833370085, 0.636441176360294, 1.4342207697460803, -1.4779307342778893, -0.3987831548880232, -1.8580169468095087]
     retreat_mode: reverse_docking_path
-    retreat_distance_m: 0.040
+    retreat_distance_m: 0.014
     retreat_axis_tcp: [0.0, 0.0, -1.0]
-    final_joint_goal_rad: [-3.2505052895298805, 0.5297074013486681, 1.5561354918359558, -1.3185961699868833, -0.2300971181830529, -1.7855536370986798]
+    final_joint_goal_rad: [-3.14159265359, 0.418529946638757, 1.347219559066946, -1.4784683933854301, -0.3451456772744761, -1.8039614065533076]
   tool2:
     joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
     # Imported from config/test/tool2_trajectory.yaml point 16. This is the

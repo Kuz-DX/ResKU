@@ -1314,18 +1314,19 @@ def test_missing_executed_approach_blocks_reverse_retreat():
     n.begin.assert_not_called()
 
 
-def test_tool1_outer_capture_preserves_orientation_with_one_mm_limit_adjustment():
+def test_tool1_clear_gate_is_20mm_behind_third_capture():
     from tool_trajectory_joy import ArmKinematics
     model = ArmKinematics(
         SCRIPTS.parent.parent/'tool_manipulator_description/urdf/tool_manipulator.urdf.xacro',
-        SCRIPTS.parent/'config/hardware.yaml', base_link='arm_world')
+        SCRIPTS.parent/'config/hardware.yaml')
     targets = load_pre_dock_targets(SCRIPTS.parent/'config/cartesian_targets.yaml')
-    old = np.array([-3.129320807286915, .9155997096172588, 1.2854350207254346,
-                    -1.5805701279954874, -.4862719097599548, -1.5048351529156072])
-    prior, current = model.fk(old), model.fk(targets[1]['joint_goal'])
-    np.testing.assert_allclose(current[:3, 3], prior[:3, 3]+.001*prior[:3, 2], atol=1e-5)
-    np.testing.assert_allclose(current[:3, :3], prior[:3, :3], atol=1e-4)
-    assert model.within_limits(targets[1]['joint_goal'], .025)
+    third = [-3.1400586728021147, .5295328977182406, 1.3966124088563185,
+             -1.4784683933854301, -.3451456772744761, -1.81009732970485]
+    prior, current = model.fk(third), model.fk(targets[1]['joint_goal'])
+    np.testing.assert_allclose(current[:3, 3], prior[:3, 3]-.020*prior[:3, 2], atol=1e-5)
+    angle = math.acos(np.clip((np.trace(current[:3, :3]@prior[:3, :3].T)-1)/2, -1, 1))
+    assert angle == pytest.approx(math.radians(5), abs=1e-4)
+    assert model.within_limits(targets[1]['joint_goal'], .02)
 
 
 def test_circuit_box_contact_is_only_allowed_at_tool1_terminal_samples():
