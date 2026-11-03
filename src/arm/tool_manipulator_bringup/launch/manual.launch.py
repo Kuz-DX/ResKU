@@ -74,8 +74,8 @@ def _bringup(context):
     jsb = base.spawner('joint_state_broadcaster')
     ee = base.spawner('ee_velocity_controller')
     manual_spawner = base.spawner('manual_position_controller', inactive=True)
-    # Temporary manual-only bypass: keep manual_collision.py available, but do
-    # not start its collision gate or the MoveIt state-validity scene.
+    # Manual jogging retains its existing behavior. Requested automatic angular
+    # alignment validates its complete path with the existing MoveIt scene service.
     manual = Node(package='tool_manipulator_bringup', executable='manual.py',
                   parameters=[description, {'hardware_config': hardware, 'servo_mode': False,
                       'invert_forward': False,  # Reverse standalone manual right-stick RMD motion.
@@ -93,7 +93,11 @@ def _bringup(context):
     joy_log = JoystickConnectionLog()
     joy_events = RegisterEventHandler(OnProcessIO(
         target_action=joy, on_stdout=joy_log.stdout, on_stderr=joy_log.stderr))
-    ready = [manual]
+    scene = Node(package='moveit_ros_move_group', executable='move_group',
+                 parameters=[base.moveit_config.to_dict(), common.alignment_collision_description(description),
+                             {'allow_trajectory_execution': False,
+                              'publish_robot_description_semantic': True}], output='screen')
+    ready = [scene, manual]
     if LaunchConfiguration('launch_joy').perform(context) == 'true':
         ready.append(joy)
     if LaunchConfiguration('launch_rviz').perform(context) == 'true':
@@ -106,7 +110,7 @@ def _bringup(context):
             # Joystick is optional: its absence or driver restart must never
             # shut down the hardware/controller processes or startup recovery.
             joy_events,
-            LogInfo(msg='Servo-free manual control: collision checking temporarily disabled.'),
+            LogInfo(msg='Manual jogging: collision checking disabled; requested angular alignment: path checked, gripper fingers excluded.'),
             state, control, jsb]
 
 

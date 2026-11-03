@@ -25,7 +25,8 @@ def settings(tmp_path):
     raw = data['tools'][0]
     raw.update(enabled=True, require_l2_hold=True,
                alignment_mode='tag_tcp_stages', tag_id=7,
-               tag_size_m=.04, actuation_enabled=False, actuation_timeout_s=5.)
+               tag_size_m=.04, actuation_enabled=False, actuation_timeout_s=5.,
+               actuation_completion='feedback')
     for stage in raw['stages']:
         stage.update(xyz_m=[0., 0., 0.], xyzw=[0., 0., 0., 1.])
     path = tmp_path/'docking.yaml'
@@ -66,7 +67,7 @@ def sample(n):
     ToolDockingCoordinator.observe(n, 1.)
 
 
-def test_shipped_config_enables_tool0_and_tool1_camera_normal_docking():
+def test_shipped_config_uses_fixed_joint_docking_for_tool0_and_tool1():
     cfg = load_settings(ROOT/'config/tool_docking.yaml')
     assert set(cfg) == {0, 1}
     assert cfg[0]['alignment_mode'] == 'fixed_joint_goal'
@@ -82,18 +83,27 @@ def test_shipped_config_enables_tool0_and_tool1_camera_normal_docking():
     assert cfg[0]['measured_pre_dock_alignment_enabled'] is False
     assert cfg[0]['max_position_error_m'] == .25
     assert cfg[0]['max_angle_error_rad'] == .35
-    assert cfg[1]['alignment_mode'] == 'camera_normal_advance'
-    assert cfg[1]['advance_distance_m'] == .030
-    assert cfg[1]['measured_final_dock_joint_rad'] == pytest.approx([
-        2.779573, .693943, 1.590693, -1.389980, -.085903, -1.805495])
-    assert cfg[1]['measured_final_dock_executable'] is False
+    assert cfg[1]['alignment_mode'] == 'fixed_joint_goal'
+    assert not cfg[1]['axial_sampled_path']
+    np.testing.assert_array_equal(cfg[1]['final_joint_goal'], [
+        -3.136990711226343, .20682150637447397, 1.1557570519759337,
+        -1.5262903776058194, -.3390097541229333, -1.5017671913398365])
+    assert cfg[1]['confirm_tag_before_motion'] is True
+    assert cfg[1]['tag_translation_correction']['enabled'] is False
+    assert 'pending' in cfg[1]['blocked_reason']
+    assert 'limit_margin_rad' not in cfg[1]
+    assert cfg[1]['final_entry_ignored_collision_links'] == ['tool_case_y_plus']
+    assert 'advance_distance_m' not in cfg[1]
     assert cfg[1]['tag_family'] == 'tag36h11'
     assert cfg[1]['tag_id'] == 1
     assert cfg[1]['actuation_enabled']
     assert cfg[1]['desired_docked'] is True
     assert cfg[1]['require_l2_hold'] is False
-    assert cfg[1]['maintain_entry_orientation'] is True
-    assert cfg[1]['max_angle_error_rad'] == .25
+    for tool_id in (0, 1):
+        assert cfg[tool_id]['actuation_completion'] == 'delay'
+        assert cfg[tool_id]['actuation_delay_s'] == 3.
+        assert cfg[tool_id]['return_home_after_back'] is True
+    assert cfg[1]['max_angle_error_rad'] == .35
     assert 'targets' not in cfg[1]
 
 
@@ -588,11 +598,12 @@ def test_fixed_joint_tail_ends_at_measured_docking_pose(tmp_path):
 
 
 @pytest.mark.parametrize('joint_error,accepted', [(.004, True), (.006, False)])
+@pytest.mark.parametrize('path_id', [0, 1])
 def test_fixed_joint_completion_uses_measured_joint_tolerance(
-        tmp_path, joint_error, accepted):
+        tmp_path, joint_error, accepted, path_id):
     n = node(tmp_path)
-    n.cfg = load_settings(ROOT/'config/tool_docking.yaml')[0]
-    n.path_id = 0
+    n.cfg = load_settings(ROOT/'config/tool_docking.yaml')[path_id]
+    n.path_id = path_id
     n.status = {'epoch': 'final-hold'}
     goal = n.cfg['final_joint_goal'].copy()
     measured = goal.copy()
@@ -621,9 +632,11 @@ def test_fixed_joint_completion_uses_measured_joint_tolerance(
 
 
 @pytest.mark.parametrize('acknowledged', [False, True])
-def test_tool0_three_second_delay_then_retreat_without_ee(tmp_path, acknowledged):
+@pytest.mark.parametrize('path_id', [0, 1])
+def test_fixed_joint_three_second_delay_then_retreat_without_ee(tmp_path, acknowledged, path_id):
     n = node(tmp_path)
-    n.cfg = load_settings(ROOT/'config/tool_docking.yaml')[0]
+    n.path_id = path_id
+    n.cfg = load_settings(ROOT/'config/tool_docking.yaml')[path_id]
     n.guard = Mock()
     n.lock_goal = np.zeros(6)
     n.stage = 'dock_attach_wait'
@@ -638,12 +651,12 @@ def test_tool0_three_second_delay_then_retreat_without_ee(tmp_path, acknowledged
     n.full_state[ARM_JOINTS[0]] = .5
     n.velocity[0] = .1
     for now in (100., 101., 102.999):
-        n.tick_tool0_finish(now)
+        n.tick_timed_finish(now)
         n.begin_docking_retreat.assert_not_called()
     n.velocity[0] = 0.
-    n.tick_tool0_finish(103.)
+    n.tick_timed_finish(103.)
     n.begin_docking_retreat.assert_called_once()
-    assert n.tool0_retreat_authorized
+    assert n.docking_retreat_authorized
     assert not n.active
     n.docking_command.publish.assert_not_called()  # no second/false pulse
     n.publisher.publish.assert_not_called()  # no EE command
@@ -665,7 +678,7 @@ def test_tool0_delay_does_not_bypass_arm_guards(tmp_path, failure):
     else:
         n.guard.side_effect = RuntimeError('ownership changed')
     with pytest.raises(RuntimeError) as failure_info:
-        n.tick_tool0_finish(3.)
+        n.tick_timed_finish(3.)
     if failure == 'speed':
         assert 'base_joint speed=0.100000rad/s' in str(failure_info.value)
     n.begin_docking_retreat.assert_not_called()
@@ -680,14 +693,16 @@ def test_tool0_arduino_failure_prevents_retreat(tmp_path, status):
     n.docking_status = status
     n.mode = Mock()
     with pytest.raises(RuntimeError, match='Arduino unavailable'):
-        n.tick_tool0_finish(1.)
+        n.tick_timed_finish(1.)
     n.mode.call_async.assert_not_called()
     n.begin_docking_retreat.assert_not_called()
 
 
-def test_tool0_disabled_final_motion_stays_in_hold(tmp_path):
+@pytest.mark.parametrize('path_id', [0, 1])
+def test_fixed_joint_disabled_final_motion_stays_in_hold(tmp_path, path_id):
     n = node(tmp_path)
-    n.cfg = load_settings(ROOT/'config/tool_docking.yaml')[0]
+    n.path_id = path_id
+    n.cfg = load_settings(ROOT/'config/tool_docking.yaml')[path_id]
     n.docking_started = None
     n.motion_enabled = False
     n.advance_locked = False
@@ -841,7 +856,9 @@ def test_launch_selects_exactly_one_path_input_owner(enabled, motion, place_test
 
 def camera_node(tmp_path):
     n = node(tmp_path)
-    n.cfg = load_settings(ROOT/'config/tool_docking.yaml')[1]
+    # Preserve coverage of the optional legacy camera-normal implementation.
+    n.cfg = load_settings(ROOT/'config/test/tool_docking.yaml')[1]
+    n.cfg['advance_distance_m'] = .030
     # Fixed-advance unit tests isolate the legacy line planner. Separate tests
     # below cover the measured pre-dock correction added in front of it.
     n.cfg['measured_pre_dock_alignment_enabled'] = False
@@ -856,6 +873,169 @@ def camera_node(tmp_path):
     n.shoulder_isolation_speed = .015
     n.observation = (1, 0., transform([0, 0, .2], [0, 0, 0, 1]))
     return n
+
+
+def tool1_confirmation_node(tmp_path):
+    n = node(tmp_path)
+    n.cfg = load_settings(ROOT/'config/tool_docking.yaml')[1]
+    n.path_id = 1
+    n.advance_locked = False
+    n.docking_started = None
+    n.status = {'epoch': 'observation-hold'}
+    n.start_final_joint_goal = Mock()
+    n.reset_tag_acquisition = Mock()
+    n.path_completed()
+    assert n.stage == 'dock_tag_confirm'
+    assert n.execution_id is None
+    return n
+
+
+def test_tool1_waits_for_distinct_stopped_tag_feedback_then_checks_joint_path(tmp_path):
+    n = tool1_confirmation_node(tmp_path)
+    n.observe_after_ns = 10
+    n.observation = None
+    n.tick_tag_confirmation(n.docking_started)
+    n.start_final_joint_goal.assert_not_called()
+    for index in range(8):
+        n.observation = (11+index, 0., np.eye(4))
+        n.feedback_sequence += 1
+        n.tick_tag_confirmation(n.docking_started)
+        for _ in range(5):
+            n.tick_tag_confirmation(n.docking_started)
+        assert n.start_final_joint_goal.call_count == int(index == 7)
+    n.start_final_joint_goal.assert_called_once()
+    n.begin.assert_not_called()
+    n.docking_command.publish.assert_not_called()
+    assert n.hold_epoch == 'observation-hold'
+
+
+def test_tool1_tag_confirmation_resets_on_motion_or_stale_feedback_and_times_out(tmp_path):
+    n = tool1_confirmation_node(tmp_path)
+    n.observe_after_ns = 0
+    n.stable = 4
+    n.observation = (1, 0., np.eye(4))
+    n.velocity[0] = .02
+    n.tick_tag_confirmation(n.docking_started)
+    assert n.stable == 0
+    n.velocity[:] = 0.
+    n.stable = 4
+    n.fresh_observation = Mock(side_effect=RuntimeError('stale'))
+    n.tick_tag_confirmation(n.docking_started)
+    assert n.stable == 0 and n.observation is None
+    with pytest.raises(RuntimeError, match='tag confirmation timed out'):
+        n.tick_tag_confirmation(n.docking_started+11.)
+    n.start_final_joint_goal.assert_not_called()
+
+
+def test_tool1_measured_joint_path_and_reverse_keep_both_exact_captures(tmp_path):
+    from tool_trajectory_joy import ArmKinematics
+    n = node(tmp_path)
+    n.cfg = load_settings(ROOT/'config/tool_docking.yaml')[1]
+    # Exercise the isolated sampler with the historical capture; production
+    # remains blocked until the operator supplies its replacement observation.
+    n.cfg.pop('blocked_reason')
+    n.cfg['limit_margin_rad'] = .01
+    n.path_id = 1
+    n.model = ArmKinematics(
+        ROOT.parent/'tool_manipulator_description/urdf/tool_manipulator.urdf.xacro',
+        ROOT/'config/hardware.yaml')
+    observation = np.array([-3.1446606151657712, .43528509147893596, 1.1995647203271922,
+                            -1.5854570285957827, -.33747577333504797, -1.4066603824909265])
+    n.start_final_joint_goal(observation)
+    forward = n.advance_plan
+    assert not forward['cartesian_line']
+    assert forward['preserve_joint_path']
+    assert not forward['allowed_collision_pairs']
+    assert forward['final_docking_entry']
+    assert forward['final_entry_ignored_collision_links'] == frozenset({'tool_case_y_plus'})
+    np.testing.assert_array_equal(forward['waypoints'][-1], n.cfg['final_joint_goal'])
+    previous = observation
+    for goal, duration in zip(forward['waypoints'], forward['durations']):
+        assert n.model.within_limits(goal, .01)
+        assert np.max(np.abs(goal-previous)) <= n.cfg['joint_step_rad']
+        assert np.max(np.abs(goal-previous))/duration <= n.cfg['joint_speed_rad_s']+1e-12
+        travel = np.linalg.norm(n.model.fk(goal)[:3, 3]-n.model.fk(previous)[:3, 3])
+        assert travel/duration <= n.cfg['linear_speed_m_s']+1e-12
+        previous = goal
+    assert pose_errors(n.model.fk(observation), n.advance_target)[1] > .1
+    live = n.cfg['final_joint_goal'].copy()
+    live[0] += .001
+    n.full_state = dict(zip(ARM_JOINTS, live))
+    n.begin.reset_mock()
+    ToolTrajectoryJoy.begin_reverse_docking_retreat(n)
+    reverse = n.begin.call_args.args[1]
+    np.testing.assert_array_equal(reverse['start'], live)
+    np.testing.assert_array_equal(reverse['waypoints'][-1], observation)
+    np.testing.assert_allclose(reverse['waypoints'],
+                               list(reversed([observation, *forward['waypoints'][:-1]])))
+    assert reverse['preserve_joint_path']
+    assert not reverse['allowed_collision_pairs']
+    assert 'final_entry_ignored_collision_links' not in reverse
+    assert 'final_docking_entry' not in reverse
+    assert n.return_home_after_back
+
+
+def test_tool1_reverse_completion_plans_back_then_home_without_extra_retreat(tmp_path):
+    from tool_trajectory_joy import load_pre_dock_targets, load_route_poses
+    n = node(tmp_path)
+    n.path_id = 1
+    n.route_kind = 'dock_retreat'
+    n.pre_dock_targets = load_pre_dock_targets(ROOT/'config/cartesian_targets.yaml')
+    n.begin_back = Mock()
+    n.begin_return_waypoint = Mock()
+    ToolTrajectoryJoy.path_completed(n)
+    n.begin_back.assert_called_once_with(via_home=False)
+    n.begin_return_waypoint.assert_not_called()
+    n.route_kind = 'back'
+    n.route_poses = load_route_poses(
+        (ROOT.parent/'tool_manipulator_moveit_config/config/tool_manipulator.srdf').read_text())
+    n.full_state = dict(zip(ARM_JOINTS, n.route_poses['back']))
+    n.status = {'epoch': 'back-hold'}
+    n.back_tolerance = .03
+    n.return_home_after_back = True
+    n.begin_named_route = Mock()
+    ToolTrajectoryJoy.path_completed(n)
+    n.begin_named_route.assert_called_once_with('home')
+
+
+@pytest.mark.parametrize('field,value', [
+    ('confirm_tag_before_motion', 'true'), ('return_home_after_back', 1),
+    ('actuation_completion', 'unknown'), ('actuation_delay_s', 0.),
+    ('actuation_delay_s', float('nan')), ('actuation_delay_s', True)])
+def test_fixed_joint_completion_policy_rejects_invalid_values(tmp_path, field, value):
+    data = yaml.safe_load((ROOT/'config/tool_docking.yaml').read_text())
+    data['tools'][1][field] = value
+    file = tmp_path/'invalid_policy.yaml'
+    file.write_text(yaml.safe_dump(data))
+    with pytest.raises(ValueError, match=field):
+        load_settings(file)
+
+
+@pytest.mark.parametrize('links', [['circuit_box'], ['tool_case_1'],
+                                  ['tool_case_y_plus', 'cam_link'], 'tool_case_y_plus'])
+def test_tool1_final_entry_exception_cannot_expand_to_other_links(tmp_path, links):
+    data = yaml.safe_load((ROOT/'config/tool_docking.yaml').read_text())
+    data['tools'][1]['final_entry_ignored_collision_links'] = links
+    file = tmp_path/'invalid_fixture_exception.yaml'
+    file.write_text(yaml.safe_dump(data))
+    with pytest.raises(ValueError, match='final_entry_ignored_collision_links'):
+        load_settings(file)
+
+
+@pytest.mark.parametrize('margin', [0., .009, .101, True, float('nan')])
+def test_tool_margin_cannot_remove_soft_limit_clearance(tmp_path, margin):
+    from tool_trajectory_joy import load_pre_dock_targets
+    data = yaml.safe_load((ROOT/'config/tool_docking.yaml').read_text())
+    data['tools'][1]['limit_margin_rad'] = margin
+    file = tmp_path/'margin.yaml'
+    file.write_text(yaml.safe_dump(data))
+    with pytest.raises(ValueError, match='limit_margin_rad'):
+        load_settings(file)
+    targets = yaml.safe_load((ROOT/'config/cartesian_targets.yaml').read_text())
+    targets['targets']['tool0']['limit_margin_rad'] = margin
+    file.write_text(yaml.safe_dump(targets))
+    with pytest.raises(ValueError, match='limit_margin_rad'):
+        load_pre_dock_targets(file)
 
 
 def camera_sample(n):
@@ -1444,6 +1624,10 @@ def test_cartesian_advance_keeps_line_and_still_builds_collision_requests(tmp_pa
 @pytest.mark.parametrize('distance', [None, 0., -.030, float('nan'), .11])
 def test_invalid_fixed_advance_distance_is_rejected(tmp_path, distance):
     data = yaml.safe_load((ROOT/'config/tool_docking.yaml').read_text())
+    data['tools'][1]['alignment_mode'] = 'camera_normal_advance'
+    data['tools'][1]['actuation_completion'] = 'feedback'
+    data['tools'][1]['confirm_tag_before_motion'] = False
+    data['tools'][1].pop('final_entry_ignored_collision_links', None)
     data['tools'][1]['advance_distance_m'] = distance
     file = tmp_path/'bad_advance.yaml'
     file.write_text(yaml.safe_dump(data))

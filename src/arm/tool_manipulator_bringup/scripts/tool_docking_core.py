@@ -186,6 +186,30 @@ def load_settings(filename):
         if ('measured_pre_dock_alignment_enabled' in item
                 and type(item['measured_pre_dock_alignment_enabled']) is not bool):
             raise ValueError('measured_pre_dock_alignment_enabled must be a boolean')
+        if type(item.get('confirm_tag_before_motion', False)) is not bool:
+            raise ValueError('confirm_tag_before_motion must be a boolean')
+        if item.get('confirm_tag_before_motion', False) and mode != 'fixed_joint_goal':
+            raise ValueError('confirm_tag_before_motion requires fixed_joint_goal mode')
+        if type(item.get('return_home_after_back', False)) is not bool:
+            raise ValueError('return_home_after_back must be a boolean')
+        completion = item.get('actuation_completion', 'feedback')
+        if completion not in ('feedback', 'delay'):
+            raise ValueError('actuation_completion must be feedback or delay')
+        if completion == 'delay':
+            delay = item.get('actuation_delay_s')
+            if (mode != 'fixed_joint_goal' or type(delay) not in (int, float)
+                    or not math.isfinite(delay) or not 0 < delay <= 120.):
+                raise ValueError('fixed joint actuation requires actuation_delay_s in (0, 120]')
+        if 'limit_margin_rad' in item:
+            margin = item['limit_margin_rad']
+            if (type(margin) not in (int, float) or not math.isfinite(margin)
+                    or not .01 <= margin <= .1):
+                raise ValueError('limit_margin_rad must be in [0.01, 0.1]')
+        ignored = item.get('final_entry_ignored_collision_links', [])
+        if (not isinstance(ignored, list)
+                or (ignored and (tool_id != 1 or mode != 'fixed_joint_goal'
+                                 or ignored != ['tool_case_y_plus']))):
+            raise ValueError('final_entry_ignored_collision_links permits only tool1/tool_case_y_plus')
         if 'tag_family' in item and (not isinstance(item['tag_family'], str)
                                      or not item['tag_family'].strip()):
             raise ValueError('tag_family must be a nonempty string')

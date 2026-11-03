@@ -37,29 +37,13 @@ targets:
     retreat_distance_m: 0.050
     retreat_axis_tcp: [0.0, 0.0, -1.0]
   tool1:
-    joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
-    # Reviewed production approach endpoint. The test point-17 endpoint is
-    # geometrically labelled as the centred 80 mm observation pose, but its
-    # wrist_pitch is only 0.0005 rad inside the 0.02-rad planning boundary.
-    # Keep the safer recorded endpoint as the executable pre-dock instead.
-    pre_joint_goal_rad: [3.2888548092266077, 0.4934045542387666, 1.4027210346066878,
-      -1.5432200926554531, -0.4801359866084125, -1.9527575429782145]
-    pre_capture_label: production_tool1_trajectory_endpoint
-    # Retained for diagnosis only: elbow=1.581792 exceeds the 1.577952 hard
-    # soft-limit endpoint and the 1.557952 planning-margin endpoint.
-    joint_goal_rad: [2.853204265467086, 0.6768386626181123, 1.5817918531455613,
-      -1.418254454296793, -0.09357282806123068, -1.661301193279943]
-    reference_frame_id: arm_world
-    # Measured docking-circle centre and final tcp_link target.  This is not
-    # the STL export origin or the mesh-placement reference.
-    reference_object_position_m: [-0.317806, 0.090, 0.163912]
-    surface_plane_tilt_from_world_xy_deg: 55.0
-    approach_z_tilt_from_world_xy_deg: -35.0
-    orientation_xyzw: [0.0, 0.8870108331782217, 0.0, 0.4617486132350339]
-    executable: true
-    role: reviewed_collision_free_pre_dock
-    retreat_distance_m: 0.030
-    retreat_axis_tcp: [0.0, 0.0, -1.0]
+    # Final docking capture confirmed by the operator. A replacement observation
+    # will be supplied later; do not execute the previous observation/route.
+    executable: false
+    blocked_reason: tool1 observation pose is pending; rebuild the complete path after the new capture
+    role: final_capture_confirmed_observation_pending
+    final_joint_goal_rad: [-3.136990711226343, 0.20682150637447397, 1.1557570519759337,
+      -1.5262903776058194, -0.3390097541229333, -1.5017671913398365]
   tool2:
     joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
     # Imported from config/test/tool2_trajectory.yaml point 16. This is the

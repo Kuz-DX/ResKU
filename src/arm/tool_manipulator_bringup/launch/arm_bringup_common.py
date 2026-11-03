@@ -53,6 +53,23 @@ def _mock_velocity_ee(description: dict, calculate_dynamics=False) -> dict:
     return result
 
 
+def alignment_collision_description(description):
+    """User-requested finger exclusion, only in the angular-alignment scene.
+
+    Keep the hardware/state-publisher URDF and all visuals unchanged. Removing
+    these two collision geometries also excludes their contacts with world objects,
+    without accepting unrelated collisions from a truncated service contact list.
+    """
+    result = dict(description)
+    root = ET.fromstring(result['robot_description'])
+    for link in root.findall('link'):
+        if link.get('name') in ('rack_left', 'rack_right'):
+            for collision in list(link.findall('collision')):
+                link.remove(collision)
+    result['robot_description'] = ET.tostring(root, encoding='unicode')
+    return result
+
+
 def build_arm_base(
     *,
     real_hardware: bool,

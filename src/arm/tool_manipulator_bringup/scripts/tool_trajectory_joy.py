@@ -102,6 +102,12 @@ def load_pre_dock_targets(path):
             if return_goal.shape != (len(ARM_JOINTS),) or not np.all(np.isfinite(return_goal)):
                 raise ValueError(f'{path}: {key} has invalid return joint goal')
             retreat['return_joint_goal'] = return_goal
+        if 'limit_margin_rad' in value:
+            margin = value['limit_margin_rad']
+            if (type(margin) not in (int, float) or not math.isfinite(margin)
+                    or not .01 <= margin <= .1):
+                raise ValueError(f'{path}: {key} limit_margin_rad must be in [0.01, 0.1]')
+            retreat['limit_margin_rad'] = margin
         # PRE is the only ordinary collision-free MoveIt entry goal.  Keep
         # joint_goal_rad/final_joint_goal_rad as diagnostic final captures.
         joint_goal = value.get('pre_joint_goal_rad', value.get('joint_goal_rad'))
@@ -297,7 +303,16 @@ def collision_check_budget(sample_count, minimum_timeout, service_rate=50.):
     return min(120., max(float(minimum_timeout), sample_count/service_rate+2.))
 
 
-def collision_result_accepted(result, allowed_pairs=frozenset()):
+def final_entry_ignored_links(path_id, path):
+    """The operator's toolbox-2 exception belongs only to tool-1 final entry."""
+    links = frozenset(path.get('final_entry_ignored_collision_links', ()))
+    if links and (path_id != 1 or not path.get('final_docking_entry', False)
+                  or links != frozenset({'tool_case_y_plus'})):
+        raise ValueError('toolbox2 collision exception requires tool1 final docking entry')
+    return links
+
+
+def collision_result_accepted(result, allowed_pairs=frozenset(), ignored_links=frozenset()):
     """Accept only explicitly scoped contact pairs; never hide other faults."""
     if result is None:
         return False
@@ -305,7 +320,9 @@ def collision_result_accepted(result, allowed_pairs=frozenset()):
         return True
     contacts = {tuple(sorted((c.contact_body_1, c.contact_body_2)))
                 for c in result.contacts}
-    return bool(contacts) and all(pair in allowed_pairs for pair in contacts)
+    return bool(contacts) and all(
+        pair in allowed_pairs or any(link in ignored_links for link in pair)
+        for pair in contacts)
 
 
 def execution_timeout(path, measured, speed_limits):
@@ -762,6 +779,12 @@ class ToolTrajectoryJoy(Node):
         if self.stage != 'idle':
             self.report('ignored', 'tool trajectory request ignored while another path is active')
             return
+        target = getattr(self, 'pre_dock_targets', {}).get(request, {})
+        if target.get('blocked_reason'):
+            self.path_id = request
+            self.report('blocked', target['blocked_reason'])
+            self.path_id = None
+            return
         self.requested_docked_state = desired_docked
         self.use_nearest_entry = nearest_entry
         close_and_return = self.paths.get(request, {}).get('after_path') is not None
@@ -854,6 +877,13 @@ class ToolTrajectoryJoy(Node):
                                       self.max_start_delta, self.approach_speed)
             else:
                 path = planned_path
+            ignored_links = final_entry_ignored_links(path_id, path)
+            if ignored_links:
+                margin = getattr(self, 'cfg', {}).get('limit_margin_rad', self.margin)
+                if ('ee_target_rad' in path or not path.get('preserve_joint_path', False)
+                        or not all(self.model.within_limits(q, margin)
+                                   for q in [measured, *path['waypoints']])):
+                    raise ValueError('final entry exception cannot bypass joint limits or apply to EE motion')
             if (self.shoulder_isolation_enabled and not path.get('cartesian_line', False)
                     and not path.get('preserve_joint_path', False)
                     and not path.get('moveit_planned', False)):
@@ -997,13 +1027,14 @@ class ToolTrajectoryJoy(Node):
         self.report('actuating', f'Arduino {action} pulse sent; waiting for /arm/docked')
 
     def begin_docking_retreat(self):
-        """Build a checked straight TCP retreat before planning directly to BACK."""
+        """Check the configured reverse approach or TCP-axis retreat before BACK."""
         self.healthy_hold(time.monotonic())
-        tool0 = self.path_id == 0 and getattr(self, 'tool0_retreat_authorized', False)
+        authorized = getattr(self, 'docking_retreat_authorized', False)
+        tool0 = self.path_id == 0 and authorized
         target = self.pre_dock_targets.get(self.path_id)
         if target is None:
             raise RuntimeError(f'{tool_label(self.path_id)} retreat configuration unavailable')
-        if tool0 and target.get('retreat_mode') == 'reverse_docking_path':
+        if authorized and target.get('retreat_mode') == 'reverse_docking_path':
             self.begin_reverse_docking_retreat()
             return
         distance = float(target['retreat_distance'])
@@ -1050,7 +1081,7 @@ class ToolTrajectoryJoy(Node):
             total=sum(durations), start_error=0., cartesian_line=True,
             stop_at_waypoints=[False]*(count-1)+[True],
             allowed_collision_pairs=(frozenset((('tool_case_1', 'wrist_link_yaw'),))
-                if self.path_id == 0 and getattr(self, 'tool0_retreat_authorized', False)
+                if self.path_id == 0 and getattr(self, 'docking_retreat_authorized', False)
                 else frozenset())))
 
     def begin_reverse_docking_retreat(self):
@@ -1059,19 +1090,22 @@ class ToolTrajectoryJoy(Node):
         if not advance or not advance.get('waypoints'):
             raise RuntimeError('completed docking path unavailable for reverse retreat')
         seed = np.asarray([self.full_state[j] for j in ARM_JOINTS], dtype=float)
+        margin = self.cfg.get('limit_margin_rad', self.margin)
+        if not self.model.within_limits(seed, margin):
+            raise RuntimeError('reverse docking start violates planning joint limits')
         waypoints = [np.asarray(q, dtype=float).copy() for q in
                      reversed([advance['start'], *advance['waypoints'][:-1]])]
         stops = list(reversed([True, *advance['stop_at_waypoints'][:-1]]))
         durations, previous = [], seed
         for goal in waypoints:
-            if not self.model.within_limits(goal, self.margin):
+            if not self.model.within_limits(goal, margin):
                 raise RuntimeError('reverse docking waypoint violates planning joint limits')
             distance = np.linalg.norm(self.model.fk(goal)[:3, 3]-self.model.fk(previous)[:3, 3])
             durations.append(max(.02,
                 float(np.max(np.abs(goal-previous)))/self.cfg['joint_speed_rad_s'],
                 distance/self.cfg['linear_speed_m_s']))
             previous = goal
-        self.return_home_after_back = True
+        self.return_home_after_back = self.cfg.get('return_home_after_back', True)
         self.route_kind = 'dock_retreat'
         self.report('retreating', 'checking reverse of the complete executed docking approach')
         self.begin(self.path_id, dict(
@@ -1091,17 +1125,18 @@ class ToolTrajectoryJoy(Node):
         if 'blocked_reason' in target:
             raise ValueError(f'{tool_label(path_id)} pre-dock blocked: '
                              +target['blocked_reason'])
+        margin = target.get('limit_margin_rad', self.margin)
         if 'joint_goal' in target:
             pre_dock = nearest_base_equivalent(
-                target['joint_goal'], measured, self.model.limits, self.margin)
-            if not self.model.within_limits(pre_dock, self.margin):
+                target['joint_goal'], measured, self.model.limits, margin)
+            if not self.model.within_limits(pre_dock, margin):
                 violations = []
                 for name, value in zip(ARM_JOINTS, pre_dock):
                     low, high = self.model.limits[name]
-                    if not low+self.margin <= value <= high-self.margin:
+                    if not low+margin <= value <= high-margin:
                         violations.append(
-                            f'{name}={value:.6f} allowed=[{low+self.margin:.6f}, '
-                            f'{high-self.margin:.6f}]')
+                            f'{name}={value:.6f} allowed=[{low+margin:.6f}, '
+                            f'{high-margin:.6f}]')
                 raise ValueError(f'{tool_label(path_id)} reviewed joint goal violates '
                                  f'planning limits: {"; ".join(violations)}')
         else:
@@ -1111,13 +1146,13 @@ class ToolTrajectoryJoy(Node):
                      ('SRDF back', self.route_poses['back'].copy())]
             pre_dock, errors = None, []
             for seed_name, seed in seeds:
-                if not self.model.within_limits(seed, self.margin):
+                if not self.model.within_limits(seed, margin):
                     errors.append(f'{seed_name}: seed violates soft limits')
                     continue
                 try:
                     pre_dock = self.model.solve_axis(
                         target['position'], target['approach_axis'], np.asarray([0., 0., 1.]),
-                        seed, margin_rad=self.margin, max_iterations=500,
+                        seed, margin_rad=margin, max_iterations=500,
                         max_time_s=.5, joint_step_rad=6.)
                     break
                 except ValueError as exc:
@@ -1142,7 +1177,7 @@ class ToolTrajectoryJoy(Node):
         transit = target.get('transit_joint_goal')
         if transit is not None:
             transit = nearest_base_equivalent(
-                transit, measured, self.model.limits, self.margin)
+                transit, measured, self.model.limits, margin)
             goals = [transit, pre_dock]
             labels = [f'{tool_label(path_id)} safe transit',
                       f'{tool_label(path_id)} pre-dock']
@@ -1475,7 +1510,8 @@ class ToolTrajectoryJoy(Node):
                     return
                 result = self.future.result()
                 allowed_pairs = self.path.get('allowed_collision_pairs', frozenset())
-                if not collision_result_accepted(result, allowed_pairs):
+                ignored_links = final_entry_ignored_links(self.path_id, self.path)
+                if not collision_result_accepted(result, allowed_pairs, ignored_links):
                     pairs = sorted({' <-> '.join(sorted((c.contact_body_1, c.contact_body_2)))
                                     for c in getattr(result, 'contacts', [])})
                     detail = ', '.join(pairs[:6]) or 'no contacts; check joint bounds/scene'

@@ -39,6 +39,64 @@ def test_scoped_collision_acceptance_allows_only_declared_contact_pair():
         ('wrist_link_yaw', 'tool_case_1'), ('elbow_link', 'tool_case_1')), allowed)
 
 
+def test_tool1_final_entry_ignores_only_toolbox2_and_preserves_other_faults():
+    from tool_trajectory_joy import final_entry_ignored_links
+    def response(*pairs, valid=False):
+        return SimpleNamespace(valid=valid, contacts=[SimpleNamespace(
+            contact_body_1=a, contact_body_2=b) for a, b in pairs])
+    path = {'final_docking_entry': True,
+            'final_entry_ignored_collision_links': frozenset({'tool_case_y_plus'})}
+    ignored = final_entry_ignored_links(1, path)
+    assert collision_result_accepted(response(('wrist_link_yaw', 'tool_case_y_plus')),
+                                     ignored_links=ignored)
+    assert collision_result_accepted(response(('cam_link', 'tool_case_y_plus')),
+                                     ignored_links=ignored)
+    for pair in [('wrist_link_yaw', 'tool_case_1'), ('elbow_link', 'circuit_box'),
+                 ('shoulder_link', 'wrist_link_yaw')]:
+        assert not collision_result_accepted(
+            response(('wrist_link_yaw', 'tool_case_y_plus'), pair), ignored_links=ignored)
+    assert not collision_result_accepted(response(), ignored_links=ignored)
+    assert not collision_result_accepted(None, ignored_links=ignored)
+    assert not collision_result_accepted(response(('wrist_link_yaw', 'tool_case_y_plus')))
+    assert not final_entry_ignored_links(1, {})  # observation, HOME/BACK and retreat
+    for other in [dict(path, final_docking_entry=False),
+                  dict(path, final_entry_ignored_collision_links={'circuit_box'})]:
+        with pytest.raises(ValueError, match='tool1 final docking entry'):
+            final_entry_ignored_links(1, other)
+    with pytest.raises(ValueError, match='tool1 final docking entry'):
+        final_entry_ignored_links(0, path)
+
+
+def test_pending_tool1_request_never_stages_or_uses_previous_observation():
+    n = SimpleNamespace(stage='idle', path_id=None, report=Mock(), begin=Mock(),
+        begin_back=Mock(), pre_dock_targets=load_pre_dock_targets(
+            SCRIPTS.parent/'config/cartesian_targets.yaml'))
+    ToolTrajectoryJoy.request_path(n, 1, desired_docked=True)
+    n.begin.assert_not_called()
+    n.begin_back.assert_not_called()
+    assert n.path_id is None
+    assert n.report.call_args.args[0] == 'blocked'
+    assert 'pending' in n.report.call_args.args[1]
+
+
+@pytest.mark.parametrize('invalid', ['joint_limit', 'ee_motion'])
+def test_final_fixture_exception_cannot_bypass_limits_or_apply_to_ee(invalid):
+    n = SimpleNamespace(healthy_hold=Mock(return_value={'epoch': 'hold'}),
+        full_state=dict.fromkeys(ARM_JOINTS, 0.), margin=.02, cfg={},
+        model=Mock(), collision=Mock(), mode=Mock(), begin_failed=Mock())
+    n.model.within_limits.return_value = invalid != 'joint_limit'
+    plan = dict(waypoints=[np.zeros(6)], durations=[1.], total=1., start_error=0.,
+        preserve_joint_path=True, final_docking_entry=True,
+        final_entry_ignored_collision_links={'tool_case_y_plus'})
+    if invalid == 'ee_motion':
+        plan['ee_target_rad'] = .5
+    ToolTrajectoryJoy.begin(n, 1, plan)
+    n.begin_failed.assert_called_once()
+    assert 'cannot bypass joint limits or apply to EE' in n.begin_failed.call_args.args[0]
+    n.collision.call_async.assert_not_called()
+    n.mode.call_async.assert_not_called()
+
+
 def write_path(tmp_path, enabled=True, times=(0., 1., 3.)):
     path = tmp_path/'path.yaml'
     path.write_text(yaml.safe_dump(dict(
@@ -642,7 +700,7 @@ def test_pre_dock_targets_prefer_explicit_pre_over_final_capture(tmp_path):
     np.testing.assert_allclose(targets[0]['joint_goal'], pre)
 
 
-def test_source_pre_targets_enable_reviewed_tool0_tool1_and_tool2_goals():
+def test_source_targets_keep_tool1_final_capture_pending_new_observation():
     from tool_trajectory_joy import ArmKinematics
     source = Path(__file__).resolve().parents[1] / 'config/cartesian_targets.yaml'
     targets = load_pre_dock_targets(source)
@@ -653,9 +711,8 @@ def test_source_pre_targets_enable_reviewed_tool0_tool1_and_tool2_goals():
     np.testing.assert_allclose(targets[0]['transit_joint_goal'], [
         3.1001751723166735, 0.6403612785882697, 1.209862232156147,
         -1.427330240975674, -0.0030679615759781065, -0.021475731030191625])
-    np.testing.assert_allclose(targets[1]['joint_goal'], [
-        3.2888548092266077, .4934045542387666, 1.4027210346066878,
-        -1.5432200926554531, -.4801359866084125, -1.9527575429782145])
+    assert 'pending' in targets[1]['blocked_reason']
+    assert 'joint_goal' not in targets[1]
     np.testing.assert_allclose(targets[2]['joint_goal'], [
         -2.13180646665643, .8056224119758513, 1.2458380150140123,
         -1.4895040589039743, -.5463633803567056, -.3205989853677441])
@@ -664,7 +721,8 @@ def test_source_pre_targets_enable_reviewed_tool0_tool1_and_tool2_goals():
         SCRIPTS.parent.parent/'tool_manipulator_description/urdf/tool_manipulator.urdf.xacro',
         SCRIPTS.parent/'config/hardware.yaml')
     assert model.within_limits(data['tool0']['pre_joint_goal_rad'], .02)
-    assert model.within_limits(data['tool1']['pre_joint_goal_rad'], .02)
+    assert model.within_limits(data['tool1']['final_joint_goal_rad'], .02)
+    assert not data['tool1']['executable']
     assert model.within_limits(data['tool2']['pre_joint_goal_rad'], .02)
     assert targets[0]['retreat_mode'] == 'reverse_docking_path'
     assert data['tool0']['required_final_motion'] == 'axial_sampled_path'
@@ -1066,7 +1124,7 @@ def test_tool0_retreat_uses_displaced_current_pose_and_orientation():
     # Real feedback sent after docking; do not require the taught endpoint.
     seed = np.array([-3.143127, .114843, 1.146507, -1.196598, .001534, -.009204])
     n = SimpleNamespace(
-        healthy_hold=Mock(), path_id=0, tool0_retreat_authorized=True,
+        healthy_hold=Mock(), path_id=0, docking_retreat_authorized=True,
         advance_plan=None,  # reverse taught path is intentionally unnecessary
         pre_dock_targets=load_pre_dock_targets(SCRIPTS.parent/'config/cartesian_targets.yaml'),
         full_state=dict(zip(ARM_JOINTS, seed)), model=model, margin=.02,
@@ -1181,9 +1239,12 @@ def test_invalid_retreat_checkpoints_rejected(tmp_path, checkpoints):
 
 
 
-def test_tool0_reverse_mode_dispatches_without_using_cartesian_distance():
+@pytest.mark.parametrize('path_id', [0, 1])
+def test_fixed_joint_reverse_dispatches_without_using_cartesian_distance(path_id):
     targets = load_pre_dock_targets(SCRIPTS.parent/'config/cartesian_targets.yaml')
-    n = SimpleNamespace(healthy_hold=Mock(), path_id=0, tool0_retreat_authorized=True,
+    # Production tool 1 is pending observation; isolate the common dispatcher.
+    targets[1] = dict(targets[0])
+    n = SimpleNamespace(healthy_hold=Mock(), path_id=path_id, docking_retreat_authorized=True,
                         pre_dock_targets=targets, begin_reverse_docking_retreat=Mock())
     ToolTrajectoryJoy.begin_docking_retreat(n)
     n.healthy_hold.assert_called_once()

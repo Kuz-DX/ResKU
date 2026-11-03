@@ -78,7 +78,7 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         self.advance_locked = False
         self.advance_target = None
         self.advance_plan = None
-        self.tool0_retreat_authorized = False
+        self.docking_retreat_authorized = False
         self.tag_translation_samples = []
         self.tag_translation_reference = None
         self.tag_translation_delta = None
@@ -162,7 +162,8 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                 raise ValueError(
                     f'expected one tag id={self.cfg["tag_id"]} '
                     f'family={self.cfg.get("tag_family", "any")}; received={seen}')
-            position_only = self.cfg.get('tag_translation_correction', {}).get('enabled', False)
+            position_only = (self.cfg.get('tag_translation_correction', {}).get('enabled', False)
+                             or self.cfg.get('confirm_tag_before_motion', False))
             pose_settings = dict(self.cfg, min_pnp_solution_gap_px=0.) if position_only else self.cfg
             camera_tag = tag_pose(detections[0], *self.camera, pose_settings)
             tf = self.tf_buffer.lookup_transform(
@@ -203,6 +204,9 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
 
     def begin(self, path_id, planned_path=None):
         if planned_path is None and path_id in self.settings:
+            if self.settings[path_id].get('blocked_reason'):
+                self.report('blocked', self.settings[path_id]['blocked_reason'])
+                return
             self.active = True
             self.cfg = copy.deepcopy(self.settings[path_id])
             self.docking_started = None
@@ -276,14 +280,17 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                     f'max_speed={speed:.6f}rad/s '
                     f'limit={self.cfg["stopped_speed_rad_s"]:.6f}rad/s')
             if self.cfg['actuation_enabled']:
-                if self.path_id == 0 and fixed_joint:
+                if fixed_joint and self.cfg.get('actuation_completion') == 'delay':
                     self.lock_goal = q.copy()
                     self.hold_epoch = self.status['epoch']
                     self.command_feedback_sequence = self.docked_feedback_sequence
-                    self.send_docking_pulse(True)
-                    self.actuation_deadline = time.monotonic()+3.0
+                    self.send_docking_pulse(self.cfg['desired_docked'])
+                    delay = self.cfg['actuation_delay_s']
+                    self.actuation_deadline = time.monotonic()+delay
                     self.stage = 'dock_attach_wait'
-                    self.report('actuating', 'final dock reached; /arm/docking=true; waiting 3 seconds before checked retreat (no EE rotation)')
+                    self.report('actuating',
+                                f'final dock reached; waiting {delay:g} seconds after Arduino '
+                                'command before checked retreat (no EE rotation)')
                     return
                 self.lock_goal = q.copy()
                 self.expected_docked = self.cfg['desired_docked']
@@ -297,8 +304,10 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                             'fixed advance completed; Arduino %s pulse sent; '
                             'waiting for /arm/docked' % action)
             else:
-                self.report('completed', 'tag-normal advance %.1f mm completed; HOLD; no actuation' %
-                            (self.cfg['advance_distance_m']*1000.))
+                detail = ('checked final joint approach completed' if fixed_joint else
+                          'tag-normal advance %.1f mm completed' %
+                          (self.cfg['advance_distance_m']*1000.))
+                self.report('completed', detail+'; HOLD; no actuation')
                 self.reset()
             return
         if (self.docking_started is None
@@ -311,7 +320,8 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             self.execution_id = None
             self.hold_epoch = self.status['epoch']
             self.docking_started = time.monotonic()
-            if self.cfg.get('tag_translation_correction', {}).get('enabled', False):
+            correction = self.cfg.get('tag_translation_correction', {}).get('enabled', False)
+            if correction or self.cfg.get('confirm_tag_before_motion', False):
                 self.reset_tag_acquisition()
                 self.tag_translation_samples = []
                 self.tag_translation_reference = None
@@ -319,8 +329,11 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                 self.observe_after_ns = self.get_clock().now().nanoseconds
                 self.observed_image = -1
                 self.observed_feedback = self.feedback_sequence
-                self.stage = 'dock_tag_acquire'
-                self.report('dock_tag_acquire', 'stopped at recorded observation pose; acquiring tag translation before automatic docking')
+                self.stable = 0
+                self.stage = 'dock_tag_acquire' if correction else 'dock_tag_confirm'
+                detail = ('acquiring tag translation' if correction else
+                          'confirming tag only; no translation reference is configured')
+                self.report(self.stage, 'stopped at recorded observation pose; '+detail)
                 return
             self.start_final_joint_goal(q)
             return
@@ -393,7 +406,7 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
     def tick(self):
         try:
             if self.active and self.stage == 'dock_attach_wait':
-                self.tick_tool0_finish(time.monotonic())
+                self.tick_timed_finish(time.monotonic())
                 return
             if self.active and self.docking_started is None:
                 self.check_deadman(time.monotonic())
@@ -402,6 +415,9 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                 self.guard(now)
                 if self.stage == 'dock_tag_acquire':
                     self.tick_tag_translation(now)
+                    return
+                if self.stage == 'dock_tag_confirm':
+                    self.tick_tag_confirmation(now)
                     return
                 if self.stage == 'dock_tag_plan':
                     self.plan_tag_translation_step()
@@ -551,7 +567,34 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
             # every corrected sample before any command is dispatched.
             self.start_final_joint_goal(current)
 
-    def tick_tool0_finish(self, now):
+    def tick_tag_confirmation(self, now):
+        """Confirm distinct stopped tag observations without inventing a correction."""
+        if now-self.docking_started > self.cfg['acquire_timeout_s']:
+            raise RuntimeError('tag confirmation timed out: '+self.tag_diagnostic())
+        if np.max(np.abs(self.velocity)) > self.cfg['stopped_speed_rad_s']:
+            self.stable = 0
+            return
+        if self.observation is None:
+            return
+        try:
+            stamp, _ = self.fresh_observation(now)
+        except RuntimeError:
+            self.observation = None
+            self.last_base_tag = None
+            self.stable = 0
+            return
+        if (stamp <= self.observe_after_ns or stamp == self.observed_image
+                or self.feedback_sequence == self.observed_feedback):
+            return
+        self.observed_image, self.observed_feedback = stamp, self.feedback_sequence
+        self.stable += 1
+        if self.stable >= self.cfg['stable_samples']:
+            q = np.asarray([self.full_state[j] for j in ARM_JOINTS])
+            self.report('tag_confirmed', 'stable tag confirmed; checking recorded joint approach '
+                        'without translation correction')
+            self.start_final_joint_goal(q)
+
+    def tick_timed_finish(self, now):
         self.guard(now)
         if getattr(self, 'docking_status', None) in ('ERROR', 'UNKNOWN'):
             raise RuntimeError('Arduino unavailable: '+self.docking_status)
@@ -567,8 +610,8 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         # sequence. This timer never blocks feedback or cancellation callbacks.
         self.active = False
         self.advance_locked = False
-        self.tool0_retreat_authorized = True
-        self.report('retreating', '3-second Arduino delay elapsed; planning configured retreat from current feedback')
+        self.docking_retreat_authorized = True
+        self.report('retreating', 'Arduino delay elapsed; planning configured retreat from current feedback')
         self.begin_docking_retreat()
 
     def camera_advance_direction(self, base_tag, current):
@@ -627,6 +670,11 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
 
     def start_final_joint_goal(self, q):
         """Build one fully checked joint-space tail to the measured dock pose."""
+        if self.cfg.get('blocked_reason'):
+            raise RuntimeError(self.cfg['blocked_reason'])
+        margin = self.cfg.get('limit_margin_rad', self.margin)
+        if not self.model.within_limits(q, margin):
+            raise RuntimeError('docking approach start violates planning limits')
         prefix = list(self.cfg.get('axial_approach_joint_goals', []))
         goals = prefix + list(self.cfg.get('intermediate_joint_goals', [])) + [self.cfg['final_joint_goal']]
         waypoints, stops, seed = [], [], q.copy()
@@ -634,7 +682,7 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         for goal_index, captured in enumerate(goals):
             goal = np.asarray(captured, dtype=float).copy()
             goal[0] += 2.*math.pi*round((seed[0]-goal[0])/(2.*math.pi))
-            if not self.model.within_limits(goal, self.margin):
+            if not self.model.within_limits(goal, margin):
                 raise RuntimeError('docking joint waypoint violates planning limits')
             count = max(1, math.ceil(float(np.max(np.abs(goal-seed)))
                                      / self.cfg['joint_step_rad']))
@@ -677,10 +725,14 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
         self.advance_plan = dict(
             start=q.copy(), waypoints=waypoints, durations=durations,
             total=sum(durations), start_error=0., cartesian_line=axial and not prefix,
-            preserve_joint_path=axial, axial_start_index=axial_start,
+            preserve_joint_path=True, axial_start_index=axial_start,
             stop_at_waypoints=stops,
-            allowed_collision_pairs=frozenset((
-                tuple(sorted(('tool_case_1', 'wrist_link_yaw'))),)))
+            allowed_collision_pairs=(frozenset((('tool_case_1', 'wrist_link_yaw'),))
+                                     if self.path_id == 0 else frozenset()))
+        ignored_links = self.cfg.get('final_entry_ignored_collision_links', [])
+        if ignored_links:
+            self.advance_plan.update(final_docking_entry=True,
+                                     final_entry_ignored_collision_links=frozenset(ignored_links))
         self.report('advance_planning',
                     'stopped %s pre-dock; checking measured final joint goal; '
                     'joint_delta_max=%.4f rad, samples=%d; tag not required' %
@@ -782,6 +834,7 @@ class ToolDockingCoordinator(ToolTrajectoryJoy):
                 self.report(state, f'Arduino {state} state confirmed; starting retreat')
                 self.active = False
                 self.advance_locked = False
+                self.docking_retreat_authorized = True
                 self.begin_docking_retreat()
             return
         if (stamp <= self.observe_after_ns or stamp == self.observed_image

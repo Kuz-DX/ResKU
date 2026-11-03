@@ -457,37 +457,29 @@ correction/advance durations keep their own timing.
 Intermediate points 3/4/6/8 were removed at the user's request because they
 violated joint limits or margins. The user reports collision simulation of the
 intermediate path is complete; runtime collision validation still applies.
-Original final point 9 is excluded from execution. Its joint values and FK-derived
-`base_actuator` -> `tcp_link` pose are preserved as comments in
-`config/tool1_trajectory.yaml`. That original joint pose exceeds the elbow margin;
-the Cartesian reference is not an approved descent command and is not read by
-the docking coordinator. Tool 1 now uses `camera_normal_advance`: after the path
-and HOLD, align the camera optical axis through live tag 1 (`tag36h11`, 20 mm)
-at the initial observed normal distance, then translate 75 mm toward the tag
-along the latched normal and HOLD without Arduino actuation. This is relative
-travel, not a 75 mm final stand-off. The whole advance is IK/collision checked
-before execution. Tag visibility is required through alignment; after the
-advance is latched, tag loss is allowed but feedback and ownership checks
-remain mandatory. Both launch switches `enable_tool_docking` and
-`enable_docking_motion` default to true in `ik_manual.launch.py`, with
-`docking_camera_frame=arm_camera_color_optical_frame`. Plain IK launch therefore
-enables the full tool-1 sequence on L2 + circle; launch itself submits no tool
-request. Set `enable_tool_docking:=false` for path-only playback or
-`enable_docking_motion:=false` for alignment preview after the approach.
-Path 2 has its close-and-return settings commented out for approach-only testing; no tag alignment.
-Tool 1 uses `require_l2_hold: false`: one L2 + tool-1 selection starts the path
-and automatically continues into tag alignment and the checked 75 mm advance.
-Releasing L2 or losing subsequent Joy messages does not cancel that sequence.
-Explicit cancel, feedback, ownership and collision checks remain active. Other
-docking configurations default to continuous L2 hold unless explicitly disabled.
-At one sample per 20 ms timer tick, 861 samples take at least about 17 seconds
-to validate. A new path request while planning or checking is ignored. Tool
-0/1/2 requests plan three sequential OMPL legs before motion: stopped current
-pose to SRDF `home`, `home` to SRDF `back`, and `back` to the selected tool
-YAML's final joint target. Captured intermediate waypoints are not executed.
-All three plans must succeed, are concatenated, sampled again through
-`/check_state_validity`, and are then executed by the mode manager; MoveIt
-trajectory execution remains disabled.
+Tool 1's exact final joint capture is confirmed in `config/tool_docking.yaml`
+and `config/cartesian_targets.yaml`. Its observation pose is pending a new
+operator capture. The tool-1 target is non-executable with a descriptive
+`blocked_reason`; requests stop before HOME/BACK staging or any docking motion.
+The complete tool-0-based approach, tag correction and return integration will
+be updated together after that capture is supplied.
+
+The operator confirmed a real-versus-URDF placement mismatch for toolbox 2.
+Only tool-1 final entry carries
+`final_entry_ignored_collision_links: [tool_case_y_plus]`. State-validity
+responses may omit this fixture's contacts from rejection, while joint bounds,
+other objects and self-collisions still block motion. The marker is not copied
+to reverse retreat or HOME/BACK/observation paths. The global SRDF collision
+matrix and independent test launch configuration are unchanged. A reverse
+retreat may consequently remain blocked by the fixture until its scope is
+separately addressed. Exact final angles and current status are listed in
+[the bringup README](../README.md#툴0툴1의-관절-경로-도킹).
+
+Both docking launch switches default to true. Launching submits no tool
+request; `enable_docking_motion:=false` leaves the fixed-joint sequence in HOLD
+after observation without final motion or Arduino actuation. The configured
+sequence does not require continuous L2 input. All planned/sampled segments
+still pass MoveIt state-validity checks before the manager executes them.
 
 TCP-ready and entry checks allow the same bounded 0.02-rad arm DXL encoder
 variation used by tool-path validation; RMD entry tolerance stays at 0.001 rad.

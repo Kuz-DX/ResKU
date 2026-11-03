@@ -72,7 +72,8 @@ def test_manual_mode_uses_common_base_and_inactive_seed_controller():
     assert manual['parameters'][1]['r2_pitch_translation'] is True
     assert manual['parameters'][1]['docking_lock_buttons'] is True
     assert next(item for item in nodes if item.get('executable') == 'joy_node')['output'] == 'screen'
-    assert not any(item.get('executable') == 'move_group' for item in nodes)
+    scene = next(item for item in nodes if item.get('executable') == 'move_group')
+    assert scene['parameters'][-1]['allow_trajectory_execution'] is False
     assert base.moveit_config.robot_description_semantic['robot_description_semantic'] == '<robot name="test"/>'
 
 
@@ -87,3 +88,16 @@ def test_real_rmd_transport_keeps_can_bus_headroom():
     assert '<param name="status1_period_ms">500</param>' in control
     assert '<param name="cycle_time">2</param>' not in control
     assert '<param name="cycle_time">5</param>' not in control
+
+
+def test_alignment_scene_excludes_only_finger_collision_geometry():
+    import xml.etree.ElementTree as ET
+    source = {'robot_description': '<robot name="test">' + ''.join(
+        f'<link name="{name}"><visual/><collision/></link>'
+        for name in ('rack_left','rack_right','tool_spurgear','wrist_link_yaw','tool_case_1')) + '</robot>'}
+    checked = module.common.alignment_collision_description(source)
+    before, after = ET.fromstring(source['robot_description']), ET.fromstring(checked['robot_description'])
+    assert len(before.findall('.//collision')) == 5
+    for link in after.findall('link'):
+        assert link.find('visual') is not None
+        assert (link.find('collision') is None) == (link.get('name') in ('rack_left','rack_right'))

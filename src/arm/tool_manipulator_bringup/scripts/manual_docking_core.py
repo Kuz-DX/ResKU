@@ -1,30 +1,16 @@
-"""AprilTag correction of existing manual motion; no joystick remapping.
-
-The operator owns approach motion. Corrections act only when the existing
-manual velocity approaches the dock; neutral input produces zero motion.
-Explicit manual joint/tool commands retain priority in the adapter.
-"""
+"""One requested angular alignment, followed by measured orientation monitoring."""
 import math
-
 import cv2
 import numpy as np
 import yaml
-
-from tool_docking_core import transform, pose_errors
-
+from tool_docking_core import transform, pose_errors, bounded_target
 
 def load_config(filename):
     with open(filename, encoding='utf-8') as stream:
         data = yaml.safe_load(stream)
     control = data['control']
     limits = {
-        'assist_full_speed_m_s': .05,
-        'lateral_gain_s_inv': 10., 'angular_gain_s_inv': 10.,
-        'max_lateral_correction_m_s': .02, 'max_angular_correction_rad_s': .2,
-        'joint_speed_rad_s': .12, 'damping': 1., 'rotation_weight_m': 1.,
-        'max_target_distance_m': .3, 'max_target_angle_rad': 1.,
-        'lateral_tolerance_m': .02, 'angle_tolerance_rad': .2,
-        'axial_tolerance_m': .01, 'slowdown_distance_m': .1,
+        'joint_speed_rad_s': .12, 'max_target_angle_rad': 1.,
         'tag_max_age_s': .5, 'acquire_timeout_s': 30.,
         'max_tag_position_jump_m': .05, 'max_tag_angle_jump_rad': .5,
     }
@@ -34,8 +20,18 @@ def load_config(filename):
             raise ValueError(f'{key} must be finite and in (0, {upper}]')
     if type(control['stable_samples']) is not int or not 2 <= control['stable_samples'] <= 100:
         raise ValueError('stable_samples must be 2..100')
-    if control['slowdown_distance_m'] <= control['axial_tolerance_m']:
-        raise ValueError('slowdown distance must exceed axial tolerance')
+    alignment = data['alignment']
+    if alignment.get('mode') not in ('rmd_pitch',):
+        raise ValueError('alignment.mode must be rmd_pitch')
+    tolerance = alignment.get('angle_tolerance_rad')
+    if tolerance is not None and (type(tolerance) not in (int, float) or
+            not math.isfinite(tolerance) or not 0 < tolerance <= .2):
+        raise ValueError('invalid alignment.angle_tolerance_rad')
+    for key in ('position_tolerance_m', 'orientation_step_rad', 'joint_sample_rad',
+                'acceleration_rad_s2', 'planning_timeout_s', 'feedback_timeout_s'):
+        value = alignment[key]
+        if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
+            raise ValueError('invalid alignment.' + key)
     vision = data['vision']
     for key in ('min_decision_margin', 'max_reprojection_px', 'min_tag_edge_px',
                 'min_pnp_solution_gap_px', 'position_tolerance_m', 'angle_tolerance_rad'):
@@ -66,47 +62,176 @@ def checked_pose(pose):
     return pose
 
 
-def capped(vector, maximum):
-    return vector * min(1., maximum / max(float(np.linalg.norm(vector)), 1e-12))
+def alignment_target(current, dock, mode, base_yaw):
+    """Keep TCP position. Align its +Z insertion axis without commanded axial roll."""
+    current, dock = checked_pose(current), checked_pose(dock)
+    source, desired = current[:3, 2], dock[:3, 2]
+    if mode == 'axis':
+        cross = np.cross(source, desired)
+        sine, cosine = float(np.linalg.norm(cross)), float(source @ desired)
+        if sine < 1e-9:
+            if cosine < 0:
+                raise ValueError('opposed insertion axes; approach manually')
+            vector = np.zeros(3)
+        else:
+            vector = cross/sine * math.atan2(sine, cosine)
+    elif mode == 'rmd_pitch':
+        axis = np.array([-math.sin(base_yaw), math.cos(base_yaw), 0.])
+        first, second = source-axis*(source@axis), desired-axis*(desired@axis)
+        if min(np.linalg.norm(first), np.linalg.norm(second)) < 1e-6:
+            raise ValueError('insertion axis has undefined pitch in the base plane')
+        first, second = first/np.linalg.norm(first), second/np.linalg.norm(second)
+        vector = axis*math.atan2(float(axis@np.cross(first, second)), float(first@second))
+    else:
+        raise ValueError('alignment axes not confirmed')
+    target = current.copy()
+    target[:3, :3] = cv2.Rodrigues(vector)[0] @ current[:3, :3]
+    return target
+
+
+class RmdModel:
+    """Reuse ArmKinematics.solve with only the three RMD columns/unknowns."""
+    def __init__(self, model, fixed):
+        self.model, self.fixed = model, fixed.copy()
+        self.joint_names = model.joint_names[1:4]
+        self.limits = {name: model.limits[name] for name in self.joint_names}
+
+    def expand(self, q):
+        full = self.fixed.copy()
+        full[1:4] = q
+        return full
+
+    def fk(self, q):
+        return self.model.fk(self.expand(q))
+
+    def pose_and_jacobian(self, q):
+        pose, jacobian = self.model.pose_and_jacobian(self.expand(q))
+        return pose, jacobian[:, 1:4]
+
+    def _pose_error_from_pose(self, current, target):
+        return self.model._pose_error_from_pose(current, target)
+
+    def within_limits(self, q, margin_rad=0.):
+        return self.model.within_limits(self.expand(q), margin_rad)
+
+    def solve(self, target, seed, margin):
+        return type(self.model).solve(self, target, seed, margin, max_time_s=.1)
+
+
+def dxl_reference(start, model, margin):
+    reference = start.copy()
+    reference[0] = min((-math.pi, math.pi), key=lambda angle: abs(angle-start[0]))
+    reference[4:6] = 0.
+    if not model.within_limits(reference, margin):
+        raise ValueError('requested DXL reference outside hardware limits')
+    return reference
+
+
+def plan_alignment(model, start, dock, cfg, speed_limits, margin, cancelled):
+    """Plan DXL preparation, then position-preserving RMD-only pitch alignment.
+
+    Worker-only math; no ROS state or commands. Every path sample is returned
+    for collision validation before any motion, including the DXL preparation.
+    """
+    reference = dxl_reference(start, model, margin)
+    initial = model.fk(reference)
+    camera_rotation = np.asarray(cfg.get('tcp_camera_rotation', np.eye(3)), dtype=float)
+    if camera_rotation.shape != (3, 3) or not np.isfinite(camera_rotation).all():
+        raise ValueError('invalid TCP-to-optical rotation')
+    alignment_frame = initial.copy()
+    alignment_frame[:3, :3] = initial[:3, :3] @ camera_rotation
+    frame_target = alignment_target(alignment_frame, dock, cfg['mode'], reference[0])
+    target = frame_target.copy()
+    target[:3, :3] = frame_target[:3, :3] @ camera_rotation.T
+    residual = math.acos(float(np.clip(frame_target[:3, 2] @ dock[:3, 2], -1., 1.)))
+    if residual > cfg['angle_tolerance_rad']:
+        raise ValueError('tag insertion axis outside fixed-DXL RMD plane; reposition manually')
+    angle = pose_errors(initial, target)[1]
+    if angle > cfg['max_angle_rad']:
+        raise ValueError('required RMD pitch change too large; approach manually')
+    count = max(1, math.ceil(angle/cfg['orientation_step_rad']))
+    rmd = RmdModel(model, reference)
+    seed = start.copy()
+    points, durations, samples, stages = [], [], [seed.copy()], []
+
+    def append(goal, stage):
+        nonlocal seed
+        delta = np.abs(goal-seed)
+        duration = max(.02, float(np.max(1.875*delta/speed_limits)),
+                       math.sqrt(float(np.max((10/math.sqrt(3))*delta/cfg['acceleration_rad_s2']))))
+        divisions = max(1, math.ceil(float(np.max(delta))/cfg['joint_sample_rad']))
+        if len(samples)+divisions > 2048:
+            raise ValueError('alignment path sample budget exceeded')
+        for fraction in np.linspace(0., 1., divisions+1)[1:]:
+            q = seed+(goal-seed)*fraction
+            if not model.within_limits(q, margin):
+                raise ValueError('interpolated alignment point outside limits')
+            if stage == 'RMD_ALIGN' and np.linalg.norm(model.fk(q)[:3, 3]-initial[:3, 3]) > cfg['position_tolerance_m']:
+                raise ValueError('RMD alignment would translate TCP beyond position tolerance')
+            samples.append(q.copy())
+        points.append(goal.copy())
+        durations.append(duration)
+        stages.append(stage)
+        seed = goal.copy()
+
+    append(reference, 'DXL_PREPARE')
+    for index in range(1, count+1):
+        if cancelled.is_set():
+            raise ValueError('alignment planning cancelled')
+        waypoint = bounded_target(initial, target, 1., angle*index/count)
+        goal = rmd.expand(rmd.solve(waypoint, seed[1:4], margin))
+        append(goal, 'RMD_ALIGN')
+    return dict(start=start.copy(), points=points, durations=durations, samples=samples,
+                stages=stages, target=target.copy(), reference=reference)
+
+
+def trajectory_position(plan, elapsed):
+    start = plan['start']
+    for goal, duration in zip(plan['points'], plan['durations']):
+        if elapsed < duration:
+            s = max(0., elapsed/duration)
+            fraction = s*s*s*(10+s*(-15+6*s))
+            return start+(goal-start)*fraction
+        elapsed -= duration
+        start = goal
+    return start.copy()
 
 
 class DockingAssist:
     def __init__(self, settings):
-        self.settings = settings
-        self.cfg = settings['control']
-        self.tool = None
-        self.state = 'idle'
-        self.reason = 'not selected'
+        self.settings, self.cfg = settings, settings['control']
+        self.tool, self.state, self.reason = None, 'idle', 'not requested'
         self.observation_reason = 'no observations'
-        self.base_tag = None
-        self.target = None
-        self.last_stamp = -1
-        self.expires = -math.inf
-        self.stable = 0
+        self.base_tag = self.observed_target = self.target = None
+        self.last_stamp, self.expires, self.stable = -1, -math.inf, 0
         self.errors = {}
+        self.monitoring = False
 
     @property
     def selected(self):
-        return self.state in ('acquiring', 'active')
+        return self.state not in ('idle', 'ALIGNMENT_FAILED')
 
     def begin(self, tool, now):
         if tool not in self.settings['tools']:
             raise ValueError('unsupported tool')
-        self.tool, self.state, self.reason = tool, 'acquiring', 'waiting for fresh tag samples'
+        self.tool, self.state, self.reason = tool, 'TAG_NOT_DETECTED', 'waiting for fresh tag samples'
         self.started = now
-        self.base_tag = self.target = None
+        self.base_tag = self.observed_target = self.target = None
         self.last_stamp, self.expires, self.stable = -1, -math.inf, 0
-        self.errors = {}
-        self.observation_reason = 'waiting for post-selection image'
+        self.errors, self.monitoring = {}, False
+        self.observation_reason = 'waiting for post-request image'
 
     def cancel(self, reason):
-        self.state, self.reason = 'idle', reason
-        self.base_tag = self.target = None
+        self.state, self.reason, self.monitoring = 'idle', reason, False
+        self.base_tag = self.observed_target = self.target = None
         self.stable = 0
+
+    def fail(self, reason):
+        self.state, self.reason, self.monitoring = 'ALIGNMENT_FAILED', reason, False
 
     def reject(self, reason):
         self.observation_reason = reason
-        if self.state == 'acquiring':
+        if self.target is None:
             self.stable = 0
 
     def observe(self, pose, stamp_ns, now, age_s):
@@ -116,111 +241,42 @@ class DockingAssist:
             raise ValueError('stale/future tag timestamp')
         if stamp_ns <= self.last_stamp:
             raise ValueError('tag timestamp did not advance')
-        if self.state == 'active' and now >= self.expires:
-            raise ValueError('tag input timeout; select assist again')
         pose = checked_pose(pose)
         if self.base_tag is not None:
             shift, angle = pose_errors(self.base_tag, pose)
-            if (shift > self.cfg['max_tag_position_jump_m'] or
-                    angle > self.cfg['max_tag_angle_jump_rad']):
+            if shift > self.cfg['max_tag_position_jump_m'] or angle > self.cfg['max_tag_angle_jump_rad']:
                 raise ValueError('tag pose jump')
         if now >= self.expires:
             self.stable = 0
         self.base_tag = pose.copy()
-        self.target = pose @ self.settings['tools'][self.tool]['tag_to_tcp']
-        self.last_stamp = stamp_ns
-        # Receipt time must not give an old image a second full timeout period.
-        self.expires = now + self.cfg['tag_max_age_s'] - age_s
+        self.observed_target = pose @ self.settings['tools'][self.tool]['tag_to_tcp']
+        self.last_stamp, self.expires = stamp_ns, now+self.cfg['tag_max_age_s']-age_s
         self.stable += 1
-        self.observation_reason = 'fresh tag accepted'
+        self.observation_reason = 'fresh tag accepted; alignment target remains latched'
 
-    def check(self, current, now):
-        if self.state == 'acquiring':
-            if now-self.started >= self.cfg['acquire_timeout_s']:
-                raise ValueError('tag acquisition timeout')
-            if self.stable < self.cfg['stable_samples'] or now >= self.expires:
-                return False
-        elif self.state != 'active':
+    def capture(self, current, now, base_yaw):
+        if self.target is not None:
+            return True
+        if now-self.started >= self.cfg['acquire_timeout_s']:
+            raise ValueError('tag acquisition timeout')
+        if self.stable < self.cfg['stable_samples'] or now >= self.expires:
             return False
-        if now >= self.expires:
-            raise ValueError('tag input timeout')
-        distance, angle = pose_errors(checked_pose(current), self.target)
-        if distance > self.cfg['max_target_distance_m'] or angle > self.cfg['max_target_angle_rad']:
-            raise ValueError('dock target outside assist envelope; approach manually')
-        self.state = 'active'
+        self.target = self.observed_target.copy()  # Frozen once per request.
+        self.state, self.reason = 'ALIGNMENT_READY', 'target captured; checking complete path'
         return True
 
-    def assist_twist(self, current, manual_twist, now, dt):
-        """Correct ROOT-frame physical velocity from the original manual mapping."""
-        manual_twist = np.asarray(manual_twist, dtype=float)
-        if manual_twist.shape != (6,) or not np.isfinite(manual_twist).all() or not 0 < dt <= .1:
-            raise ValueError('invalid manual velocity or interval')
-        if not self.check(current, now):
-            return manual_twist.copy()
-        cfg = self.cfg
-        rotation = current[:3, :3]
-        normal = self.target[:3, 2]
-        error = self.target[:3, 3]-current[:3, 3]
-        axial = float(error @ normal)
-        lateral = error-normal*axial
-        rot_error = cv2.Rodrigues(self.target[:3, :3] @ rotation.T)[0].reshape(3)
-        self.errors = dict(axial_m=axial, lateral_m=float(np.linalg.norm(lateral)),
-                           angle_rad=float(np.linalg.norm(rot_error)))
-        self.reason = 'manual hold' if not np.any(manual_twist) else 'manual motion'
-        linear, angular = manual_twist[:3].copy(), manual_twist[3:].copy()
-        forward = float(linear @ normal)
-        if forward > 0:
-            strength = min(1., forward/cfg['assist_full_speed_m_s'])
-            aligned = (self.errors['lateral_m'] <= cfg['lateral_tolerance_m'] and
-                       self.errors['angle_rad'] <= cfg['angle_tolerance_rad'])
-            gap = max(0., axial-cfg['axial_tolerance_m'])
-            if gap < 1e-9:
-                gap = 0.
-            allowed = (min(forward * max(0., min(1., axial/cfg['slowdown_distance_m'])),
-                           gap/dt) if aligned else 0.)
-            # Slow/gate the WHOLE original movement, preserving its direction.
-            # Removing only its normal component could leave a large sideways
-            # drift when the original radial manual direction is oblique to
-            # the dock. Explicit joint/O inputs bypass this assist in the adapter.
-            scale = allowed/forward
-            linear *= scale
-            angular *= scale
-            linear += capped(lateral*cfg['lateral_gain_s_inv'], cfg['max_lateral_correction_m_s'])*strength
-            angular += capped(rot_error*cfg['angular_gain_s_inv'], cfg['max_angular_correction_rad_s'])*strength
-            if not aligned:
-                self.reason = 'aligning; forward travel gated'
-            elif allowed == 0:
-                self.reason = 'dock reference reached; retreat available'
-        return np.concatenate((linear, angular))
+    def monitor(self, measured_pose):
+        if self.target is None:
+            return
+        distance, angle = pose_errors(checked_pose(measured_pose), self.target)
+        self.errors = dict(angle_rad=angle, tcp_displacement_m=distance)
+        if self.monitoring:
+            self.state = ('ALIGNMENT_OK' if angle <= self.settings['alignment']['angle_tolerance_rad']
+                          else 'ALIGNMENT_READY')
+            self.reason = (('camera plane aligned; insertion angle NOT verified' if self.settings['tools'][self.tool].get('alignment_reference') == 'camera_plane' else 'measured insertion orientation aligned; manual docking only') if self.state == 'ALIGNMENT_OK'
+                           else 'orientation changed; press tool combination to align again')
 
     def snapshot(self):
         return dict(state=self.state, tool=self.tool, reason=self.reason,
-                    observation_reason=self.observation_reason,
-                    stable_samples=self.stable, **self.errors)
-
-
-def joint_velocity(jacobian, twist, speeds, cfg, axial_normal, manual_velocity=None):
-    jacobian, twist = np.asarray(jacobian), np.asarray(twist)
-    if jacobian.shape != (6, 6) or twist.shape != (6,) or not np.isfinite(jacobian).all() or not np.isfinite(twist).all():
-        raise ValueError('invalid full-arm differential IK input')
-    weights = np.array([1.]*3 + [cfg['rotation_weight_m']]*3)
-    base = np.zeros(6) if manual_velocity is None else np.asarray(manual_velocity, dtype=float)
-    if base.shape != (6,) or not np.isfinite(base).all():
-        raise ValueError('invalid manual joint velocity')
-    delta = twist-jacobian @ base
-    if np.max(np.abs(delta)) < 1e-12:
-        return base.copy()
-    matrix, requested = weights[:, None]*jacobian, weights*delta
-    # Give commanded axial speed an exact first-order constraint. Ordinary
-    # damped 6D IK can turn a lateral/tilt correction into unintended insertion.
-    row = np.asarray(axial_normal) @ jacobian[:3]
-    norm_sq = float(row @ row)
-    if norm_sq < 1e-12:
-        return np.zeros(6)
-    primary = row * float(np.asarray(axial_normal) @ delta[:3]) / norm_sq
-    nullspace = np.eye(6) - np.outer(row, row)/norm_sq
-    reduced = matrix @ nullspace
-    velocity = base + primary + reduced.T @ np.linalg.solve(
-        reduced @ reduced.T + cfg['damping']**2*np.eye(6), requested-matrix @ primary)
-    caps = np.minimum(speeds, cfg['joint_speed_rad_s'])
-    return velocity / max(1., float(np.max(np.abs(velocity)/caps)))
+                    observation_reason=self.observation_reason, stable_samples=self.stable,
+                    monitoring_only=self.monitoring, target_latched=self.target is not None, **self.errors)

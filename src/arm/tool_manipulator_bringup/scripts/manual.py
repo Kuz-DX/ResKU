@@ -130,7 +130,7 @@ class Manual(ManualController):
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE,
                          durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.create_subscription(String, '/control/hardware_fault', self.on_hardware_fault, qos)
-        collision_notice = ('Collision checking required. ' if self.collision_guarded else 'No collision checking. ')
+        collision_notice = ('Collision checking required. ' if self.collision_guarded else 'Manual jogging has no collision checking; angular alignment validates its path. ')
         if self.params['startup_recovery_enabled']:
             self.get_logger().warning(collision_notice + 'Automatic startup RMD recovery to 2-degree inset; '
                                       'manual input stays disabled until recovery completes. '
@@ -188,6 +188,14 @@ class Manual(ManualController):
             self.state_times.clear()
             return
         super().on_state(message)
+        # Include measured EE position in full-robot collision validation.
+        if 'ee_joint' in message.name:
+            value = message.position[message.name.index('ee_joint')]
+            if math.isfinite(value):
+                self.positions['ee_joint'] = float(value)
+                self.state_times['ee_joint'] = self.now_seconds()
+            else:
+                self.state_times.pop('ee_joint', None)
 
     def on_hardware_fault(self, message):
         status = message.data.strip()
@@ -777,7 +785,9 @@ class Manual(ManualController):
         if docking is not None:
             message += (f"; docking={docking['state']} tool={docking['tool']} "
                         f"ready={docking['ready']} reason={docking['reason']} "
-                        f"tag={docking['observation_reason']}")
+                        f"tag={docking['observation_reason']}"
+                        f" reference={docking.get('alignment_reference')}"
+                        f" angle_error_deg={docking.get('angle_error_deg')}")
         self.get_logger().info(message)
 
     def on_timer(self):
@@ -856,7 +866,7 @@ class Manual(ManualController):
         self.emit_diagnostics(elapsed)
 
     def run_operator(self, now, dt):
-        """Original manual mapping/integration, with optional AprilTag correction."""
+        """Original manual mapping/integration; alignment never modifies manual motion."""
         self.status = 'operator control'
         self.stop_target = None
         measured = self.measured()
@@ -878,8 +888,6 @@ class Manual(ManualController):
                 candidate[indexes] = step
             elif index in (1, 2, 3) and abs(velocity[index]) > 1e-12:
                 self.rmd_lead_blocked_joints.extend(JOINTS[indexes] if self.pitch_vertical_active else [JOINTS[index]])
-        if getattr(self, 'docking', None) is not None and self.docking.selected:
-            candidate = self.docking.adjust(candidate, measured, now, dt)
         if dt > 0:
             self.rmd_applied_velocity = (candidate[1:4]-self.target[1:4])/dt
         self.apply_motion(candidate, self.ee_velocity(), 'operator', dt)
@@ -887,6 +895,8 @@ class Manual(ManualController):
     def shutdown_controller(self):
         self.publish_ee_velocity(0.)
         self.stop('shutdown', 1/self.params['publish_rate_hz'])
+        if self.docking is not None:
+            self.docking.shutdown()
         if self.switch_client.service_is_ready() and self.phase != 'waiting':
             future = self.switch_client.call_async(SwitchController.Request(
                 deactivate_controllers=['manual_position_controller'],

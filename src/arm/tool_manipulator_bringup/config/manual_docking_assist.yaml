@@ -1,28 +1,30 @@
 # Only manual.launch.py consumes this file. Units: metres, seconds, radians.
-# ASSUMED / 임의값: all tuning below is a simulation starting point, NOT measured
-# performance or calibrated docking geometry. Replace after physical calibration.
+# User-specified DXL reference and +/-1 degree completion threshold are marked below.
+# Other tuning remains ASSUMED / 임의값, not measured hardware accuracy.
+# User requirement: prepare DXL ID1 at nearest +/-pi, ID2/3 at zero;
+# then hold DXL fixed and align with RMD shoulder/elbow/wrist pitch only.
 control:
-  # Correction reaches full strength at this existing manual approach speed.
-  # This does NOT set a new joystick/TCP movement speed or input mapping.
-  assist_full_speed_m_s: 0.010
-  lateral_gain_s_inv: 0.8
-  angular_gain_s_inv: 0.8
-  max_lateral_correction_m_s: 0.003
-  max_angular_correction_rad_s: 0.030
-  joint_speed_rad_s: 0.060
-  damping: 0.020
-  rotation_weight_m: 0.20
-  max_target_distance_m: 0.15
-  max_target_angle_rad: 0.60
-  lateral_tolerance_m: 0.005
-  angle_tolerance_rad: 0.08
-  axial_tolerance_m: 0.001
-  slowdown_distance_m: 0.030
+  joint_speed_rad_s: 0.060       # Existing conservative manual docking speed cap.
+  max_target_angle_rad: 0.60    # Existing maximum alignment change.
   tag_max_age_s: 0.25
   acquire_timeout_s: 5.0
   stable_samples: 3
   max_tag_position_jump_m: 0.010
   max_tag_angle_jump_rad: 0.10
+alignment:
+  mode: rmd_pitch
+  angle_tolerance_rad: 0.017453292519943295  # USER: +/-1 degree.
+  # ASSUMED engineering tolerances, inherited from previous docking/manual guards;
+  # not measured hardware accuracy. DXL preparation intentionally changes TCP position.
+  position_tolerance_m: 0.001   # Position hold applies only to the RMD alignment phase.
+  orientation_step_rad: 0.02
+  joint_sample_rad: 0.005      # Existing manual_collision sampling resolution.
+  acceleration_rad_s2: 0.25   # Existing mode-manager TCP acceleration cap.
+  planning_timeout_s: 30.0
+  feedback_timeout_s: 30.0
+  # Model-derived tool0 collar/recess normal: 35 deg acute angle to circuit-box top.
+  # Tag MUST lie flush on the identified recess. Actual mounting is not calibrated here.
+  model_tool0_acute_angle_deg: 35.0
 # ASSUMED / 임의값: input-quality thresholds, reused from existing docking
 # settings as initial values; no camera recognition performance was evaluated.
 vision:
@@ -34,18 +36,24 @@ vision:
   angle_tolerance_rad: 0.02
 tools:
   0:
+    alignment_reference: insertion_axis
+    alignment_enabled: true  # Model: tag recess is parallel to the collar end face.
     tag_id: 0                  # Existing repository tag assignment.
     tag_family: tag36h11
     tag_size_m: 0.020          # Existing repository black-square size.
     # ASSUMED / 임의 적용값: copied from tool_docking.yaml, not measured here.
-    # T_tag_tcp is expressed in the RAW PnP tag frame. In particular identity
-    # assumes its axes match the desired TCP axes; verify printed-tag rotation.
+    # Only tag normal is used; sign is chosen from the observed camera side.
+    # Model collar/recess normals are parallel. Tag must be flush to the recess.
+    # Translation retained as reference only; angular alignment never targets this position.
     tag_to_tcp_xyz_m: [-0.0457, 0.0, -0.05157]
     tag_to_tcp_xyzw: [0.0, 0.0, 0.0, 1.0]
   1:
+    alignment_enabled: true
+    alignment_reference: camera_plane  # USER: face the tag; actual hole axis is unknown.
     tag_id: 1
     tag_family: tag36h11
     tag_size_m: 0.020
-    # ASSUMED / 임의 적용값: existing reference, not verified for this mode.
+    # Reference translation unused; camera alignment uses measured TCP-to-optical TF.
+    # Identity keeps the tag plane normal; it does NOT assert alignment with the hole.
     tag_to_tcp_xyz_m: [-0.0457, 0.0, -0.0500]
     tag_to_tcp_xyzw: [0.0, 0.0, 0.0, 1.0]

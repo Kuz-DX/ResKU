@@ -16,13 +16,14 @@
 
 `manual`은 오늘 pull 받은 Servo 없는 수동 제어 구현이다. 세부 버튼 매핑, 시작 복귀,
 안전 조건과 rosbag 진단 방법은 [manual_controller.md](docs/manual_controller.md)를 따른다.
-현재 `manual.launch.py`의 충돌 검사는 임시로 비활성화돼 있다. 수동 입력과 시작 복귀는
-`manual.py`를 사용하며, 충돌 검사용 MoveIt 장면은 실행하지 않는다.
+현재 `manual.launch.py`의 일반 수동 조작은 기존 충돌 검사 비활성 동작을 유지한다.
+버튼식 각도 정렬은 MoveIt 장면으로 전체 경로를 검사하며, 사용자 요청에 따라 핑거 두 링크만 제외한다.
+모터 명령은 계속 `manual.py`가 담당한다.
 `manual.launch.py`는 기본적으로 실기(`real_hardware:=true`)를 사용한다.
 모의 하드웨어로 실행할 때는 `real_hardware:=false`를 명시한다.
 
 `manual.launch.py`의 L2+△(툴0), L2+○(툴1)는 사용자가 근처까지 접근한 뒤
-AprilTag 기반 수동 이동 보조를 선택한다. 기존 manual 키 매핑을 유지한다. 조작 순서,
+AprilTag 기반 각도 정렬을 한 번 요청한다. 완료 후 자동 위치 보정은 하지 않는다. 기존 manual 키 매핑을 유지한다. 조작 순서,
 도킹 보조 동작과 임의 파라미터는 [manual_docking_assist.md](docs/manual_docking_assist.md)를 따른다.
 아래의 IK/Manual 자동 경로·도킹 설명은 `ik_manual.launch.py`에 해당한다.
 
@@ -59,210 +60,93 @@ ros2 launch src/arm/tool_manipulator_bringup/launch/ik_manual.launch.py
 
 ## L2 경로 이후 AprilTag 도킹
 
-기본 `ros2 launch tool_manipulator_bringup ik_manual.launch.py`는
-`enable_tool_docking:=true`, `enable_docking_motion:=true`,
-`docking_camera_frame:=arm_camera_color_optical_frame`로 실행한다.
-먼저 L2+네모를 한 번 눌러 MoveIt `home → back` staging을 완료한다. BACK 도달이
-관절 피드백으로 확인된 뒤 L2+동그라미를 누르면 툴 1 접근 경로 → 정지 상태의 태그 확인 → 상대 30 mm 전진 → HOLD가
-한 시퀀스로 이어진다. launch 자체는 툴 경로를 시작하지 않는다. 카메라와 AprilTag
-검출기는 별도로 실행한다. `enable_tool_docking:=false`를 명시하면
-`tool_trajectory_joy.py`로 경로만 재생한다. 도킹을 켜면
-`tool_docking_coordinator.py` 하나만 실행하며, 설정에서 `enabled: false`인
-경로는 저장 경로 완료 후 HOLD로 끝낸다.
-
-UI는 `std_msgs/msg/Bool`의 `/arm/tool0_docking` 또는 `/arm/tool0_release`를
-`true`로 올려 경로 0 작업을 한 번 요청한다. 다시 요청하려면 먼저 해당 토픽을
-`false`로 내려 상승 에지를 재무장해야 한다. L2 조작은 다음처럼 분리된다.
+`ik_manual.launch.py`는 기본적으로 `enable_tool_docking:=true`,
+`enable_docking_motion:=true`,
+`docking_camera_frame:=arm_camera_color_optical_frame`를 사용한다.
+launch 자체는 툴 경로를 시작하지 않는다. 카메라와 AprilTag 검출기는 별도로 실행한다.
 
 ```text
-□ 단독       → 기존 HOME/Stop_pose
-L2 + □       → MoveIt 현재→home→back, BACK 피드백 확인
-L2 + △/○/×  → 각각 tool0/tool1/tool2 pre-dock (확인된 BACK에서만 허용)
+□ 단독       → MoveIt HOME
+L2 + □       → 현재 → HOME → BACK, BACK 피드백 확인
+L2 + △/○/×  → 각각 tool0/tool1/tool2 선택
 ```
 
-tool 요청은 `cartesian_targets.yaml`의 검토된 tool별 목표까지 별도로 계획한다.
-실측 joint goal이 있으면 이를 우선 사용하고, 없는 경우에만 BACK seed의 bounded
-axis IK로 Cartesian TCP 목표를 계산한다. 기존 tool YAML의 마지막 관절점은 실행
-목표로 사용하지 않는다.
-BACK 경로와 tool 경로는 각각 전체 샘플의 충돌 검사가 끝난 뒤 manager가 실행한다.
-tool IK나 계획이 실패해도 로봇이 BACK에 머물면 다른 tool을 다시 선택할 수 있다.
-BACK 선택 가능 여부는 과거 시퀀스 완료 latch가 아니라 신선한 정지 HOLD 피드백과
-현재 관절값의 BACK 오차로 매번 다시 판정한다. 따라서 tool 목표/계획이 이동 전에
-실패한 뒤에는 HOME→BACK을 반복하지 않는다. L2+□를 다시 눌러도 이미 BACK이면
-이동을 계획하지 않고 tool0/1/2 선택 대기로 돌아간다.
-마지막 도킹 준비 자세에서 docking은 `/arm/docking`에 `true -> false`,
-release는 `false -> true`를 즉시 발행하고, 이후 새 `/arm/docked` 피드백이 각각
-`true` 또는 `false`가 될 때까지 HOLD를 유지한다. 같은 계약을 tool1/tool2에도
-적용한다.
+툴 선택은 시작 복구와 DXL 정렬을 완료한 arm의 신선한 정지 HOLD에서 받는다.
+현재 BACK이면 바로 툴 접근을 계획한다. BACK이 아니면 선택을 보관하고
+현재→HOME→BACK을 실행한 뒤 자동으로 이어간다. 이미 실행 중인 경로가 있으면
+새 요청은 무시한다. BACK은 현재 관절 피드백의 최대 오차 `0.03 rad`로 확인한다.
 
-2026-11-01 이후 기록된 tool0/tool2 joint goal은 각각 최종 기어 맞물림과 최종 grasp
-접촉 자세로 재분류됐다. collision-free pre-dock/pre-grasp가 아니므로 BACK에서 해당
-goal까지 직접 전역 계획하지 않는다. 별도 진입 목표와 단계별 scene 전이가 구현될
-때까지 실행 비활성 상태를 유지한다.
-tool0 pre-dock은 최종점의 TCP local `-Z` 30 mm이며, rack 제거 명령은 10% 속도·2초로
-지정됐다. 단, 10%의 기준 속도와 회전 부호 및 제거 완료 feedback은 아직 미확정이므로
-이 시간 명령만으로 다음 직선 접근을 시작하지 않는다. tool2 grasp에서는 양쪽 rack과
-supply box 접촉만 grasp 단계에 한정해 허용하며 전역 allowed-collision로 만들지 않는다.
-base 목표는 soft limit 안에서 현재 BACK에 가장 가까운 `2π` 동치각을 선택하므로
-`-π → +π`의 불필요한 한 바퀴 회전을 만들지 않는다. 저장 YAML waypoint는 테스트와
-fallback 자료로만 남고 production 경로로 직접 재생하지 않는다. tool1 실측값은
-elbow planning limit을 넘으므로 수정 측정 전까지 fail-closed로 차단된다.
+접근 목표는 `config/cartesian_targets.yaml`의 `pre_joint_goal_rad`를 우선한다.
+base는 제한 안에서 현재 관절값에 가까운 `2π` 동치각을 선택한다.
+MoveIt은 경로 계획과 장면 충돌 검사만 제공하고, 실제 명령은 Mode Manager만 발행한다.
+계획 경로는 관절 변화량 최대 `0.005 rad` 간격으로 다시 충돌 검사한 뒤 실행한다.
+계획·IK·충돌 검사 실패, 오래된 피드백, 제어 소유권 변경, 명시적 취소는 이동을 중단한다.
 
-AprilTag와 TCP 축은 `+X=위`, `+Y=왼쪽`, `+Z=TCP에서 박스를 보는 방향`으로 일치한다.
-실측 최종 `T_tag_tcp` translation은 tool0 `[-0.0457, 0, -0.0445] m`, tool1
-`[-0.0457, 0, -0.0500] m`이며 회전은 identity다. 최종점에서 30 mm 물러난
-pre-dock은 각각 `[-0.0457, 0, -0.0745] m`, `[-0.0457, 0, -0.0800] m`다.
-현재 tool1 `camera_normal_advance`는 X 오프셋을 사용하지 않으므로 이 측정값을
-기록만 하며, tag-relative staged approach로 전환하기 전에는 최종 도킹에 사용하지 않는다.
+### 툴0·툴1의 관절 경로 도킹
 
-`enable_docking_motion:=false`를 명시하면 활성 경로의 저장 궤적 이후 태그와 목표 오차를
-`preview` 상태로 출력하며 보정 이동이나 Arduino 구동은 실행하지 않는다.
-
-도킹을 활성화한 경로의 순서는 다음과 같다.
+두 툴은 `fixed_joint_goal` 실행기와 다음 체결·복귀 흐름을 공유한다.
 
 ```text
-L2+□ → MoveIt 현재→home→back 계획/검증/실행 → BACK 피드백 확인
-  → L2+△/○/× → MoveIt back→tool pre-dock 계획/검증/실행 → 실제 완료 및 HOLD
-  → 태그 획득 → coarse 목표 → fine 목표 → dock 목표
-  → 서로 다른 영상/관절 피드백에서 정렬·정지 연속 확인
-  → `/arm/docking=true` → 새 `/arm/docked=true` 완료 상태 확인
-  → TCP 로컬 -Z로 30 mm 직선 후퇴(전체 IK/충돌 검사)
-  → MoveIt 현재→back 직행 계획/검증/실행 → BACK 피드백 확인
+BACK → 관측 자세 → 정지 후 새 태그 확인 → 전체 관절 접근 경로 검사/실행
+  → 최종 관절 오차·정지 확인 → /arm/docking=true 한 번 발행 → 3초 대기
+  → 실제 실행한 접근 경로를 역순으로 검사/실행 → BACK → HOME
 ```
 
-정렬은 매번 `검출 → 제한된 TCP 보정 → IK → 관절 경로 충돌 검사 → 실행 → 재검출`로
-진행한다. 기존 Mode Manager만 모터 명령을 발행한다. 세 단계는 모두 태그 기준 TCP의
-6D 목표이며, coarse/fine은 삽입 전 여유 공간, dock은 최종 삽입 위치로 직접 측정해
-정한다. 경로 YAML의 마지막 점도 **접촉 전, 태그가 보이는 위치**여야 한다.
-이미 삽입까지 포함한 경로 뒤에 도킹을 그대로 덧붙이지 않는다.
+`require_l2_hold: false`이므로 요청 이후 L2를 계속 누를 필요는 없다.
+3초 대기는 체결 ACK를 필수 완료 조건으로 사용하지 않는다. 대기 중에도 피드백,
+HOLD 소유권, Arduino ERROR/UNKNOWN 상태와 후퇴 전 정지 조건을 검사한다.
+추가 EE 회전이나 별도의 직선 후퇴는 수행하지 않는다. 후퇴·BACK·HOME 경로가
+검증되지 않으면 현재 자세에서 정지하며 임의의 대체 경로로 이동하지 않는다.
 
-`config/tool_docking.yaml`의 경로 0 템플릿부터 다음 값을 채운다.
+툴0은 안전 경유점을 거쳐 관측 자세로 간다. 태그0의 정지 상태 표본 8개로 저장 기준과의
+위치 차이를 한 번 확정한다. 표본 분산 한계는 `3 mm`, 보정량 한계는 `10 mm`다.
+전체 남은 접근점에 같은 위치 보정량을 적용하고 IK로 다시 계산한다. 실측 외곽 접근점과
+마지막 `70 mm` 축방향 샘플을 사용하며, 전체 관측→도킹 구간을 직선으로 만들지 않는다.
+역순 후퇴 뒤에는 저장된 복귀 경유점을 거쳐 BACK→HOME으로 이동한다.
 
-- 실제 `tag_id`, 검은 정사각형의 실측 `tag_size_m`.
-- `stages`의 coarse/fine/dock 각각 `xyz_m`와 `xyzw`.
-  이는 `T_tag_tcp`이며 카메라 좌표나 base 좌표가 아니다. quaternion 순서는 x/y/z/w.
-- Arduino와 확인한 `actuation_timeout_s`. 최초 정렬 검증은
-  `actuation_enabled: false`로 수행한다.
-- `desired_docked: true`는 체결, `false`는 해지 경로다.
-- 기구에 맞는 위치/각도/속도 허용값과 보정 범위. 제공된 값은 실기 검증값이 아니다.
+툴1의 최종 도킹 관절값은 다음으로 확정했다. 순서는
+`base, shoulder, elbow, wrist_pitch, wrist_roll, wrist_yaw`, 단위는 rad다.
 
-이 3단계 TCP 목표 방식은 경로 0 템플릿의 필수값을 채운 뒤 활성화한다.
-경로 1은 아래의 별도 태그 확인·고정 거리 전진 방식을 사용하며, 경로 2는 비활성이다.
-경로 번호와 tag ID가 같다고 가정하지 않는다.
-
-```bash
-# 아래 프레임 이름은 실제 보정된 카메라 optical frame으로 교체한다.
-ros2 launch src/arm/tool_manipulator_bringup/launch/ik_manual.launch.py \
-  enable_tool_docking:=true \
-  enable_docking_motion:=false \
-  docking_camera_frame:=YOUR_CALIBRATED_OPTICAL_FRAME
+```yaml
+final: [-3.136990711226343, 0.20682150637447397, 1.1557570519759337,
+  -1.5262903776058194, -0.3390097541229333, -1.5017671913398365]
 ```
 
-카메라/검출기는 별도로 실행한다. 입력은 현재 vision의
-`/arm/apriltag/centers` (`std_msgs/String`, stamp/frame_id/detections/corners_px 포함)와
-`/arm/camera/color/camera_info`다. `CameraInfo`와 영상의 optical frame이 일치하고,
-영상 시각의 `base_actuator ← optical frame` TF가 있어야 한다. 저장소의 측정 도구
-`tool_change_min/scripts/measure_apriltag_docking.py`와 같은 코너 순서로 PnP를 계산한다.
-태그 획득 후 검출 유실, 낮은 품질, 오래된 영상, TF 누락, 관절 피드백 유실, 소유권 변경,
-보정 한계 초과, 충돌 검사/IK 실패는 중단 사유다. 마지막 검출값으로 계속 접근하지 않는다.
-검출 화면에 ID가 보여도 도킹 입력 검사를 통과한 것은 아니다. `dock_acquire` 대기 중에는
-1초마다 수신/승인 횟수와 마지막 거부 사유를 출력하며, 10초 획득 timeout에도 이를 포함한다.
-`CameraInfo frame mismatch`, `tag frame mismatch`, `tag image age`, `TF`, PnP 오류를
-구분해서 확인한다. 관측은 영상 시각의 TF를 사용한다. TF 수신은 별도 executor worker에서
-처리하고, 툴 경로·관절 상태·태그 콜백은 기존 상호 배제 그룹에서 직렬 처리한다.
-접근 완료 시에는 접근 중 관측한 태그 기준 자세를 지우고 정지 후의 새 관측으로 시작한다.
+관측 자세는 사용자가 새로 제공할 예정이므로 이전 관측점은 실행 목표에서 제외했다.
+`cartesian_targets.yaml`의 tool1은 `executable: false`이며, 도킹 설정에도
+`blocked_reason`을 두어 새 관측값을 반영하기 전에는 툴1 요청이 HOME/BACK staging이나
+도킹 이동을 시작하지 않는다. 관측점이 들어오면 최종점에 맞춘 접근·후퇴·복귀 경로와
+태그 보정을 함께 통합한다. 현재 최종점은 `0.02 rad` 계획 여유를 만족한다.
 
-Arduino 명령과 완료 상태는 `std_msgs/Bool`을 사용한다. 체결은 `/arm/docking`에
-`true` 후 즉시 `false`, 해지는 `false` 후 즉시 `true`를 발행하는 트리거 펄스다.
-`/arm/docked`의 명령 이후 새 피드백이 체결 시 `true`, 해지 시 `false`가 되어야 완료로
-인정한다. 명령 전에 남아 있던 동일 상태나 반대 상태는 완료로 인정하지 않는다. 대기 중
-위치 이탈·timeout·취소는 팔을 정지시키며 자동 재시도나 반대 펄스를 보내지 않는다.
-성공 피드백 뒤에만 설정된 TCP 직선 후퇴와 MoveIt BACK 복귀를 자동 실행한다. 후퇴 IK,
-충돌 검사 또는 BACK 계획이 실패하면 현재 자세에서 HOLD하고 HOME 우회로를 임의 실행하지 않는다.
-Bool 계약에는 STOP 명령이 없으므로 통신 단절과 비상 정지는 Arduino 자체 watchdog이
-담당해야 한다. 시각적 도킹 판정은 물리적인 접촉/삽입 센서 확인을 대신하지 않으며,
-실제 완료는 `/arm/docked` 피드백으로 구분한다.
+실제 툴박스2와 URDF 위치가 다르다는 사용자 확인에 따라, 툴1의 최종 진입 경로에만
+`final_entry_ignored_collision_links: [tool_case_y_plus]`를 적용한다.
+이는 해당 구간의 상태 유효성 응답에서 툴박스2와의 접촉을 제외하며 다른 물체와의 충돌,
+자체 충돌, 관절 제한은 계속 검사한다. 관측점·HOME/BACK 경로와 역순 후퇴에는 이 예외를
+전달하지 않으며 SRDF의 전역 충돌 행렬도 수정하지 않는다. 후퇴 때에도 모델 불일치가
+남아 있으면 현재 정책에서는 차단될 수 있다.
+
+툴0은 `tag36h11` ID 0, 툴1은 ID 1이며 검은 사각형의 실측 변 길이는 모두 `20 mm`다.
+입력은 `/arm/apriltag/centers` (`std_msgs/String`, stamp/frame_id/detections/corners_px)와
+`/arm/camera/color/camera_info`다. 두 입력의 optical frame이 일치하고 영상 시각의
+`base_actuator ← optical frame` TF가 있어야 한다. 태그 확인은 관측 자세에서 정지한 뒤
+수신한 새 영상으로 시작한다. 취득 timeout은 `10초`이며 낮은 품질, 프레임 불일치,
+오래된 영상과 TF 누락은 정상 확인 표본으로 세지 않는다.
+
+`actuation_completion: delay`, `actuation_delay_s: 3.0`,
+`return_home_after_back: true`, `retreat_mode: reverse_docking_path`가 공통 완료 정책이다.
+기존 `camera_normal_advance`, `tag_tcp_stages`, 피드백 기반 체결과 TCP 축 후퇴 구현은
+별도 설정에서 사용할 수 있다. `ik_manual_test.launch.py`의 독립 테스트 설정은 유지한다.
+`enable_docking_motion:=false`이면 관측 자세에서 최종 도킹 이동과 체결 없이 HOLD한다.
 
 ```bash
 ros2 service call /arm/tool_docking/cancel std_srvs/srv/Trigger '{}'
 ros2 topic echo /arm/tool_trajectory/status
 ```
 
-도킹 노드는 전용 취소 서비스와 기존 `/arm/cancel`에 의한 모드/epoch 변경을 감시한다.
-도킹 노드 종료 시 launch도 종료한다. 프로세스 강제 종료/통신 단절에서 Arduino의 동작을
-정지시키는 자체 watchdog은 펌웨어에 필요하다. 성공 시에는 직선 후퇴 후 BACK으로 복귀한다.
-툴 1은 `require_l2_hold: false`로 설정되어 한 번 요청하면 저장 경로부터 태그 확인·전진까지
-자동으로 이어진다. 시작 후 L2 해제나 `/joy` 수신 중단으로 취소되지 않는다.
-다른 도킹 설정은 기본값 `require_l2_hold: true`일 때 L2를 계속 눌러야 하며,
-L2 해제 또는 `/joy` 0.3초 이상 수신 중단 시 취소한다.
-`actuation_enabled: true`인 경로는 시작 시점부터 `/arm/docking` subscriber와
-`/arm/docked` publisher가
-모두 보여야 한다.
-
-### 툴 1: 저장 경로 종료 후 태그 방향으로 상대 30 mm 전진
-
-툴 0은 `tag36h11` ID 0, 툴 1은 ID 1을 사용하며 검은 사각형은 모두 20 mm다.
-툴 0/1 모두 저장 경로 종료 후 정지한 새 태그 관측으로 상대 30 mm 접근을 계산한다.
-툴 1 저장 경로의 마지막 하강
-지점은 주석으로만 남아 있으며, 해당 관절값이나 FK 좌표를 목표 생성에 사용하지 않는다.
-툴 1의 `timing_mode: joint_limits`는 측정 시각을 기록용으로만 사용한다.
-저장점 사이 이동 시간은 관절 이동량과 모드 관리자의 속도 제한으로 정하며,
-기존 가속도·저크·피드백 제한을 적용한다. 측정 중 대기 시간이 이동을 늦추지 않는다.
-
-```text
-툴 1 접근 경로 → 정지/HOLD → 태그 관측
-→ 서로 다른 영상·정지 피드백 5회 확인
-→ 툴 1 종료 위치에서 태그 법선 방향으로 상대 30 mm 전진 → HOLD
-```
-
-별도의 태그 중심 이동·제자리 정렬 단계는 없다. 카메라 광학 프레임과 TCP 사이 TF를
-사용해 태그 쪽을 향하는 법선을 고른다. 30 mm 전진과 동시에 카메라 광축을 현재 방향에서
-태그 법선으로 점진적으로 바꾸어 마지막에는 영상면과 태그 면이 평행해지도록 한다.
-진입축 주위 회전은 자유롭다. 실측 태그 방향을 사용하며 55°를 고정 목표로 넣지 않는다.
-초기 광축과 법선의 차이는 `max_angle_error_rad`(0.25 rad) 범위 내여야 한다.
-전진은 **최종 태그 거리 30 mm가 아니라 현재 위치에서 30 mm 이동**이다. 관측 거리가
-전진량과 위치 허용오차의 합보다 짧으면 거부한다.
-
-확인 중에는 신선한 태그 관측이 필요하다. 5회 확인 후 전진 방향과 시작 위치를 고정한
-뒤에는 태그가 시야 밖으로 나가도 계속 진행한다. 전진 전체는 작은 Cartesian 구간으로
-IK를 구하고 충돌 검사를 마친 뒤 제출하며, 일부만 풀렸을 때는 이동하지 않는다.
-이 전진 전용 IK는 위치와 광축 방향을 대상으로 6개 관절을 계산하며, 관절 제한을
-포함한 계산으로 한 관절이 경계에 닿으면 가능한 다른 관절 움직임을 찾는다.
-현재 자세에서 풀리는 해가 없으면 제한을 넘기거나 불완전한 경로를 실행하지 않는다.
-이 구간은 직선 유지를 위해 어깨 분리 동작을 적용하지 않고 보수적인 어깨 속도 제한을
-구간 시간에 반영한다. 명시적 취소, 제어권 변경, 피드백·충돌·관절 제한 오류는 중단/HOLD로
-처리한다. 목표 전진 속도는 5 mm/s이고 관절 제한 때문에 더 느려질 수 있다.
-최종 FK 위치 오차 2 mm·광축 방향 오차 0.02 rad·정지 상태를 확인하며 체결 신호는 보내지 않는다.
-진입축 주위 회전은 최종 방향 오차에 포함하지 않는다.
-
-팔 카메라·AprilTag 검출기와 보정된 TF가 제공되는 상태에서 실행한다. 아래 optical frame은
-기본 팔 D435i 설정 기준이며 실제 `CameraInfo.header.frame_id`와 일치해야 한다.
-`enable_docking_motion:=false`는 접근 경로 완료 후 태그 거리만 표시하고 전진하지 않는다.
-
-```bash
-ros2 launch src/arm/tool_manipulator_bringup/launch/ik_manual.launch.py \
-  enable_tool_docking:=true \
-  enable_docking_motion:=true \
-  docking_camera_frame:=arm_camera_color_optical_frame \
-  launch_docking_bridge:=false
-```
-
-기존 툴 1 선택 조합(L2 + ROS `buttons[3]`)으로 한 번 요청한다. 이후 L2를 놓아도
-툴 1 경로가 완료되면 별도 입력 없이 태그 확인과 전진까지 이어진다.
-현재 별도의 UI docking/release 요청은 기존 체결 흐름을 사용하므로 이 테스트에는 사용하지 않는다.
-`tag confirmed at stopped tool-1 endpoint; planning fixed 30.0 mm ...`가 방향 고정 시점이고,
-`tag-normal advance 30.0 mm completed; HOLD; no actuation`가 최종 완료 로그다.
-이 동작은 오프라인 계약 테스트로 검증했으며 하드웨어 동작·카메라 외부 보정·실제 간섭은
-실기 확인 전이다.
-
-오프라인 검증(ROS 패키지 빌드 및 실기 구동 없음):
-
-```bash
-source /opt/ros/humble/setup.bash
-PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider \
-  src/arm/tool_manipulator_bringup/test/test_tool_docking.py \
-  src/arm/tool_manipulator_bringup/test/test_tool_trajectory_joy.py
-```
+UI의 `/arm/tool{0,1,2}_docking` 또는 `/arm/tool{0,1,2}_release`는 Bool 상승 에지로
+요청한다. 같은 요청을 다시 보내려면 먼저 false로 내려 재무장한다. UI 요청은 알려진
+체결 상태를 먼저 확인한다. `actuation_enabled: true`인 경로는 시작할 때부터
+`/arm/docking` subscriber와 `/arm/docked` publisher가 있어야 한다.
 
 ## 수동 구동
 
