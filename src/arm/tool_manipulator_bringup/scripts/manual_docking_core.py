@@ -118,10 +118,11 @@ class RmdModel:
         return type(self.model).solve(self, target, seed, margin, max_time_s=.1)
 
 
-def dxl_reference(start, model, margin):
+def dxl_reference(start, model, margin, wrist_yaw_rad=0.):
     reference = start.copy()
     reference[0] = min((-math.pi, math.pi), key=lambda angle: abs(angle-start[0]))
-    reference[4:6] = 0.
+    reference[4] = 0.
+    reference[5] = wrist_yaw_rad
     if not model.within_limits(reference, margin):
         raise ValueError('requested DXL reference outside hardware limits')
     return reference
@@ -133,7 +134,7 @@ def plan_alignment(model, start, dock, cfg, speed_limits, margin, cancelled):
     Worker-only math; no ROS state or commands. Every path sample is returned
     for collision validation before any motion, including the DXL preparation.
     """
-    reference = dxl_reference(start, model, margin)
+    reference = dxl_reference(start, model, margin, cfg.get('wrist_yaw_rad', 0.))
     initial = model.fk(reference)
     camera_rotation = np.asarray(cfg.get('tcp_camera_rotation', np.eye(3)), dtype=float)
     if camera_rotation.shape != (3, 3) or not np.isfinite(camera_rotation).all():
