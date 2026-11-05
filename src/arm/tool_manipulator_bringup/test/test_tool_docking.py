@@ -85,10 +85,10 @@ def test_shipped_config_uses_fixed_joint_docking_for_tool0_and_tool1():
     assert cfg[0]['max_angle_error_rad'] == .35
     assert cfg[1]['alignment_mode'] == 'fixed_joint_goal'
     assert cfg[1]['axial_sampled_path']
-    assert cfg[1]['axial_entry_distance_m'] == .014
+    assert cfg[1]['axial_entry_distance_m'] == .050
     np.testing.assert_allclose(cfg[1]['final_joint_goal'], [
-        -3.14159265359, .418529946638757, 1.347219559066946,
-        -1.4784683933854301, -.3451456772744761, -1.8039614065533076])
+        -3.2418108258098957, .5780601077556683, 1.5321290654774542,
+        -1.3166626358441107, -.18281378013489566, -1.8075530307799061])
     assert cfg[1]['confirm_tag_before_motion'] is False
     assert cfg[1]['tag_translation_correction']['enabled'] is False
     assert 'blocked_reason' not in cfg[1]
@@ -966,7 +966,7 @@ def test_tool1_clear_observation_and_reverse_keep_exact_final_capture(tmp_path):
     axis = final_pose[:3, 2]
     axial_start = forward['axial_start_index']
     entry = n.model.fk(forward['waypoints'][axial_start-1])
-    np.testing.assert_allclose(entry[:3, 3], final_pose[:3, 3]-.014*axis, atol=1e-5)
+    np.testing.assert_allclose(entry[:3, 3], final_pose[:3, 3]-.050*axis, atol=1e-5)
     assert forward['stop_at_waypoints'][axial_start-1]
     assert sum(forward['stop_at_waypoints'][axial_start:]) == 1
     last_remaining = 1.
@@ -1670,3 +1670,22 @@ def test_invalid_fixed_advance_distance_is_rejected(tmp_path, distance):
     file.write_text(yaml.safe_dump(data))
     with pytest.raises(ValueError, match='advance_distance_m'):
         load_settings(file)
+
+
+def test_tool1_fifty_mm_tail_keeps_measured_final_position_and_constant_orientation():
+    from tool_trajectory_joy import ArmKinematics
+    model = ArmKinematics(ROOT.parent/'tool_manipulator_description/urdf/tool_manipulator.urdf.xacro',
+                          ROOT/'config/hardware.yaml')
+    cfg = load_settings(ROOT/'config/tool_docking.yaml')[1]
+    measured = [-3.14159265359, .418529946638757, 1.347219559066946,
+                -1.4784683933854301, -.3451456772744761, -1.8039614065533076]
+    final = model.fk(cfg['final_joint_goal'])
+    np.testing.assert_allclose(final[:3, 3], model.fk(measured)[:3, 3], atol=1e-6)
+    goals = [cfg['axial_approach_joint_goals'][-1],
+             *cfg['intermediate_joint_goals'], cfg['final_joint_goal']]
+    for index, q in enumerate(goals):
+        assert model.within_limits(q, .025)
+        pose = model.fk(q)
+        np.testing.assert_allclose(pose[:3, :3], final[:3, :3], atol=1e-4)
+        remaining = .050-index*.002
+        np.testing.assert_allclose(pose[:3, 3], final[:3, 3]-remaining*final[:3, 2], atol=1e-5)

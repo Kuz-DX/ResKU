@@ -44,9 +44,9 @@ targets:
     role: reviewed_outer_approach
     pre_joint_goal_rad: [-3.0702833370085, 0.636441176360294, 1.4342207697460803, -1.4779307342778893, -0.3987831548880232, -1.8580169468095087]
     retreat_mode: reverse_docking_path
-    retreat_distance_m: 0.014
+    retreat_distance_m: 0.050
     retreat_axis_tcp: [0.0, 0.0, -1.0]
-    final_joint_goal_rad: [-3.14159265359, 0.418529946638757, 1.347219559066946, -1.4784683933854301, -0.3451456772744761, -1.8039614065533076]
+    final_joint_goal_rad: [-3.2418108258098957, 0.5780601077556683, 1.5321290654774542, -1.3166626358441107, -0.18281378013489566, -1.8075530307799061]
   tool2:
     joint_names: [base_joint, shoulder_joint, elbow_joint, wrist_pitch_joint, wrist_roll_joint, wrist_yaw_joint]
     # Imported from config/test/tool2_trajectory.yaml point 16. This is the
