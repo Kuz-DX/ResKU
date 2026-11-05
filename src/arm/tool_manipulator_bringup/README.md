@@ -161,6 +161,40 @@ ros2 topic pub --once /selected_tool_id std_msgs/msg/Int32 '{data: 0}'
 
 ## 수동 구동
 
+### 토픽으로 전체 툴 자동 경로 실행
+
+`manual.launch.py`는 `/selected_tool_id` (`std_msgs/msg/Int32`, 0/1/2)를 직접
+구독하는 실행기를 함께 시작한다. 조이스틱 버튼 매핑은 유지한다. Options로 arm을
+선택하고 시작 복구·DXL 정렬을 완료한 뒤 요청한다. 토픽은 클릭 시 한 번만 발행한다.
+
+```bash
+ros2 topic pub --once /selected_tool_id std_msgs/msg/Int32 '{data: 0}'
+# tool1은 data: 1, tool2는 data: 2
+```
+
+요청하면 수동 입력을 정지하고 HOLD 확인 → HOME → BACK → 선택 툴 접근·도킹
+순서로 기존 managed 실행기를 사용한다. 툴별 설정의 후퇴·복귀까지 정상 완료하면
+자동으로 manual 모드로 돌아온다. 복귀 후 조이스틱 중립을 확인해야 수동 이동이 열린다.
+실행·모드 전환 중 추가 선택은 무시하고 예약하지 않는다. 실패·취소·focus 변경 시에는
+자동 수동 복귀를 취소하며 정지 원인을 해제하지 않는다.
+
+자동 경로는 손가락을 포함한 전체 형상의 별도 MoveIt 장면으로 검사한다.
+기존 버튼식 각도 정렬의 손가락 제외 장면과 일반 수동 조작은 유지한다.
+모터 명령은 mode manager 한 곳에서 발행하며 기존 manual 코드는 수동 입력을 제공한다.
+`ik_manual.launch.py`와 함께 실행하지 않는다.
+
+카메라·AprilTag 검출기는 별도로 실행해야 한다. Arduino 도킹 bridge는 실기에서
+기본 실행한다. 이미 bridge가 실행 중이면 `launch_docking_bridge:=false`를 지정한다.
+포트는 `docking_serial_port:=/dev/ttyACM0`으로 지정할 수 있다.
+tool2는 `ik_manual`과 동일하게 설정된 단계까지만 수행하며 완성된 집기 시퀀스를 추가하지 않는다.
+
+```bash
+ros2 topic echo /arm/tool_trajectory/status
+ros2 service call /arm/tool_docking/cancel std_srvs/srv/Trigger '{}'
+# 취소·실패 원인을 확인하고 복구한 뒤 명시적으로 수동 제어를 요청할 때:
+ros2 service call /arm/set_mode/manual std_srvs/srv/Trigger '{}'
+```
+
 ### mock, 시각화 없음
 
 ```bash

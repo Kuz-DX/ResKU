@@ -76,8 +76,9 @@ def _bringup(context):
     manual_spawner = base.spawner('manual_position_controller', inactive=True)
     # Manual jogging retains its existing behavior. Requested automatic angular
     # alignment validates its complete path with the existing MoveIt scene service.
-    manual = Node(package='tool_manipulator_bringup', executable='manual.py',
+    manual = Node(package='tool_manipulator_bringup', executable='standalone_managed_manual.py',
                   parameters=[description, {'hardware_config': hardware, 'servo_mode': False,
+                      'startup_recovery_enabled': False,  # Single recovery owner: manager.
                       'invert_forward': False,  # Reverse standalone manual right-stick RMD motion.
                       'r2_pitch_translation': True,
                       'docking_lock_buttons': True,
@@ -97,20 +98,55 @@ def _bringup(context):
                  parameters=[base.moveit_config.to_dict(), common.alignment_collision_description(description),
                              {'allow_trajectory_execution': False,
                               'publish_robot_description_semantic': True}], output='screen')
-    ready = [scene, manual]
+    manager = Node(package='tool_manipulator_bringup', executable='arm_control_mode_manager.py',
+                   parameters=[{'hardware_config': hardware, 'focus_arm_mode': 'manual'}],
+                   output='screen')
+    # Keep the manual alignment scene's finger exception local to alignment.
+    # Automatic routes use the full robot geometry in their own planning scene.
+    auto_scene = Node(package='moveit_ros_move_group', executable='move_group',
+                      namespace='manual_auto',
+                      parameters=[base.moveit_config.to_dict(), description,
+                                  {'allow_trajectory_execution': False,
+                                   'publish_robot_description_semantic': True}],
+                      remappings=[('joint_states', '/joint_states')], output='screen')
+    tool_sequence = Node(package='tool_manipulator_bringup', executable='manual_tool_sequence.py',
+                         parameters=[description, base.moveit_config.robot_description_semantic,
+                                     {'hardware_config': hardware,
+                                      'trajectory_dir': str(share/'config/resampled'),
+                                      'cartesian_targets_file': str(share/'config/cartesian_targets.yaml'),
+                                      'shoulder_isolation_enabled': True,
+                                      'shoulder_isolation_half_width_rad': .08,
+                                      'shoulder_isolation_speed_rad_s': .015,
+                                      'docking_config': LaunchConfiguration('docking_config').perform(context),
+                                      'docking_motion_enabled': True,
+                                      'docking_camera_frame': LaunchConfiguration('docking_camera_frame').perform(context),
+                                      'docking_camera_info_topic': LaunchConfiguration('docking_camera_info_topic').perform(context),
+                                      'docking_centers_topic': LaunchConfiguration('docking_centers_topic').perform(context)}],
+                         remappings=[('/check_state_validity', '/manual_auto/check_state_validity'),
+                                     ('/plan_kinematic_path', '/manual_auto/plan_kinematic_path')],
+                         output='screen')
+    ready = [scene, auto_scene, manager, manual, tool_sequence]
+    if real and LaunchConfiguration('launch_docking_bridge').perform(context) == 'true':
+        ready.append(Node(package='tool_manipulator_bringup', executable='arduino_docking_bridge.py',
+                          parameters=[{'port': LaunchConfiguration('docking_serial_port').perform(context),
+                                       'baud': int(LaunchConfiguration('docking_serial_baud').perform(context))}],
+                          output='screen'))
     if LaunchConfiguration('launch_joy').perform(context) == 'true':
         ready.append(joy)
     if LaunchConfiguration('launch_rviz').perform(context) == 'true':
         ready.append(Node(package='rviz2', executable='rviz2',
                           arguments=['-d', str(share/'config/joint_rviz.rviz')], output='screen'))
-    # No JTC/Servo/recover-only process; the new node owns its startup ramp.
+    # The manager owns startup recovery and all controller command output.
     return [_after(jsb, [ee]), _after(ee, [manual_spawner]), _after(manual_spawner, ready),
             _shutdown_on_exit(control), _shutdown_on_exit(state),
             _shutdown_on_exit(manual),
+            _shutdown_on_exit(manager), _shutdown_on_exit(tool_sequence),
+            _shutdown_on_exit(scene), _shutdown_on_exit(auto_scene),
             # Joystick is optional: its absence or driver restart must never
             # shut down the hardware/controller processes or startup recovery.
             joy_events,
             LogInfo(msg='Manual jogging: collision checking disabled; requested angular alignment: path checked, gripper fingers excluded.'),
+            LogInfo(msg='/selected_tool_id: HOME -> BACK -> tool docking; successful completion restores manual control.'),
             state, control, jsb]
 
 
@@ -136,6 +172,10 @@ def generate_launch_description():
         DeclareLaunchArgument('launch_joy', default_value='true', choices=['true', 'false']),
         DeclareLaunchArgument('mock_initial_positions_file', default_value=''),
         DeclareLaunchArgument('docking_assist_config', default_value=str(share/'config/manual_docking_assist.yaml')),
+        DeclareLaunchArgument('docking_config', default_value=str(share/'config/tool_docking.yaml')),
+        DeclareLaunchArgument('launch_docking_bridge', default_value='true', choices=['true', 'false']),
+        DeclareLaunchArgument('docking_serial_port', default_value='/dev/ttyACM0'),
+        DeclareLaunchArgument('docking_serial_baud', default_value='115200'),
         DeclareLaunchArgument('docking_camera_frame', default_value='arm_camera_color_optical_frame'),
         DeclareLaunchArgument('docking_camera_info_topic', default_value='/arm/camera/color/camera_info'),
         DeclareLaunchArgument('docking_centers_topic', default_value='/arm/apriltag/centers'),
